@@ -37,11 +37,29 @@ export default function ChaptersPanel({ pid, project, outlines }: Props) {
   }
 
   async function generate(n: number) {
-    setBusy(`第 ${n} 章生成中:草稿 → 定稿 → 一致性检查 → 状态抽取 → 前情摘要(约3-10分钟)…`);
     setErr(""); setGenResult(null);
+    setBusy(`第 ${n} 章:排队中…`);
     try {
-      const r = await api.generateChapter(pid, n, genTendency);
-      setGenResult(r); setCurrent(r);
+      const { job_id } = await api.generateChapterAsync(pid, n, genTendency);
+      // 轮询任务进度(五段:草稿→定稿→检查→抽取→摘要)
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const job = await api.getJob(job_id);
+        if (job.status === "running") {
+          setBusy(`第 ${n} 章:${job.stage}`);
+          continue;
+        }
+        if (job.status === "error") throw new Error(job.error ?? "生成失败");
+        const result = job.result!;
+        setGenResult(result);
+        setCurrent({
+          chapter_number: result.chapter_number, status: result.status,
+          word_count: result.word_count, is_stale: result.is_stale,
+          draft_content: result.draft_content, final_content: result.final_content,
+          outline_version_used: result.outline_version_used,
+        });
+        break;
+      }
       await reload();
     } catch (e) { setErr(String(e)); } finally { setBusy(""); }
   }

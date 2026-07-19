@@ -88,18 +88,38 @@ class LLMAdapter(abc.ABC):
         """
         raise NotImplementedError
 
+    @staticmethod
+    def _record_usage(resp: "LLMResponse") -> None:
+        """用量记账(静默失败,绝不影响生成)。"""
+        try:
+            from app.db.models import LlmUsage
+            from app.db.session import session_scope
+
+            with session_scope() as db:
+                db.add(
+                    LlmUsage(
+                        model=resp.model,
+                        prompt_tokens=resp.prompt_tokens,
+                        completion_tokens=resp.completion_tokens,
+                    )
+                )
+        except Exception:  # noqa: BLE001
+            pass
+
     # ---- 便捷入口:直接传字符串 ----
     async def ask(self, prompt: str, system: str | None = None) -> str:
         """带重试的问答:空回复自动重试并放大 max_tokens。
 
         推理类模型(DeepSeek-R 系/中转站)思考内容可能吃掉 token 上限,
         导致正文为空——空正文绝不能当结果返回污染下游,这里兜底。
+        每次调用自动记录 token 用量。
         """
         messages = self.to_messages(prompt, system)
         original_max = self.max_tokens
         try:
             for attempt in range(3):
                 resp = await self.complete(messages)
+                self._record_usage(resp)
                 content = (resp.content or "").strip()
                 if content:
                     return content

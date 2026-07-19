@@ -31,6 +31,7 @@ for _stream in (sys.stdout, sys.stderr):
 from app.api.chapters import router as chapters_router
 from app.api.consistency import router as consistency_router
 from app.api.inspire import router as inspire_router
+from app.api.misc import router as misc_router
 from app.api.outline import router as outline_router
 from app.api.polish import router as polish_router
 from app.api.projects import router as projects_router
@@ -87,6 +88,7 @@ def create_app() -> FastAPI:
     app.include_router(outline_router)
     app.include_router(polish_router)
     app.include_router(inspire_router)
+    app.include_router(misc_router)
 
     _static_dir = Path(__file__).resolve().parent / "static"
     # 前端构建产物(frontend/dist)挂在 /app

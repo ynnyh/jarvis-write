@@ -19,6 +19,7 @@ from app.db.models.foreshadowing import Foreshadowing
 from app.db.models.preset import TendencyPreset
 from app.db.models.setting import ProviderSetting
 from app.db.models.summary import ChapterSummary
+from app.db.models.usage import LlmUsage
 
 __all__ = [
     "Project",
@@ -34,4 +35,5 @@ __all__ = [
     "TendencyPreset",
     "ProviderSetting",
     "ChapterSummary",
+    "LlmUsage",
 ]

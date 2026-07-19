@@ -72,6 +72,15 @@ export default function ProjectPage() {
         <div className="stat">大纲<b>{outlines.length}/{project.target_chapters} 章</b></div>
         <div className="stat">正文<b>{doneCount} 章 · {wordsTotal} 字</b></div>
         {staleCount > 0 && <div className="stat">失配<b style={{ color: "var(--err)" }}>{staleCount} 章</b></div>}
+        {doneCount > 0 && (
+          <div className="stat">导出
+            <b style={{ fontSize: 13 }}>
+              <a href={`/api/projects/${pid}/export/txt`}>txt</a>
+              {" · "}
+              <a href={`/api/projects/${pid}/export/epub`}>epub</a>
+            </b>
+          </div>
+        )}
       </div>
 
       <div className="workbench">

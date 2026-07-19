@@ -107,11 +107,21 @@ async def generate_chapter(
     project: Project,
     chapter_number: int,
     tendency: Tendency | None = None,
+    progress=None,
 ) -> tuple[Chapter, list[dict], dict]:
     """生成一章:草稿 → 定稿 → 一致性检查 → 抽取写圣经 → 摘要 → 入库。
 
+    progress: 可选回调 fn(stage_text),五段各报一次(异步任务进度用)。
     返回 (Chapter, 一致性问题列表, 抽取统计)。
     """
+
+    def _report(stage: str) -> None:
+        if progress:
+            try:
+                progress(stage)
+            except Exception:  # noqa: BLE001 — 进度上报绝不影响生成
+                pass
+
     outline = _get_outline(db, project.id, chapter_number)
     if outline is None:
         raise ValueError(f"第 {chapter_number} 章没有大纲,请先生成蓝图")
@@ -153,6 +163,7 @@ async def generate_chapter(
     avoid_repetition = avoid_block(recent_full)
 
     # ---- 草稿 ----
+    _report("1/5 生成草稿")
     logger.info("第 %d 章:生成草稿...", chapter_number)
     draft_prompt = CHAPTER_DRAFT_PROMPT.format(
         chapter_number=chapter_number,
@@ -179,6 +190,7 @@ async def generate_chapter(
     draft = _strip_meta(await get_adapter_for(Task.DRAFT).ask(draft_prompt))
 
     # ---- 定稿 ----
+    _report("2/5 定稿修订")
     logger.info("第 %d 章:定稿修订...", chapter_number)
     finalize_prompt = CHAPTER_FINALIZE_PROMPT.format(
         chapter_number=chapter_number,
@@ -218,18 +230,21 @@ async def generate_chapter(
     db.flush()
 
     # ---- 一致性检查(vs 本章之前的圣经状态) ----
+    _report("3/5 一致性检查")
     logger.info("第 %d 章:一致性检查...", chapter_number)
     issues = await check_chapter(
         db, project.id, chapter_number, final, rolling_summary=rolling
     )
 
     # ---- 章后抽取:状态变化写回圣经/伏笔表(闭环) ----
+    _report("4/5 抽取状态写入故事圣经")
     logger.info("第 %d 章:抽取状态变化...", chapter_number)
     extraction_stats = await extract_and_apply(
         db, project.id, chapter_number, final
     )
 
     # ---- 滚动摘要更新 ----
+    _report("5/5 更新前情摘要")
     logger.info("第 %d 章:更新前情摘要...", chapter_number)
     new_summary = await get_adapter_for(Task.SUMMARY).ask(
         ROLLING_SUMMARY_PROMPT.format(

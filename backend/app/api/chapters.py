@@ -8,13 +8,16 @@ GET  /api/projects/{id}/chapters/{n}            单章详情(含正文)
 """
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db.models import Chapter, Project
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.engines.pipeline.chapter import generate_chapter
+from app.jobs import create_job, fail_job, finish_job, update_stage
 from app.schemas.tendency import Tendency
 
 router = APIRouter(prefix="/api/projects/{project_id}/chapters", tags=["chapters"])
@@ -73,6 +76,47 @@ async def generate(
     resp.consistency_issues = issues
     resp.extraction_stats = stats
     return resp
+
+
+@router.post("/{chapter_number}/generate-async")
+async def generate_async(
+    project_id: int,
+    chapter_number: int,
+    req: GenerateChapterRequest,
+    db: Session = Depends(get_db),
+):
+    """异步生成:立即返回 job_id,前端轮询 /api/jobs/{job_id} 看五段进度。"""
+    _project(db, project_id)  # 先校验存在
+    job_id = create_job(f"chapter-{project_id}-{chapter_number}")
+
+    async def runner() -> None:
+        session = SessionLocal()
+        try:
+            project = session.get(Project, project_id)
+            chapter, issues, stats = await generate_chapter(
+                session, project, chapter_number, req.tendency,
+                progress=lambda s: update_stage(job_id, s),
+            )
+            session.commit()
+            finish_job(job_id, {
+                "chapter_number": chapter.chapter_number,
+                "word_count": chapter.word_count,
+                "status": chapter.status,
+                "final_content": chapter.final_content,
+                "draft_content": chapter.draft_content,
+                "is_stale": chapter.is_stale,
+                "outline_version_used": chapter.outline_version_used,
+                "consistency_issues": issues,
+                "extraction_stats": stats,
+            })
+        except Exception as exc:  # noqa: BLE001 — 任务失败进 job 状态
+            session.rollback()
+            fail_job(job_id, str(exc)[:500])
+        finally:
+            session.close()
+
+    asyncio.create_task(runner())
+    return {"job_id": job_id}
 
 
 @router.get("", response_model=list[ChapterBrief])

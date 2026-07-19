@@ -120,6 +120,14 @@ export const api = {
   getChapter: (pid: number, n: number) => req<ChapterDetail>("GET", `/api/projects/${pid}/chapters/${n}`),
   generateChapter: (pid: number, n: number, tendency: Tendency) =>
     req<GenerateChapterResponse>("POST", `/api/projects/${pid}/chapters/${n}/generate`, { tendency }, LLM_TIMEOUT),
+  generateChapterAsync: (pid: number, n: number, tendency: Tendency) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/chapters/${n}/generate-async`, { tendency }),
+  getJob: (jobId: string) =>
+    req<{ status: string; stage: string; result: GenerateChapterResponse | null; error: string | null }>(
+      "GET", `/api/jobs/${jobId}`),
+  usage: () =>
+    req<{ total_calls: number; total_prompt_tokens: number; total_completion_tokens: number }>(
+      "GET", "/api/usage"),
 
   bible: (pid: number, chapter: number) =>
     req<BibleSnapshot>("GET", `/api/projects/${pid}/bible?chapter=${chapter}`),

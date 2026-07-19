@@ -189,13 +189,18 @@
 
 ---
 
-## 阶段 7 · 打磨
+## 阶段 7 · 打磨 ✅ 已完成(2026-07-19)
 
-- [ ] 多模型路由(架构/定稿用强模型,草稿/摘要用快模型;OpenAI/Gemini 补齐)
-- [ ] Token 成本统计
-- [ ] 导出(txt / epub)
-- [ ] Docker 部署
-- [ ] 初始化 git 并连远程 `git@github.com:ynnyh/jarvis-write.git`(注意:目前目录非 git 仓库)
+- [x] **git 初始化并推送远程**:`git@github.com:ynnyh/jarvis-write.git` main 分支已推送(.gitignore 排除 .venv/db/chroma/.env/node_modules/dist)
+- [x] **Token 成本统计**:llm_usage 表,`base.ask` 统一埋点(所有生成链路自动记账);GET /api/usage 汇总;前端顶栏实时显示累计用量
+- [x] **异步生成 + 五段进度**:POST .../generate-async → job_id,前端 3 秒轮询 /api/jobs/{id},实时显示"1/5 生成草稿 → … → 5/5 更新前情摘要"(替代原 10 分钟无反馈长请求)
+- [x] **导出**:txt(整本)/ **epub**(纯标准库 zip 打包,含目录 nav,结构校验通过)
+- [x] Docker:多阶段 Dockerfile(前端 build → 后端运行时)+ docker-compose(数据卷持久化)。文件就绪,**未实际构建验证**(本机未确认 Docker 环境)
+- [ ] SSE 逐 token 流式:**用"异步任务+五段进度轮询"替代**,体验已达标;真 token 级流式留待后续有需要再做
+- [ ] 多模型路由细化(quality/fast 分别指定 provider):当前两档都走默认 provider,留待接入第二家模型时做成设置页配置
+
+**验收:** ✅ 全量回归 73/73;真实验证:txt 导出内容正确、epub 7 文件结构合规、
+用量接口就绪、任务接口 404 语义正确、前端构建通过。代码已推送 GitHub。
 
 ---
 

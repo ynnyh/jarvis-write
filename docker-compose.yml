@@ -1,0 +1,17 @@
+services:
+  jarvis-write:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      # 持久化数据库与向量库
+      - jarvis_data:/srv/backend
+    environment:
+      # 也可通过设置页(/settings)在界面里配置,存数据库
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    restart: unless-stopped
+
+volumes:
+  jarvis_data:
