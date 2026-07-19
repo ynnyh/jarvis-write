@@ -42,9 +42,18 @@ def parse_llm_json(text: str) -> dict:
 async def extract_and_apply(
     db: Session, project_id: int, chapter_number: int, chapter_text: str
 ) -> dict:
-    """跑一次抽取并写库。返回统计;抽取失败返回空统计,不阻塞主流程。"""
+    """跑一次抽取并写库。返回统计;抽取失败返回空统计,不阻塞主流程。
+
+    幂等:先撤销该章此前的抽取记录再重抽——重写正文不会污染圣经。
+    """
     bible = BibleService(db, project_id)
     scheduler = ForeshadowScheduler(db, project_id)
+
+    # 防记忆污染:清掉本章旧账(首次抽取时无旧账,清理为空操作)
+    purge_stats = {
+        "bible": bible.purge_chapter_extraction(chapter_number),
+        "foreshadow": scheduler.purge_chapter_ops(chapter_number),
+    }
 
     known_entities = "\n".join(
         f"- {e.name}({e.entity_type})"
@@ -79,4 +88,4 @@ async def extract_and_apply(
     fs_stats = scheduler.apply_ops(
         chapter_number, extraction.get("foreshadow_ops") or []
     )
-    return {"bible": bible_stats, "foreshadow": fs_stats}
+    return {"bible": bible_stats, "foreshadow": fs_stats, "purged": purge_stats}

@@ -106,6 +106,51 @@ class BibleService:
         return "\n".join(lines)
 
     # ---------- 写回 ----------
+    def purge_chapter_extraction(self, chapter_number: int) -> dict:
+        """撤销某章此前抽取的全部圣经写入(重写正文前调用,防记忆污染)。
+
+        三步:
+        1. 删除该章事实关联的 knowledge_states(SQLite FK 默认不级联,手动删)
+        2. 删除 source_chapter == n 的事实
+        3. 重新打开被该章"取代"关闭的旧事实(valid_until == n-1 → NULL)
+        """
+        facts = (
+            self.db.query(Fact)
+            .filter(
+                Fact.project_id == self.project_id,
+                Fact.source_chapter == chapter_number,
+            )
+            .all()
+        )
+        fact_ids = [f.id for f in facts]
+        removed_ks = 0
+        if fact_ids:
+            removed_ks = (
+                self.db.query(KnowledgeState)
+                .filter(KnowledgeState.fact_id.in_(fact_ids))
+                .delete(synchronize_session=False)
+            )
+            for f in facts:
+                self.db.delete(f)
+
+        reopened = (
+            self.db.query(Fact)
+            .filter(
+                Fact.project_id == self.project_id,
+                Fact.valid_until == chapter_number - 1,
+            )
+            # fetch:同步内存中已加载的对象,避免后续读到旧值
+            .update({Fact.valid_until: None}, synchronize_session="fetch")
+        )
+        self.db.flush()
+        stats = {
+            "facts_removed": len(fact_ids),
+            "knowledge_removed": removed_ks,
+            "facts_reopened": reopened,
+        }
+        logger.info("圣经清理(第%d章): %s", chapter_number, stats)
+        return stats
+
     def apply_extraction(self, chapter_number: int, extraction: dict) -> dict:
         """把章后抽取结果写入圣经。返回统计。"""
         stats = {"entities": 0, "facts": 0, "closed": 0, "knowledge": 0}

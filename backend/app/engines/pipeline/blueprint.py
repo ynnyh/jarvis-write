@@ -35,6 +35,13 @@ CHUNK_SIZE = 20
 # 衔接上下文取前一块尾部多少字符
 _TAIL_CHARS = 1200
 
+# 单块解析失败(空/大幅欠章)时的重试次数。LLM 偶发返回格式崩坏/截断,
+# 重试通常能恢复;仍失败则明确报错,不让空蓝图流入逐章生成。
+_CHUNK_MAX_ATTEMPTS = 3
+
+# 一块解析出的章数低于应有章数的这个比例,视为本块失败需重试。
+_CHUNK_MIN_RATIO = 0.6
+
 
 def _outline_content_hash(data: dict[str, Any]) -> str:
     """对大纲的语义字段计算指纹,供级联引擎判断"是否真的变了"。"""
@@ -94,11 +101,31 @@ async def generate_blueprint(
                 style_directives=style_block,
             )
 
-        raw = await adapter.ask(prompt)
-        raw_accumulated += "\n" + raw
+        expected = end - start + 1
+        min_ok = max(1, int(expected * _CHUNK_MIN_RATIO))
 
-        parsed = parse_blueprint(raw)
-        valid, warnings = validate_blueprint(parsed, start, end)
+        valid: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        raw = ""
+        for attempt in range(1, _CHUNK_MAX_ATTEMPTS + 1):
+            raw = await adapter.ask(prompt)
+            parsed = parse_blueprint(raw)
+            valid, warnings = validate_blueprint(parsed, start, end)
+            if len(valid) >= min_ok:
+                break
+            logger.warning(
+                "蓝图块 %d-%d 第 %d/%d 次仅解析出 %d/%d 章(raw %d 字),重试...",
+                start, end, attempt, _CHUNK_MAX_ATTEMPTS, len(valid), expected, len(raw),
+            )
+        else:
+            # 重试用尽仍不达标:明确报错,不让空/残缺蓝图静默流入逐章生成
+            raise RuntimeError(
+                f"蓝图块 {start}-{end} 生成失败:{_CHUNK_MAX_ATTEMPTS} 次尝试仅解析出 "
+                f"{len(valid)}/{expected} 章。最后一次返回长度 {len(raw)} 字。"
+                "可能是模型返回格式崩坏或被截断,请重试或换模型。"
+            )
+
+        raw_accumulated += "\n" + raw
         all_chapters.extend(valid)
         all_warnings.extend(warnings)
         if warnings:

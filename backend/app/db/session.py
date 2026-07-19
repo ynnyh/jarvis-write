@@ -16,9 +16,10 @@ from app.config import get_settings
 
 settings = get_settings()
 
-# SQLite 需要 check_same_thread=False 才能在多线程(FastAPI)下共享连接。
+# SQLite 需要 check_same_thread=False 才能在多线程(FastAPI)下共享连接;
+# timeout=30 让并发写(压测+服务)等锁而非立刻报 database is locked。
 _connect_args = (
-    {"check_same_thread": False}
+    {"check_same_thread": False, "timeout": 30}
     if settings.database_url.startswith("sqlite")
     else {}
 )

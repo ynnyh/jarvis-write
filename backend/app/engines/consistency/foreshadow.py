@@ -79,6 +79,41 @@ class ForeshadowScheduler:
                 return f
         return None
 
+    def purge_chapter_ops(self, chapter_number: int) -> dict:
+        """撤销某章此前登记的伏笔操作(重写正文前调用)。
+
+        - 该章埋设的伏笔 → 删除
+        - 该章回收的伏笔 → 恢复为未回收(有剩余强化记录则 reinforced,否则 planted)
+        - 强化记录中去掉该章
+        """
+        stats = {"deleted": 0, "payoff_reverted": 0, "reinforce_removed": 0}
+        rows = (
+            self.db.query(Foreshadowing)
+            .filter(Foreshadowing.project_id == self.project_id)
+            .all()
+        )
+        for f in rows:
+            if f.chapter_planted == chapter_number:
+                self.db.delete(f)
+                stats["deleted"] += 1
+                continue
+            changed = False
+            reinforcements = [c for c in (f.reinforcement_chapters or []) if c != chapter_number]
+            if reinforcements != list(f.reinforcement_chapters or []):
+                f.reinforcement_chapters = reinforcements
+                stats["reinforce_removed"] += 1
+                changed = True
+            if f.payoff_chapter == chapter_number:
+                f.payoff_chapter = None
+                f.status = "reinforced" if reinforcements else "planted"
+                stats["payoff_reverted"] += 1
+                changed = True
+            elif changed and f.status == "reinforced" and not reinforcements:
+                f.status = "planted"
+        self.db.flush()
+        logger.info("伏笔清理(第%d章): %s", chapter_number, stats)
+        return stats
+
     def apply_ops(self, chapter_number: int, ops: list[dict]) -> dict:
         """把章后抽取的伏笔操作写库。"""
         stats = {"planted": 0, "reinforced": 0, "paid_off": 0, "skipped": 0}
