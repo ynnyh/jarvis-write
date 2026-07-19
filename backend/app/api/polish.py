@@ -13,12 +13,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.auth import assert_project_owner, get_current_user
 from app.db.models import Chapter, Project
 from app.db.session import get_db
 from app.engines.polish import ai_flavor_report, polish_text
 from app.schemas.tendency import Tendency
 
-router = APIRouter(tags=["polish"])
+router = APIRouter(tags=["polish"], dependencies=[Depends(get_current_user)])
 
 
 class SegmentPolishRequest(BaseModel):
@@ -50,6 +51,7 @@ def _project(db: Session, project_id: int) -> Project:
     p = db.get(Project, project_id)
     if p is None:
         raise HTTPException(status_code=404, detail=f"项目 {project_id} 不存在")
+    assert_project_owner(p)
     return p
 
 

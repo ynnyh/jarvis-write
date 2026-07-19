@@ -1,17 +1,36 @@
 // src/api.ts — 后端 API 客户端(对齐 backend/app/api/*)
 const BASE = "";
+const TOKEN_KEY = "jarvis_token";
+
+export const token = {
+  get: () => localStorage.getItem(TOKEN_KEY) || "",
+  set: (t: string) => localStorage.setItem(TOKEN_KEY, t),
+  clear: () => localStorage.removeItem(TOKEN_KEY),
+};
+
+// 收到 401 时的回调:由 App 注册,统一跳登录
+let onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(fn: () => void) { onUnauthorized = fn; }
 
 async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 30000): Promise<T> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
+    const headers: Record<string, string> = {};
+    if (body) headers["Content-Type"] = "application/json";
+    const tk = token.get();
+    if (tk) headers["Authorization"] = `Bearer ${tk}`;
     const res = await fetch(BASE + path, {
       method,
-      headers: body ? { "Content-Type": "application/json" } : undefined,
+      headers,
       body: body ? JSON.stringify(body) : undefined,
       signal: ctrl.signal,
     });
     if (!res.ok) {
+      if (res.status === 401) {
+        token.clear();
+        onUnauthorized?.();
+      }
       let detail = `HTTP ${res.status}`;
       try {
         const j = await res.json();
@@ -84,6 +103,8 @@ export interface PolishResult {
   flavor_before: { score: number; summary: string }; flavor_after: { score: number; summary: string };
 }
 export interface ProviderState { deepseek: boolean; openai: boolean; gemini: boolean; }
+export interface AuthResult { token: string; username: string; is_admin: boolean; }
+export interface Me { id: number; username: string; is_admin: boolean; }
 export interface Idea { title: string; logline: string; hook: string; twist: string; }
 
 // ---------- 接口 ----------
@@ -148,4 +169,11 @@ export const api = {
     req<PolishResult>("POST", `/api/projects/${pid}/polish/segment`, { text, tendency }, LLM_TIMEOUT),
   aiFlavor: (text: string) =>
     req<{ score: number; summary: string; hits: Record<string, number> }>("POST", "/api/polish/ai-flavor", { text }),
+
+  // ---------- 鉴权 ----------
+  register: (username: string, password: string, invite_code: string) =>
+    req<AuthResult>("POST", "/api/auth/register", { username, password, invite_code }),
+  login: (username: string, password: string) =>
+    req<AuthResult>("POST", "/api/auth/login", { username, password }),
+  me: () => req<Me>("GET", "/api/auth/me"),
 };

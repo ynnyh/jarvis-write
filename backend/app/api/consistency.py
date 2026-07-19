@@ -11,11 +11,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.auth import assert_project_owner, get_current_user
 from app.db.models import Entity, Foreshadowing, Project
 from app.db.session import get_db
 from app.engines.consistency import BibleService, ForeshadowScheduler
 
-router = APIRouter(prefix="/api/projects/{project_id}", tags=["consistency"])
+router = APIRouter(
+    prefix="/api/projects/{project_id}",
+    tags=["consistency"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 class FactOut(BaseModel):
@@ -51,6 +56,7 @@ def _project(db: Session, project_id: int) -> Project:
     p = db.get(Project, project_id)
     if p is None:
         raise HTTPException(status_code=404, detail=f"项目 {project_id} 不存在")
+    assert_project_owner(p)
     return p
 
 

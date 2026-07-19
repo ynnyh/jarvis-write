@@ -30,15 +30,27 @@ _REGISTRY: dict[str, type[LLMAdapter]] = {
 def _db_settings() -> dict[str, dict]:
     """读数据库里的 provider 配置(设置页保存的)。
 
+    多用户:只读"当前用户"(contextvar)的配置,各账号 key 互不共用。
+    未登录上下文(如迁移脚本)取不到用户时返回空,回落到 .env。
+
     返回 {provider: {api_key, base_url, model, is_default}};读失败返回空
     (建表前/迁移中也能工作,回落到 .env)。
     """
     try:
+        from app.auth import current_user_id
         from app.db.models import ProviderSetting
         from app.db.session import session_scope
 
+        uid = current_user_id.get()
+        if uid is None:
+            return {}
+
         with session_scope() as db:
-            rows = db.query(ProviderSetting).all()
+            rows = (
+                db.query(ProviderSetting)
+                .filter(ProviderSetting.user_id == uid)
+                .all()
+            )
             return {
                 r.provider: {
                     "api_key": r.api_key,

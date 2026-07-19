@@ -62,8 +62,25 @@
 <script>
 const NAMES = { deepseek: "DeepSeek", openai: "OpenAI (GPT)", gemini: "Google Gemini" };
 
+// 与 SPA 共用同一份登录态(同源 localStorage)
+const TOKEN = localStorage.getItem("jarvis_token") || "";
+function authHeaders(extra) {
+  const h = extra || {};
+  if (TOKEN) h["Authorization"] = "Bearer " + TOKEN;
+  return h;
+}
+function guard(res) {
+  if (res.status === 401) {
+    localStorage.removeItem("jarvis_token");
+    document.body.innerHTML =
+      '<div class="wrap"><h1>请先登录</h1><div class="sub">回到 <a href="/">工作台</a> 登录后再配置模型。</div></div>';
+    throw new Error("unauthorized");
+  }
+  return res;
+}
+
 async function load() {
-  const res = await fetch("/api/settings/providers");
+  const res = guard(await fetch("/api/settings/providers", { headers: authHeaders() }));
   const list = await res.json();
   const root = document.getElementById("cards");
   root.innerHTML = "";
@@ -117,17 +134,17 @@ function card(p) {
       model: $('[data-f=model]').value,
       is_default: $('[data-f=is_default]').checked,
     };
-    const res = await fetch(`/api/settings/providers/${p.provider}`, {
-      method: "PUT", headers: { "Content-Type": "application/json" },
+    const res = guard(await fetch(`/api/settings/providers/${p.provider}`, {
+      method: "PUT", headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body),
-    });
+    }));
     if (res.ok) { msg.className = "msg ok"; msg.textContent = "已保存 ✓"; setTimeout(load, 600); }
     else { const e = await res.json(); msg.className = "msg err"; msg.textContent = "保存失败: " + (e.detail || res.status); }
   };
 
   $('[data-a=test]').onclick = async () => {
     msg.className = "msg"; msg.textContent = "测试中(最长 60 秒)...";
-    const res = await fetch(`/api/settings/providers/${p.provider}/test`, { method: "POST" });
+    const res = guard(await fetch(`/api/settings/providers/${p.provider}/test`, { method: "POST", headers: authHeaders() }));
     const r = await res.json();
     if (r.ok) { msg.className = "msg ok"; msg.textContent = `连接成功 ✓ ${r.model}:${r.reply}`; }
     else { msg.className = "msg err"; msg.textContent = "失败: " + r.error; }

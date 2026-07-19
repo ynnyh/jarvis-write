@@ -14,7 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.db.models import Outline, Project
+from app.auth import assert_project_owner, current_user_id, get_current_user
+from app.db.models import Outline, Project, User
 from app.db.session import get_db
 from app.engines.pipeline.architecture import generate_architecture, save_architecture
 from app.engines.pipeline.blueprint import generate_blueprint, save_blueprint
@@ -28,19 +29,25 @@ from app.schemas.project import (
     ProjectOut,
 )
 
-router = APIRouter(prefix="/api/projects", tags=["projects"])
+router = APIRouter(
+    prefix="/api/projects",
+    tags=["projects"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 def _get_project_or_404(db: Session, project_id: int) -> Project:
     project = db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=f"项目 {project_id} 不存在")
+    assert_project_owner(project)
     return project
 
 
 @router.post("", response_model=ProjectOut)
 async def create_project(req: ProjectCreate, db: Session = Depends(get_db)) -> Project:
     project = Project(
+        user_id=current_user_id.get(),
         title=req.title,
         topic=req.topic,
         genre=req.genre,
@@ -56,7 +63,12 @@ async def create_project(req: ProjectCreate, db: Session = Depends(get_db)) -> P
 
 @router.get("", response_model=list[ProjectOut])
 async def list_projects(db: Session = Depends(get_db)) -> list[Project]:
-    return list(db.query(Project).order_by(Project.id.desc()))
+    uid = current_user_id.get()
+    return list(
+        db.query(Project)
+        .filter(Project.user_id == uid)
+        .order_by(Project.id.desc())
+    )
 
 
 @router.get("/{project_id}", response_model=ProjectOut)

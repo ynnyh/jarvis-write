@@ -58,6 +58,16 @@ class Settings(BaseSettings):
     default_max_tokens: int = 8192
     default_timeout: int = 600
 
+    # ===== 多用户认证(阶段 8) =====
+    # 注册邀请码:固定共享码,只有填对才能注册(留空则任何人可注册)
+    invite_code: str = ""
+    # JWT 签名密钥:生产务必用环境变量覆盖成随机长串,否则 token 可被伪造
+    jwt_secret: str = "change-me-in-production-please-use-a-random-secret"
+    jwt_expire_days: int = 30
+    # 初始管理员:首次启动/迁移时自动创建,存量数据归其名下
+    admin_username: str = "admin"
+    admin_password: str = "admin12345"  # 首次登录后请在设置页修改
+
     def provider(self, name: str) -> ProviderConfig:
         name = name.lower()
         if name == "deepseek":

@@ -18,11 +18,12 @@ from fastapi.responses import Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.auth import assert_project_owner, current_user_id, get_current_user
 from app.db.models import Chapter, LlmUsage, Outline, Project
 from app.db.session import get_db
 from app.jobs import get_job
 
-router = APIRouter(tags=["misc"])
+router = APIRouter(tags=["misc"], dependencies=[Depends(get_current_user)])
 
 
 @router.get("/api/jobs/{job_id}")
@@ -35,7 +36,8 @@ async def job_status(job_id: str):
 
 @router.get("/api/usage")
 async def usage_summary(db: Session = Depends(get_db)):
-    """Token 用量汇总(总量 + 按模型)。"""
+    """Token 用量汇总(总量 + 按模型)——只统计当前用户。"""
+    uid = current_user_id.get()
     rows = (
         db.query(
             LlmUsage.model,
@@ -43,6 +45,7 @@ async def usage_summary(db: Session = Depends(get_db)):
             func.sum(LlmUsage.prompt_tokens),
             func.sum(LlmUsage.completion_tokens),
         )
+        .filter(LlmUsage.user_id == uid)
         .group_by(LlmUsage.model)
         .all()
     )
@@ -66,6 +69,7 @@ def _book(db: Session, project_id: int) -> tuple[Project, list[tuple[str, str]]]
     project = db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="项目不存在")
+    assert_project_owner(project)
     titles = {
         o.chapter_number: o.title
         for o in db.query(Outline).filter(Outline.project_id == project_id)

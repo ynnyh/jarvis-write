@@ -3,9 +3,10 @@
 """灵感接口:碎片 → 多个故事方案;独立于项目,可在建项目前用。"""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from app.auth import get_current_user
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import render_style_block
@@ -13,7 +14,11 @@ from app.llm.router import Task, get_adapter_for
 from app.prompts.inspire import INSPIRE_PROMPT
 from app.schemas.tendency import Tendency
 
-router = APIRouter(prefix="/api/inspire", tags=["inspire"])
+router = APIRouter(
+    prefix="/api/inspire",
+    tags=["inspire"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 class InspireRequest(BaseModel):

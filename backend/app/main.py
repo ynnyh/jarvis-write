@@ -28,6 +28,7 @@ for _stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
+from app.api.auth import router as auth_router
 from app.api.chapters import router as chapters_router
 from app.api.consistency import router as consistency_router
 from app.api.inspire import router as inspire_router
@@ -58,7 +59,10 @@ async def lifespan(app: FastAPI):
     """启动时建表。日后换 Alembic 迁移可移除这里。"""
     logger.info("建表中(SQLite)...")
     Base.metadata.create_all(bind=engine)
-    logger.info("建表完成,服务就绪。")
+    logger.info("建表完成,运行多用户迁移...")
+    from app.migrate import run_migrations
+    run_migrations()
+    logger.info("服务就绪。")
     yield
 
 
@@ -80,6 +84,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(system_router)
+    app.include_router(auth_router)
     app.include_router(projects_router)
     app.include_router(tendency_router)
     app.include_router(settings_router)

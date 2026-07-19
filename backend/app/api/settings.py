@@ -12,7 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.db.models import ProviderSetting
+from app.auth import get_current_user
+from app.db.models import ProviderSetting, User
 from app.db.session import get_db
 from app.llm.factory import (
     _REGISTRY,
@@ -71,7 +72,9 @@ class TestResult(BaseModel):
 
 
 @router.get("/providers", response_model=list[ProviderSettingOut])
-async def list_provider_settings(db: Session = Depends(get_db)):
+async def list_provider_settings(
+    db: Session = Depends(get_db), user: User = Depends(get_current_user)
+):
     default = resolve_default_provider()
     out = []
     for name in _REGISTRY:
@@ -93,17 +96,25 @@ async def list_provider_settings(db: Session = Depends(get_db)):
 
 @router.put("/providers/{name}", response_model=ProviderSettingOut)
 async def save_provider_setting(
-    name: str, req: ProviderSettingIn, db: Session = Depends(get_db)
+    name: str,
+    req: ProviderSettingIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     name = name.lower()
     if name not in _REGISTRY:
         raise HTTPException(status_code=404, detail=f"未知 provider: {name}")
 
     row = (
-        db.query(ProviderSetting).filter(ProviderSetting.provider == name).first()
+        db.query(ProviderSetting)
+        .filter(
+            ProviderSetting.user_id == user.id,
+            ProviderSetting.provider == name,
+        )
+        .first()
     )
     if row is None:
-        row = ProviderSetting(provider=name)
+        row = ProviderSetting(provider=name, user_id=user.id)
         db.add(row)
 
     if req.api_key is not None and req.api_key != "":
@@ -112,9 +123,10 @@ async def save_provider_setting(
     row.model = req.model.strip()
 
     if req.is_default:
-        # 只允许一个默认:先清掉别家的
+        # 只允许一个默认:先清掉本用户别家的
         db.query(ProviderSetting).filter(
-            ProviderSetting.provider != name
+            ProviderSetting.user_id == user.id,
+            ProviderSetting.provider != name,
         ).update({ProviderSetting.is_default: False})
         row.is_default = True
     else:
@@ -136,7 +148,7 @@ async def save_provider_setting(
 
 
 @router.post("/providers/{name}/test", response_model=TestResult)
-async def test_provider(name: str):
+async def test_provider(name: str, user: User = Depends(get_current_user)):
     """用当前已存配置实际调一次模型(设置页的「测试连接」按钮)。"""
     name = name.lower()
     if name not in _REGISTRY:

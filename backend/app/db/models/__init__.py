@@ -20,8 +20,10 @@ from app.db.models.preset import TendencyPreset
 from app.db.models.setting import ProviderSetting
 from app.db.models.summary import ChapterSummary
 from app.db.models.usage import LlmUsage
+from app.db.models.user import User
 
 __all__ = [
+    "User",
     "Project",
     "Architecture",
     "Outline",

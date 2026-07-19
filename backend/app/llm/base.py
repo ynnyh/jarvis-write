@@ -92,12 +92,14 @@ class LLMAdapter(abc.ABC):
     def _record_usage(resp: "LLMResponse") -> None:
         """用量记账(静默失败,绝不影响生成)。"""
         try:
+            from app.auth import current_user_id
             from app.db.models import LlmUsage
             from app.db.session import session_scope
 
             with session_scope() as db:
                 db.add(
                     LlmUsage(
+                        user_id=current_user_id.get(),
                         model=resp.model,
                         prompt_tokens=resp.prompt_tokens,
                         completion_tokens=resp.completion_tokens,

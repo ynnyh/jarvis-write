@@ -14,13 +14,18 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.auth import assert_project_owner, get_current_user
 from app.db.models import Chapter, Project
 from app.db.session import SessionLocal, get_db
 from app.engines.pipeline.chapter import generate_chapter
 from app.jobs import create_job, fail_job, finish_job, update_stage
 from app.schemas.tendency import Tendency
 
-router = APIRouter(prefix="/api/projects/{project_id}/chapters", tags=["chapters"])
+router = APIRouter(
+    prefix="/api/projects/{project_id}/chapters",
+    tags=["chapters"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 class GenerateChapterRequest(BaseModel):
@@ -53,6 +58,7 @@ def _project(db: Session, project_id: int) -> Project:
     p = db.get(Project, project_id)
     if p is None:
         raise HTTPException(status_code=404, detail=f"项目 {project_id} 不存在")
+    assert_project_owner(p)
     return p
 
 

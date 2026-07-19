@@ -8,3 +8,5 @@ httpx==0.28.1
 python-dotenv==1.0.1
 chromadb==0.6.3
 tenacity==9.0.0
+PyJWT==2.10.1
+bcrypt==5.0.0

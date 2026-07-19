@@ -17,6 +17,10 @@ class Project(Base, TimestampMixin):
     __tablename__ = "projects"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # 归属用户(阶段 8 多用户隔离);存量数据迁移时归到 admin
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=True
+    )
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     topic: Mapped[str] = mapped_column(Text, default="")
     genre: Mapped[str] = mapped_column(String(100), default="")
