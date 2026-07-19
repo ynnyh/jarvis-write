@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>设置 · jarvis-write</title>
+<style>
+  :root {
+    --bg: #f6f7fb; --card: #ffffff; --line: #e4e7f0;
+    --text: #1c2333; --muted: #6b7280; --brand: #4f5ae8;
+    --brand-weak: #eef0ff; --ok: #16a34a; --err: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 32px 20px 80px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 14px; margin-bottom: 28px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 20px 22px; margin-bottom: 18px;
+  }
+  .card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .card-head h2 { font-size: 16px; margin: 0; text-transform: capitalize; }
+  .badge {
+    font-size: 12px; padding: 2px 10px; border-radius: 999px;
+    background: var(--brand-weak); color: var(--brand);
+  }
+  .badge.ok { background: #ecfdf5; color: var(--ok); }
+  .badge.no { background: #fef2f2; color: var(--err); }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+  .field { flex: 1 1 240px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  input[type=text], input[type=password] {
+    width: 100%; padding: 9px 12px; border: 1px solid var(--line);
+    border-radius: 8px; font-size: 14px; outline: none;
+  }
+  input:focus { border-color: var(--brand); }
+  .actions { display: flex; align-items: center; gap: 10px; margin-top: 4px; flex-wrap: wrap; }
+  button {
+    padding: 8px 18px; border-radius: 8px; border: 1px solid var(--line);
+    background: #fff; font-size: 14px; cursor: pointer;
+  }
+  button.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .default-pick { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
+  .msg { font-size: 13px; }
+  .msg.ok { color: var(--ok); }
+  .msg.err { color: var(--err); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>模型设置</h1>
+  <div class="sub">配置各家大模型的 API Key。支持 OpenAI 兼容格式(DeepSeek 官方与中转站均可,改 Base URL 即可)。Key 保存在本地数据库。</div>
+  <div id="cards"></div>
+</div>
+
+<script>
+const NAMES = { deepseek: "DeepSeek", openai: "OpenAI (GPT)", gemini: "Google Gemini" };
+
+async function load() {
+  const res = await fetch("/api/settings/providers");
+  const list = await res.json();
+  const root = document.getElementById("cards");
+  root.innerHTML = "";
+  for (const p of list) root.appendChild(card(p));
+}
+
+function card(p) {
+  const el = document.createElement("div");
+  el.className = "card";
+  el.innerHTML = `
+    <div class="card-head">
+      <h2>${NAMES[p.provider] || p.provider}</h2>
+      <span class="badge ${p.has_key ? "ok" : "no"}">${p.has_key ? "已配置" : "未配置"}</span>
+      ${p.is_default ? '<span class="badge">默认模型</span>' : ""}
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>API Key ${p.has_key ? "(已保存:" + p.api_key_masked + ",留空则不修改)" : ""}</label>
+        <input type="password" data-f="api_key" placeholder="${p.has_key ? "留空保持不变" : "sk-..."}">
+      </div>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>Base URL</label>
+        <input type="text" data-f="base_url" value="${p.base_url || ""}" placeholder="${p.default_base_url}">
+        <div class="hint">用中转站就填中转地址,如 https://xxx.com/v1</div>
+      </div>
+      <div class="field">
+        <label>模型名</label>
+        <input type="text" data-f="model" value="${p.model || ""}" placeholder="${p.default_model}">
+      </div>
+    </div>
+    <div class="actions">
+      <button class="primary" data-a="save">保存</button>
+      <button data-a="test">测试连接</button>
+      <label class="default-pick">
+        <input type="radio" name="default_provider" data-f="is_default" ${p.is_default ? "checked" : ""}>
+        设为默认
+      </label>
+      <span class="msg" data-f="msg"></span>
+    </div>`;
+
+  const $ = (sel) => el.querySelector(sel);
+  const msg = $('[data-f=msg]');
+
+  $('[data-a=save]').onclick = async () => {
+    msg.className = "msg"; msg.textContent = "保存中...";
+    const body = {
+      api_key: $('[data-f=api_key]').value || null,
+      base_url: $('[data-f=base_url]').value,
+      model: $('[data-f=model]').value,
+      is_default: $('[data-f=is_default]').checked,
+    };
+    const res = await fetch(`/api/settings/providers/${p.provider}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) { msg.className = "msg ok"; msg.textContent = "已保存 ✓"; setTimeout(load, 600); }
+    else { const e = await res.json(); msg.className = "msg err"; msg.textContent = "保存失败: " + (e.detail || res.status); }
+  };
+
+  $('[data-a=test]').onclick = async () => {
+    msg.className = "msg"; msg.textContent = "测试中(最长 60 秒)...";
+    const res = await fetch(`/api/settings/providers/${p.provider}/test`, { method: "POST" });
+    const r = await res.json();
+    if (r.ok) { msg.className = "msg ok"; msg.textContent = `连接成功 ✓ ${r.model}:${r.reply}`; }
+    else { msg.className = "msg err"; msg.textContent = "失败: " + r.error; }
+  };
+
+  return el;
+}
+
+load();
+</script>
+</body>
+</html>

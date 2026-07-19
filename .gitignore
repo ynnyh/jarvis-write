@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# 运行时数据(本地私有,不入库)
+backend/jarvis_write.db
+backend/chroma_data/
+backend/.env
+backend/app.log
+backend/server.log
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

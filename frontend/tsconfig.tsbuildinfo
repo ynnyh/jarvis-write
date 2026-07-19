@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/api.ts","./src/main.tsx","./src/components/tendencyselector.tsx","./src/pages/projectpage.tsx","./src/pages/projectspage.tsx","./src/panels/archpanel.tsx","./src/panels/boardpanel.tsx","./src/panels/chapterspanel.tsx","./src/panels/inspirepanel.tsx","./src/panels/outlinepanel.tsx","./src/panels/polishpanel.tsx"],"version":"5.9.3"}
