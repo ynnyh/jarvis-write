@@ -119,6 +119,85 @@ async def generate_async(
     return {"job_id": job_id}
 
 
+class EditContentRequest(BaseModel):
+    final_content: str = Field(min_length=1)
+
+
+@router.put("/{chapter_number}/content", response_model=ChapterDetail)
+async def edit_content(
+    project_id: int,
+    chapter_number: int,
+    req: EditContentRequest,
+    db: Session = Depends(get_db),
+):
+    """手动编辑正文:立即保存。保存后请调 re-extract-async 同步圣经/摘要。"""
+    _project(db, project_id)
+    ch = (
+        db.query(Chapter)
+        .filter(
+            Chapter.project_id == project_id,
+            Chapter.chapter_number == chapter_number,
+        )
+        .first()
+    )
+    if ch is None:
+        raise HTTPException(status_code=404, detail=f"第 {chapter_number} 章尚未生成")
+    ch.final_content = req.final_content.strip()
+    ch.word_count = len(ch.final_content)
+    ch.status = "finalized"
+    db.commit()
+    return ch
+
+
+@router.post("/{chapter_number}/re-extract-async")
+async def re_extract_async(
+    project_id: int, chapter_number: int, db: Session = Depends(get_db)
+):
+    """手改正文后:重抽取(幂等,先清旧账)→ 重建下游摘要 → 更新向量库。"""
+    _project(db, project_id)
+    job_id = create_job(f"re-extract-{project_id}-{chapter_number}")
+
+    async def runner() -> None:
+        from app.engines.consistency.extractor import extract_and_apply
+        from app.engines.memory import ChapterMemory
+        from app.engines.pipeline.chapter import rebuild_summaries_after
+
+        session = SessionLocal()
+        try:
+            project = session.get(Project, project_id)
+            ch = (
+                session.query(Chapter)
+                .filter(
+                    Chapter.project_id == project_id,
+                    Chapter.chapter_number == chapter_number,
+                )
+                .first()
+            )
+            update_stage(job_id, "1/3 重新抽取状态(清旧账)")
+            stats = await extract_and_apply(
+                session, project_id, chapter_number, ch.final_content
+            )
+            update_stage(job_id, "2/3 重建下游前情摘要")
+            rebuilt = await rebuild_summaries_after(
+                session, project, chapter_number,
+                progress=lambda s: update_stage(job_id, f"2/3 {s}"),
+            )
+            update_stage(job_id, "3/3 更新向量库")
+            await ChapterMemory(project_id).add_chapter(
+                chapter_number, ch.final_content
+            )
+            session.commit()
+            finish_job(job_id, {"extraction_stats": stats, "summaries_rebuilt": rebuilt})
+        except Exception as exc:  # noqa: BLE001
+            session.rollback()
+            fail_job(job_id, str(exc)[:500])
+        finally:
+            session.close()
+
+    asyncio.create_task(runner())
+    return {"job_id": job_id}
+
+
 @router.get("", response_model=list[ChapterBrief])
 async def list_chapters(project_id: int, db: Session = Depends(get_db)):
     _project(db, project_id)

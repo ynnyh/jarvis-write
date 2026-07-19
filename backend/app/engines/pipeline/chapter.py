@@ -102,6 +102,67 @@ def _rolling_summary(db: Session, project_id: int, current: int) -> str:
     return row.rolling_summary if row else "(无,本章为开篇)"
 
 
+async def rebuild_summaries_after(
+    db: Session, project: Project, changed_chapter: int, progress=None
+) -> list[int]:
+    """重建第 changed_chapter 章之后的滚动摘要链。
+
+    重写/手改某章正文后,后续章的滚动摘要都基于旧文,必须顺序重算
+    (快模型档,每章一次调用)。返回重建的章号列表。
+    """
+    laters = (
+        db.query(Chapter)
+        .filter(
+            Chapter.project_id == project.id,
+            Chapter.chapter_number > changed_chapter,
+            Chapter.final_content != "",
+        )
+        .order_by(Chapter.chapter_number)
+        .all()
+    )
+    # 只有当后续章已存在摘要时才需要重建
+    later_nums = [c.chapter_number for c in laters]
+    if not later_nums:
+        return []
+
+    rebuilt: list[int] = []
+    for ch in laters:
+        if progress:
+            try:
+                progress(f"重建第 {ch.chapter_number} 章前情摘要")
+            except Exception:  # noqa: BLE001
+                pass
+        prev = _rolling_summary(db, project.id, ch.chapter_number)
+        outline = _get_outline(db, project.id, ch.chapter_number)
+        new_summary = await get_adapter_for(Task.SUMMARY).ask(
+            ROLLING_SUMMARY_PROMPT.format(
+                previous_summary=prev,
+                chapter_number=ch.chapter_number,
+                chapter_title=outline.title if outline else "",
+                chapter_text=ch.final_content,
+            )
+        )
+        row = (
+            db.query(ChapterSummary)
+            .filter(
+                ChapterSummary.project_id == project.id,
+                ChapterSummary.chapter_number == ch.chapter_number,
+            )
+            .first()
+        )
+        if row is None:
+            row = ChapterSummary(
+                project_id=project.id, chapter_number=ch.chapter_number
+            )
+            db.add(row)
+        row.rolling_summary = new_summary.strip()
+        db.flush()
+        rebuilt.append(ch.chapter_number)
+
+    logger.info("摘要链重建完成: %s", rebuilt)
+    return rebuilt
+
+
 async def generate_chapter(
     db: Session,
     project: Project,
@@ -270,6 +331,11 @@ async def generate_chapter(
 
     # ---- 入向量库(失败自动降级,不阻塞) ----
     await memory.add_chapter(chapter_number, final)
+
+    # ---- 重写场景:下游章节的滚动摘要基于旧文,重建 ----
+    rebuilt = await rebuild_summaries_after(db, project, chapter_number, progress)
+    if rebuilt:
+        logger.info("第 %d 章重写,已重建下游摘要: %s", chapter_number, rebuilt)
 
     logger.info("第 %d 章完成,共 %d 字。", chapter_number, chapter.word_count)
     return chapter, issues, extraction_stats

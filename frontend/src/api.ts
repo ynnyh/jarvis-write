@@ -122,6 +122,10 @@ export const api = {
     req<GenerateChapterResponse>("POST", `/api/projects/${pid}/chapters/${n}/generate`, { tendency }, LLM_TIMEOUT),
   generateChapterAsync: (pid: number, n: number, tendency: Tendency) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/chapters/${n}/generate-async`, { tendency }),
+  editChapterContent: (pid: number, n: number, final_content: string) =>
+    req<ChapterDetail>("PUT", `/api/projects/${pid}/chapters/${n}/content`, { final_content }),
+  reExtractAsync: (pid: number, n: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/chapters/${n}/re-extract-async`),
   getJob: (jobId: string) =>
     req<{ status: string; stage: string; result: GenerateChapterResponse | null; error: string | null }>(
       "GET", `/api/jobs/${jobId}`),

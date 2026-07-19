@@ -20,6 +20,8 @@ export default function ChaptersPanel({ pid, project, outlines }: Props) {
   const [genResult, setGenResult] = useState<GenerateChapterResponse | null>(null);
   const [genTendency, setGenTendency] = useState<Tendency>({});
   const [showTendency, setShowTendency] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState("");
 
   const reload = useCallback(async () => {
     setChapters(await api.listChapters(pid));
@@ -32,8 +34,28 @@ export default function ChaptersPanel({ pid, project, outlines }: Props) {
     : null;
 
   async function open(n: number) {
-    setErr(""); setGenResult(null);
+    setErr(""); setGenResult(null); setEditing(false);
     try { setCurrent(await api.getChapter(pid, n)); } catch (e) { setErr(String(e)); }
+  }
+
+  async function saveEdit() {
+    if (!current) return;
+    setBusy("保存正文…"); setErr("");
+    try {
+      const updated = await api.editChapterContent(pid, current.chapter_number, editText);
+      setCurrent(updated);
+      setEditing(false);
+      await reload();
+      // 手改后同步一致性引擎:重抽取 + 重建下游摘要 + 向量库
+      const { job_id } = await api.reExtractAsync(pid, current.chapter_number);
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const job = await api.getJob(job_id);
+        if (job.status === "running") { setBusy(`同步一致性引擎:${job.stage}`); continue; }
+        if (job.status === "error") throw new Error(job.error ?? "同步失败");
+        break;
+      }
+    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
   }
 
   async function generate(n: number) {
@@ -140,9 +162,32 @@ export default function ChaptersPanel({ pid, project, outlines }: Props) {
                   第{current.chapter_number}章 正文
                   <span className="muted" style={{ fontWeight: 400, marginLeft: 8 }}>{current.word_count}字</span>
                 </h2>
-                <span className="muted">要改文笔?去左侧「润色」工作区</span>
+                {!editing ? (
+                  <>
+                    <button onClick={() => {
+                      setEditText(current.final_content || current.draft_content);
+                      setEditing(true);
+                    }}>编辑正文</button>
+                    <span className="muted" style={{ marginLeft: 8 }}>改文笔?去「润色」</span>
+                  </>
+                ) : (
+                  <>
+                    <button className="primary" disabled={!!busy} onClick={saveEdit}>
+                      {busy && <span className="spin" />}保存(自动同步一致性引擎)
+                    </button>
+                    <button disabled={!!busy} onClick={() => setEditing(false)}>取消</button>
+                  </>
+                )}
               </div>
-              <div className="prose">{current.final_content || current.draft_content || "(空)"}</div>
+              {editing ? (
+                <textarea
+                  value={editText}
+                  onChange={(e) => setEditText(e.target.value)}
+                  style={{ minHeight: 480, lineHeight: 1.9, fontSize: 14.5 }}
+                />
+              ) : (
+                <div className="prose">{current.final_content || current.draft_content || "(空)"}</div>
+              )}
             </div>
           </>
         ) : (
