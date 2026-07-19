@@ -1,0 +1,30 @@
+# 构建镜像时排除:运行时数据 / 本地环境 / 产物,避免烤进镜像层
+# —— 尤其是数据库和日志(含隐私数据,绝不能随镜像分发)
+
+# Python 运行时数据与环境
+backend/*.db
+backend/*.db-journal
+backend/*.db-wal
+backend/*.db-shm
+backend/chroma_data/
+backend/.venv/
+backend/.env
+backend/*.log
+**/__pycache__/
+*.py[cod]
+
+# 压测/临时产物
+backend/scripts/stress_report.jsonl
+backend/scripts/_*.txt
+
+# 前端本地依赖与产物(镜像内会重新 npm ci + build)
+frontend/node_modules/
+frontend/dist/
+
+# Git / IDE / OS
+.git/
+.gitignore
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
