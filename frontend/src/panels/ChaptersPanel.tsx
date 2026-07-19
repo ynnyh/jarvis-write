@@ -87,8 +87,8 @@ export default function ChaptersPanel({ pid, project, outlines }: Props) {
   }
 
   return (
-    <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
-      <div style={{ width: 300, flexShrink: 0 }}>
+    <div className="two-col">
+      <div className="two-col-side">
         <div className="card" style={{ padding: 12 }}>
           <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
             <h3 style={{ flex: 1, margin: 0 }}>章节</h3>
@@ -126,7 +126,7 @@ export default function ChaptersPanel({ pid, project, outlines }: Props) {
         {err && <div className="msg-err">{err}</div>}
       </div>
 
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div className="two-col-main">
         {genResult && (
           <div className="card" style={{ background: "#f8fffa" }}>
             <b>生成完成</b> {genResult.word_count} 字

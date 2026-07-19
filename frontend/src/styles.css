@@ -151,3 +151,76 @@ table.tbl th { color: var(--muted); font-weight: 500; }
   padding: 10px 16px; font-size: 13px; color: var(--muted);
 }
 .stat b { display: block; font-size: 18px; color: var(--text); margin-top: 2px; }
+
+/* 写作面板:章节列表 + 阅读区双栏(桌面) */
+.two-col { display: flex; gap: 16px; align-items: flex-start; }
+.two-col-side { width: 300px; flex-shrink: 0; }
+.two-col-main { flex: 1; min-width: 0; }
+
+/* ===== 移动端适配(≤820px:平板竖屏与手机) ===== */
+@media (max-width: 820px) {
+  body { font-size: 15px; }              /* 手机上略放大正文 */
+  .wrap { padding: 14px 12px 64px; }
+
+  /* 顶栏:允许换行,隐藏次要说明文字 */
+  .topbar { padding: 0 12px; height: auto; min-height: 52px; flex-wrap: wrap; gap: 10px 14px; }
+  .topbar .muted { display: none; }
+
+  /* 工作流导航:从左侧竖排 → 顶部横向可滑动条 */
+  .workbench { flex-direction: column; gap: 12px; }
+  .flow-nav {
+    width: 100%; position: static; display: flex; gap: 6px;
+    overflow-x: auto; padding: 8px; -webkit-overflow-scrolling: touch;
+  }
+  .flow-step { flex-shrink: 0; padding: 8px 12px; white-space: nowrap; }
+  .flow-step .dot { position: static; margin-left: 2px; }
+
+  /* 各种双栏 → 单列堆叠 */
+  .split, .two-col { flex-direction: column; }
+  .two-col-side { width: 100%; }
+  .pane { max-height: 300px; }
+
+  /* 写作面板阅读区:统计标签横向滑动而非挤压 */
+  .stat-strip { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .stat { flex-shrink: 0; }
+  .stat-strip .stat b[style] { max-width: 200px !important; }
+
+  /* 触摸目标:按钮/输入更高更好点 */
+  button { padding: 10px 16px; font-size: 14px; }
+  .chip { padding: 9px 14px; }
+  input[type="text"], input[type="number"], textarea, select { font-size: 16px; }  /* iOS 防聚焦缩放 */
+  select[style] { max-width: 100% !important; }
+
+  /* 弹窗占满宽度 */
+  .modal { max-width: 100%; padding: 18px 16px; max-height: 92vh; }
+  .modal-mask { padding: 10px; }
+
+  /* 宽表格横向滑动,避免撑破布局 */
+  table.tbl { display: block; overflow-x: auto; white-space: nowrap; }
+}
+
+/* 更窄的手机(≤480px):进一步压缩留白 */
+@media (max-width: 480px) {
+  h1 { font-size: 18px; }
+  .card { padding: 14px; }
+  .flow-main .card { padding: 14px 12px; }
+}
+
+/* ===== 登录/注册页 ===== */
+.auth-wrap {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  padding: 20px; background: var(--bg);
+}
+.auth-card {
+  width: 100%; max-width: 380px; background: var(--card);
+  border: 1px solid var(--line); border-radius: 14px; padding: 28px 26px;
+}
+.auth-logo { font-weight: 700; font-size: 22px; color: var(--text); }
+.auth-logo span { color: var(--brand); }
+
+/* 顶栏用户信息 */
+.topbar .user { color: var(--muted); font-size: 13px; }
+.topbar .linkbtn {
+  background: none; border: none; color: var(--brand); font-size: 13px;
+  cursor: pointer; padding: 0;
+}
