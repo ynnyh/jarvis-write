@@ -70,8 +70,20 @@ async def generate_blueprint(
     number_of_chapters: int,
     tendency: Tendency | None = None,
     global_tendency: Tendency | None = None,
+    progress=None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    """分块生成全书章节蓝图。返回 (章节 dict 列表, 警告列表)。纯生成,不落库。"""
+    """分块生成全书章节蓝图。返回 (章节 dict 列表, 警告列表)。纯生成,不落库。
+
+    progress: 可选回调 fn(stage_text),每块生成前/解析后各报一次(异步任务进度用)。
+    """
+
+    def _report(stage: str) -> None:
+        if progress:
+            try:
+                progress(stage)
+            except Exception:  # noqa: BLE001 — 进度上报绝不影响生成
+                pass
+
     assembled = assemble_tendency("outline", tendency, global_tendency)
     style_block = render_style_block(assembled)
     adapter = get_adapter_for(Task.BLUEPRINT)
@@ -84,6 +96,7 @@ async def generate_blueprint(
     while start <= number_of_chapters:
         end = min(start + CHUNK_SIZE - 1, number_of_chapters)
         logger.info("蓝图生成:第 %d-%d 章...", start, end)
+        _report(f"生成中:第 {start}-{end} 章 / 共 {number_of_chapters} 章")
 
         if start == 1 and end == number_of_chapters:
             # 一块装得下,用整书模板
@@ -128,6 +141,7 @@ async def generate_blueprint(
         raw_accumulated += "\n" + raw
         all_chapters.extend(valid)
         all_warnings.extend(warnings)
+        _report(f"第 {start}-{end} 章解析完成(累计 {len(all_chapters)} 章)")
         if warnings:
             logger.warning("蓝图块 %d-%d 警告: %s", start, end, warnings)
 

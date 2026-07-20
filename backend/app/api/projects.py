@@ -5,11 +5,14 @@
 阶段 1 核心链路:
   POST /api/projects                          建项目(带全局倾向)
   POST /api/projects/{id}/architecture        雪花四步生成顶层架构
+  POST /api/projects/{id}/architecture-async  同上,异步任务(前端轮询进度)
   POST /api/projects/{id}/blueprint           分块生成章节蓝图并落库
+  POST /api/projects/{id}/blueprint-async     同上,异步任务(前端轮询进度)
   GET  /api/projects/{id}/outlines            查看章节目录
 """
 from __future__ import annotations
 
+import asyncio
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,9 +22,10 @@ from sqlalchemy.orm import Session
 from app.api.deps import delete_project_cascade
 from app.auth import assert_project_owner, current_user_id, get_current_user
 from app.db.models import Outline, Project
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.engines.pipeline.architecture import generate_architecture, save_architecture
 from app.engines.pipeline.blueprint import generate_blueprint, save_blueprint
+from app.jobs import create_job, fail_job, finish_job, update_stage
 from app.llm.factory import (
     create_llm_adapter,
     resolve_default_provider,
@@ -227,6 +231,44 @@ async def generate_project_architecture(
     return arch
 
 
+@router.post("/{project_id}/architecture-async")
+async def generate_project_architecture_async(
+    project_id: int,
+    req: GenerateArchitectureRequest,
+    db: Session = Depends(get_db),
+):
+    """异步生成架构:立即返回 job_id,前端轮询 /api/jobs/{job_id} 看 1/4-4/4 进度。"""
+    _get_project_or_404(db, project_id)  # 先校验存在与归属
+    job_id = create_job(f"architecture-{project_id}")
+
+    async def runner() -> None:
+        session = SessionLocal()
+        try:
+            project = session.get(Project, project_id)
+            result = await generate_architecture(
+                topic=project.topic,
+                genre=project.genre,
+                number_of_chapters=project.target_chapters,
+                word_number=project.target_words_per_chapter,
+                tendency=req.tendency,
+                global_tendency=project.global_tendency,
+                progress=lambda s: update_stage(job_id, s),
+            )
+            update_stage(job_id, "落库中")
+            arch = save_architecture(session, project, result)
+            session.commit()
+            session.refresh(arch)
+            finish_job(job_id, ArchitectureOut.model_validate(arch).model_dump())
+        except Exception as exc:  # noqa: BLE001 — 任务失败进 job 状态
+            session.rollback()
+            fail_job(job_id, str(exc)[:500])
+        finally:
+            session.close()
+
+    asyncio.create_task(runner())
+    return {"job_id": job_id}
+
+
 @router.get("/{project_id}/architecture", response_model=ArchitectureOut)
 async def get_project_architecture(
     project_id: int, db: Session = Depends(get_db)
@@ -271,6 +313,59 @@ async def generate_project_blueprint(
         outlines=[OutlineOut.model_validate(o) for o in outlines],
         warnings=warnings,
     )
+
+
+@router.post("/{project_id}/blueprint-async")
+async def generate_project_blueprint_async(
+    project_id: int,
+    req: GenerateBlueprintRequest,
+    db: Session = Depends(get_db),
+):
+    """异步生成蓝图:立即返回 job_id,前端轮询 /api/jobs/{job_id} 看分块进度。"""
+    project = _get_project_or_404(db, project_id)
+    if project.architecture is None:
+        raise HTTPException(
+            status_code=400, detail="请先生成顶层架构(POST .../architecture)"
+        )
+    job_id = create_job(f"blueprint-{project_id}")
+
+    async def runner() -> None:
+        from app.engines.pipeline.architecture import ArchitectureResult
+
+        session = SessionLocal()
+        try:
+            p = session.get(Project, project_id)
+            arch_text = ArchitectureResult(
+                core_seed=p.architecture.core_seed,
+                character_dynamics=p.architecture.character_dynamics,
+                world_building=p.architecture.world_building,
+                plot_architecture=p.architecture.plot_architecture,
+            ).full_text
+
+            chapters, warnings = await generate_blueprint(
+                novel_architecture=arch_text,
+                number_of_chapters=p.target_chapters,
+                tendency=req.tendency,
+                global_tendency=p.global_tendency,
+                progress=lambda s: update_stage(job_id, s),
+            )
+            update_stage(job_id, "落库中")
+            outlines = save_blueprint(session, p, chapters)
+            session.commit()
+            finish_job(job_id, {
+                "outlines": [
+                    OutlineOut.model_validate(o).model_dump() for o in outlines
+                ],
+                "warnings": warnings,
+            })
+        except Exception as exc:  # noqa: BLE001 — 任务失败进 job 状态
+            session.rollback()
+            fail_job(job_id, str(exc)[:500])
+        finally:
+            session.close()
+
+    asyncio.create_task(runner())
+    return {"job_id": job_id}
 
 
 @router.get("/{project_id}/outlines", response_model=list[OutlineOut])

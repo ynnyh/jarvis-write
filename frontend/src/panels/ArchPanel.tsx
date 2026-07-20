@@ -1,6 +1,7 @@
 // 架构工作区:雪花四步产出,四块均可手动编辑,也可整体重生成
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, Architecture, Project, Tendency } from "../api";
+import { pollJob } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
 
 interface Props { project: Project; arch: Architecture | null; onChanged: () => Promise<void>; }
@@ -19,6 +20,9 @@ export default function ArchPanel({ project, arch, onChanged }: Props) {
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+  // 组件卸载时中止轮询,防止卸载后继续 setState
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   useEffect(() => {
     if (arch) {
@@ -31,12 +35,22 @@ export default function ArchPanel({ project, arch, onChanged }: Props) {
   }, [arch]);
 
   async function regenerate() {
-    setBusy("雪花四步生成中(种子→角色→世界观→情节,约2-6分钟)…"); setErr(""); setMsg("");
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    setBusy("架构生成:排队中…"); setErr(""); setMsg("");
     try {
-      await api.generateArchitecture(project.id, tendency);
+      const { job_id } = await api.generateArchitectureAsync(project.id, tendency);
+      // 轮询任务进度(雪花四步:种子→角色→世界观→情节)
+      await pollJob(job_id, {
+        signal: ctrl.signal,
+        onStage: (stage) => setBusy(`架构生成中:${stage}`),
+      });
+      if (ctrl.signal.aborted) return;
       await onChanged();
       setMsg("架构已生成。下一步:去「大纲」生成章节蓝图。");
-    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+    } catch (e) {
+      if (!ctrl.signal.aborted) setErr(String(e));
+    } finally { if (!ctrl.signal.aborted) setBusy(""); }
   }
 
   async function save() {

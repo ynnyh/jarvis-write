@@ -151,6 +151,10 @@ export const api = {
     req<Architecture>("POST", `/api/projects/${id}/architecture`, { tendency }, LLM_TIMEOUT),
   generateBlueprint: (id: number, tendency: Tendency) =>
     req<{ outlines: Outline[]; warnings: string[] }>("POST", `/api/projects/${id}/blueprint`, { tendency }, LLM_TIMEOUT),
+  generateArchitectureAsync: (id: number, tendency: Tendency) =>
+    req<{ job_id: string }>("POST", `/api/projects/${id}/architecture-async`, { tendency }),
+  generateBlueprintAsync: (id: number, tendency: Tendency) =>
+    req<{ job_id: string }>("POST", `/api/projects/${id}/blueprint-async`, { tendency }),
   listOutlines: (id: number) => req<Outline[]>("GET", `/api/projects/${id}/outlines`),
 
   editOutline: (pid: number, n: number, updates: Partial<Outline>) =>

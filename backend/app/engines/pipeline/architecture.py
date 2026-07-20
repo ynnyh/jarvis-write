@@ -53,14 +53,27 @@ async def generate_architecture(
     word_number: int,
     tendency: Tendency | None = None,
     global_tendency: Tendency | None = None,
+    progress=None,
 ) -> ArchitectureResult:
-    """执行雪花四步,返回完整架构。纯生成,不落库。"""
+    """执行雪花四步,返回完整架构。纯生成,不落库。
+
+    progress: 可选回调 fn(stage_text),四步各报一次(异步任务进度用)。
+    """
+
+    def _report(stage: str) -> None:
+        if progress:
+            try:
+                progress(stage)
+            except Exception:  # noqa: BLE001 — 进度上报绝不影响生成
+                pass
+
     assembled = assemble_tendency("outline", tendency, global_tendency)
     style_block = render_style_block(assembled)
     adapter = get_adapter_for(Task.ARCHITECTURE)
 
     # Step 1: 核心种子
     logger.info("架构生成 1/4:核心种子...")
+    _report("1/4 核心种子")
     core_seed = (
         await adapter.ask(
             CORE_SEED_PROMPT.format(
@@ -75,6 +88,7 @@ async def generate_architecture(
 
     # Step 2: 角色动力学
     logger.info("架构生成 2/4:角色动力学...")
+    _report("2/4 角色动力学")
     character_dynamics = (
         await adapter.ask(
             CHARACTER_DYNAMICS_PROMPT.format(
@@ -85,6 +99,7 @@ async def generate_architecture(
 
     # Step 3: 世界观
     logger.info("架构生成 3/4:世界观...")
+    _report("3/4 世界观")
     world_building = (
         await adapter.ask(
             WORLD_BUILDING_PROMPT.format(
@@ -97,6 +112,7 @@ async def generate_architecture(
 
     # Step 4: 情节架构
     logger.info("架构生成 4/4:情节架构...")
+    _report("4/4 情节架构")
     plot_architecture = (
         await adapter.ask(
             PLOT_ARCHITECTURE_PROMPT.format(

@@ -1,6 +1,7 @@
 // 大纲工作区:蓝图生成 / 内联编辑 / 大改分级 → 影响分析 → 勾选级联
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, EditResult, ImpactReport, Outline, Tendency } from "../api";
+import { pollJob } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
 import type { Step } from "../pages/ProjectPage";
 
@@ -28,6 +29,9 @@ export default function OutlinePanel({ pid, outlines, hasArch, onChanged, onGoto
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [flash, setFlash] = useState("");
   const [genDone, setGenDone] = useState<number | null>(null);
+  // 组件卸载时中止轮询,防止卸载后继续 setState
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   function toggleExpand(n: number) {
     const s = new Set(expanded);
@@ -36,15 +40,25 @@ export default function OutlinePanel({ pid, outlines, hasArch, onChanged, onGoto
   }
 
   async function generateBlueprint() {
-    setBusy(`生成章节蓝图中(约2-6分钟)…`); setErr("");
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    setBusy("蓝图生成:排队中…"); setErr("");
     try {
-      const r = await api.generateBlueprint(pid, genTendency);
+      const { job_id } = await api.generateBlueprintAsync(pid, genTendency);
+      // 轮询任务进度(按块生成,阶段文案来自后端 stage)
+      const r = await pollJob<{ outlines: Outline[]; warnings: string[] }>(job_id, {
+        signal: ctrl.signal,
+        onStage: (stage) => setBusy(`蓝图生成中:${stage}`),
+      });
+      if (ctrl.signal.aborted) return;
       if (r.warnings.length) setErr("警告: " + r.warnings.join(";"));
       await onChanged();
       setShowGen(false);
       setExpanded(new Set());
       setGenDone(r.outlines.length);
-    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+    } catch (e) {
+      if (!ctrl.signal.aborted) setErr(String(e));
+    } finally { if (!ctrl.signal.aborted) setBusy(""); }
   }
 
   function startEdit(o: Outline) {
