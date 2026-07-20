@@ -125,6 +125,7 @@ export default function ProjectPage() {
       {readingBook && chapters.length > 0 && (
         <BookReader
           pid={pid}
+          project={project}
           outlines={outlines}
           chapters={chapters}
           onClose={() => setReadingBook(false)}

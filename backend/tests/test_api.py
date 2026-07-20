@@ -848,3 +848,89 @@ def test_polish_fragment_not_owner_404(client):
         json={"fragment": "他走进了城门。", "direction": "更生动"},
     )
     assert r.status_code == 404
+
+
+# ---------- 书籍简介(synopsis) ----------
+
+
+def _create_project_with_topic(client: TestClient, headers: dict) -> dict:
+    p = _create_project(client, headers, "简介书")
+    r = client.patch(
+        f"/api/projects/{p['id']}",
+        headers=headers,
+        json={"topic": "落魄镖师发现镖箱里藏着个大活人", "genre": "武侠"},
+    )
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_synopsis_generate_ok(client):
+    """mock LLM:生成接口返回简介;prompt 注入主题与类型。"""
+    from unittest.mock import patch
+
+    headers = _setup_user_with_key(client, "syn_user")
+    p = _create_project_with_topic(client, headers)
+
+    captured: dict = {}
+
+    class _SynAdapter:
+        async def ask(self, prompt, system=None):
+            captured["prompt"] = prompt
+            return "  一趟险镖,箱中藏着惊天秘密;落魄镖师从此卷入江湖漩涡。  "
+
+    with patch("app.api.projects.create_llm_adapter", return_value=_SynAdapter()):
+        r = client.post(f"/api/projects/{p['id']}/synopsis", headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["synopsis"] == "一趟险镖,箱中藏着惊天秘密;落魄镖师从此卷入江湖漩涡。"
+    assert "落魄镖师发现镖箱里藏着个大活人" in captured["prompt"]
+    assert "武侠" in captured["prompt"]
+
+
+def test_synopsis_generate_empty_topic_400(client):
+    """主题为空 → 400,提示先去灵感区定主题。"""
+    headers = _setup_user_with_key(client, "syn_empty")
+    p = _create_project(client, headers, "没主题的书")
+
+    r = client.post(f"/api/projects/{p['id']}/synopsis", headers=headers)
+    assert r.status_code == 400
+    assert "主题" in r.json()["detail"]
+
+
+def test_synopsis_generate_requires_key(client):
+    """未配置任何 key → 工厂层 400。"""
+    headers = _auth(_register(client, "syn_nokey")["token"])
+    p = _create_project_with_topic(client, headers)
+
+    r = client.post(f"/api/projects/{p['id']}/synopsis", headers=headers)
+    assert r.status_code == 400
+    assert "API key" in r.json()["detail"]
+
+
+def test_synopsis_generate_not_owner_404(client):
+    """非 owner 生成他人项目简介 → 404(不泄露存在性)。"""
+    a = _setup_user_with_key(client, "syn_a")
+    b = _auth(_register(client, "syn_b")["token"])
+    p = _create_project_with_topic(client, a)
+
+    r = client.post(f"/api/projects/{p['id']}/synopsis", headers=b)
+    assert r.status_code == 404
+
+
+def test_synopsis_patch_roundtrip(client):
+    """PATCH 保存简介后,get/list 都能读回;新建项目默认为 null。"""
+    headers = _auth(_register(client, "syn_patch")["token"])
+    p = _create_project(client, headers, "往返书")
+    assert p["synopsis"] is None
+
+    text = "一段手写的书籍简介。"
+    r = client.patch(
+        f"/api/projects/{p['id']}", headers=headers, json={"synopsis": text}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["synopsis"] == text
+
+    assert client.get(
+        f"/api/projects/{p['id']}", headers=headers
+    ).json()["synopsis"] == text
+    items = client.get("/api/projects", headers=headers).json()
+    assert next(i for i in items if i["id"] == p["id"])["synopsis"] == text

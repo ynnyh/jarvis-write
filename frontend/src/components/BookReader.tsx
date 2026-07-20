@@ -3,11 +3,12 @@
 // 按项目记住阅读位置(localStorage reader-pos-{pid}):打开时恢复到上次的章节与滚动位置,
 // 章节已不存在则从第一章有正文的开始。
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, ChapterBrief, ChapterDetail, Outline } from "../api";
+import { api, ChapterBrief, ChapterDetail, Outline, Project } from "../api";
 import Reader, { ReaderTocItem } from "./Reader";
 
 interface Props {
   pid: number;
+  project: Project;
   outlines: Outline[];
   chapters: ChapterBrief[];
   onClose: () => void;
@@ -32,7 +33,7 @@ function savePos(key: string, pos: ReaderPos) {
   try { localStorage.setItem(key, JSON.stringify(pos)); } catch { /* ignore */ }
 }
 
-export default function BookReader({ pid, outlines, chapters, onClose }: Props) {
+export default function BookReader({ pid, project, outlines, chapters, onClose }: Props) {
   const [chapter, setChapter] = useState<ChapterDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -96,7 +97,13 @@ export default function BookReader({ pid, outlines, chapters, onClose }: Props) 
         onPrev={() => prevNum != null && open(prevNum)}
         onNext={() => nextNum != null && open(nextNum)}
         onClose={onClose}
-        toc={{ items: tocItems, current: chapter?.chapter_number ?? null, onSelect: open }}
+        toc={{
+          items: tocItems,
+          current: chapter?.chapter_number ?? null,
+          onSelect: open,
+          bookTitle: project.title,
+          synopsis: project.synopsis,
+        }}
         restoreScroll={restoreScroll}
         onScrollPos={handleScrollPos}
         polishCtx={{

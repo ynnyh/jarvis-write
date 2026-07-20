@@ -68,6 +68,19 @@ def _add_is_active_column() -> None:
             logger.info("迁移:users 补 is_active 列")
 
 
+def _add_synopsis_column() -> None:
+    """给 projects 表补 synopsis 列(书籍简介,幂等)。"""
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "projects" not in insp.get_table_names():
+            return  # create_all 会新建,无需补列
+        if not _column_exists("projects", "synopsis"):
+            conn.execute(
+                text("ALTER TABLE projects ADD COLUMN synopsis TEXT")
+            )
+            logger.info("迁移:projects 补 synopsis 列")
+
+
 def _ensure_admin(db: Session) -> User:
     settings = get_settings()
     admin = (
@@ -113,6 +126,7 @@ def run_migrations() -> None:
     """启动时调用。幂等。"""
     _add_user_id_columns()
     _add_is_active_column()
+    _add_synopsis_column()
     with session_scope() as db:
         admin = _ensure_admin(db)
         db.flush()

@@ -27,6 +27,7 @@ class ProjectOut(BaseModel):
     target_chapters: int
     target_words_per_chapter: int
     global_tendency: dict[str, Any]
+    synopsis: str | None = None
     status: str
 
     model_config = {"from_attributes": True}

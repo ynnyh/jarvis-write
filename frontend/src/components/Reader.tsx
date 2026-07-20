@@ -91,7 +91,13 @@ interface Props {
   onPrev: () => void;
   onNext: () => void;
   onClose: () => void;
-  toc?: { items: ReaderTocItem[]; current: number | null; onSelect: (n: number) => void };
+  toc?: {
+    items: ReaderTocItem[];
+    current: number | null;
+    onSelect: (n: number) => void;
+    bookTitle?: string;        // 全书模式:目录栏顶部书名
+    synopsis?: string | null;  // 目录栏书名下的简介(无则不显示)
+  };
   restoreScroll?: number | null;              // 全书模式:首次打开要恢复的滚动位置
   onScrollPos?: (chapterNum: number, scroll: number) => void; // 滚动位置上报(父级防抖持久化)
   polishCtx?: PolishCtx;       // 传入即开启「点选段落润色」
@@ -322,6 +328,16 @@ export default function Reader({
             <div className="reader-body">
               {toc && (
                 <div className={"reader-toc" + (tocOpen ? " open" : "")}>
+                  {toc.bookTitle && (
+                    <div className="reader-toc-book">
+                      <div className="reader-toc-book-title">{toc.bookTitle}</div>
+                      {toc.synopsis && (
+                        <div className="reader-toc-book-syn" title={toc.synopsis}>
+                          {toc.synopsis}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {toc.items.map((it) => (
                     <div
                       key={it.num}

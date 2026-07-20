@@ -28,6 +28,8 @@ class Project(Base, TimestampMixin):
     target_words_per_chapter: Mapped[int] = mapped_column(Integer, default=3000)
     # 全局倾向:标签组合 JSON,如 {"pace": "快节奏", "tone": ["热血"], ...}
     global_tendency: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # 书籍简介(网文风格 150-300 字,可 AI 生成也可手改);老库由迁移补列
+    synopsis: Mapped[str | None] = mapped_column(Text, nullable=True)
     # draft / outlining / writing / done
     status: Mapped[str] = mapped_column(String(20), default="draft")
 

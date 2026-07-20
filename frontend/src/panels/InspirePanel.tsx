@@ -9,11 +9,15 @@ export default function InspirePanel({ project, onChanged }: Props) {
   const [topic, setTopic] = useState(project.topic);
   const [spark, setSpark] = useState("");
   const [tendency, setTendency] = useState<Tendency>(project.global_tendency ?? {});
+  const [synopsis, setSynopsis] = useState(project.synopsis ?? "");
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [picked, setPicked] = useState<number | null>(null);
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+  const [synBusy, setSynBusy] = useState("");
+  const [synMsg, setSynMsg] = useState("");
+  const [synErr, setSynErr] = useState("");
 
   async function brainstorm() {
     setBusy("AI 正在扩展灵感方案(约1-2分钟)…"); setErr(""); setMsg("");
@@ -49,6 +53,24 @@ export default function InspirePanel({ project, onChanged }: Props) {
     } catch (e) { setErr(String(e)); } finally { setBusy(""); }
   }
 
+  async function genSynopsis() {
+    setSynBusy("AI 正在撰写书籍简介(约1分钟)…"); setSynErr(""); setSynMsg("");
+    try {
+      const r = await api.generateSynopsis(project.id);
+      setSynopsis(r.synopsis);
+      setSynMsg("简介已生成,可继续修改,点「保存简介」写入项目。");
+    } catch (e) { setSynErr(String(e)); } finally { setSynBusy(""); }
+  }
+
+  async function saveSynopsis() {
+    setSynBusy("保存…"); setSynErr(""); setSynMsg("");
+    try {
+      await api.patchProject(project.id, { synopsis });
+      await onChanged();
+      setSynMsg("简介已保存。");
+    } catch (e) { setSynErr(String(e)); } finally { setSynBusy(""); }
+  }
+
   return (
     <>
       <div className="card">
@@ -65,6 +87,41 @@ export default function InspirePanel({ project, onChanged }: Props) {
           {msg && <span className="msg-ok">{msg}</span>}
         </div>
       </div>
+
+      {project.topic && (
+        <div className="card">
+          <h2>书籍简介</h2>
+          {synopsis.trim() ? (
+            <>
+              <div className="card-desc">
+                展示在「阅读全书」目录栏顶部,也可用于书籍页介绍。可随意修改后保存。
+              </div>
+              <textarea rows={5} value={synopsis} onChange={(e) => setSynopsis(e.target.value)} />
+              <div className="actions mt-3">
+                <button className="primary" disabled={!!synBusy} onClick={saveSynopsis}>保存简介</button>
+                <button disabled={!!synBusy} onClick={genSynopsis}>
+                  {synBusy && <span className="spin" />}重新生成
+                </button>
+                {synMsg && <span className="msg-ok">{synMsg}</span>}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="card-desc">
+                还没有简介。让 AI 根据主题{project.genre ? `与题材(${project.genre})` : ""}写一段 150-300 字的网文风简介,吸引人但不剧透结局。
+              </div>
+              <div className="actions mt-3">
+                <button className="primary" disabled={!!synBusy} onClick={genSynopsis}>
+                  {synBusy && <span className="spin" />}✨ AI 生成简介
+                </button>
+                {synMsg && <span className="msg-ok">{synMsg}</span>}
+              </div>
+            </>
+          )}
+          {synBusy && <div className="muted mt-2">{synBusy}</div>}
+          {synErr && <div className="msg-err mt-2">{synErr}</div>}
+        </div>
+      )}
 
       <div className="card">
         <h2>灵感工坊</h2>

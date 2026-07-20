@@ -25,6 +25,8 @@ from app.db.models import Outline, Project
 from app.db.session import SessionLocal, get_db
 from app.engines.pipeline.architecture import generate_architecture, save_architecture
 from app.engines.pipeline.blueprint import generate_blueprint, save_blueprint
+from app.engines.tendency import assemble_tendency
+from app.engines.tendency.assembler import render_style_block
 from app.jobs import create_job, fail_job, finish_job, update_stage
 from app.llm.factory import (
     create_llm_adapter,
@@ -144,6 +146,64 @@ async def get_project(project_id: int, db: Session = Depends(get_db)) -> Project
     return _get_project_or_404(db, project_id)
 
 
+# ---------- 书籍简介 ----------
+
+# 简介 prompt:网文简介风格,吸引人但不剧透结局
+_SYNOPSIS_PROMPT = """\
+你是网文编辑。根据下面的作品信息,写一段 150-300 字的书籍简介。
+
+【书名】{title}
+【类型】{genre}
+【主题/灵感】{topic}
+{core_seed}{style_block}
+要求:
+1. 网文简介风格:有钩子、有悬念、突出爽点与人物张力,让人想点进去看
+2. 只铺垫开局与核心冲突,不要剧透结局
+3. 只输出简介正文,不要标题、不要"简介:"前缀、不要任何解释
+"""
+
+
+class SynopsisResponse(BaseModel):
+    synopsis: str
+
+
+@router.post("/{project_id}/synopsis", response_model=SynopsisResponse)
+async def generate_synopsis(
+    project_id: int, db: Session = Depends(get_db)
+) -> SynopsisResponse:
+    """AI 生成书籍简介:注入主题/类型/全局倾向(有架构核心种子也带上)。"""
+    project = _get_project_or_404(db, project_id)
+    if not project.topic.strip():
+        raise HTTPException(
+            status_code=400, detail="请先在「灵感」确定本书主题,再生成简介。"
+        )
+    core_seed = (
+        f"【核心种子】{project.architecture.core_seed}\n"
+        if project.architecture and project.architecture.core_seed.strip()
+        else ""
+    )
+    prompt = _SYNOPSIS_PROMPT.format(
+        title=project.title,
+        genre=project.genre.strip() or "不限",
+        topic=project.topic,
+        core_seed=core_seed,
+        style_block=render_style_block(
+            assemble_tendency("outline", project.global_tendency)
+        ),
+    )
+    # 未配置 key 时工厂层抛 400(去「模型设置」页配置)
+    adapter = create_llm_adapter(resolve_default_provider(), max_tokens=600, timeout=120)
+    try:
+        raw = await adapter.ask(prompt)
+    except Exception as exc:  # noqa: BLE001 — 把失败原因直接反馈给用户
+        raise HTTPException(status_code=502, detail=f"简介生成失败: {exc}") from exc
+
+    synopsis = raw.strip().strip("《》\"'“” ")
+    if not synopsis:
+        raise HTTPException(status_code=502, detail="模型没有返回可用简介,请重试。")
+    return SynopsisResponse(synopsis=synopsis)
+
+
 class ProjectPatch(BaseModel):
     title: str | None = None
     topic: str | None = None
@@ -151,6 +211,7 @@ class ProjectPatch(BaseModel):
     target_chapters: int | None = None
     target_words_per_chapter: int | None = None
     global_tendency: dict | None = None
+    synopsis: str | None = None
 
 
 @router.patch("/{project_id}", response_model=ProjectOut)

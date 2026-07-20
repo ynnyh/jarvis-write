@@ -54,6 +54,7 @@ export interface Project {
   id: number; title: string; topic: string; genre: string;
   target_chapters: number; target_words_per_chapter: number;
   global_tendency: Tendency; status: string;
+  synopsis?: string | null;
 }
 export interface Architecture {
   core_seed: string; character_dynamics: string;
@@ -143,6 +144,8 @@ export const api = {
 
   inspire: (spark: string, tendency: Tendency, count = 4) =>
     req<{ ideas: Idea[] }>("POST", "/api/inspire", { spark, tendency, count }, LLM_TIMEOUT),
+  generateSynopsis: (id: number) =>
+    req<{ synopsis: string }>("POST", `/api/projects/${id}/synopsis`, {}, LLM_TIMEOUT),
   patchArchitecture: (id: number, patch: Partial<Architecture>) =>
     req<Architecture>("PATCH", `/api/projects/${id}/architecture`, patch),
 

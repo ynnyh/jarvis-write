@@ -787,6 +787,23 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 .reader-toc-item:not(.off):hover { background: var(--surface-2); color: var(--text); }
 .reader-toc-item.on { background: var(--brand-weak); color: var(--brand); font-weight: 600; }
 .reader-toc-item.off { opacity: 0.45; cursor: default; }
+/* 目录栏顶部:书名 + 简介(简介最多 3 行,悬浮 title 看全文) */
+.reader-toc-book {
+  padding: 4px 10px 10px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+.reader-toc-book-title { font-size: var(--fs-sm); font-weight: 600; color: var(--text); }
+.reader-toc-book-syn {
+  margin-top: 4px;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-3);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 /* 窄屏「目录」按钮:默认隐藏,≤640px 显示 */
 .reader-toc-btn { display: none; }
 /* 全书加载失败提示:浮在阅读器遮罩之上 */
