@@ -64,7 +64,7 @@ export default function ProjectPage() {
 
   return (
     <>
-      <h1>{project.title}
+      <h1 className="project-head"><span className="project-title-text">{project.title}</span>
         <span className="badge">{project.status}</span>
         {project.genre && <span className="badge">{project.genre}</span>}
         {chapters.length > 0 && (

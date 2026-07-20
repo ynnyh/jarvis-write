@@ -318,6 +318,7 @@ label.fl {
 .auth-wrap {
   min-height: 100vh;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: var(--sp-6);
@@ -671,6 +672,8 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
   border-bottom: 1px solid var(--line);
   flex-shrink: 0;
 }
+/* 窄屏换行点:仅 ≤640px 媒体查询里显示(见文件底部) */
+.reader-head-br { display: none; }
 .reader-title { flex: 1; margin: 0; min-width: 200px; font-size: var(--fs-lg); }
 .reader-tabs { display: flex; gap: 2px; background: var(--surface-2); border-radius: 999px; padding: 2px; }
 .reader-tab {
@@ -836,12 +839,51 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
   /* 宽表格横向滑动,避免撑破布局 */
   table.tbl { display: block; overflow-x: auto; white-space: nowrap; }
 
-  .reader-head { padding: 10px 14px; }
+  /* 顶栏:收紧间距;GitHub 链接在登录页/文档里也有入口,窄屏藏掉防破行 */
+  .topbar { gap: 8px 12px; }
+  .topbar-gh { display: none; }
+
+  /* 项目页标题行:项目名可省略号截断,badge 跟随,「阅读全书」放不下时整体换行居左 */
+  .project-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+  .project-title-text {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .project-head .badge { margin-left: 0; flex-shrink: 0; }
+  .project-head .read-book-btn { margin-left: 0; flex-shrink: 0; }
+
+  /* 阅读器头部:清晰两行布局(h2 用 display:contents 拆开,子元素参与 head 的 flex 排序)——
+     行1:目录 / 章节标题(省略号截断,不换行) / 关闭;行2:定稿·草稿 tab / 状态徽章 / 字数 / 设置 */
+  .reader-head { padding: 10px 14px; gap: 8px 10px; }
+  .reader-title { display: contents; }
+  .reader-toc-btn { order: 1; }
+  .reader-title-text {
+    order: 2;
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .reader-close { order: 3; flex-shrink: 0; }
+  .reader-head-br { display: block; flex-basis: 100%; height: 0; order: 4; }
+  .reader-tabs { order: 5; flex-shrink: 0; }
+  .reader-meta {
+    order: 6;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  .reader-meta .badge { margin-left: 0; }
+  .reader-settings { order: 7; flex-shrink: 0; margin-left: auto; }
+
   .reader-content { padding: 24px 16px 40px; }
   .reader-nav { padding: 10px 14px; }
-  /* 窄屏:标题让位,设置弹层占满安全宽度 */
-  .reader-title { min-width: 0; font-size: var(--fs-md); }
-  .reader-settings-pop { position: fixed; top: 56px; right: 12px; left: 12px; width: auto; }
 
   /* 全书阅读:目录收成左侧抽屉,点头部「目录」按钮开合,不挤正文 */
   .reader-toc-btn { display: inline-block; flex-shrink: 0; }

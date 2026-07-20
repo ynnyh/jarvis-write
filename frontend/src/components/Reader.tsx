@@ -126,11 +126,13 @@ export default function Reader({
                 </button>
               )}
               <h2 className="reader-title">
-                第{chapter.chapter_number}章 {title ?? ""}
-                <span className={"badge " + (chapter.is_stale ? "err" : chapter.status === "finalized" ? "ok" : "")}>
-                  {chapter.is_stale ? "大纲已变" : STATUS_CN[chapter.status] ?? chapter.status}
+                <span className="reader-title-text">第{chapter.chapter_number}章 {title ?? ""}</span>
+                <span className="reader-meta">
+                  <span className={"badge " + (chapter.is_stale ? "err" : chapter.status === "finalized" ? "ok" : "")}>
+                    {chapter.is_stale ? "大纲已变" : STATUS_CN[chapter.status] ?? chapter.status}
+                  </span>
+                  <span className="muted"> {chapter.word_count}字</span>
                 </span>
-                <span className="muted"> {chapter.word_count}字</span>
               </h2>
               {chapter.draft_content && chapter.draft_content !== chapter.final_content && (
                 <div className="reader-tabs">
@@ -189,7 +191,9 @@ export default function Reader({
                   </div>
                 )}
               </div>
-              <button onClick={onClose}>关闭</button>
+              <button className="reader-close" onClick={onClose}>关闭</button>
+              {/* 窄屏强制换行点:仅 ≤640px 显示,把头部切成两行(见 styles.css) */}
+              <div className="reader-head-br" />
             </div>
             <div className="reader-body">
               {toc && (
