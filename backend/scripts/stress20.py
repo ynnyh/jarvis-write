@@ -6,6 +6,9 @@
 每章记录:耗时/字数/一致性问题数/抽取统计/AI味指数,写入
 scripts/stress_report.jsonl(逐行 JSON,可随时查看进度)与最终汇总。
 
+注意:本脚本绕过 API 直接写 DATABASE_URL 指向的库,每运行一次就新建一个
+"压测·灯下黑"项目(不去重),请勿对生产库运行;跑完记得清理测试项目。
+
 用法: .venv/Scripts/python -m scripts.stress20 [章数,默认20]
 """
 from __future__ import annotations
