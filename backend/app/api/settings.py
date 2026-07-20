@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user
 from app.db.models import ProviderSetting, User
 from app.db.session import get_db
+from app.llm.embeddings import check_embedding
 from app.llm.factory import (
     _REGISTRY,
     create_llm_adapter,
@@ -69,6 +70,8 @@ class TestResult(BaseModel):
     model: str = ""
     reply: str = ""
     error: str = ""
+    embedding_ok: bool = False
+    embedding_error: str = ""
 
 
 @router.get("/providers", response_model=list[ProviderSettingOut])
@@ -149,14 +152,26 @@ async def save_provider_setting(
 
 @router.post("/providers/{name}/test", response_model=TestResult)
 async def test_provider(name: str, user: User = Depends(get_current_user)):
-    """用当前已存配置实际调一次模型(设置页的「测试连接」按钮)。"""
+    """用当前已存配置实际调一次模型(设置页的「测试连接」按钮)。
+
+    顺带探测该 provider 的 /embeddings 可用性(设置页据此提示语义记忆
+    是否降级);embedding 探测失败不影响聊天测试结果。
+    """
     name = name.lower()
     if name not in _REGISTRY:
         raise HTTPException(status_code=404, detail=f"未知 provider: {name}")
 
     cfg = resolve_provider_config(name)
     if not cfg["api_key"]:
-        return TestResult(ok=False, provider=name, error="尚未配置 api_key")
+        return TestResult(
+            ok=False,
+            provider=name,
+            error="尚未配置 api_key",
+            embedding_error="尚未配置 api_key",
+        )
+
+    # embedding 探测(最多 ~10s,永不抛异常)
+    emb_ok, emb_err = await check_embedding(name)
 
     adapter = create_llm_adapter(name, max_tokens=100, timeout=60)
     try:
@@ -164,7 +179,18 @@ async def test_provider(name: str, user: User = Depends(get_current_user)):
             adapter.to_messages("请回复:连接成功")
         )
         return TestResult(
-            ok=True, provider=name, model=resp.model, reply=resp.content[:200]
+            ok=True,
+            provider=name,
+            model=resp.model,
+            reply=resp.content[:200],
+            embedding_ok=emb_ok,
+            embedding_error=emb_err,
         )
     except Exception as exc:  # noqa: BLE001 — 测试接口,错误原样反馈给用户
-        return TestResult(ok=False, provider=name, error=str(exc)[:500])
+        return TestResult(
+            ok=False,
+            provider=name,
+            error=str(exc)[:500],
+            embedding_ok=emb_ok,
+            embedding_error=emb_err,
+        )

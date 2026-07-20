@@ -49,6 +49,9 @@
   .msg { font-size: 13px; }
   .msg.ok { color: var(--ok); }
   .msg.err { color: var(--err); }
+  .emb-status { display: none; font-size: 13px; margin-top: 10px; padding: 8px 12px; border-radius: 8px; }
+  .emb-status.ok { display: block; background: #ecfdf5; color: var(--ok); }
+  .emb-status.err { display: block; background: #fef2f2; color: var(--err); }
   .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
 </style>
 </head>
@@ -121,7 +124,8 @@ function card(p) {
         设为默认
       </label>
       <span class="msg" data-f="msg"></span>
-    </div>`;
+    </div>
+    <div class="emb-status" data-f="emb"></div>`;
 
   const $ = (sel) => el.querySelector(sel);
   const msg = $('[data-f=msg]');
@@ -143,11 +147,22 @@ function card(p) {
   };
 
   $('[data-a=test]').onclick = async () => {
+    const emb = $('[data-f=emb]');
+    emb.className = "emb-status"; emb.textContent = "";
     msg.className = "msg"; msg.textContent = "测试中(最长 60 秒)...";
     const res = guard(await fetch(`/api/settings/providers/${p.provider}/test`, { method: "POST", headers: authHeaders() }));
     const r = await res.json();
     if (r.ok) { msg.className = "msg ok"; msg.textContent = `连接成功 ✓ ${r.model}:${r.reply}`; }
     else { msg.className = "msg err"; msg.textContent = "失败: " + r.error; }
+    if (r.embedding_ok) {
+      emb.className = "emb-status ok";
+      emb.textContent = "✓ embedding 可用（语义记忆已启用）";
+    } else {
+      emb.className = "emb-status err";
+      emb.textContent = "✗ embedding 不可用——语义记忆已降级，写作只靠最近章节。原因：" +
+        (r.embedding_error || "未知") +
+        "。如果该 provider 是 DeepSeek 官方或中转站未开放 /embeddings，属于正常现象。";
+    }
   };
 
   return el;
