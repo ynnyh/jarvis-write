@@ -18,6 +18,7 @@
 | 5 | 润色引擎 | 整章/选段风格化润色,情节不变 | 2 |
 | 6 | Web 前端 | 标签选择器/大纲编辑器/流式生成/一致性看板/润色台 | 1-5 |
 | 7 | 打磨 | 多模型路由/成本统计/导出/Docker/连 git 远程 | 6 |
+| 8 | 多用户 + 移动端 | JWT/邀请码注册/per-user LLM key/数据隔离；移动端适配 | 7 |
 
 ★ = 本项目的核心差异化价值,全网开源项目的空白区。
 
@@ -30,7 +31,7 @@
 - [x] FastAPI 项目脚手架(目录结构见 `01-architecture.md`)
 - [x] LLM 适配层:先接 **DeepSeek** 一家跑通(OpenAI/Gemini 留接口,后续补)
 - [x] 配置管理(API key / base_url / 模型路由,借鉴 AI_NovelGenerator 的 config 分组)
-- [x] 数据库模型定义(SQLite,按 `02-data-model.md` 建表,11 张表已建)
+- [x] 数据库模型定义(SQLite,按 `02-data-model.md` 建表;当时 11 张表,阶段 2/7/8 后增至 15 张)
 - [x] 冒烟测试:`scripts/smoke_test.py`(5/5 通过)
 
 **验收:** ✅ `python -m app` 起服务,`/api/health` 返回 200 + provider 状态;
@@ -201,6 +202,26 @@
 
 **验收:** ✅ 全量回归 73/73;真实验证:txt 导出内容正确、epub 7 文件结构合规、
 用量接口就绪、任务接口 404 语义正确、前端构建通过。代码已推送 GitHub。
+
+---
+
+## 阶段 8 · 多用户 + 移动端适配 ✅ 已完成(2026-07-19)
+
+**目标:** 从单机单用户变成多账号可用,且手机上能用。
+
+- [x] 用户体系:User 模型 + bcrypt 密码哈希 + JWT(HS256)登录态(`app/auth.py`);登录/注册接口
+- [x] 邀请码注册:注册须填对固定共享码 `INVITE_CODE`,留空则关闭注册
+- [x] per-user LLM key:`provider_settings` 加 user_id,每个账号在设置页配自己的 key;key 经 contextvar 从鉴权依赖贯穿到异步生成任务,不用层层传参
+- [x] 数据隔离:`projects` / `provider_settings` / `llm_usage` 加 user_id 按用户过滤,跨账号访问 404
+- [x] 启动迁移 `app/migrate.py`(幂等,不用 Alembic):旧表补 user_id 列、建初始 admin(`ADMIN_USERNAME`/`ADMIN_PASSWORD`)、存量无主数据归 admin
+- [x] 前端:登录注册页 + token 注入(Authorization: Bearer)
+- [x] 移动端适配:窄屏导航、双栏堆叠、按钮放大、iOS 防缩放
+- [x] 部署收尾:docker-compose 改 named volume(`jarvis_data` → `/srv/data`)持久化 SQLite/Chroma;`JWT_SECRET`/`ADMIN_PASSWORD` 强制必填
+
+**已知推迟项(遗留/后续):**
+- **6 桶分桶加权记忆**:用户中转站 /embeddings 返回 403 未解决,当前仅单桶(`engines/memory/store.py`),接口已预留;待 embedding 来源解决后实施
+- **SSE 逐 token 真流式**:已用"异步任务 + 五段进度 3 秒轮询"替代,体验达标;真流式留待有需要再做
+- **多模型路由细化**(quality/fast 分 provider):当前两档都走默认 provider,待接入第二家模型时做成设置页配置
 
 ---
 

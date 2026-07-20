@@ -16,5 +16,6 @@ COPY --from=frontend /fe/dist ./frontend/dist
 RUN mkdir -p /srv/data
 WORKDIR /srv/backend
 EXPOSE 8000
-# 数据(SQLite/Chroma)落在 /srv/backend,用 volume 持久化
+# 默认数据落在工作目录 ./(即 /srv/backend);compose 通过 DATABASE_URL/CHROMA_PERSIST_DIR
+# 把数据指到 /srv/data,并用 named volume(jarvis_data)持久化
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

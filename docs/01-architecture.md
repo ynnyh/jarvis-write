@@ -47,7 +47,7 @@
 | 后端框架 | Python + **FastAPI** | 原生 async + SSE 流式，适合 LLM 长任务；用户指定 Python |
 | LLM 编排 | **自封适配层**（不用 LangChain） | 更可控；参考项目用 LangChain 反而变重 |
 | 结构化存储 | **SQLite**（起步）→ Postgres | 存故事圣经、大纲版本、伏笔表；SQLite 零配置先跑通 |
-| ORM | **SQLAlchemy 2.x** + Alembic | 迁移管理，方便日后切 Postgres |
+| ORM | **SQLAlchemy 2.x** | create_all + 手写幂等迁移（`app/migrate.py`），未引入 Alembic；方便日后切 Postgres |
 | 向量库 | **Chroma** | 轻量、本地、Python 原生；支持多 collection（对应 6 桶） |
 | 数据校验 | **Pydantic v2** | FastAPI 原生集成，LLM 结构化输出校验 |
 | 前端 | **React + Vite + TypeScript** | 生态成熟，标签组件/看板好做 |
@@ -108,10 +108,11 @@ backend/
 │   │   ├── polish.py
 │   │   └── tendency.py
 │   └── schemas/                 # Pydantic 请求/响应模型
-├── tests/
-├── alembic/                     # DB 迁移
+├── scripts/                     # 阶段自检脚本（smoke_test / stage1~5_test / ...）
 ├── requirements.txt
 └── Dockerfile
+
+> 实际未引入 Alembic：启动时 `create_all` + `app/migrate.py` 幂等迁移（补列/建 admin）。
 
 frontend/
 ├── src/

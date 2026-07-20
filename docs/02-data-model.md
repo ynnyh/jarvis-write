@@ -3,6 +3,9 @@
 > 这份是整个系统的骨架。三大引擎都靠这些表运转。字段设计吸收了调研中
 > knowrite（时序真相库）、NovelClaw（分桶记忆/伏笔四态）、KazKozDev
 > （读者已知/角色已知分离）的做法。
+>
+> 当前共 15 张表：主体 11 张 + 阶段 2 的 `chapter_summaries`、阶段 7 的
+> `llm_usage`、阶段 8 的 `users` / `provider_settings`（见下）。
 
 ---
 
@@ -12,6 +15,7 @@
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | id | PK | |
+| user_id | FK → users? | 归属用户（阶段 8 数据隔离）；存量数据迁移时归 admin |
 | title | str | 小说名 |
 | topic | text | 核心主题 |
 | genre | str | 题材（可来自标签，如"赛博朋克"） |
@@ -85,6 +89,17 @@
 
 > `is_stale` 是关键：大纲级联引擎发现某章大纲变了、但正文还是旧版本生成的，
 > 就把这一章标 stale，前端红点提醒"正文与新大纲不符，是否重写？"
+
+### `chapter_summaries` — 滚动前情摘要（阶段 2 新增）
+> 第 N 章的行存的是「截至第 N 章的完整前情摘要」，每章定稿后把剧情合并压缩进来；
+> 生成第 N+1 章时取 chapter_number=N 的行注入上下文。
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | PK | |
+| project_id | FK → projects | 级联删除 |
+| chapter_number | int | 摘要覆盖到第几章 |
+| rolling_summary | text | 截至该章的合并压缩摘要 |
+| created_at / updated_at | datetime | |
 
 ---
 
@@ -183,7 +198,47 @@
 
 ---
 
-## 六、向量库（Chroma，与关系库并行）
+## 六、用量与多用户（阶段 7/8 新增）
+
+### `llm_usage` — LLM 用量记录（阶段 7）
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | PK | |
+| user_id | int? | 记账归属：哪个用户烧的 token（NULL = 多用户迁移前的历史记录） |
+| model | str | 实际调用的模型 |
+| prompt_tokens / completion_tokens | int | 本次调用的输入/输出 token |
+| created_at / updated_at | datetime | |
+
+> `llm/base.ask` 统一埋点，所有生成链路自动记账；`GET /api/usage` 汇总，
+> 前端顶栏实时显示累计用量。
+
+### `users` — 用户账号（阶段 8）
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | PK | |
+| username | str | 唯一 |
+| password_hash | str | bcrypt 哈希，不存明文 |
+| is_admin | bool | 初始 admin 由启动迁移（migrate.py）自动创建 |
+| created_at / updated_at | datetime | |
+
+> 数据隔离：`projects.user_id` / `provider_settings.user_id` / `llm_usage.user_id`
+> 均按用户过滤，跨账号访问返回 404。
+
+### `provider_settings` — 每用户 LLM provider 配置（阶段 8 起 per-user）
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | PK | |
+| user_id | FK → users | 每用户 × provider 一行（唯一约束 `uq_provider_per_user`） |
+| provider | str | deepseek / openai / gemini |
+| api_key / base_url / model | str | 该用户自己的 key 与接入点，在站点设置页配置 |
+| is_default | bool | 该用户的默认 provider |
+| created_at / updated_at | datetime | |
+
+> 优先级：数据库里当前用户的配置 > .env / 环境变量（.env 仅作开发兜底）。
+
+---
+
+## 七、向量库（Chroma，与关系库并行）
 
 不进 SQL，独立存于 Chroma，**6 个 collection 对应 6 桶**（借鉴 NovelClaw）：
 
@@ -200,7 +255,7 @@
 
 ---
 
-## 七、数据流转关系图
+## 八、数据流转关系图
 
 ```
 生成一章正文的数据流：
