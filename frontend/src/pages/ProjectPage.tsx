@@ -9,7 +9,7 @@ import ChaptersPanel from "../panels/ChaptersPanel";
 import PolishPanel from "../panels/PolishPanel";
 import BoardPanel from "../panels/BoardPanel";
 
-type Step = "inspire" | "arch" | "outline" | "write" | "polish" | "board";
+export type Step = "inspire" | "arch" | "outline" | "write" | "polish" | "board";
 
 const STEPS: { key: Step; no: number; label: string }[] = [
   { key: "inspire", no: 1, label: "灵感" },
@@ -98,7 +98,7 @@ export default function ProjectPage() {
           {step === "inspire" && <InspirePanel project={project} onChanged={reload} />}
           {step === "arch" && <ArchPanel project={project} arch={arch} onChanged={reload} />}
           {step === "outline" && (
-            <OutlinePanel pid={pid} outlines={outlines} hasArch={!!arch} onChanged={reload} />
+            <OutlinePanel pid={pid} outlines={outlines} hasArch={!!arch} onChanged={reload} onGotoStep={setStep} />
           )}
           {step === "write" && (
             outlines.length

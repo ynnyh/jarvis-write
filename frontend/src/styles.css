@@ -499,6 +499,23 @@ a.proj-card:hover .proj-go { color: var(--brand); }
 .outline-item .head { display: flex; align-items: center; gap: var(--sp-2); cursor: pointer; flex-wrap: wrap; }
 .outline-item .num { font-weight: 700; color: var(--brand); min-width: 52px; }
 
+/* 折叠行:标题占满剩余空间并省略号截断;悬停提示可点击 */
+.outline-item .head .outline-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.outline-item .head:hover .outline-title { color: var(--brand); }
+.outline-item .head .caret { color: var(--text-3); font-size: var(--fs-xs); width: 14px; text-align: center; }
+
+/* 展开后的详情区:与行头用虚线分隔 */
+.outline-detail { border-top: 1px dashed var(--line); margin-top: var(--sp-2); padding-top: var(--sp-2); }
+
+/* 生成成功后的"下一步"引导卡 */
+.gen-guide { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+
 .idea-card {
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -758,6 +775,9 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 
   .chip { padding: 8px 14px; }
   .narrow { max-width: 100%; }
+
+  /* 大纲折叠行:收紧内边距,标题已做省略号截断 */
+  .outline-item { padding: 10px 14px; }
 
   .auth-card { padding: 28px 22px 22px; }
   .auth-wrap { padding: var(--sp-4); }
