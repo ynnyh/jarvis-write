@@ -2,8 +2,9 @@
 # -*- coding: utf-8 -*-
 """鉴权接口:注册(带邀请码)/ 登录 / 当前用户。
 
-- 注册需填邀请码:数据库 app_settings 里的优先,无记录时回落 .env 的
-  invite_code;两者皆空则关闭注册(见 admin 接口)。
+- 注册需填邀请码:invite_codes 表有记录时按表校验(存在 + 启用 + 未超
+  次数,注册成功 used_count +1);表为空时回落旧的单码逻辑
+  (app_settings 优先,无记录回落 .env,空串 = 关闭注册),见 admin 接口。
 - 登录返回 JWT,前端存起来随请求带上。
 - 每个账号的 LLM key 独立(见 settings 接口),互不共用。
 """
@@ -20,7 +21,7 @@ from app.auth import (
     verify_password,
 )
 from app.api.admin import get_effective_invite_code
-from app.db.models import User
+from app.db.models import InviteCode, User
 from app.db.session import get_db
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -53,12 +54,25 @@ class UserOut(BaseModel):
 
 @router.post("/register", response_model=TokenOut)
 async def register(req: RegisterRequest, db: Session = Depends(get_db)):
-    # 邀请码:DB(app_settings)优先,无记录时回落 .env;空串 = 关闭注册
-    invite_code, _source = get_effective_invite_code(db)
-    if not invite_code:
-        raise HTTPException(status_code=403, detail="本站未开放注册")
-    if req.invite_code.strip() != invite_code:
-        raise HTTPException(status_code=403, detail="邀请码不正确")
+    code = req.invite_code.strip()
+    used_invite: InviteCode | None = None
+    if db.query(InviteCode.id).limit(1).first() is not None:
+        # 多邀请码体系:表里有记录就只按表校验,旧单码(app_settings/.env)不再生效
+        invite = db.query(InviteCode).filter(InviteCode.code == code).first()
+        if (
+            invite is None
+            or not invite.is_active
+            or (invite.max_uses is not None and invite.used_count >= invite.max_uses)
+        ):
+            raise HTTPException(status_code=403, detail="邀请码无效或已失效")
+        used_invite = invite
+    else:
+        # 表为空:回落旧的单码逻辑(app_settings 优先,无记录回落 .env;空串 = 关闭注册)
+        invite_code, _source = get_effective_invite_code(db)
+        if not invite_code:
+            raise HTTPException(status_code=403, detail="本站未开放注册")
+        if code != invite_code:
+            raise HTTPException(status_code=403, detail="邀请码不正确")
 
     uname = req.username.strip()
     if db.query(User).filter(User.username == uname).first():
@@ -79,6 +93,9 @@ async def register(req: RegisterRequest, db: Session = Depends(get_db)):
         is_admin=is_first,
     )
     db.add(user)
+    if used_invite is not None:
+        # 注册成功即消耗一次使用次数,与建号同事务提交
+        used_invite.used_count += 1
     db.commit()
     db.refresh(user)
     return TokenOut(

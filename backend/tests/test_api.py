@@ -411,42 +411,166 @@ def test_admin_cannot_disable_or_delete_self(client):
     assert r.status_code == 400
 
 
-def test_invite_code_db_overrides_env(client):
-    """DB 邀请码优先于 .env;置空 = 关闭注册。最后恢复成 test-invite。"""
+# ---------- 多邀请码体系 ----------
+
+def _clear_invite_codes() -> None:
+    """清空 invite_codes 表,回到"表为空 → 回落旧单码"的状态。"""
+    from app.db.models import InviteCode
+    from app.db.session import SessionLocal
+
+    db = SessionLocal()
+    try:
+        db.query(InviteCode).delete()
+        db.commit()
+    finally:
+        db.close()
+
+
+def _register_with(client: TestClient, username: str, code: str):
+    return client.post(
+        "/api/auth/register",
+        json={"username": username, "password": "pass123", "invite_code": code},
+    )
+
+
+def test_invite_fallback_when_table_empty(client):
+    """invite_codes 表为空时,回落旧单码逻辑(app_settings 优先于 .env)。"""
+    from app.db.models import AppSetting
+    from app.db.session import SessionLocal
+
+    _clear_invite_codes()
     admin = _admin_auth(client)
 
-    # 初始:无 DB 记录,生效的是 .env 的 test-invite
-    r = client.get("/api/admin/invite-code", headers=admin)
-    assert r.json() == {"code": INVITE, "source": "env"}
+    # 列表为空,legacy_fallback 给出当前生效的旧单码(来自 .env)
+    r = client.get("/api/admin/invite-codes", headers=admin)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["items"] == []
+    assert body["legacy_fallback"] == {"code": INVITE, "source": "env"}
 
-    # DB 设置后,DB 值生效,env 值不再可用
-    assert client.put(
-        "/api/admin/invite-code", headers=admin, json={"code": "db-code"}
-    ).status_code == 200
-    r = client.get("/api/admin/invite-code", headers=admin)
-    assert r.json() == {"code": "db-code", "source": "db"}
-    assert client.post(
-        "/api/auth/register",
-        json={"username": "inv_old", "password": "pass123", "invite_code": INVITE},
-    ).status_code == 403
-    r = client.post(
-        "/api/auth/register",
-        json={"username": "inv_new", "password": "pass123", "invite_code": "db-code"},
-    )
+    # app_settings 设置后,DB 值生效,env 值不再可用
+    db = SessionLocal()
+    try:
+        db.add(AppSetting(key="invite_code", value="db-code"))
+        db.commit()
+    finally:
+        db.close()
+    assert _register_with(client, "fb_old", INVITE).status_code == 403
+    r = _register_with(client, "fb_new", "db-code")
     assert r.status_code == 200, r.text
 
     # 置空 = 关闭注册
-    assert client.put(
-        "/api/admin/invite-code", headers=admin, json={"code": ""}
-    ).status_code == 200
-    r = client.post(
-        "/api/auth/register",
-        json={"username": "inv_closed", "password": "pass123", "invite_code": "db-code"},
-    )
+    db = SessionLocal()
+    try:
+        row = db.get(AppSetting, "invite_code")
+        row.value = ""
+        db.commit()
+    finally:
+        db.close()
+    r = _register_with(client, "fb_closed", "db-code")
     assert r.status_code == 403
     assert "未开放注册" in r.json()["detail"]
 
-    # 恢复成 test-invite,避免影响后续用例
-    assert client.put(
-        "/api/admin/invite-code", headers=admin, json={"code": INVITE}
+    # 删掉 DB 记录,恢复 env 生效,避免影响后续用例
+    db = SessionLocal()
+    try:
+        db.delete(db.get(AppSetting, "invite_code"))
+        db.commit()
+    finally:
+        db.close()
+    assert _register_with(client, "fb_env", INVITE).status_code == 200
+
+
+def test_invite_codes_multi_flow(client):
+    """多邀请码:CRUD、限次、停用、删除、used_count 递增;结束后清表。"""
+    admin = _admin_auth(client)
+    _clear_invite_codes()
+
+    # 新建:长期码 + 限 2 次码
+    r = client.post(
+        "/api/admin/invite-codes",
+        headers=admin,
+        json={"code": "LONG-2026", "note": "长期合作方"},
+    )
+    assert r.status_code == 200, r.text
+    long_id = r.json()["id"]
+    assert r.json()["max_uses"] is None
+    r = client.post(
+        "/api/admin/invite-codes",
+        headers=admin,
+        json={"code": "TWO-ONLY", "max_uses": 2},
+    )
+    assert r.status_code == 200, r.text
+    two_id = r.json()["id"]
+
+    # 重复 code → 400;格式非法 → 422;max_uses < 1 → 422
+    assert client.post(
+        "/api/admin/invite-codes", headers=admin, json={"code": "LONG-2026"}
+    ).status_code == 400
+    assert client.post(
+        "/api/admin/invite-codes", headers=admin, json={"code": "bad code!"}
+    ).status_code == 422
+    assert client.post(
+        "/api/admin/invite-codes",
+        headers=admin,
+        json={"code": "ZERO-USE", "max_uses": 0},
+    ).status_code == 422
+
+    # 表有记录后:legacy_fallback 为 null,旧单码(env)不再生效
+    body = client.get("/api/admin/invite-codes", headers=admin).json()
+    assert len(body["items"]) == 2
+    assert body["legacy_fallback"] is None
+    assert _register_with(client, "mc_env", INVITE).status_code == 403
+
+    # 长期码可多次注册,used_count 递增
+    assert _register_with(client, "mc_a", "LONG-2026").status_code == 200
+    assert _register_with(client, "mc_b", "LONG-2026").status_code == 200
+    items = client.get("/api/admin/invite-codes", headers=admin).json()["items"]
+    long_item = next(i for i in items if i["id"] == long_id)
+    assert long_item["used_count"] == 2
+    assert long_item["note"] == "长期合作方"
+
+    # 限次码:用完即失效,第 3 次注册被拒
+    assert _register_with(client, "mc_c", "TWO-ONLY").status_code == 200
+    assert _register_with(client, "mc_d", "TWO-ONLY").status_code == 200
+    r = _register_with(client, "mc_e", "TWO-ONLY")
+    assert r.status_code == 403
+    assert "无效或已失效" in r.json()["detail"]
+
+    # 停用 → 403;启用后恢复
+    assert client.patch(
+        f"/api/admin/invite-codes/{long_id}",
+        headers=admin,
+        json={"is_active": False},
     ).status_code == 200
+    assert _register_with(client, "mc_f", "LONG-2026").status_code == 403
+    assert client.patch(
+        f"/api/admin/invite-codes/{long_id}",
+        headers=admin,
+        json={"is_active": True},
+    ).status_code == 200
+    assert _register_with(client, "mc_g", "LONG-2026").status_code == 200
+
+    # 删除 → 403(表里还有别的码,不会回落);重复删除 → 404
+    assert client.delete(
+        f"/api/admin/invite-codes/{two_id}", headers=admin
+    ).status_code == 200
+    assert _register_with(client, "mc_h", "TWO-ONLY").status_code == 403
+    assert client.delete(
+        f"/api/admin/invite-codes/{two_id}", headers=admin
+    ).status_code == 404
+
+    # 收尾:清空表,恢复"回落旧单码"状态,不影响其他用例
+    assert client.delete(
+        f"/api/admin/invite-codes/{long_id}", headers=admin
+    ).status_code == 200
+
+
+def test_invite_codes_require_admin(client):
+    """邀请码管理接口仅管理员可用。"""
+    user = _auth(_register(client, "not_admin_ic")["token"])
+    assert client.get("/api/admin/invite-codes", headers=user).status_code == 403
+    assert client.post(
+        "/api/admin/invite-codes", headers=user, json={"code": "HACK-123"}
+    ).status_code == 403
+    assert client.get("/api/admin/invite-codes").status_code == 401

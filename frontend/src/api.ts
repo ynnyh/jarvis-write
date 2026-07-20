@@ -111,7 +111,15 @@ export interface AdminUser {
   created_at: string; project_count: number;
   total_prompt_tokens: number; total_completion_tokens: number; total_calls: number;
 }
-export interface InviteCodeState { code: string; source: "db" | "env"; }
+export interface InviteCodeItem {
+  id: number; code: string; note: string | null;
+  max_uses: number | null; used_count: number; is_active: boolean; created_at: string;
+}
+export interface InviteCodeListOut {
+  items: InviteCodeItem[];
+  // 表为空时仍在生效的旧单码(app_settings/env);有记录后为 null
+  legacy_fallback: { code: string; source: "db" | "env" } | null;
+}
 
 // ---------- 接口 ----------
 export const api = {
@@ -195,7 +203,11 @@ export const api = {
     req<{ ok: boolean; is_active: boolean }>("PATCH", `/api/admin/users/${id}`, { is_active }),
   adminDeleteUser: (id: number) =>
     req<{ ok: boolean; deleted_projects: number }>("DELETE", `/api/admin/users/${id}`),
-  adminGetInviteCode: () => req<InviteCodeState>("GET", "/api/admin/invite-code"),
-  adminSetInviteCode: (code: string) =>
-    req<InviteCodeState>("PUT", "/api/admin/invite-code", { code }),
+  adminListInviteCodes: () => req<InviteCodeListOut>("GET", "/api/admin/invite-codes"),
+  adminCreateInviteCode: (code: string, note?: string, max_uses?: number | null) =>
+    req<InviteCodeItem>("POST", "/api/admin/invite-codes", { code, note: note || null, max_uses: max_uses ?? null }),
+  adminSetInviteCodeActive: (id: number, is_active: boolean) =>
+    req<InviteCodeItem>("PATCH", `/api/admin/invite-codes/${id}`, { is_active }),
+  adminDeleteInviteCode: (id: number) =>
+    req<{ ok: boolean }>("DELETE", `/api/admin/invite-codes/${id}`),
 };

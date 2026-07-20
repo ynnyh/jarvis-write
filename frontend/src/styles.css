@@ -242,6 +242,7 @@ label.fl {
   line-height: 1.6;
 }
 .notice-err { background: var(--err-weak); border-color: var(--err-line); color: var(--err); }
+.notice-warn { background: var(--warn-weak); border-color: var(--warn-line); color: var(--warn); }
 
 .msg-ok { color: var(--ok); font-size: var(--fs-sm); }
 .msg-err { color: var(--err); font-size: var(--fs-sm); white-space: pre-wrap; }

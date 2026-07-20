@@ -22,10 +22,12 @@ from app.db.models.summary import ChapterSummary
 from app.db.models.usage import LlmUsage
 from app.db.models.user import User
 from app.db.models.app_setting import AppSetting
+from app.db.models.invite_code import InviteCode
 
 __all__ = [
     "User",
     "AppSetting",
+    "InviteCode",
     "Project",
     "Architecture",
     "Outline",

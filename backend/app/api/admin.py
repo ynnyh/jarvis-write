@@ -6,8 +6,10 @@ GET    /api/admin/users                       全部用户(含项目数与用量
 POST   /api/admin/users/{id}/reset-password   重置某用户密码
 PATCH  /api/admin/users/{id}                  禁用 / 启用(不能禁用自己)
 DELETE /api/admin/users/{id}                  删用户及其全部项目数据(不能删自己)
-GET    /api/admin/invite-code                 当前生效的邀请码及来源(db/env)
-PUT    /api/admin/invite-code                 设置邀请码(空串 = 关闭注册)
+GET    /api/admin/invite-codes                邀请码列表(附旧单码回落状态)
+POST   /api/admin/invite-codes                新建邀请码(可备注 / 限次)
+PATCH  /api/admin/invite-codes/{id}           停用 / 启用某个邀请码
+DELETE /api/admin/invite-codes/{id}           删除邀请码
 """
 from __future__ import annotations
 
@@ -21,7 +23,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import delete_project_cascade
 from app.auth import get_current_user, hash_password
 from app.config import get_settings
-from app.db.models import AppSetting, LlmUsage, Project, ProviderSetting, User
+from app.db.models import AppSetting, InviteCode, LlmUsage, Project, ProviderSetting, User
 from app.db.session import get_db
 
 logger = logging.getLogger("jarvis-write.admin")
@@ -187,41 +189,119 @@ async def delete_user(
     return {"ok": True, "deleted_projects": deleted_projects}
 
 
-# ---------- 邀请码 ----------
+# ---------- 邀请码(多码体系) ----------
 
 
-class InviteCodeOut(BaseModel):
+class InviteCodeItem(BaseModel):
+    id: int
+    code: str
+    note: str | None
+    max_uses: int | None
+    used_count: int
+    is_active: bool
+    created_at: str
+
+
+class LegacyFallback(BaseModel):
+    """表为空时仍在生效的旧单码(app_settings / .env),前端用来提示过渡状态。"""
+
     code: str
     source: str  # db / env
 
 
-class InviteCodeSet(BaseModel):
-    code: str = Field(max_length=100)
+class InviteCodeListOut(BaseModel):
+    items: list[InviteCodeItem]
+    legacy_fallback: LegacyFallback | None
 
 
-@router.get("/invite-code", response_model=InviteCodeOut)
-async def get_invite_code(
+class InviteCodeCreate(BaseModel):
+    code: str = Field(pattern=r"^[A-Za-z0-9-]{4,64}$")
+    note: str | None = Field(default=None, max_length=200)
+    max_uses: int | None = Field(default=None, ge=1)
+
+
+class InviteCodePatch(BaseModel):
+    is_active: bool
+
+
+def _to_item(row: InviteCode) -> InviteCodeItem:
+    return InviteCodeItem(
+        id=row.id,
+        code=row.code,
+        note=row.note,
+        max_uses=row.max_uses,
+        used_count=row.used_count,
+        is_active=row.is_active,
+        created_at=row.created_at.isoformat() if row.created_at else "",
+    )
+
+
+@router.get("/invite-codes", response_model=InviteCodeListOut)
+async def list_invite_codes(
     db: Session = Depends(get_db),
     _admin: User = Depends(get_current_admin),
 ):
-    code, source = get_effective_invite_code(db)
-    return InviteCodeOut(code=code, source=source)
+    """邀请码列表;表为空时附当前生效的旧单码,便于前端提示过渡状态。"""
+    rows = list(db.query(InviteCode).order_by(InviteCode.id))
+    legacy = None
+    if not rows:
+        code, source = get_effective_invite_code(db)
+        legacy = LegacyFallback(code=code, source=source)
+    return InviteCodeListOut(items=[_to_item(r) for r in rows], legacy_fallback=legacy)
 
 
-@router.put("/invite-code", response_model=InviteCodeOut)
-async def set_invite_code(
-    req: InviteCodeSet,
+@router.post("/invite-codes", response_model=InviteCodeItem)
+async def create_invite_code(
+    req: InviteCodeCreate,
     db: Session = Depends(get_db),
     _admin: User = Depends(get_current_admin),
 ):
-    """把邀请码写进 DB(之后 .env 的不再生效);空串 = 关闭注册。"""
     code = req.code.strip()
-    row = db.get(AppSetting, _INVITE_CODE_KEY)
-    if row is None:
-        row = AppSetting(key=_INVITE_CODE_KEY, value=code)
-        db.add(row)
-    else:
-        row.value = code
+    if db.query(InviteCode).filter(InviteCode.code == code).first():
+        raise HTTPException(status_code=400, detail="邀请码已存在")
+    row = InviteCode(
+        code=code,
+        note=req.note.strip() if req.note else None,
+        max_uses=req.max_uses,
+    )
+    db.add(row)
     db.commit()
-    logger.info("管理员更新了注册邀请码(来源:数据库)")
-    return InviteCodeOut(code=code, source="db")
+    db.refresh(row)
+    logger.info("管理员创建了邀请码 %s(上限:%s)", row.code, row.max_uses or "不限")
+    return _to_item(row)
+
+
+def _get_invite_or_404(db: Session, invite_id: int) -> InviteCode:
+    row = db.get(InviteCode, invite_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="邀请码不存在")
+    return row
+
+
+@router.patch("/invite-codes/{invite_id}", response_model=InviteCodeItem)
+async def patch_invite_code(
+    invite_id: int,
+    req: InviteCodePatch,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(get_current_admin),
+):
+    row = _get_invite_or_404(db, invite_id)
+    row.is_active = req.is_active
+    db.commit()
+    logger.info(
+        "管理员%s了邀请码 %s", "启用" if req.is_active else "停用", row.code
+    )
+    return _to_item(row)
+
+
+@router.delete("/invite-codes/{invite_id}")
+async def delete_invite_code(
+    invite_id: int,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(get_current_admin),
+):
+    row = _get_invite_or_404(db, invite_id)
+    db.delete(row)
+    db.commit()
+    logger.info("管理员删除了邀请码 %s", row.code)
+    return {"ok": True}

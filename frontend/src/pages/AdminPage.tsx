@@ -1,12 +1,25 @@
-// 后台管理页(仅管理员):用户列表 + 邀请码设置
+// 后台管理页(仅管理员):用户列表 + 多邀请码管理
 import { useCallback, useEffect, useState } from "react";
-import { api, AdminUser, InviteCodeState } from "../api";
+import { api, AdminUser, InviteCodeItem } from "../api";
+
+// 8 位易读随机串(去掉易混淆的 0/O/1/I),中间加连字符
+function randomCode(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const pick = () => chars[Math.floor(Math.random() * chars.length)];
+  return Array.from({ length: 4 }, pick).join("") + "-" + Array.from({ length: 4 }, pick).join("");
+}
+
+const CODE_RE = /^[A-Za-z0-9-]{4,64}$/;
 
 export default function AdminPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [selfId, setSelfId] = useState<number | null>(null);
-  const [invite, setInvite] = useState<InviteCodeState | null>(null);
-  const [inviteInput, setInviteInput] = useState("");
+  const [codes, setCodes] = useState<InviteCodeItem[]>([]);
+  const [legacy, setLegacy] = useState<{ code: string; source: "db" | "env" } | null>(null);
+  const [newCode, setNewCode] = useState("");
+  const [newNote, setNewNote] = useState("");
+  const [newMax, setNewMax] = useState("");
+  const [deletingCodeId, setDeletingCodeId] = useState<number | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -28,9 +41,9 @@ export default function AdminPage() {
           setErr(String(e));
         }
       });
-    api.adminGetInviteCode()
-      .then((s) => { setInvite(s); setInviteInput(s.code); })
-      .catch(() => setInvite(null));
+    api.adminListInviteCodes()
+      .then((r) => { setCodes(r.items); setLegacy(r.legacy_fallback); })
+      .catch(() => { setCodes([]); setLegacy(null); });
   }, []);
 
   useEffect(() => {
@@ -38,12 +51,47 @@ export default function AdminPage() {
     load();
   }, [load]);
 
-  async function saveInvite() {
+  async function createInvite() {
+    const code = newCode.trim();
+    if (!CODE_RE.test(code)) { setErr("邀请码需为 4-64 位字母、数字或连字符"); return; }
+    let maxUses: number | null = null;
+    if (newMax.trim() !== "") {
+      maxUses = Number(newMax.trim());
+      if (!Number.isInteger(maxUses) || maxUses < 1) { setErr("次数限制需为 ≥1 的整数,留空表示不限"); return; }
+    }
     setBusy(true); setErr(""); setMsg("");
     try {
-      const s = await api.adminSetInviteCode(inviteInput.trim());
-      setInvite(s); setInviteInput(s.code);
-      setMsg(s.code ? "邀请码已保存" : "已关闭注册");
+      await api.adminCreateInviteCode(code, newNote.trim(), maxUses);
+      setNewCode(""); setNewNote(""); setNewMax("");
+      setMsg(`邀请码 ${code} 已创建`);
+      load();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleCode(c: InviteCodeItem) {
+    setBusy(true); setErr(""); setMsg("");
+    try {
+      await api.adminSetInviteCodeActive(c.id, !c.is_active);
+      setMsg(c.is_active ? `已停用 ${c.code}` : `已启用 ${c.code}`);
+      load();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmDeleteCode(c: InviteCodeItem) {
+    setBusy(true); setErr(""); setMsg("");
+    try {
+      await api.adminDeleteInviteCode(c.id);
+      setDeletingCodeId(null);
+      setMsg(`已删除邀请码 ${c.code}`);
+      load();
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -112,27 +160,75 @@ export default function AdminPage() {
       <div className="card">
         <div className="card-head"><h2>注册邀请码</h2></div>
         <p className="card-desc">
-          新用户注册必须填写邀请码。数据库里设置后优先生效(覆盖环境变量);
-          留空保存 = 关闭注册,任何人都无法再注册。
+          新用户注册必须填写邀请码。可建多个码,分别限次、停用;
+          列表为空时回落旧版单一邀请码(app_settings / 环境变量),创建第一个码后旧码自动失效。
         </p>
-        <div className="input-row narrow">
-          <input
-            type="text"
-            value={inviteInput}
-            placeholder="留空 = 关闭注册"
-            onChange={(e) => setInviteInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") saveInvite(); }}
-          />
-          <button className="primary" disabled={busy} onClick={saveInvite}>
-            {busy && <span className="spin" />}保存
-          </button>
-        </div>
-        {invite && (
-          <div className="meta-line">
-            当前生效:{invite.code ? `「${invite.code}」` : "(已关闭注册)"}
-            · 来源:{invite.source === "db" ? "数据库" : "环境变量"}
+        {legacy && (
+          <div className="notice notice-warn" style={{ marginTop: 0 }}>
+            当前使用旧版单一邀请码(来自{legacy.source === "db" ? "数据库" : "环境变量"}):
+            {legacy.code ? `「${legacy.code}」` : "(空,已关闭注册)"}。
+            创建第一个邀请码后,旧码自动失效。
           </div>
         )}
+        <div className="input-row" style={{ marginTop: 10 }}>
+          <input
+            type="text"
+            value={newCode}
+            placeholder="邀请码,4-64 位字母/数字/连字符"
+            onChange={(e) => setNewCode(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") createInvite(); }}
+          />
+          <button className="btn-sm" disabled={busy} onClick={() => setNewCode(randomCode())}>
+            随机生成
+          </button>
+        </div>
+        <div className="input-row" style={{ marginTop: 8 }}>
+          <input
+            type="text"
+            value={newNote}
+            placeholder="备注(可空):这个码发给谁"
+            onChange={(e) => setNewNote(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") createInvite(); }}
+          />
+          <input
+            type="number"
+            min={1}
+            style={{ maxWidth: 160, flex: "none" }}
+            value={newMax}
+            placeholder="次数限制(留空=不限)"
+            onChange={(e) => setNewMax(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") createInvite(); }}
+          />
+          <button className="primary" disabled={busy} onClick={createInvite}>
+            {busy && <span className="spin" />}创建
+          </button>
+        </div>
+        <table className="tbl" style={{ marginTop: 12 }}>
+          <thead>
+            <tr>
+              <th>邀请码</th>
+              <th>备注</th>
+              <th>已用/上限</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {codes.map((c) => (
+              <InviteCodeRow
+                key={c.id}
+                c={c}
+                busy={busy}
+                deleting={deletingCodeId === c.id}
+                onToggle={() => toggleCode(c)}
+                onStartDelete={() => { setDeletingCodeId(c.id); setErr(""); }}
+                onCancelDelete={() => setDeletingCodeId(null)}
+                onConfirmDelete={() => confirmDeleteCode(c)}
+              />
+            ))}
+          </tbody>
+        </table>
+        {!codes.length && !legacy && <div className="muted">暂无邀请码</div>}
       </div>
 
       <div className="card">
@@ -184,6 +280,68 @@ export default function AdminPage() {
 
       {msg && <div className="msg-ok">{msg}</div>}
       {err && <div className="msg-err">{err}</div>}
+    </>
+  );
+}
+
+function InviteCodeRow(props: {
+  c: InviteCodeItem;
+  busy: boolean;
+  deleting: boolean;
+  onToggle: () => void;
+  onStartDelete: () => void;
+  onCancelDelete: () => void;
+  onConfirmDelete: () => void;
+}) {
+  const { c, busy } = props;
+  const usedUp = c.max_uses != null && c.used_count >= c.max_uses;
+  const status = !c.is_active
+    ? <span className="badge err">已停用</span>
+    : usedUp
+      ? <span className="badge warn">已用完</span>
+      : <span className="badge ok">有效</span>;
+
+  return (
+    <>
+      <tr>
+        <td><code>{c.code}</code></td>
+        <td>{c.note || "—"}</td>
+        <td>{c.used_count}/{c.max_uses ?? "不限"}</td>
+        <td>{status}</td>
+        <td>
+          <div className="actions">
+            <button
+              className={`btn-sm${c.is_active ? " danger" : ""}`}
+              disabled={busy}
+              onClick={props.onToggle}
+            >
+              {c.is_active ? "停用" : "启用"}
+            </button>
+            <button className="btn-sm danger" disabled={busy} onClick={props.onStartDelete}>
+              删除
+            </button>
+          </div>
+        </td>
+      </tr>
+      {props.deleting && (
+        <tr>
+          <td colSpan={5}>
+            <div className="notice notice-err" style={{ marginTop: 0 }}>
+              <div>
+                删除邀请码 {c.code} 后,持有该码的人将无法再注册(不影响已注册用户)。确认删除?
+              </div>
+              <div className="actions mt-2">
+                <button className="btn-sm danger" disabled={busy} onClick={props.onConfirmDelete}>
+                  {busy && <span className="spin" />}确认删除
+                </button>
+                <button className="btn-sm" disabled={busy} onClick={props.onCancelDelete}>
+                  取消
+                </button>
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
     </>
   );
 }
