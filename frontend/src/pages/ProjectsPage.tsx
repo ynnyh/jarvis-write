@@ -118,7 +118,7 @@ export default function ProjectsPage() {
             <div>
               <label className="fl">书名 *</label>
               <div className="input-row">
-                <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="如:霓虹深渊" />
+                <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="如:雾都诡事" />
                 <TitleSuggest topic={topic} genre={(tendency.genre as string) ?? ""} onPick={setTitle} />
               </div>
             </div>
@@ -135,7 +135,7 @@ export default function ProjectsPage() {
           </div>
           <label className="fl">核心主题 / 一句话灵感(可留空,建好后到「灵感工坊」让 AI 帮你找)</label>
           <textarea rows={2} value={topic} onChange={(e) => setTopic(e.target.value)}
-            placeholder="如:底层义体维修师捡到一枚藏着企业罪证的芯片,被卷入猎杀…(没想法就留空)" />
+            placeholder="如:落魄镖师接下一趟险镖,半路开箱验货时发现镖箱里藏着个大活人…(没想法就留空)" />
           <label className="fl">全局写作倾向(整本书的默认基调,单次生成时还可临时调整)</label>
           <TendencySelector node="outline" value={tendency} onChange={setTendency} />
           <div className="actions mt-4">

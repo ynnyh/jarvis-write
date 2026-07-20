@@ -57,7 +57,7 @@ export default function InspirePanel({ project, onChanged }: Props) {
           这是整本书的"一句话灵魂",架构、大纲、正文都会围绕它生成。可以直接写,也可以用下面的灵感工坊帮你找。
         </div>
         <textarea rows={3} value={topic} onChange={(e) => setTopic(e.target.value)}
-          placeholder="如:底层义体维修师捡到一枚藏着企业罪证的芯片…" />
+          placeholder="如:落魄镖师接下一趟险镖,半路开箱验货时发现镖箱里藏着个大活人…" />
         <label className="fl">全局写作倾向(题材/节奏/结构/基调,影响所有生成环节)</label>
         <TendencySelector node="outline" value={tendency} onChange={setTendency} compact />
         <div className="actions mt-3">
