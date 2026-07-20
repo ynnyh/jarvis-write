@@ -102,4 +102,4 @@ cd frontend && npm run lint && npm run build
 
 ## License
 
-暂未指定 License。在添加开源许可证之前，代码默认保留所有权利；如需使用或二次分发，请先联系作者。
+本项目以 [Apache License 2.0](LICENSE) 开源。Copyright 2026 ynnyh。

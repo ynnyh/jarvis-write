@@ -345,6 +345,11 @@ label.fl {
   padding-top: 14px;
   border-top: 1px solid var(--line);
 }
+.auth-foot {
+  font-size: var(--fs-xs);
+  margin-top: var(--sp-3);
+  text-align: center;
+}
 
 /* ---------- 登录页 tabs / 通用 tabs ---------- */
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: var(--sp-4); }

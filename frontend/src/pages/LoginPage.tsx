@@ -67,6 +67,9 @@ export default function LoginPage({ onAuthed }: Props) {
           登录后请到「模型设置」配置你自己的模型 key。每个账号的 key 相互独立,不共用。
         </div>
       </div>
+      <div className="muted auth-foot">
+        开源项目 · <a href="https://github.com/ynnyh/jarvis-write" target="_blank" rel="noreferrer">GitHub</a> · Apache-2.0
+      </div>
     </div>
   );
 }

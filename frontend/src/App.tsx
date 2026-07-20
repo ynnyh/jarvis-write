@@ -60,6 +60,7 @@ export default function App() {
         {tokens && <span className="muted" title="累计 LLM 用量">{tokens}</span>}
         <a href="/settings" target="_blank" rel="noreferrer">模型设置</a>
         <a href="/docs" target="_blank" rel="noreferrer">API</a>
+        <a href="https://github.com/ynnyh/jarvis-write" target="_blank" rel="noreferrer">GitHub</a>
         <span className="muted" title={me.is_admin ? "管理员" : "用户"}>{me.username}</span>
         <a className="linkbtn" onClick={logout}>退出</a>
       </div>

@@ -105,4 +105,4 @@ There are also per-phase self-check scripts (`backend/scripts/stage*_test.py`) â
 
 ## License
 
-No license has been specified yet. Until an open-source license is added, all rights are reserved; please contact the author before reuse or redistribution.
+This project is open-sourced under the [Apache License 2.0](LICENSE). Copyright 2026 ynnyh.
