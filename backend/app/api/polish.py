@@ -13,8 +13,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.auth import assert_project_owner, get_current_user
-from app.db.models import Chapter, Project
+from app.api.deps import get_project_or_404
+from app.auth import get_current_user
+from app.db.models import Chapter
 from app.db.session import get_db
 from app.engines.polish import ai_flavor_report, polish_text
 from app.schemas.tendency import Tendency
@@ -47,14 +48,6 @@ class FlavorRequest(BaseModel):
     text: str = Field(min_length=1)
 
 
-def _project(db: Session, project_id: int) -> Project:
-    p = db.get(Project, project_id)
-    if p is None:
-        raise HTTPException(status_code=404, detail=f"项目 {project_id} 不存在")
-    assert_project_owner(p)
-    return p
-
-
 def _chapter(db: Session, project_id: int, n: int) -> Chapter:
     ch = (
         db.query(Chapter)
@@ -71,7 +64,7 @@ async def polish_chapter(
     project_id: int, n: int, req: ChapterPolishRequest, db: Session = Depends(get_db)
 ):
     """润色整章(返回润色稿,不落库;满意后再调 /apply)。"""
-    project = _project(db, project_id)
+    project = get_project_or_404(db, project_id)
     ch = _chapter(db, project_id, n)
     try:
         result = await polish_text(
@@ -87,7 +80,7 @@ async def apply_chapter_polish(
     project_id: int, n: int, req: ApplyPolishRequest, db: Session = Depends(get_db)
 ):
     """把润色稿写回定稿(用户确认后)。"""
-    _project(db, project_id)
+    get_project_or_404(db, project_id)
     ch = _chapter(db, project_id, n)
     ch.final_content = req.polished_text.strip()
     ch.word_count = len(ch.final_content)
@@ -96,11 +89,11 @@ async def apply_chapter_polish(
 
 
 @router.post("/api/projects/{project_id}/polish/segment", response_model=PolishResult)
-async def polish_segment_in_project(
+async def polish_segment_inget_project_or_404(
     project_id: int, req: SegmentPolishRequest, db: Session = Depends(get_db)
 ):
     """润色选段(带项目全局倾向)。"""
-    project = _project(db, project_id)
+    project = get_project_or_404(db, project_id)
     try:
         result = await polish_text(req.text, req.tendency, project.global_tendency)
     except ValueError as exc:

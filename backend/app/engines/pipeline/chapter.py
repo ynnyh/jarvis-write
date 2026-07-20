@@ -13,6 +13,7 @@ import logging
 from sqlalchemy.orm import Session
 
 from app.db.models import Chapter, ChapterSummary, Outline, Project
+from app.engines.common import chapter_architecture_brief, get_outline
 from app.engines.consistency import BibleService, ForeshadowScheduler
 from app.engines.consistency.checker import check_chapter
 from app.engines.consistency.extractor import extract_and_apply
@@ -45,25 +46,6 @@ def _strip_meta(text: str) -> str:
     ):
         lines.pop(0)
     return "\n".join(lines).strip()
-
-
-def _get_outline(db: Session, project_id: int, n: int) -> Outline | None:
-    return (
-        db.query(Outline)
-        .filter(Outline.project_id == project_id, Outline.chapter_number == n)
-        .first()
-    )
-
-
-def _architecture_brief(project: Project) -> str:
-    arch = project.architecture
-    if arch is None:
-        return "(无)"
-    return (
-        f"核心种子:{arch.core_seed}\n\n"
-        f"世界观(节选):{arch.world_building[:600]}\n\n"
-        f"角色动力学(节选):{arch.character_dynamics[:900]}"
-    )
 
 
 def _next_chapter_brief(nxt: Outline | None) -> str:
@@ -133,7 +115,7 @@ async def rebuild_summaries_after(
             except Exception:  # noqa: BLE001
                 pass
         prev = _rolling_summary(db, project.id, ch.chapter_number)
-        outline = _get_outline(db, project.id, ch.chapter_number)
+        outline = get_outline(db, project.id, ch.chapter_number)
         new_summary = await get_adapter_for(Task.SUMMARY).ask(
             ROLLING_SUMMARY_PROMPT.format(
                 previous_summary=prev,
@@ -183,10 +165,10 @@ async def generate_chapter(
             except Exception:  # noqa: BLE001 — 进度上报绝不影响生成
                 pass
 
-    outline = _get_outline(db, project.id, chapter_number)
+    outline = get_outline(db, project.id, chapter_number)
     if outline is None:
         raise ValueError(f"第 {chapter_number} 章没有大纲,请先生成蓝图")
-    next_outline = _get_outline(db, project.id, chapter_number + 1)
+    next_outline = get_outline(db, project.id, chapter_number + 1)
 
     assembled = assemble_tendency("chapter", tendency, project.global_tendency)
     style_block = render_style_block(assembled)
@@ -229,7 +211,7 @@ async def generate_chapter(
     draft_prompt = CHAPTER_DRAFT_PROMPT.format(
         chapter_number=chapter_number,
         chapter_title=outline.title,
-        architecture_brief=_architecture_brief(project),
+        architecture_brief=chapter_architecture_brief(project),
         rolling_summary=rolling,
         recent_tail=recent,
         retrieved_context=retrieved_text,

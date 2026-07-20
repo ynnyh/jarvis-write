@@ -17,13 +17,16 @@ _MAX_JOBS = 200  # 防泄漏:超出后清最旧的已完成任务
 
 
 def create_job(kind: str) -> str:
+    """建任务。owner_id 记当前登录用户,取不到(脚本/迁移上下文)则为 None。"""
+    from app.auth import current_user_id
+
     job_id = uuid.uuid4().hex[:12]
     with _LOCK:
         if len(_JOBS) > _MAX_JOBS:
             for k in [k for k, v in _JOBS.items() if v["status"] != "running"][: len(_JOBS) - _MAX_JOBS]:
                 _JOBS.pop(k, None)
         _JOBS[job_id] = {
-            "kind": kind, "status": "running",
+            "kind": kind, "status": "running", "owner_id": current_user_id.get(),
             "stage": "排队中", "result": None, "error": None,
         }
     return job_id

@@ -56,7 +56,11 @@ logger = logging.getLogger("jarvis-write")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """启动时建表。日后换 Alembic 迁移可移除这里。"""
+    """启动时建表 + 幂等迁移。
+
+    不用 Alembic:create_all 建缺失的表,migrate.py 负责给旧表补列、
+    建初始 admin、把存量无主数据归到 admin(全部幂等,每次启动都跑)。
+    """
     logger.info("建表中(SQLite)...")
     Base.metadata.create_all(bind=engine)
     logger.info("建表完成,运行多用户迁移...")

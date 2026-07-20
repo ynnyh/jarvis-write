@@ -11,8 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth import assert_project_owner, get_current_user
-from app.db.models import Entity, Foreshadowing, Project
+from app.api.deps import get_project_or_404
+from app.auth import get_current_user
+from app.db.models import Entity, Foreshadowing
 from app.db.session import get_db
 from app.engines.consistency import BibleService, ForeshadowScheduler
 
@@ -52,21 +53,13 @@ class ForeshadowOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-def _project(db: Session, project_id: int) -> Project:
-    p = db.get(Project, project_id)
-    if p is None:
-        raise HTTPException(status_code=404, detail=f"项目 {project_id} 不存在")
-    assert_project_owner(p)
-    return p
-
-
 @router.get("/bible", response_model=BibleSnapshot)
 async def bible_snapshot(
     project_id: int,
     chapter: int = Query(default=9999, description="查第几章时刻的状态,默认最新"),
     db: Session = Depends(get_db),
 ):
-    _project(db, project_id)
+    get_project_or_404(db, project_id)
     bible = BibleService(db, project_id)
     facts = bible.query_facts_at(chapter)
     ent_count = (
@@ -95,7 +88,7 @@ async def list_foreshadowings(
     current_chapter: int = Query(default=9999, description="用于计算是否到期"),
     db: Session = Depends(get_db),
 ):
-    _project(db, project_id)
+    get_project_or_404(db, project_id)
     scheduler = ForeshadowScheduler(db, project_id)
     due_ids = {f.id for f in scheduler.due_foreshadowings(current_chapter)}
     rows = (

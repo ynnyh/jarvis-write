@@ -14,8 +14,9 @@ services:
       # JWT 签名密钥:务必设成随机长串(否则 token 可被伪造)。
       - JWT_SECRET=${JWT_SECRET:?请在 .env 或环境变量里设置一个随机长串}
       # 初始管理员(首次启动自动创建,存量数据归其名下)。
+      # 密码强制必填:代码里的默认值 admin12345 仅限本地开发,带上公网等于白给。
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin12345}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?请设置一个强密码作为初始管理员密码}
       # 每个账号进来单独配自己的 key(存数据库);默认不放共享 key。
       # 如需 .env 兜底可自行取消注释:
       # - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}

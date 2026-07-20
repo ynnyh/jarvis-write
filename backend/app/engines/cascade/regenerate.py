@@ -11,9 +11,10 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Chapter, Outline, OutlineVersion, Project
+from app.db.models import Chapter, OutlineVersion, Project
 from app.engines.cascade.differ import outline_to_dict, _fmt
 from app.engines.cascade.impact import _latest_change_summary
+from app.engines.common import cascade_architecture_brief, get_outline
 from app.engines.pipeline.blueprint import _outline_content_hash
 from app.engines.pipeline.blueprint_parser import parse_blueprint
 from app.engines.tendency import assemble_tendency
@@ -25,21 +26,6 @@ from app.schemas.tendency import Tendency
 logger = logging.getLogger("jarvis-write.cascade")
 
 
-def _architecture_brief(project: Project) -> str:
-    arch = project.architecture
-    if arch is None:
-        return "(无)"
-    return f"核心种子:{arch.core_seed}\n情节架构(节选):{arch.plot_architecture[:800]}"
-
-
-def _get_outline(db: Session, project_id: int, n: int) -> Outline | None:
-    return (
-        db.query(Outline)
-        .filter(Outline.project_id == project_id, Outline.chapter_number == n)
-        .first()
-    )
-
-
 async def cascade_regenerate(
     db: Session,
     project: Project,
@@ -49,7 +35,7 @@ async def cascade_regenerate(
     tendency: Tendency | None = None,
 ) -> dict:
     """重生成指定章节的大纲。返回 {updated: [...], stale_chapters: [...], warnings: [...]}。"""
-    source = _get_outline(db, project.id, source_chapter)
+    source = get_outline(db, project.id, source_chapter)
     if source is None:
         raise ValueError(f"源章节 {source_chapter} 大纲不存在")
 
@@ -64,7 +50,7 @@ async def cascade_regenerate(
     warnings: list[str] = []
 
     for n in sorted(chapter_numbers):
-        outline = _get_outline(db, project.id, n)
+        outline = get_outline(db, project.id, n)
         if outline is None:
             warnings.append(f"第 {n} 章大纲不存在,跳过")
             continue
@@ -75,13 +61,13 @@ async def cascade_regenerate(
         # 相邻章节(重生成过的用新版)
         neighbors = []
         for m in (n - 1, n + 1):
-            o = _get_outline(db, project.id, m)
+            o = get_outline(db, project.id, m)
             if o:
                 neighbors.append(f"第{m}章《{o.title}》:{o.summary}")
         prompt = OUTLINE_REGENERATE_PROMPT.format(
             source_chapter=source_chapter,
             chapter_number=n,
-            architecture_brief=_architecture_brief(project),
+            architecture_brief=cascade_architecture_brief(project),
             change_summary=change_summary,
             new_source_outline=_fmt(outline_to_dict(source)),
             old_outline=_fmt(outline_to_dict(outline)),

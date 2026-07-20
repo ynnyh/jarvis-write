@@ -62,6 +62,13 @@ async def register(req: RegisterRequest, db: Session = Depends(get_db)):
     if db.query(User).filter(User.username == uname).first():
         raise HTTPException(status_code=409, detail="该用户名已被注册")
 
+    # bcrypt 只取密码前 72 字节,超长会直接抛 ValueError;提前拦截给明确提示
+    if len(req.password.encode("utf-8")) > 72:
+        raise HTTPException(
+            status_code=400,
+            detail="密码过长:按 UTF-8 字节计不能超过 72 字节(中文约占 3 字节/字)",
+        )
+
     # 首个注册用户设为管理员(方便你自己接管);之后都是普通用户
     is_first = db.query(User).count() == 0
     user = User(

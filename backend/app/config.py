@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     default_timeout: int = 600
 
     # ===== 多用户认证(阶段 8) =====
-    # 注册邀请码:固定共享码,只有填对才能注册(留空则任何人可注册)
+    # 注册邀请码:固定共享码,只有填对才能注册(留空则关闭注册,任何人都不能注册)
     invite_code: str = ""
     # JWT 签名密钥:生产务必用环境变量覆盖成随机长串,否则 token 可被伪造
     jwt_secret: str = "change-me-in-production-please-use-a-random-secret"

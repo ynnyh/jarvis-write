@@ -18,7 +18,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.auth import hash_password
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.db.models import User
 from app.db.session import engine, session_scope
 
@@ -65,6 +65,13 @@ def _ensure_admin(db: Session) -> User:
         db.add(admin)
         db.flush()
         logger.info("迁移:创建初始管理员 %s", settings.admin_username)
+        # 还在用代码里的默认密码:仅适合本地开发,务必提醒改掉
+        if settings.admin_password == Settings.model_fields["admin_password"].default:
+            logger.warning(
+                "初始管理员 %s 使用的是默认密码,仅限本地开发;"
+                "部署请通过环境变量 ADMIN_PASSWORD 设置强密码,或登录后立即修改",
+                settings.admin_username,
+            )
     return admin
 
 

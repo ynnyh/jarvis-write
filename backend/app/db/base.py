@@ -1,8 +1,9 @@
 # app/db/base.py
 """SQLAlchemy 2.x 声明式基类。
 
-所有模型继承 Base。为了让 Alembic 的 autogenerate 能发现全部表,
-在 app/db/models/__init__.py 中集中导入所有模型。
+所有模型继承 Base。建表走 Base.metadata.create_all,后续结构变更
+由 app/migrate.py 的手写幂等迁移负责;在 app/db/models/__init__.py
+中集中导入所有模型,确保 create_all 能发现全部表。
 """
 from __future__ import annotations
 

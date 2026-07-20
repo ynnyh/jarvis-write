@@ -29,8 +29,10 @@ router = APIRouter(tags=["misc"], dependencies=[Depends(get_current_user)])
 @router.get("/api/jobs/{job_id}")
 async def job_status(job_id: str):
     job = get_job(job_id)
-    if job is None:
+    # 归属校验:非本人的任务按"不存在"处理,不泄露 job 存在性
+    if job is None or job.get("owner_id") != current_user_id.get():
         raise HTTPException(status_code=404, detail="任务不存在或已被清理")
+    job.pop("owner_id", None)  # 内部字段,不下发
     return job
 
 

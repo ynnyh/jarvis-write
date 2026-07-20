@@ -14,7 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.auth import assert_project_owner, get_current_user
+from app.api.deps import get_project_or_404
+from app.auth import get_current_user
 from app.db.models import Chapter, Project
 from app.db.session import SessionLocal, get_db
 from app.engines.pipeline.chapter import generate_chapter
@@ -54,14 +55,6 @@ class GenerateChapterResponse(ChapterDetail):
     extraction_stats: dict = {}
 
 
-def _project(db: Session, project_id: int) -> Project:
-    p = db.get(Project, project_id)
-    if p is None:
-        raise HTTPException(status_code=404, detail=f"项目 {project_id} 不存在")
-    assert_project_owner(p)
-    return p
-
-
 @router.post("/{chapter_number}/generate", response_model=GenerateChapterResponse)
 async def generate(
     project_id: int,
@@ -70,7 +63,7 @@ async def generate(
     db: Session = Depends(get_db),
 ):
     """生成一章(草稿/定稿/检查/抽取/摘要,多次 LLM 调用,耗时较长)。"""
-    project = _project(db, project_id)
+    project = get_project_or_404(db, project_id)
     try:
         chapter, issues, stats = await generate_chapter(
             db, project, chapter_number, req.tendency
@@ -92,7 +85,7 @@ async def generate_async(
     db: Session = Depends(get_db),
 ):
     """异步生成:立即返回 job_id,前端轮询 /api/jobs/{job_id} 看五段进度。"""
-    _project(db, project_id)  # 先校验存在
+    get_project_or_404(db, project_id)  # 先校验存在
     job_id = create_job(f"chapter-{project_id}-{chapter_number}")
 
     async def runner() -> None:
@@ -137,7 +130,7 @@ async def edit_content(
     db: Session = Depends(get_db),
 ):
     """手动编辑正文:立即保存。保存后请调 re-extract-async 同步圣经/摘要。"""
-    _project(db, project_id)
+    get_project_or_404(db, project_id)
     ch = (
         db.query(Chapter)
         .filter(
@@ -160,7 +153,7 @@ async def re_extract_async(
     project_id: int, chapter_number: int, db: Session = Depends(get_db)
 ):
     """手改正文后:重抽取(幂等,先清旧账)→ 重建下游摘要 → 更新向量库。"""
-    _project(db, project_id)
+    get_project_or_404(db, project_id)
     job_id = create_job(f"re-extract-{project_id}-{chapter_number}")
 
     async def runner() -> None:
@@ -206,7 +199,7 @@ async def re_extract_async(
 
 @router.get("", response_model=list[ChapterBrief])
 async def list_chapters(project_id: int, db: Session = Depends(get_db)):
-    _project(db, project_id)
+    get_project_or_404(db, project_id)
     return list(
         db.query(Chapter)
         .filter(Chapter.project_id == project_id)
@@ -218,7 +211,7 @@ async def list_chapters(project_id: int, db: Session = Depends(get_db)):
 async def get_chapter(
     project_id: int, chapter_number: int, db: Session = Depends(get_db)
 ):
-    _project(db, project_id)
+    get_project_or_404(db, project_id)
     ch = (
         db.query(Chapter)
         .filter(

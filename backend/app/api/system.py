@@ -8,8 +8,9 @@
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from app.auth import get_current_user
 from app.llm.factory import (
     available_providers,
     create_llm_adapter,
@@ -31,7 +32,13 @@ async def health() -> HealthResponse:
     return HealthResponse(status="ok", providers=available_providers())
 
 
-@router.post("/ping-llm", response_model=PingLLMResponse)
+@router.post(
+    "/ping-llm",
+    response_model=PingLLMResponse,
+    # 端点级鉴权:/health 保持公开,ping-llm 要求登录
+    # (登录后走当前用户自己配置的 key,不再白嫖服务端 .env 的 key)
+    dependencies=[Depends(get_current_user)],
+)
 async def ping_llm(req: PingLLMRequest) -> PingLLMResponse:
     """给模型发一个 prompt，拿回复。阶段 0 的核心验收点。"""
     provider = (req.provider or resolve_default_provider()).lower()

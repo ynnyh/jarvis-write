@@ -15,8 +15,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.auth import assert_project_owner, get_current_user
-from app.db.models import Outline, OutlineVersion, Project
+from app.api.deps import get_project_or_404
+from app.auth import get_current_user
+from app.db.models import Outline, OutlineVersion
 from app.db.session import get_db
 from app.engines.cascade import (
     analyze_impact,
@@ -93,14 +94,6 @@ class VersionOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-def _project(db: Session, project_id: int) -> Project:
-    p = db.get(Project, project_id)
-    if p is None:
-        raise HTTPException(status_code=404, detail=f"项目 {project_id} 不存在")
-    assert_project_owner(p)
-    return p
-
-
 def _outline(db: Session, project_id: int, n: int) -> Outline:
     o = (
         db.query(Outline)
@@ -120,7 +113,7 @@ async def edit_outline(
     db: Session = Depends(get_db),
 ):
     """编辑大纲。major 改动会提示做影响分析(needs_impact_analysis=true)。"""
-    _project(db, project_id)
+    get_project_or_404(db, project_id)
     outline = _outline(db, project_id, chapter_number)
     result = await apply_outline_edit(
         db, outline, req.model_dump(exclude_none=True)
@@ -136,7 +129,7 @@ async def impact(
     project_id: int, chapter_number: int, db: Session = Depends(get_db)
 ):
     """分析最新一次改动对下游的影响。只分析,不改任何数据。"""
-    project = _project(db, project_id)
+    project = get_project_or_404(db, project_id)
     outline = _outline(db, project_id, chapter_number)
     result = await analyze_impact(db, project, outline)
     return ImpactReport(
@@ -151,7 +144,7 @@ async def cascade(
     project_id: int, req: CascadeRequest, db: Session = Depends(get_db)
 ):
     """级联重生成用户勾选的章节大纲(用户拍板后才调用)。"""
-    project = _project(db, project_id)
+    project = get_project_or_404(db, project_id)
     try:
         result = await cascade_regenerate(
             db,
@@ -183,7 +176,7 @@ async def cascade(
 async def versions(
     project_id: int, chapter_number: int, db: Session = Depends(get_db)
 ):
-    _project(db, project_id)
+    get_project_or_404(db, project_id)
     outline = _outline(db, project_id, chapter_number)
     return list(
         db.query(OutlineVersion)

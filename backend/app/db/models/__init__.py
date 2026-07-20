@@ -1,7 +1,7 @@
 """数据模型汇总。
 
 在此统一导入所有 ORM 模型,确保:
-1. Alembic / create_all 能发现全部表;
+1. create_all / migrate.py 能发现全部表(项目不用 Alembic);
 2. 外部按 `from app.db.models import Project, Outline, ...` 使用。
 
 表设计详见 docs/02-data-model.md。

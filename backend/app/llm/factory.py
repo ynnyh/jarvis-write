@@ -12,12 +12,16 @@ LLM 适配器工厂。
 """
 from __future__ import annotations
 
+import logging
+
 from app.config import get_settings
 
 from .base import LLMAdapter
 from .deepseek import DeepSeekAdapter
 from .openai import OpenAIAdapter
 from .gemini import GeminiAdapter
+
+logger = logging.getLogger("jarvis-write.llm")
 
 # interface_format -> 适配器类
 _REGISTRY: dict[str, type[LLMAdapter]] = {
@@ -60,7 +64,8 @@ def _db_settings() -> dict[str, dict]:
                 }
                 for r in rows
             }
-    except Exception:  # noqa: BLE001 — 任何读库失败都回落 .env
+    except Exception as exc:  # noqa: BLE001 — 任何读库失败都回落 .env,但要留痕
+        logger.warning("读取数据库 provider 配置失败,回落 .env: %s", exc)
         return {}
 
 
