@@ -83,22 +83,22 @@ export default function OutlinePanel({ pid, outlines, hasArch, onChanged }: Prop
   return (
     <>
       <div className="card">
-        <div style={{ display: "flex", alignItems: "center" }}>
-          <h2 style={{ flex: 1, margin: 0 }}>章节蓝图 <span className="badge">{outlines.length} 章</span></h2>
+        <div className="card-head">
+          <h2 className="grow">章节蓝图 <span className="badge">{outlines.length} 章</span></h2>
           <button onClick={() => setShowGen(!showGen)}>
             {outlines.length ? "重新生成蓝图" : "生成蓝图"}
           </button>
         </div>
-        <div className="muted" style={{ marginTop: 6 }}>
+        <div className="card-desc mt-2">
           每章都可直接编辑。动了情节的"大改"会自动分析下游影响,由你决定级联范围——不会出现"这里改了那里还是旧的"。
         </div>
         {showGen && (
-          <div style={{ marginTop: 10 }}>
+          <div className="mt-3">
             {!hasArch && <div className="msg-err">请先在「架构」生成顶层架构。</div>}
             {hasArch && (
               <>
                 <TendencySelector node="outline" value={genTendency} onChange={setGenTendency} compact />
-                <button className="primary" disabled={!!busy} onClick={generateBlueprint} style={{ marginTop: 8 }}>
+                <button className="primary mt-2" disabled={!!busy} onClick={generateBlueprint}>
                   {busy && <span className="spin" />}
                   {outlines.length ? "覆盖并重新生成全部蓝图" : "生成章节蓝图"}
                 </button>
@@ -106,9 +106,9 @@ export default function OutlinePanel({ pid, outlines, hasArch, onChanged }: Prop
             )}
           </div>
         )}
-        {busy && <div className="muted" style={{ marginTop: 8 }}><span className="spin" />{busy}</div>}
-        {flash && <div className="msg-ok" style={{ marginTop: 8 }}>{flash}</div>}
-        {err && <div className="msg-err" style={{ marginTop: 8 }}>{err}</div>}
+        {busy && <div className="muted mt-2"><span className="spin" />{busy}</div>}
+        {flash && <div className="msg-ok mt-2">{flash}</div>}
+        {err && <div className="msg-err mt-2">{err}</div>}
       </div>
 
       {outlines.map((o) => {
@@ -120,21 +120,21 @@ export default function OutlinePanel({ pid, outlines, hasArch, onChanged }: Prop
               <b>{o.title}</b>
               <span className="badge">{o.chapter_role || "—"}</span>
               <span className="badge">v{o.current_version}</span>
-              <div style={{ flex: 1 }} />
+              <div className="grow" />
               {!editing && <button onClick={() => startEdit(o)}>编辑本章</button>}
             </div>
 
             {!editing && (
               <>
-                <div className="muted" style={{ marginTop: 6 }}>{o.summary}</div>
-                <div className="muted" style={{ marginTop: 4, fontSize: 12.5 }}>
-                  伏笔:{o.foreshadowing || "无"} · 人物:{(o.characters_involved as string[]).join("、") || "—"} · 场景:{o.scene_location || "—"}
+                <div className="muted mt-2">{o.summary}</div>
+                <div className="meta-line">
+                  伏笔:{o.foreshadowing || "无"} · 人物:{(o.characters_involved ?? []).join("、") || "—"} · 场景:{o.scene_location || "—"}
                 </div>
               </>
             )}
 
             {editing && (
-              <div style={{ marginTop: 10 }}>
+              <div className="mt-3">
                 <div className="row">
                   <div>
                     <label className="fl">标题</label>
@@ -158,7 +158,7 @@ export default function OutlinePanel({ pid, outlines, hasArch, onChanged }: Prop
                 <label className="fl">伏笔操作(埋设 / 强化 / 回收)</label>
                 <textarea rows={2} value={form.foreshadowing as string}
                   onChange={(e) => setForm({ ...form, foreshadowing: e.target.value })} />
-                <div style={{ marginTop: 10 }}>
+                <div className="actions mt-3">
                   <button className="primary" disabled={!!busy} onClick={() => save(o.chapter_number)}>
                     {busy && <span className="spin" />}保存
                   </button>
@@ -168,9 +168,9 @@ export default function OutlinePanel({ pid, outlines, hasArch, onChanged }: Prop
                 </div>
 
                 {editResult?.status === "saved" && editResult.needs_impact_analysis && (
-                  <div className="card" style={{ marginTop: 12, background: "#fffdf5" }}>
+                  <div className="card card-warn mt-3">
                     <b>大改</b><span className="badge warn">major</span>
-                    <div className="muted" style={{ margin: "6px 0" }}>{editResult.change_summary}</div>
+                    <div className="card-desc mt-1">{editResult.change_summary}</div>
                     {editResult.own_chapter_stale && (
                       <div className="msg-err">本章已有正文,已标记「与新大纲不符」。</div>
                     )}
@@ -180,14 +180,15 @@ export default function OutlinePanel({ pid, outlines, hasArch, onChanged }: Prop
                       </button>
                     )}
                     {impact && (
-                      <div style={{ marginTop: 8 }}>
+                      <div className="mt-2">
                         <div className="muted">{impact.overall}</div>
                         {impact.affected.map((a) => (
-                          <div key={a.chapter_number} className="fact-line" style={{ display: "flex", gap: 8 }}>
+                          <div key={a.chapter_number} className="fact-line fact-check">
                             <input type="checkbox" checked={picked.has(a.chapter_number)}
                               onChange={(e) => {
                                 const s = new Set(picked);
-                                e.target.checked ? s.add(a.chapter_number) : s.delete(a.chapter_number);
+                                if (e.target.checked) s.add(a.chapter_number);
+                                else s.delete(a.chapter_number);
                                 setPicked(s);
                               }} />
                             <div>
@@ -200,7 +201,7 @@ export default function OutlinePanel({ pid, outlines, hasArch, onChanged }: Prop
                           </div>
                         ))}
                         {impact.affected.length > 0 ? (
-                          <button className="primary" style={{ marginTop: 8 }}
+                          <button className="primary mt-2"
                             disabled={!!busy || !picked.size} onClick={() => runCascade(o.chapter_number)}>
                             {busy && <span className="spin" />}级联重生成勾选的 {picked.size} 章
                           </button>

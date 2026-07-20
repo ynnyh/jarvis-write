@@ -52,8 +52,8 @@ export default function ArchPanel({ project, arch, onChanged }: Props) {
   return (
     <>
       <div className="card">
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <h2 style={{ flex: 1, margin: 0 }}>
+        <div className="card-head">
+          <h2 className="grow">
             顶层架构 {arch && <span className="badge">v{arch.version}</span>}
           </h2>
           {arch && dirty && (
@@ -62,27 +62,27 @@ export default function ArchPanel({ project, arch, onChanged }: Props) {
             </button>
           )}
         </div>
-        <div className="muted" style={{ marginTop: 6 }}>
+        <div className="card-desc mt-2">
           {arch
             ? "四块内容都可以直接改——这是你的书,AI 只是初稿。改完记得保存。"
             : "还没有架构。选好倾向后点「生成架构」,AI 按雪花写作法四步产出。"}
         </div>
         {!arch && (
-          <div style={{ marginTop: 10 }}>
+          <div className="mt-3">
             <TendencySelector node="outline" value={tendency} onChange={setTendency} compact />
-            <button className="primary" disabled={!!busy} onClick={regenerate} style={{ marginTop: 8 }}>
+            <button className="primary mt-2" disabled={!!busy} onClick={regenerate}>
               {busy && <span className="spin" />}生成架构
             </button>
           </div>
         )}
-        {busy && <div className="muted" style={{ marginTop: 8 }}>{busy}</div>}
-        {msg && <div className="msg-ok" style={{ marginTop: 8 }}>{msg}</div>}
-        {err && <div className="msg-err" style={{ marginTop: 8 }}>{err}</div>}
+        {busy && <div className="muted mt-2">{busy}</div>}
+        {msg && <div className="msg-ok mt-2">{msg}</div>}
+        {err && <div className="msg-err mt-2">{err}</div>}
       </div>
 
       {arch && BLOCKS.map((b) => (
         <div key={b.key} className="card arch-block">
-          <h3>{b.label} <span className="muted" style={{ fontWeight: 400 }}>· {b.hint}</span></h3>
+          <h3>{b.label} <span className="hint">· {b.hint}</span></h3>
           <textarea
             rows={Math.min(14, Math.max(4, (form[b.key] ?? "").split("\n").length + 1))}
             value={form[b.key] ?? ""}
@@ -94,11 +94,11 @@ export default function ArchPanel({ project, arch, onChanged }: Props) {
       {arch && (
         <div className="card">
           <h3>整体重生成</h3>
-          <div className="muted" style={{ marginBottom: 8 }}>
+          <div className="card-desc">
             对现有架构整体不满意时使用,会覆盖以上四块(版本+1,可在数据库回溯)。
           </div>
           <TendencySelector node="outline" value={tendency} onChange={setTendency} compact />
-          <button className="danger" disabled={!!busy} onClick={regenerate} style={{ marginTop: 8 }}>
+          <button className="danger mt-2" disabled={!!busy} onClick={regenerate}>
             {busy && <span className="spin" />}重新生成整个架构
           </button>
         </div>

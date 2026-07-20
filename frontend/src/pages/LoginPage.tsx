@@ -20,7 +20,7 @@ export default function LoginPage({ onAuthed }: Props) {
         ? await api.login(username.trim(), password)
         : await api.register(username.trim(), password, invite.trim());
       token.set(r.token);
-      onAuthed({ id: 0, username: r.username, is_admin: r.is_admin });
+      onAuthed(await api.me());
     } catch (e) {
       setErr(String(e instanceof Error ? e.message : e));
     } finally {
@@ -31,10 +31,10 @@ export default function LoginPage({ onAuthed }: Props) {
   return (
     <div className="auth-wrap">
       <div className="card auth-card">
-        <h1 style={{ marginBottom: 4 }}>jarvis<span style={{ color: "var(--brand)" }}>·write</span></h1>
-        <div className="muted" style={{ marginBottom: 18 }}>AI 长篇小说工作台</div>
+        <h1 className="auth-brand">jarvis<span>·write</span></h1>
+        <div className="auth-sub">AI 长篇小说工作台 · 从一句灵感到一部成书</div>
 
-        <div className="tabs" style={{ marginBottom: 18 }}>
+        <div className="tabs auth-tabs">
           <div className={"tab" + (mode === "login" ? " on" : "")} onClick={() => { setMode("login"); setErr(""); }}>登录</div>
           <div className={"tab" + (mode === "register" ? " on" : "")} onClick={() => { setMode("register"); setErr(""); }}>注册</div>
         </div>
@@ -57,14 +57,13 @@ export default function LoginPage({ onAuthed }: Props) {
             </>
           )}
 
-          <button className="primary" type="submit" disabled={busy}
-            style={{ width: "100%", marginTop: 18, padding: "10px" }}>
+          <button className="primary btn-lg btn-block" type="submit" disabled={busy}>
             {busy && <span className="spin" />}{mode === "login" ? "登录" : "注册并登录"}
           </button>
         </form>
 
-        {err && <div className="msg-err" style={{ marginTop: 12 }}>{err}</div>}
-        <div className="muted" style={{ marginTop: 16, fontSize: 12.5, lineHeight: 1.7 }}>
+        {err && <div className="notice notice-err">{err}</div>}
+        <div className="auth-note">
           登录后请到「模型设置」配置你自己的模型 key。每个账号的 key 相互独立,不共用。
         </div>
       </div>

@@ -1,8 +1,9 @@
 // 写作面板:逐章生成 / 阅读;本章蓝图上下文置顶;润色移步「润色」工作区
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   api, ChapterBrief, ChapterDetail, GenerateChapterResponse, Outline, Project, Tendency,
 } from "../api";
+import { pollJob } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
 
 interface Props { pid: number; project: Project; outlines: Outline[]; }
@@ -12,7 +13,14 @@ const STATUS_CN: Record<string, string> = {
   finalized: "已定稿", stale: "大纲已变",
 };
 
-export default function ChaptersPanel({ pid, project, outlines }: Props) {
+/** 正文按空行/换行分段渲染成 <p>,保证可读性 */
+function Paragraphs({ text }: { text: string }) {
+  const paras = text.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+  if (!paras.length) return <div className="muted">(空)</div>;
+  return <>{paras.map((p, i) => <p key={i}>{p}</p>)}</>;
+}
+
+export default function ChaptersPanel({ pid, outlines }: Props) {
   const [chapters, setChapters] = useState<ChapterBrief[]>([]);
   const [current, setCurrent] = useState<ChapterDetail | null>(null);
   const [busy, setBusy] = useState("");
@@ -22,6 +30,13 @@ export default function ChaptersPanel({ pid, project, outlines }: Props) {
   const [showTendency, setShowTendency] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
+  // 阅读器(全屏遮罩):当前阅读章节 + 定稿/草稿 tab
+  const [reader, setReader] = useState<ChapterDetail | null>(null);
+  const [readerLoading, setReaderLoading] = useState(false);
+  const [readerTab, setReaderTab] = useState<"final" | "draft">("final");
+  // 组件卸载时中止轮询,防止卸载后继续 setState
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const reload = useCallback(async () => {
     setChapters(await api.listChapters(pid));
@@ -38,8 +53,38 @@ export default function ChaptersPanel({ pid, project, outlines }: Props) {
     try { setCurrent(await api.getChapter(pid, n)); } catch (e) { setErr(String(e)); }
   }
 
+  // 阅读器:打开/翻章都走这里;默认看定稿,无定稿看草稿
+  async function openReader(n: number) {
+    setReaderLoading(true); setErr("");
+    try {
+      const detail = await api.getChapter(pid, n);
+      setReader(detail);
+      setReaderTab(detail.final_content ? "final" : "draft");
+    } catch (e) { setErr(String(e)); } finally { setReaderLoading(false); }
+  }
+
+  // 上一章/下一章:仅限已生成的章节
+  const generatedNums = chapters.map((c) => c.chapter_number);
+  const readerIdx = reader ? generatedNums.indexOf(reader.chapter_number) : -1;
+  const prevNum = readerIdx > 0 ? generatedNums[readerIdx - 1] : null;
+  const nextNum = readerIdx >= 0 && readerIdx < generatedNums.length - 1
+    ? generatedNums[readerIdx + 1] : null;
+  const readerOutline = reader
+    ? outlines.find((o) => o.chapter_number === reader.chapter_number)
+    : null;
+
+  // Esc 关闭阅读器
+  useEffect(() => {
+    if (!reader) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setReader(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [reader]);
+
   async function saveEdit() {
     if (!current) return;
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     setBusy("保存正文…"); setErr("");
     try {
       const updated = await api.editChapterContent(pid, current.chapter_number, editText);
@@ -48,56 +93,53 @@ export default function ChaptersPanel({ pid, project, outlines }: Props) {
       await reload();
       // 手改后同步一致性引擎:重抽取 + 重建下游摘要 + 向量库
       const { job_id } = await api.reExtractAsync(pid, current.chapter_number);
-      for (;;) {
-        await new Promise((r) => setTimeout(r, 3000));
-        const job = await api.getJob(job_id);
-        if (job.status === "running") { setBusy(`同步一致性引擎:${job.stage}`); continue; }
-        if (job.status === "error") throw new Error(job.error ?? "同步失败");
-        break;
-      }
-    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+      await pollJob(job_id, {
+        signal: ctrl.signal,
+        onStage: (stage) => setBusy(`同步一致性引擎:${stage}`),
+      });
+    } catch (e) {
+      if (!ctrl.signal.aborted) setErr(String(e));
+    } finally { if (!ctrl.signal.aborted) setBusy(""); }
   }
 
   async function generate(n: number) {
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     setErr(""); setGenResult(null);
     setBusy(`第 ${n} 章:排队中…`);
     try {
       const { job_id } = await api.generateChapterAsync(pid, n, genTendency);
       // 轮询任务进度(五段:草稿→定稿→检查→抽取→摘要)
-      for (;;) {
-        await new Promise((r) => setTimeout(r, 3000));
-        const job = await api.getJob(job_id);
-        if (job.status === "running") {
-          setBusy(`第 ${n} 章:${job.stage}`);
-          continue;
-        }
-        if (job.status === "error") throw new Error(job.error ?? "生成失败");
-        const result = job.result!;
-        setGenResult(result);
-        setCurrent({
-          chapter_number: result.chapter_number, status: result.status,
-          word_count: result.word_count, is_stale: result.is_stale,
-          draft_content: result.draft_content, final_content: result.final_content,
-          outline_version_used: result.outline_version_used,
-        });
-        break;
-      }
+      const result = await pollJob<GenerateChapterResponse>(job_id, {
+        signal: ctrl.signal,
+        onStage: (stage) => setBusy(`第 ${n} 章:${stage}`),
+      });
+      if (ctrl.signal.aborted) return;
+      setGenResult(result);
+      setCurrent({
+        chapter_number: result.chapter_number, status: result.status,
+        word_count: result.word_count, is_stale: result.is_stale,
+        draft_content: result.draft_content, final_content: result.final_content,
+        outline_version_used: result.outline_version_used,
+      });
       await reload();
-    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+    } catch (e) {
+      if (!ctrl.signal.aborted) setErr(String(e));
+    } finally { if (!ctrl.signal.aborted) setBusy(""); }
   }
 
   return (
     <div className="two-col">
       <div className="two-col-side">
-        <div className="card" style={{ padding: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
-            <h3 style={{ flex: 1, margin: 0 }}>章节</h3>
-            <button onClick={() => setShowTendency(!showTendency)}>
+        <div className="card card-compact">
+          <div className="card-head mb-2">
+            <h3 className="grow">章节</h3>
+            <button className="btn-sm" onClick={() => setShowTendency(!showTendency)}>
               {showTendency ? "收起" : "正文倾向"}
             </button>
           </div>
           {showTendency && (
-            <div style={{ marginBottom: 10 }}>
+            <div className="mb-3">
               <TendencySelector node="chapter" value={genTendency} onChange={setGenTendency} compact />
             </div>
           )}
@@ -105,9 +147,8 @@ export default function ChaptersPanel({ pid, project, outlines }: Props) {
             const ch = byNum.get(o.chapter_number);
             const st = ch?.status ?? "empty";
             return (
-              <div key={o.chapter_number} className="fact-line"
-                style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ cursor: ch ? "pointer" : "default", flex: 1 }}
+              <div key={o.chapter_number} className="fact-line fact-row">
+                <span className={"fact-title" + (ch ? " linkish" : "")}
                   onClick={() => ch && open(o.chapter_number)}>
                   <b>第{o.chapter_number}章</b> {o.title}
                   <span className={"badge " + (ch?.is_stale ? "err" : st === "finalized" ? "ok" : "")}>
@@ -115,7 +156,12 @@ export default function ChaptersPanel({ pid, project, outlines }: Props) {
                   </span>
                   {ch && <span className="muted"> {ch.word_count}字</span>}
                 </span>
-                <button disabled={!!busy} onClick={() => generate(o.chapter_number)}>
+                {ch && (
+                  <button className="btn-sm" disabled={!!busy} onClick={() => openReader(o.chapter_number)}>
+                    阅读
+                  </button>
+                )}
+                <button className="btn-sm" disabled={!!busy} onClick={() => generate(o.chapter_number)}>
                   {ch ? "重写" : "生成"}
                 </button>
               </div>
@@ -128,10 +174,10 @@ export default function ChaptersPanel({ pid, project, outlines }: Props) {
 
       <div className="two-col-main">
         {genResult && (
-          <div className="card" style={{ background: "#f8fffa" }}>
+          <div className="card card-ok">
             <b>生成完成</b> {genResult.word_count} 字
             {genResult.consistency_issues.length
-              ? <div style={{ marginTop: 6 }}>
+              ? <div className="mt-2">
                   <span className="badge err">一致性问题 {genResult.consistency_issues.length}</span>
                   {genResult.consistency_issues.map((i, k) => (
                     <div key={k} className="fact-line">
@@ -147,20 +193,20 @@ export default function ChaptersPanel({ pid, project, outlines }: Props) {
         {current ? (
           <>
             {currentOutline && (
-              <div className="card" style={{ background: "#fafbff" }}>
+              <div className="card card-info">
                 <b>本章蓝图</b> 第{currentOutline.chapter_number}章《{currentOutline.title}》
                 <span className="badge">{currentOutline.chapter_role}</span>
-                <div className="muted" style={{ marginTop: 4 }}>{currentOutline.summary}</div>
-                <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>
+                <div className="muted mt-1">{currentOutline.summary}</div>
+                <div className="meta-line">
                   伏笔:{currentOutline.foreshadowing || "无"}
                 </div>
               </div>
             )}
             <div className="card">
-              <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
-                <h2 style={{ flex: 1, margin: 0 }}>
+              <div className="card-head mb-2">
+                <h2 className="grow">
                   第{current.chapter_number}章 正文
-                  <span className="muted" style={{ fontWeight: 400, marginLeft: 8 }}>{current.word_count}字</span>
+                  <span className="hint"> {current.word_count}字</span>
                 </h2>
                 {!editing ? (
                   <>
@@ -168,7 +214,7 @@ export default function ChaptersPanel({ pid, project, outlines }: Props) {
                       setEditText(current.final_content || current.draft_content);
                       setEditing(true);
                     }}>编辑正文</button>
-                    <span className="muted" style={{ marginLeft: 8 }}>改文笔?去「润色」</span>
+                    <span className="muted">改文笔?去「润色」</span>
                   </>
                 ) : (
                   <>
@@ -181,22 +227,76 @@ export default function ChaptersPanel({ pid, project, outlines }: Props) {
               </div>
               {editing ? (
                 <textarea
+                  className="editor-area"
                   value={editText}
                   onChange={(e) => setEditText(e.target.value)}
-                  style={{ minHeight: 480, lineHeight: 1.9, fontSize: 14.5 }}
                 />
               ) : (
-                <div className="prose">{current.final_content || current.draft_content || "(空)"}</div>
+                <div className="prose">
+                  <Paragraphs text={current.final_content || current.draft_content} />
+                </div>
               )}
             </div>
           </>
         ) : (
           <div className="card muted">
-            左侧点「生成」写新章,或点章节标题阅读。生成时自动注入:本章蓝图、前情摘要、
-            最近章节结尾、人物当前状态(硬约束)、到期伏笔提醒、重复用词避免清单。
+            左侧点「生成」写新章,点「阅读」全屏读正文,点章节标题看蓝图/改正文。生成时自动注入:
+            本章蓝图、前情摘要、最近章节结尾、人物当前状态(硬约束)、到期伏笔提醒、重复用词避免清单。
           </div>
         )}
       </div>
+
+      {(reader || readerLoading) && (
+        <div className="reader-overlay" onClick={() => setReader(null)}>
+          <div className="reader" onClick={(e) => e.stopPropagation()}>
+            {reader ? (
+              <>
+                <div className="reader-head">
+                  <h2 className="reader-title">
+                    第{reader.chapter_number}章 {readerOutline?.title ?? ""}
+                    <span className={"badge " + (reader.is_stale ? "err" : reader.status === "finalized" ? "ok" : "")}>
+                      {reader.is_stale ? "大纲已变" : STATUS_CN[reader.status] ?? reader.status}
+                    </span>
+                    <span className="muted"> {reader.word_count}字</span>
+                  </h2>
+                  {reader.draft_content && reader.draft_content !== reader.final_content && (
+                    <div className="reader-tabs">
+                      <span
+                        className={"reader-tab" + (readerTab === "final" ? " on" : "")}
+                        onClick={() => setReaderTab("final")}
+                      >定稿</span>
+                      <span
+                        className={"reader-tab" + (readerTab === "draft" ? " on" : "")}
+                        onClick={() => setReaderTab("draft")}
+                      >草稿</span>
+                    </div>
+                  )}
+                  <button onClick={() => setReader(null)}>关闭</button>
+                </div>
+                <div className="reader-content">
+                  <Paragraphs
+                    text={readerTab === "final"
+                      ? reader.final_content || reader.draft_content
+                      : reader.draft_content}
+                  />
+                </div>
+                <div className="reader-nav">
+                  <button disabled={prevNum == null || readerLoading}
+                    onClick={() => prevNum != null && openReader(prevNum)}>
+                    ← 上一章
+                  </button>
+                  <button disabled={nextNum == null || readerLoading}
+                    onClick={() => nextNum != null && openReader(nextNum)}>
+                    下一章 →
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="reader-content muted"><span className="spin" />加载正文…</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

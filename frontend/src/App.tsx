@@ -56,12 +56,12 @@ export default function App() {
       <div className="topbar">
         <Link to="/" className="logo">jarvis<span>·write</span></Link>
         <span className="muted">AI 长篇小说工作台</span>
-        <div style={{ flex: 1 }} />
+        <div className="grow" />
         {tokens && <span className="muted" title="累计 LLM 用量">{tokens}</span>}
         <a href="/settings" target="_blank" rel="noreferrer">模型设置</a>
         <a href="/docs" target="_blank" rel="noreferrer">API</a>
         <span className="muted" title={me.is_admin ? "管理员" : "用户"}>{me.username}</span>
-        <a onClick={logout} style={{ cursor: "pointer" }}>退出</a>
+        <a className="linkbtn" onClick={logout}>退出</a>
       </div>
       <div className="wrap">
         <Outlet />

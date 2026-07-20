@@ -51,8 +51,8 @@ export default function TendencySelector({ node, value, onChange, compact }: Pro
   return (
     <div>
       {dims.map((dim) => (
-        <div key={dim.key} style={{ marginBottom: compact ? 8 : 14 }}>
-          <div className="muted" style={{ marginBottom: 6 }}>
+        <div key={dim.key} className={compact ? "dim compact" : "dim"}>
+          <div className="dim-label">
             {dim.label}
             {dim.select === "multi" && <span className="badge">可多选</span>}
           </div>
@@ -78,7 +78,7 @@ export default function TendencySelector({ node, value, onChange, compact }: Pro
             </span>
           </div>
           {customFor === dim.key && (
-            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <div className="input-row mt-2">
               <input
                 type="text"
                 autoFocus

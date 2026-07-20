@@ -53,47 +53,47 @@ export default function InspirePanel({ project, onChanged }: Props) {
     <>
       <div className="card">
         <h2>本书主题</h2>
-        <div className="muted" style={{ marginBottom: 8 }}>
+        <div className="card-desc">
           这是整本书的"一句话灵魂",架构、大纲、正文都会围绕它生成。可以直接写,也可以用下面的灵感工坊帮你找。
         </div>
         <textarea rows={3} value={topic} onChange={(e) => setTopic(e.target.value)}
           placeholder="如:底层义体维修师捡到一枚藏着企业罪证的芯片…" />
         <label className="fl">全局写作倾向(题材/节奏/结构/基调,影响所有生成环节)</label>
         <TendencySelector node="outline" value={tendency} onChange={setTendency} compact />
-        <div style={{ marginTop: 10 }}>
+        <div className="actions mt-3">
           <button className="primary" disabled={!!busy} onClick={saveTopic}>保存主题与倾向</button>
-          {msg && <span className="msg-ok" style={{ marginLeft: 10 }}>{msg}</span>}
+          {msg && <span className="msg-ok">{msg}</span>}
         </div>
       </div>
 
       <div className="card">
         <h2>灵感工坊</h2>
-        <div className="muted" style={{ marginBottom: 8 }}>
+        <div className="card-desc">
           丢一个碎片进来(一个画面/一个设定/一句话,留空则按倾向自由发挥),AI 给你 4 个差异化的故事方案。
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div className="input-row">
           <input type="text" value={spark} onChange={(e) => setSpark(e.target.value)}
             placeholder='如:"一个能听见建筑物说话的拆迁评估员"'
             onKeyDown={(e) => e.key === "Enter" && !busy && brainstorm()} />
-          <button className="primary" disabled={!!busy} onClick={brainstorm} style={{ flexShrink: 0 }}>
+          <button className="primary" disabled={!!busy} onClick={brainstorm}>
             {busy && <span className="spin" />}给我灵感
           </button>
         </div>
-        {busy && <div className="muted" style={{ marginTop: 8 }}>{busy}</div>}
-        {err && <div className="msg-err" style={{ marginTop: 8 }}>{err}</div>}
+        {busy && <div className="muted mt-2">{busy}</div>}
+        {err && <div className="msg-err mt-2">{err}</div>}
 
         {ideas.length > 0 && (
-          <div style={{ marginTop: 14 }}>
+          <div className="mt-4">
             {ideas.map((idea, i) => (
               <div key={i} className={"idea-card" + (picked === i ? " picked" : "")}>
-                <div style={{ display: "flex", alignItems: "center" }}>
-                  <h3 style={{ flex: 1, margin: 0 }}>《{idea.title}》</h3>
+                <div className="idea-head">
+                  <h3>《{idea.title}》</h3>
                   <button className="primary" disabled={!!busy} onClick={() => adopt(i)}>
                     用这个方案
                   </button>
                 </div>
-                <div style={{ marginTop: 6 }}>{idea.logline}</div>
-                <div className="muted" style={{ marginTop: 4 }}>
+                <div className="idea-line">{idea.logline}</div>
+                <div className="muted mt-1">
                   <b>钩子:</b>{idea.hook}
                 </div>
                 <div className="muted"><b>反转方向:</b>{idea.twist}</div>

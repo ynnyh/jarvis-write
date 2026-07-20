@@ -51,7 +51,6 @@ export default function ProjectPage() {
     else if (!arch) setStep("arch");
     else if (!outlines.length) setStep("outline");
     else setStep("write");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project, arch, outlines, step]);
 
   if (!project) return <div className="muted">{err || "加载中…"}</div>;
@@ -67,14 +66,13 @@ export default function ProjectPage() {
         {project.genre && <span className="badge">{project.genre}</span>}
       </h1>
       <div className="stat-strip">
-        <div className="stat">主题<b style={{ fontSize: 13, maxWidth: 420, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {project.topic || "(未定,先去灵感区)"}</b></div>
+        <div className="stat">主题<b className="stat-topic">{project.topic || "(未定,先去灵感区)"}</b></div>
         <div className="stat">大纲<b>{outlines.length}/{project.target_chapters} 章</b></div>
         <div className="stat">正文<b>{doneCount} 章 · {wordsTotal} 字</b></div>
-        {staleCount > 0 && <div className="stat">失配<b style={{ color: "var(--err)" }}>{staleCount} 章</b></div>}
+        {staleCount > 0 && <div className="stat">失配<b className="stat-alert">{staleCount} 章</b></div>}
         {doneCount > 0 && (
           <div className="stat">导出
-            <b style={{ fontSize: 13 }}>
+            <b className="stat-links">
               <a href={`/api/projects/${pid}/export/txt`}>txt</a>
               {" · "}
               <a href={`/api/projects/${pid}/export/epub`}>epub</a>

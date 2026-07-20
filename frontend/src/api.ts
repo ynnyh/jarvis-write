@@ -62,7 +62,7 @@ export interface Architecture {
 export interface Outline {
   id: number; chapter_number: number; title: string; chapter_role: string;
   chapter_purpose: string; suspense_level: string; foreshadowing: string;
-  plot_twist_level: string; summary: string; characters_involved: unknown[];
+  plot_twist_level: string; summary: string; characters_involved: string[] | null;
   key_items: unknown[]; scene_location: string; current_version: number;
 }
 export interface ChapterBrief {

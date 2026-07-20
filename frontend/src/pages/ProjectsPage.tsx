@@ -43,8 +43,8 @@ export default function ProjectsPage() {
 
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 16 }}>
-        <h1 style={{ flex: 1 }}>我的小说</h1>
+      <div className="page-head">
+        <h1>我的小说</h1>
         <button className="primary" onClick={() => setCreating(!creating)}>
           {creating ? "收起" : "+ 新建小说"}
         </button>
@@ -74,31 +74,29 @@ export default function ProjectsPage() {
             placeholder="如:底层义体维修师捡到一枚藏着企业罪证的芯片,被卷入猎杀…(没想法就留空)" />
           <label className="fl">全局写作倾向(整本书的默认基调,单次生成时还可临时调整)</label>
           <TendencySelector node="outline" value={tendency} onChange={setTendency} />
-          <div style={{ marginTop: 14 }}>
+          <div className="actions mt-4">
             <button className="primary" disabled={busy} onClick={create}>
               {busy && <span className="spin" />}创建项目
             </button>
-            {err && <span className="msg-err" style={{ marginLeft: 10 }}>{err}</span>}
+            {err && <span className="msg-err">{err}</span>}
           </div>
         </div>
       )}
 
-      {projects.map((p) => (
-        <Link key={p.id} to={`/project/${p.id}`}>
-          <div className="card" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ flex: 1 }}>
-              <h2 style={{ margin: 0 }}>{p.title}
-                <span className="badge">{p.status}</span>
-                {p.genre && <span className="badge">{p.genre}</span>}
-              </h2>
-              <div className="muted" style={{ marginTop: 4 }}>
-                {p.topic || "(未填主题)"} · 目标 {p.target_chapters} 章 × {p.target_words_per_chapter} 字
-              </div>
+      <div className="proj-grid">
+        {projects.map((p) => (
+          <Link key={p.id} to={`/project/${p.id}`} className="proj-card">
+            <h2 className="proj-title">{p.title}
+              <span className="badge">{p.status}</span>
+              {p.genre && <span className="badge">{p.genre}</span>}
+            </h2>
+            <div className="proj-meta">
+              {p.topic || "(未填主题)"} · 目标 {p.target_chapters} 章 × {p.target_words_per_chapter} 字
             </div>
-            <span className="muted">进入 →</span>
-          </div>
-        </Link>
-      ))}
+            <span className="proj-go">进入 →</span>
+          </Link>
+        ))}
+      </div>
       {!projects.length && !creating && (
         <div className="card muted">还没有项目。点右上角「新建小说」开始。</div>
       )}

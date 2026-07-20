@@ -1,6 +1,6 @@
 // 一致性看板:故事圣经(时序快照) + 伏笔四态面板
 import { useCallback, useEffect, useState } from "react";
-import { api, BibleSnapshot, ForeshadowOut, Outline } from "../api";
+import { api, BibleSnapshot, FactOut, ForeshadowOut, Outline } from "../api";
 
 interface Props { pid: number; outlines: Outline[]; }
 
@@ -26,10 +26,11 @@ export default function BoardPanel({ pid, outlines }: Props) {
 
   useEffect(() => { reload(atChapter); }, [reload, atChapter]);
 
-  const byEntity = new Map<string, typeof bible extends null ? never : NonNullable<typeof bible>["facts"]>();
+  const byEntity = new Map<string, FactOut[]>();
   bible?.facts.forEach((f) => {
-    if (!byEntity.has(f.entity)) byEntity.set(f.entity, [] as never);
-    (byEntity.get(f.entity) as unknown as typeof bible.facts).push(f);
+    const list = byEntity.get(f.entity) ?? [];
+    list.push(f);
+    byEntity.set(f.entity, list);
   });
 
   const open = foreshadows.filter((f) => f.status === "planted" || f.status === "reinforced");
@@ -39,22 +40,21 @@ export default function BoardPanel({ pid, outlines }: Props) {
   return (
     <>
       <div className="card">
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <h2 style={{ margin: 0 }}>故事圣经 · 时间机</h2>
+        <div className="card-head">
+          <h2>故事圣经 · 时间机</h2>
           <span className="muted">查看任意章节时刻的世界状态</span>
-          <div style={{ flex: 1 }} />
+          <div className="grow" />
           <span className="muted">第</span>
-          <input type="number" min={1} max={maxCh} value={atChapter}
-            style={{ width: 80 }}
+          <input type="number" min={1} max={maxCh} value={atChapter} className="input-xs"
             onChange={(e) => setAtChapter(Math.max(1, Math.min(maxCh, Number(e.target.value) || 1)))} />
           <span className="muted">章时刻 · {bible?.entities_count ?? 0} 实体 / {bible?.facts.length ?? 0} 条有效事实</span>
         </div>
-        {err && <div className="msg-err" style={{ marginTop: 8 }}>{err}</div>}
-        <div style={{ marginTop: 12 }}>
+        {err && <div className="msg-err mt-2">{err}</div>}
+        <div className="mt-3">
           {[...byEntity.entries()].map(([entity, facts]) => (
-            <div key={entity} style={{ marginBottom: 10 }}>
+            <div key={entity} className="entity">
               <b>{entity}</b>
-              {(facts as BibleSnapshot["facts"]).map((f, i) => (
+              {facts.map((f, i) => (
                 <div key={i} className="fact-line">
                   <span className={"badge " + (IMP_BADGE[f.importance] ?? "")}>{f.importance}</span>
                   {" "}{f.content}

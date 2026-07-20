@@ -60,10 +60,10 @@ export default function PolishPanel({ pid }: Props) {
     <>
       <div className="card">
         <h2>润色工作台</h2>
-        <div className="muted" style={{ marginBottom: 10 }}>
+        <div className="card-desc">
           只改文笔不改剧情:润色前自动抽取情节事实锁定,润色后逐条校验;默认开启「去AI味」。
         </div>
-        <div className="chips" style={{ marginBottom: 10 }}>
+        <div className="chips mb-3">
           <span className={"chip" + (mode === "chapter" ? " on" : "")} onClick={() => { setMode("chapter"); setResult(null); }}>
             润色整章
           </span>
@@ -74,8 +74,7 @@ export default function PolishPanel({ pid }: Props) {
 
         {mode === "chapter" ? (
           chapters.length ? (
-            <select value={chapterNum ?? ""} onChange={(e) => setChapterNum(Number(e.target.value))}
-              style={{ maxWidth: 300 }}>
+            <select className="narrow" value={chapterNum ?? ""} onChange={(e) => setChapterNum(Number(e.target.value))}>
               {chapters.map((c) => (
                 <option key={c.chapter_number} value={c.chapter_number}>
                   第{c.chapter_number}章({c.word_count}字{c.is_stale ? " · 大纲已变" : ""})
@@ -90,19 +89,19 @@ export default function PolishPanel({ pid }: Props) {
 
         <label className="fl">润色风格(可多选 + 我要输入)</label>
         <TendencySelector node="polish" value={tendency} onChange={setTendency} compact />
-        <div style={{ marginTop: 10 }}>
+        <div className="actions mt-3">
           <button className="primary" disabled={!!busy} onClick={run}>
             {busy && <span className="spin" />}生成润色预览
           </button>
-          {busy && <span className="muted" style={{ marginLeft: 8 }}>{busy}</span>}
-          {msg && <span className="msg-ok" style={{ marginLeft: 8 }}>{msg}</span>}
+          {busy && <span className="muted">{busy}</span>}
+          {msg && <span className="msg-ok">{msg}</span>}
         </div>
-        {err && <div className="msg-err" style={{ marginTop: 8 }}>{err}</div>}
+        {err && <div className="msg-err mt-2">{err}</div>}
       </div>
 
       {result && (
         <div className="card">
-          <div style={{ marginBottom: 10 }}>
+          <div className="mb-3">
             <span className="badge">AI味 {result.flavor_before.score} → {result.flavor_after.score} /千字</span>
             <span className="badge ok">锁定事实 {result.locked_facts.length} 条</span>
             {result.violations.length
@@ -112,21 +111,21 @@ export default function PolishPanel({ pid }: Props) {
           {result.violations.map((v, i) => (
             <div key={i} className="msg-err fact-line">「{v.fact}」— {v.problem}</div>
           ))}
-          <div className="split" style={{ marginTop: 10 }}>
+          <div className="split mt-3">
             <div>
               <div className="pane-title">原文({(mode === "chapter" ? original : segment).length}字)</div>
-              <div className="pane prose" style={{ fontSize: 13.5 }}>
+              <div className="pane pane-prose">
                 {mode === "chapter" ? original : segment}
               </div>
             </div>
             <div>
               <div className="pane-title">润色稿({result.polished.length}字)</div>
-              <div className="pane prose" style={{ fontSize: 13.5, borderColor: "var(--brand)" }}>
+              <div className="pane pane-prose pane-accent">
                 {result.polished}
               </div>
             </div>
           </div>
-          <div style={{ marginTop: 12 }}>
+          <div className="actions mt-3">
             {mode === "chapter" && (
               <button className="primary" disabled={!!busy || !!result.violations.length} onClick={apply}>
                 应用(写回第{chapterNum}章定稿)
@@ -134,7 +133,7 @@ export default function PolishPanel({ pid }: Props) {
             )}
             <button onClick={() => setResult(null)}>放弃这版</button>
             {mode === "chapter" && !!result.violations.length && (
-              <span className="msg-err" style={{ marginLeft: 8 }}>有事实违规,不允许直接应用,请重新润色</span>
+              <span className="msg-err">有事实违规,不允许直接应用,请重新润色</span>
             )}
           </div>
         </div>
