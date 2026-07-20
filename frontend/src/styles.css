@@ -643,6 +643,7 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
   justify-content: center;
 }
 .reader {
+  position: relative; /* 片段润色弹层(.reader-polish)的定位锚点 */
   background: var(--surface);
   color: var(--text);
   width: 100%;
@@ -824,6 +825,84 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 .rs-font-hei { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
 .rs-font-kai { font-family: "Kaiti SC", "STKaiti", "KaiTi", cursive; }
 
+/* ---- 阅读中片段润色:段落点选 + 工具条 + 方向/对照弹层 ---- */
+/* 可点选段落(开启润色时):圆角给选中底色留白;选中 = 左侧品牌色竖条 + 品牌底色 */
+.reader-content p.pickable { cursor: pointer; border-radius: var(--r-sm); }
+.reader-content p.sel {
+  background: var(--brand-weak);
+  box-shadow: inset 3px 0 0 var(--brand);
+}
+/* 选中段落后的浮动工具条:吸在正文区底部居中,不依赖 hover(移动端可点按) */
+.para-tools {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: flex;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  box-shadow: var(--shadow-md);
+  white-space: nowrap;
+}
+/* 润色弹层:盖在整个阅读器上(含头部),点击遮罩关闭 */
+.reader-polish {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(24, 25, 28, 0.4);
+}
+.reader-polish-panel {
+  width: 100%;
+  max-width: 720px;
+  max-height: 100%;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 16px 18px;
+}
+.rp-label { font-size: var(--fs-xs); color: var(--text-2); margin: 10px 0 6px; }
+.rp-label:first-child { margin-top: 0; }
+.rp-orig {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  background: var(--surface-2);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  line-height: 1.8;
+  /* 输入方向阶段只预览开头,长段落不撑高弹层 */
+  max-height: 120px;
+  overflow-y: auto;
+}
+.reader-polish-panel input { width: 100%; }
+.rp-chips { margin-top: 8px; }
+.rp-actions { display: flex; gap: 8px; margin-top: 14px; }
+.rp-actions button { margin-left: 0; }
+.rp-err { margin-top: 10px; }
+/* 对照视图:宽屏左右,窄屏(≤640px)上下(见底部媒体查询) */
+.rp-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.rp-col { min-width: 0; }
+.rp-text {
+  font-size: var(--fs-sm);
+  line-height: 1.8;
+  background: var(--surface-2);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  max-height: 46vh;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+.rp-new { background: var(--ok-weak); }
+
 /* ==========================================================================
    响应式:≤900px 折叠布局;≤640px 触摸优化
    ========================================================================== */
@@ -937,6 +1016,11 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 
   .reader-content { padding: 24px 16px 40px; }
   .reader-nav { padding: 10px 14px; }
+
+  /* 片段润色:窄屏对照视图改上下排列,工具条贴底 */
+  .rp-compare { grid-template-columns: 1fr; }
+  .rp-text { max-height: 32vh; }
+  .reader-polish { padding: 12px; }
 
   /* 全书阅读:目录收成左侧抽屉,点头部「目录」按钮开合,不挤正文 */
   .reader-toc-btn { display: inline-block; flex-shrink: 0; }

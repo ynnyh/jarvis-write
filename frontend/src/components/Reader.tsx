@@ -1,19 +1,39 @@
 // 全屏阅读器:写作页单章阅读与「阅读全书」共用。
 // 内含:偏好设置(背景/字体/字号,localStorage 持久化)、定稿/草稿 tab、上一章/下一章、Esc 关闭;
-// 传入 toc 时变为全书模式 —— PC 左侧目录栏,窄屏(≤640px)收成「目录」抽屉。
+// 传入 toc 时变为全书模式 —— PC 左侧目录栏,窄屏(≤640px)收成「目录」抽屉;
+// 传入 polishCtx 时开启段落点选润色(选段 → 输方向 → 对照 → 替换并同步一致性引擎);
+// 传入 restoreScroll / onScrollPos 时支持全书阅读位置记忆(恢复与上报)。
 import { useEffect, useRef, useState } from "react";
-import { ChapterDetail } from "../api";
+import { api, ChapterDetail } from "../api";
+import { pollJob } from "../pollJob";
 
 export const STATUS_CN: Record<string, string> = {
   empty: "未生成", drafting: "生成中", drafted: "有草稿",
   finalized: "已定稿", stale: "大纲已变",
 };
 
-/** 正文按空行/换行分段渲染成 <p>,保证可读性 */
-export function Paragraphs({ text }: { text: string }) {
-  const paras = text.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+/** 正文分段:按空行/换行切开,去空白;阅读器渲染与片段替换共用同一套分段逻辑 */
+export function splitParas(text: string): string[] {
+  return text.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+}
+
+/** 正文按空行/换行分段渲染成 <p>,保证可读性;传 onSelect 时段落可点选(片段润色用) */
+export function Paragraphs({ text, selectedIdx, onSelect }: {
+  text: string;
+  selectedIdx?: number | null;
+  onSelect?: (idx: number) => void;
+}) {
+  const paras = splitParas(text);
   if (!paras.length) return <div className="muted">(空)</div>;
-  return <>{paras.map((p, i) => <p key={i}>{p}</p>)}</>;
+  return <>{paras.map((p, i) => (
+    <p
+      key={i}
+      className={
+        (onSelect ? "pickable" : "") + (onSelect && selectedIdx === i ? " sel" : "") || undefined
+      }
+      onClick={onSelect ? (e) => { e.stopPropagation(); onSelect(i); } : undefined}
+    >{p}</p>
+  ))}</>;
 }
 
 /** 阅读器个性化设置:背景主题/字体/字号,localStorage 持久化,不登录、跨项目生效 */
@@ -49,9 +69,18 @@ const SIZE_OPTIONS: { v: ReaderSize; label: string }[] = [
   { v: "md", label: "标准" },
   { v: "lg", label: "大" },
 ];
+// 常用润色方向(点一下填入输入框,可再改)
+const DIRECTION_CHIPS = ["更生动", "更紧张", "更简洁", "去 AI 味"];
 
 /** 全书目录条目:disabled 表示该章尚未生成正文(置灰不可点) */
 export interface ReaderTocItem { num: number; label: string; disabled?: boolean; }
+
+/** 片段润色上下文:由 BookReader / ChaptersPanel 传入以开启段落点选润色 */
+export interface PolishCtx {
+  pid: number;
+  chapterNumber: number;
+  onApplied: (updated: ChapterDetail) => void;
+}
 
 interface Props {
   loading: boolean;            // 翻章/加载中:禁用翻页按钮;chapter 为空时显示加载态
@@ -63,10 +92,14 @@ interface Props {
   onNext: () => void;
   onClose: () => void;
   toc?: { items: ReaderTocItem[]; current: number | null; onSelect: (n: number) => void };
+  restoreScroll?: number | null;              // 全书模式:首次打开要恢复的滚动位置
+  onScrollPos?: (chapterNum: number, scroll: number) => void; // 滚动位置上报(父级防抖持久化)
+  polishCtx?: PolishCtx;       // 传入即开启「点选段落润色」
 }
 
 export default function Reader({
   loading, chapter, title, hasPrev, hasNext, onPrev, onNext, onClose, toc,
+  restoreScroll, onScrollPos, polishCtx,
 }: Props) {
   const [tab, setTab] = useState<"final" | "draft">("final");
   const [prefs, setPrefs] = useState<ReaderPrefs>(loadReaderPrefs);
@@ -74,6 +107,25 @@ export default function Reader({
   const [tocOpen, setTocOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  // 全书位置记忆:恢复滚动只在首个章节应用一次
+  const restoreAppliedRef = useRef(false);
+  const scrollTimerRef = useRef<number | null>(null);
+
+  // ---- 片段润色状态 ----
+  const [selPara, setSelPara] = useState<number | null>(null);
+  const [polishOpen, setPolishOpen] = useState(false);
+  const [direction, setDirection] = useState("");
+  const [polishing, setPolishing] = useState(false);
+  const [polished, setPolished] = useState<string | null>(null);
+  const [applyStage, setApplyStage] = useState(""); // 替换/同步进行中(空=空闲)
+  const [polishErr, setPolishErr] = useState("");
+
+  const closePolish = () => {
+    setPolishOpen(false);
+    setPolished(null);
+    setPolishErr("");
+    setDirection("");
+  };
 
   // 偏好变化即写入 localStorage(隐私模式等写失败时静默忽略)
   useEffect(() => {
@@ -92,21 +144,93 @@ export default function Reader({
     return () => window.removeEventListener("mousedown", onDown);
   }, [showSettings]);
 
-  // 换章:默认看定稿(无定稿看草稿),收起设置/目录,正文滚动回顶
+  // 换章:默认看定稿(无定稿看草稿),收起设置/目录/润色,清除段落选择;
+  // 全书模式首章恢复到记忆的滚动位置,之后翻章回顶
   useEffect(() => {
     if (!chapter) return;
     setTab(chapter.final_content ? "final" : "draft");
     setShowSettings(false);
     setTocOpen(false);
-    contentRef.current?.scrollTo(0, 0);
-  }, [chapter]);
+    setSelPara(null);
+    setPolishOpen(false);
+    setPolished(null);
+    setPolishErr("");
+    const target = !restoreAppliedRef.current && restoreScroll != null ? restoreScroll : 0;
+    restoreAppliedRef.current = true;
+    contentRef.current?.scrollTo(0, target);
+  }, [chapter, restoreScroll]);
 
-  // Esc 关闭阅读器
+  // Esc:先关润色弹层 → 再取消段落选择 → 最后才关阅读器
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (polishOpen) { closePolish(); return; }
+      if (selPara != null) { setSelPara(null); return; }
+      onClose();
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, polishOpen, selPara]);
+
+  // 卸载时清掉滚动防抖定时器
+  useEffect(() => () => {
+    if (scrollTimerRef.current) window.clearTimeout(scrollTimerRef.current);
+  }, []);
+
+  // 滚动 ~500ms 防抖后上报位置(全书模式父级持久化到 localStorage)
+  const handleContentScroll = () => {
+    if (!onScrollPos || !chapter) return;
+    if (scrollTimerRef.current) window.clearTimeout(scrollTimerRef.current);
+    scrollTimerRef.current = window.setTimeout(() => {
+      onScrollPos(chapter.chapter_number, contentRef.current?.scrollTop ?? 0);
+    }, 500);
+  };
+
+  const curText = chapter
+    ? (tab === "final" ? chapter.final_content || chapter.draft_content : chapter.draft_content)
+    : "";
+  const paras = curText ? splitParas(curText) : [];
+  const selText = selPara != null && selPara < paras.length ? paras[selPara] : null;
+  // 只在定稿 tab 且有定稿正文时允许点选润色(替换目标是 final_content)
+  const polishEnabled = !!polishCtx && tab === "final" && !!chapter?.final_content;
+
+  async function doPolish() {
+    if (!polishCtx || selText == null) return;
+    setPolishing(true); setPolishErr("");
+    try {
+      const r = await api.polishFragment(
+        polishCtx.pid, polishCtx.chapterNumber, selText, direction.trim(),
+      );
+      setPolished(r.polished);
+    } catch (e) {
+      setPolishErr(e instanceof Error ? e.message : String(e));
+    } finally { setPolishing(false); }
+  }
+
+  async function applyPolish() {
+    if (!polishCtx || !chapter || selText == null || polished == null) return;
+    const source = chapter.final_content;
+    // exact match 替换第一次出现;找不到(正文已被别处改过)则报错提示
+    const at = source.indexOf(selText);
+    if (at < 0) {
+      setPolishErr("在定稿正文中找不到该段落(可能已被修改),请关闭阅读器重试");
+      return;
+    }
+    const newContent = source.slice(0, at) + polished + source.slice(at + selText.length);
+    setApplyStage("保存正文…"); setPolishErr("");
+    try {
+      const updated = await api.editChapterContent(polishCtx.pid, polishCtx.chapterNumber, newContent);
+      polishCtx.onApplied(updated);
+      // 与写作页手动保存一致:替换后重抽取 + 重建下游摘要 + 向量库
+      setApplyStage("同步一致性引擎…");
+      const { job_id } = await api.reExtractAsync(polishCtx.pid, polishCtx.chapterNumber);
+      await pollJob(job_id, { onStage: (s) => setApplyStage(s || "同步一致性引擎…") });
+      closePolish();
+      setSelPara(null);
+    } catch (e) {
+      setPolishErr(e instanceof Error ? e.message : String(e));
+    } finally { setApplyStage(""); }
+  }
 
   return (
     <div className="reader-overlay" onClick={onClose}>
@@ -138,11 +262,11 @@ export default function Reader({
                 <div className="reader-tabs">
                   <span
                     className={"reader-tab" + (tab === "final" ? " on" : "")}
-                    onClick={() => setTab("final")}
+                    onClick={() => { setTab("final"); setSelPara(null); closePolish(); }}
                   >定稿</span>
                   <span
                     className={"reader-tab" + (tab === "draft" ? " on" : "")}
-                    onClick={() => setTab("draft")}
+                    onClick={() => { setTab("draft"); setSelPara(null); closePolish(); }}
                   >草稿</span>
                 </div>
               )}
@@ -215,13 +339,29 @@ export default function Reader({
                   ))}
                 </div>
               )}
-              <div className="reader-content" ref={contentRef}>
+              <div
+                className="reader-content"
+                ref={contentRef}
+                onScroll={handleContentScroll}
+                onClick={(e) => {
+                  // 点正文空白处取消段落选择(点段落本身已 stopPropagation)
+                  if (e.target === e.currentTarget) setSelPara(null);
+                }}
+              >
                 <Paragraphs
-                  text={tab === "final"
-                    ? chapter.final_content || chapter.draft_content
-                    : chapter.draft_content}
+                  text={curText}
+                  selectedIdx={polishEnabled ? selPara : null}
+                  onSelect={polishEnabled ? (i) => setSelPara(i) : undefined}
                 />
               </div>
+              {polishEnabled && selPara != null && !polishOpen && (
+                <div className="para-tools">
+                  <button className="btn-sm primary" onClick={() => setPolishOpen(true)}>
+                    ✨ 润色此段
+                  </button>
+                  <button className="btn-sm" onClick={() => setSelPara(null)}>取消选择</button>
+                </div>
+              )}
             </div>
             <div className="reader-nav">
               <button disabled={!hasPrev || loading} onClick={onPrev}>
@@ -231,6 +371,65 @@ export default function Reader({
                 下一章 →
               </button>
             </div>
+            {polishOpen && selText != null && (
+              <div className="reader-polish" onClick={() => { if (!polishing && !applyStage) closePolish(); }}>
+                <div className="reader-polish-panel" onClick={(e) => e.stopPropagation()}>
+                  {polished == null ? (
+                    <>
+                      <div className="rp-label">选中段落</div>
+                      <div className="rp-orig">{selText}</div>
+                      <div className="rp-label">润色方向(只改文笔,不动情节)</div>
+                      <input
+                        type="text"
+                        value={direction}
+                        placeholder="如:更紧张一些 / 去掉 AI 腔"
+                        onChange={(e) => setDirection(e.target.value)}
+                      />
+                      <div className="chips rp-chips">
+                        {DIRECTION_CHIPS.map((c) => (
+                          <span
+                            key={c}
+                            className={"chip" + (direction === c ? " on" : "")}
+                            onClick={() => setDirection(c)}
+                          >{c}</span>
+                        ))}
+                      </div>
+                      <div className="rp-actions">
+                        <button className="primary" disabled={polishing} onClick={doPolish}>
+                          {polishing && <span className="spin" />}开始润色
+                        </button>
+                        <button disabled={polishing} onClick={closePolish}>取消</button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="rp-compare">
+                        <div className="rp-col">
+                          <div className="rp-label">原文</div>
+                          <div className="rp-text">{selText}</div>
+                        </div>
+                        <div className="rp-col">
+                          <div className="rp-label">润色后</div>
+                          <div className="rp-text rp-new">{polished}</div>
+                        </div>
+                      </div>
+                      <div className="rp-actions">
+                        <button className="primary" disabled={!!applyStage} onClick={applyPolish}>
+                          {applyStage && <span className="spin" />}
+                          {applyStage || "替换原文"}
+                        </button>
+                        <button
+                          disabled={!!applyStage}
+                          onClick={() => { setPolished(null); setPolishErr(""); }}
+                        >重新润色</button>
+                        <button disabled={!!applyStage} onClick={closePolish}>取消</button>
+                      </div>
+                    </>
+                  )}
+                  {polishErr && <div className="msg-err rp-err">{polishErr}</div>}
+                </div>
+              </div>
+            )}
           </>
         ) : (
           <div className="reader-content muted"><span className="spin" />加载正文…</div>

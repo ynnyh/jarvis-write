@@ -21,6 +21,7 @@ from app.prompts.polish import (
     _DEAI_RULES,
     FACT_LOCK_PROMPT,
     FACT_VERIFY_PROMPT,
+    FRAGMENT_POLISH_PROMPT,
     POLISH_PROMPT,
 )
 from app.schemas.tendency import Tendency
@@ -28,6 +29,39 @@ from app.schemas.tendency import Tendency
 logger = logging.getLogger("jarvis-write.polish")
 
 _MAX_POLISH_CHARS = 12000
+_MAX_FRAGMENT_CHARS = 2000
+
+
+async def polish_fragment(
+    fragment: str,
+    direction: str = "",
+    chapter_summary: str = "",
+) -> dict:
+    """润色阅读时点选的单个段落(轻量单次调用,带用户润色方向)。
+
+    与 polish_text 的事实锁定三段式不同,片段很短,直接靠 prompt 铁律
+    约束"只改文笔不改情节",省去事实抽取/校验两轮调用。
+    返回 {polished, notes}。
+    """
+    fragment = fragment.strip()
+    if not fragment:
+        raise ValueError("待润色片段为空")
+    if len(fragment) > _MAX_FRAGMENT_CHARS:
+        raise ValueError(
+            f"片段最长 {_MAX_FRAGMENT_CHARS} 字,当前 {len(fragment)} 字"
+        )
+
+    polished = await get_adapter_for(Task.POLISH).ask(
+        FRAGMENT_POLISH_PROMPT.format(
+            chapter_summary=chapter_summary.strip() or "(无)",
+            direction=direction.strip() or "整体更自然流畅",
+            fragment=fragment,
+        )
+    )
+    polished = polished.strip()
+    if not polished:
+        raise ValueError("模型未返回润色结果,请重试")
+    return {"polished": polished, "notes": None}
 
 
 async def polish_text(

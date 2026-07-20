@@ -757,3 +757,94 @@ def test_invite_codes_require_admin(client):
         "/api/admin/invite-codes", headers=user, json={"code": "HACK-123"}
     ).status_code == 403
     assert client.get("/api/admin/invite-codes").status_code == 401
+
+
+# ---------- 阅读中片段润色(polish-fragment) ----------
+
+
+def _create_chapter_with_content(client: TestClient, headers: dict, title: str = "润色书") -> dict:
+    """建项目 + 直接落库一章带定稿正文(走 API 生成依赖 LLM,太慢)。"""
+    from app.db.models import Chapter, Outline
+    from app.db.session import SessionLocal
+
+    p = _create_project(client, headers, title)
+    db = SessionLocal()
+    try:
+        outline = Outline(project_id=p["id"], chapter_number=1, title="第一章", summary="主角进城")
+        db.add(outline)
+        db.flush()
+        db.add(Chapter(project_id=p["id"], outline_id=outline.id, chapter_number=1,
+                       final_content="他走进了城门。", status="finalized"))
+        db.commit()
+    finally:
+        db.close()
+    return p
+
+
+class _FragmentAdapter:
+    """假适配器:直接返回"润色后"文本。"""
+
+    async def ask(self, prompt, system=None):
+        return "他迈步走进了高大的城门。"
+
+
+def test_polish_fragment_ok(client):
+    """mock LLM:片段润色返回 polished;prompt 注入蓝图摘要与润色方向。"""
+    from unittest.mock import patch
+
+    headers = _auth(_register(client, "frag_user")["token"])
+    p = _create_chapter_with_content(client, headers)
+
+    captured: dict = {}
+
+    class _CaptureAdapter:
+        async def ask(self, prompt, system=None):
+            captured["prompt"] = prompt
+            return "他迈步走进了高大的城门。"
+
+    with patch("app.engines.polish.polisher.get_adapter_for", return_value=_CaptureAdapter()):
+        r = client.post(
+            f"/api/projects/{p['id']}/chapters/1/polish-fragment",
+            headers=headers,
+            json={"fragment": "他走进了城门。", "direction": "更紧张一些"},
+        )
+    assert r.status_code == 200, r.text
+    assert r.json()["polished"] == "他迈步走进了高大的城门。"
+    # 上下文与方向确实注入 prompt(防跑题约束)
+    assert "主角进城" in captured["prompt"]
+    assert "更紧张一些" in captured["prompt"]
+    assert "不得改变" in captured["prompt"]
+
+
+def test_polish_fragment_empty_400(client):
+    """空片段(含纯空白)→ 400;章节不存在 → 404。"""
+    headers = _auth(_register(client, "frag_empty")["token"])
+    p = _create_chapter_with_content(client, headers, "空片段书")
+
+    r = client.post(
+        f"/api/projects/{p['id']}/chapters/1/polish-fragment",
+        headers=headers,
+        json={"fragment": "   ", "direction": ""},
+    )
+    assert r.status_code == 400
+
+    r = client.post(
+        f"/api/projects/{p['id']}/chapters/99/polish-fragment",
+        headers=headers,
+        json={"fragment": "一段正文", "direction": ""},
+    )
+    assert r.status_code == 404
+
+
+def test_polish_fragment_not_owner_404(client):
+    """非 owner 润色他人项目片段 → 404(不泄露存在性)。"""
+    a = _auth(_register(client, "frag_a")["token"])
+    b = _auth(_register(client, "frag_b")["token"])
+    p = _create_chapter_with_content(client, a, "别人的书")
+
+    r = client.post(
+        f"/api/projects/{p['id']}/chapters/1/polish-fragment",
+        headers=b,
+        json={"fragment": "他走进了城门。", "direction": "更生动"},
+    )
+    assert r.status_code == 404

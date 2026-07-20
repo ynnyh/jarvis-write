@@ -276,6 +276,11 @@ export default function ChaptersPanel({ pid, outlines }: Props) {
           onPrev={() => prevNum != null && openReader(prevNum)}
           onNext={() => nextNum != null && openReader(nextNum)}
           onClose={() => setReader(null)}
+          polishCtx={{
+            pid,
+            chapterNumber: reader?.chapter_number ?? 0,
+            onApplied: (updated) => { setReader(updated); reload(); },
+          }}
         />
       )}
     </div>

@@ -4,6 +4,7 @@
 
 POST /api/projects/{id}/polish/chapter/{n}   润色整章(不落库,返回润色稿供预览)
 POST /api/projects/{id}/polish/chapter/{n}/apply  把上一次润色稿写回定稿
+POST /api/projects/{id}/chapters/{n}/polish-fragment  阅读时点选段落润色(带用户方向)
 POST /api/polish/segment                     润色任意选段(前端选中文本直接传)
 POST /api/polish/ai-flavor                   只做 AI 味检测(不调 LLM,秒回)
 """
@@ -15,9 +16,9 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_project_or_404
 from app.auth import get_current_user
-from app.db.models import Chapter
+from app.db.models import Chapter, Outline
 from app.db.session import get_db
-from app.engines.polish import ai_flavor_report, polish_text
+from app.engines.polish import ai_flavor_report, polish_fragment, polish_text
 from app.schemas.tendency import Tendency
 
 router = APIRouter(tags=["polish"], dependencies=[Depends(get_current_user)])
@@ -109,6 +110,62 @@ async def polish_segment(req: SegmentPolishRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return PolishResult(**result)
+
+
+# ---------- 阅读中片段润色(带润色方向) ----------
+
+_MAX_FRAGMENT_CHARS = 2000
+
+
+class FragmentPolishRequest(BaseModel):
+    fragment: str = ""
+    direction: str = Field(default="", max_length=200)
+
+
+class FragmentPolishResult(BaseModel):
+    polished: str
+    notes: str | None = None
+
+
+@router.post(
+    "/api/projects/{project_id}/chapters/{n}/polish-fragment",
+    response_model=FragmentPolishResult,
+)
+async def polish_chapter_fragment(
+    project_id: int, n: int, req: FragmentPolishRequest, db: Session = Depends(get_db)
+):
+    """润色章节中的单个段落(阅读器点选):注入本章蓝图摘要作上下文,
+    只改文笔不改情节,遵循用户润色方向。不落库,由前端确认后替换。"""
+    get_project_or_404(db, project_id)
+    ch = (
+        db.query(Chapter)
+        .filter(Chapter.project_id == project_id, Chapter.chapter_number == n)
+        .first()
+    )
+    if ch is None:
+        raise HTTPException(status_code=404, detail=f"第 {n} 章尚未生成")
+
+    fragment = req.fragment.strip()
+    if not fragment:
+        raise HTTPException(status_code=400, detail="待润色片段不能为空")
+    if len(fragment) > _MAX_FRAGMENT_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"片段最长 {_MAX_FRAGMENT_CHARS} 字,当前 {len(fragment)} 字",
+        )
+
+    outline = (
+        db.query(Outline)
+        .filter(Outline.project_id == project_id, Outline.chapter_number == n)
+        .first()
+    )
+    try:
+        result = await polish_fragment(
+            fragment, req.direction, outline.summary if outline else ""
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return FragmentPolishResult(**result)
 
 
 @router.post("/api/polish/ai-flavor")

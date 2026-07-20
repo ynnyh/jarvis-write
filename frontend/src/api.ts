@@ -195,6 +195,9 @@ export const api = {
     req<{ status: string }>("POST", `/api/projects/${pid}/polish/chapter/${n}/apply`, { polished_text }),
   polishSegment: (pid: number, text: string, tendency: Tendency) =>
     req<PolishResult>("POST", `/api/projects/${pid}/polish/segment`, { text, tendency }, LLM_TIMEOUT),
+  polishFragment: (pid: number, n: number, fragment: string, direction: string) =>
+    req<{ polished: string; notes: string | null }>(
+      "POST", `/api/projects/${pid}/chapters/${n}/polish-fragment`, { fragment, direction }, LLM_TIMEOUT),
   aiFlavor: (text: string) =>
     req<{ score: number; summary: string; hits: Record<string, number> }>("POST", "/api/polish/ai-flavor", { text }),
 
