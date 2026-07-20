@@ -8,6 +8,7 @@ import OutlinePanel from "../panels/OutlinePanel";
 import ChaptersPanel from "../panels/ChaptersPanel";
 import PolishPanel from "../panels/PolishPanel";
 import BoardPanel from "../panels/BoardPanel";
+import BookReader from "../components/BookReader";
 
 export type Step = "inspire" | "arch" | "outline" | "write" | "polish" | "board";
 
@@ -29,6 +30,8 @@ export default function ProjectPage() {
   const [chapters, setChapters] = useState<ChapterBrief[]>([]);
   const [step, setStep] = useState<Step | null>(null);
   const [err, setErr] = useState("");
+  // 全书阅读模式(有已生成章节时,标题行出现「阅读全书」入口)
+  const [readingBook, setReadingBook] = useState(false);
 
   const reload = useCallback(async () => {
     const p = await api.getProject(pid);
@@ -64,6 +67,11 @@ export default function ProjectPage() {
       <h1>{project.title}
         <span className="badge">{project.status}</span>
         {project.genre && <span className="badge">{project.genre}</span>}
+        {chapters.length > 0 && (
+          <button className="primary read-book-btn" onClick={() => setReadingBook(true)}>
+            阅读全书
+          </button>
+        )}
       </h1>
       <div className="stat-strip">
         <div className="stat">主题<b className="stat-topic">{project.topic || "(未定,先去灵感区)"}</b></div>
@@ -113,6 +121,15 @@ export default function ProjectPage() {
           )}
         </div>
       </div>
+
+      {readingBook && chapters.length > 0 && (
+        <BookReader
+          pid={pid}
+          outlines={outlines}
+          chapters={chapters}
+          onClose={() => setReadingBook(false)}
+        />
+      )}
     </>
   );
 }

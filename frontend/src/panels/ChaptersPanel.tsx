@@ -5,54 +5,9 @@ import {
 } from "../api";
 import { pollJob } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
+import Reader, { Paragraphs, STATUS_CN } from "../components/Reader";
 
 interface Props { pid: number; project: Project; outlines: Outline[]; }
-
-const STATUS_CN: Record<string, string> = {
-  empty: "未生成", drafting: "生成中", drafted: "有草稿",
-  finalized: "已定稿", stale: "大纲已变",
-};
-
-/** 正文按空行/换行分段渲染成 <p>,保证可读性 */
-function Paragraphs({ text }: { text: string }) {
-  const paras = text.split(/\n+/).map((s) => s.trim()).filter(Boolean);
-  if (!paras.length) return <div className="muted">(空)</div>;
-  return <>{paras.map((p, i) => <p key={i}>{p}</p>)}</>;
-}
-
-/** 阅读器个性化设置:背景主题/字体/字号,localStorage 持久化,不登录、跨项目生效 */
-type ReaderTheme = "paper" | "kraft" | "night";
-type ReaderFont = "song" | "hei" | "kai";
-type ReaderSize = "sm" | "md" | "lg";
-interface ReaderPrefs { theme: ReaderTheme; font: ReaderFont; size: ReaderSize; }
-const READER_PREFS_KEY = "reader-prefs";
-const DEFAULT_READER_PREFS: ReaderPrefs = { theme: "kraft", font: "song", size: "md" };
-
-function loadReaderPrefs(): ReaderPrefs {
-  try {
-    const raw = localStorage.getItem(READER_PREFS_KEY);
-    if (!raw) return DEFAULT_READER_PREFS;
-    return { ...DEFAULT_READER_PREFS, ...JSON.parse(raw) };
-  } catch {
-    return DEFAULT_READER_PREFS;
-  }
-}
-
-const THEME_OPTIONS: { v: ReaderTheme; label: string }[] = [
-  { v: "paper", label: "纸白" },
-  { v: "kraft", label: "牛皮纸" },
-  { v: "night", label: "暗夜" },
-];
-const FONT_OPTIONS: { v: ReaderFont; label: string; cls: string }[] = [
-  { v: "song", label: "宋体", cls: "rs-font-song" },
-  { v: "hei", label: "黑体", cls: "rs-font-hei" },
-  { v: "kai", label: "楷体", cls: "rs-font-kai" },
-];
-const SIZE_OPTIONS: { v: ReaderSize; label: string }[] = [
-  { v: "sm", label: "小" },
-  { v: "md", label: "标准" },
-  { v: "lg", label: "大" },
-];
 
 export default function ChaptersPanel({ pid, outlines }: Props) {
   const [chapters, setChapters] = useState<ChapterBrief[]>([]);
@@ -64,34 +19,12 @@ export default function ChaptersPanel({ pid, outlines }: Props) {
   const [showTendency, setShowTendency] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
-  // 阅读器(全屏遮罩):当前阅读章节 + 定稿/草稿 tab
+  // 阅读器(全屏遮罩,共用组件 Reader):当前阅读章节
   const [reader, setReader] = useState<ChapterDetail | null>(null);
   const [readerLoading, setReaderLoading] = useState(false);
-  const [readerTab, setReaderTab] = useState<"final" | "draft">("final");
-  // 阅读器设置:主题/字体/字号 + 设置面板开合
-  const [readerPrefs, setReaderPrefs] = useState<ReaderPrefs>(loadReaderPrefs);
-  const [showReaderSettings, setShowReaderSettings] = useState(false);
-  const settingsRef = useRef<HTMLDivElement>(null);
   // 组件卸载时中止轮询,防止卸载后继续 setState
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
-
-  // 偏好变化即写入 localStorage(隐私模式等写失败时静默忽略)
-  useEffect(() => {
-    try { localStorage.setItem(READER_PREFS_KEY, JSON.stringify(readerPrefs)); } catch { /* ignore */ }
-  }, [readerPrefs]);
-
-  // 设置面板:点击面板外任意处收起
-  useEffect(() => {
-    if (!showReaderSettings) return;
-    const onDown = (e: MouseEvent) => {
-      if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) {
-        setShowReaderSettings(false);
-      }
-    };
-    window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
-  }, [showReaderSettings]);
 
   const reload = useCallback(async () => {
     setChapters(await api.listChapters(pid));
@@ -108,13 +41,11 @@ export default function ChaptersPanel({ pid, outlines }: Props) {
     try { setCurrent(await api.getChapter(pid, n)); } catch (e) { setErr(String(e)); }
   }
 
-  // 阅读器:打开/翻章都走这里;默认看定稿,无定稿看草稿
+  // 阅读器:打开/翻章都走这里(tab/偏好由 Reader 内部管理)
   async function openReader(n: number) {
-    setReaderLoading(true); setErr(""); setShowReaderSettings(false);
+    setReaderLoading(true); setErr("");
     try {
-      const detail = await api.getChapter(pid, n);
-      setReader(detail);
-      setReaderTab(detail.final_content ? "final" : "draft");
+      setReader(await api.getChapter(pid, n));
     } catch (e) { setErr(String(e)); } finally { setReaderLoading(false); }
   }
 
@@ -127,14 +58,6 @@ export default function ChaptersPanel({ pid, outlines }: Props) {
   const readerOutline = reader
     ? outlines.find((o) => o.chapter_number === reader.chapter_number)
     : null;
-
-  // Esc 关闭阅读器
-  useEffect(() => {
-    if (!reader) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setReader(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [reader]);
 
   async function saveEdit() {
     if (!current) return;
@@ -302,106 +225,16 @@ export default function ChaptersPanel({ pid, outlines }: Props) {
       </div>
 
       {(reader || readerLoading) && (
-        <div className="reader-overlay" onClick={() => setReader(null)}>
-          <div
-            className="reader"
-            data-theme={readerPrefs.theme}
-            data-font={readerPrefs.font}
-            data-size={readerPrefs.size}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {reader ? (
-              <>
-                <div className="reader-head">
-                  <h2 className="reader-title">
-                    第{reader.chapter_number}章 {readerOutline?.title ?? ""}
-                    <span className={"badge " + (reader.is_stale ? "err" : reader.status === "finalized" ? "ok" : "")}>
-                      {reader.is_stale ? "大纲已变" : STATUS_CN[reader.status] ?? reader.status}
-                    </span>
-                    <span className="muted"> {reader.word_count}字</span>
-                  </h2>
-                  {reader.draft_content && reader.draft_content !== reader.final_content && (
-                    <div className="reader-tabs">
-                      <span
-                        className={"reader-tab" + (readerTab === "final" ? " on" : "")}
-                        onClick={() => setReaderTab("final")}
-                      >定稿</span>
-                      <span
-                        className={"reader-tab" + (readerTab === "draft" ? " on" : "")}
-                        onClick={() => setReaderTab("draft")}
-                      >草稿</span>
-                    </div>
-                  )}
-                  <div className="reader-settings" ref={settingsRef}>
-                    <button className="btn-sm" onClick={() => setShowReaderSettings((v) => !v)}>
-                      设置
-                    </button>
-                    {showReaderSettings && (
-                      <div className="reader-settings-pop">
-                        <div className="rs-group">
-                          <div className="rs-label">背景</div>
-                          <div className="chips">
-                            {THEME_OPTIONS.map((o) => (
-                              <span
-                                key={o.v}
-                                className={"chip" + (readerPrefs.theme === o.v ? " on" : "")}
-                                onClick={() => setReaderPrefs((p) => ({ ...p, theme: o.v }))}
-                              >{o.label}</span>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="rs-group">
-                          <div className="rs-label">字体</div>
-                          <div className="chips">
-                            {FONT_OPTIONS.map((o) => (
-                              <span
-                                key={o.v}
-                                className={"chip " + o.cls + (readerPrefs.font === o.v ? " on" : "")}
-                                onClick={() => setReaderPrefs((p) => ({ ...p, font: o.v }))}
-                              >{o.label}</span>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="rs-group">
-                          <div className="rs-label">字号</div>
-                          <div className="chips">
-                            {SIZE_OPTIONS.map((o) => (
-                              <span
-                                key={o.v}
-                                className={"chip" + (readerPrefs.size === o.v ? " on" : "")}
-                                onClick={() => setReaderPrefs((p) => ({ ...p, size: o.v }))}
-                              >{o.label}</span>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <button onClick={() => setReader(null)}>关闭</button>
-                </div>
-                <div className="reader-content">
-                  <Paragraphs
-                    text={readerTab === "final"
-                      ? reader.final_content || reader.draft_content
-                      : reader.draft_content}
-                  />
-                </div>
-                <div className="reader-nav">
-                  <button disabled={prevNum == null || readerLoading}
-                    onClick={() => prevNum != null && openReader(prevNum)}>
-                    ← 上一章
-                  </button>
-                  <button disabled={nextNum == null || readerLoading}
-                    onClick={() => nextNum != null && openReader(nextNum)}>
-                    下一章 →
-                  </button>
-                </div>
-              </>
-            ) : (
-              <div className="reader-content muted"><span className="spin" />加载正文…</div>
-            )}
-          </div>
-        </div>
+        <Reader
+          loading={readerLoading}
+          chapter={reader}
+          title={readerOutline?.title}
+          hasPrev={prevNum != null}
+          hasNext={nextNum != null}
+          onPrev={() => prevNum != null && openReader(prevNum)}
+          onNext={() => nextNum != null && openReader(nextNum)}
+          onClose={() => setReader(null)}
+        />
       )}
     </div>
   );

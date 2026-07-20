@@ -694,6 +694,43 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 }
 .reader-nav button { margin-left: 0; }
 
+/* ---- 全书阅读:更宽版面 + 左侧章节目录(窄屏收为抽屉,见底部媒体查询) ---- */
+.reader-book { max-width: 1080px; }
+.reader-body { flex: 1; display: flex; min-height: 0; position: relative; }
+.reader-toc {
+  width: 216px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  padding: 10px;
+  -webkit-overflow-scrolling: touch;
+}
+.reader-toc-item {
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.reader-toc-item:not(.off):hover { background: var(--surface-2); color: var(--text); }
+.reader-toc-item.on { background: var(--brand-weak); color: var(--brand); font-weight: 600; }
+.reader-toc-item.off { opacity: 0.45; cursor: default; }
+/* 窄屏「目录」按钮:默认隐藏,≤640px 显示 */
+.reader-toc-btn { display: none; }
+/* 全书加载失败提示:浮在阅读器遮罩之上 */
+.book-err {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: calc(var(--z-reader) + 1);
+  margin: 0;
+  max-width: calc(100vw - 24px);
+}
+/* 「阅读全书」入口:跟在项目标题后面 */
+.read-book-btn { margin-left: 14px; vertical-align: middle; }
+
 /* ---- 阅读器设置弹层:背景 / 字体 / 字号 ---- */
 .reader-settings { position: relative; }
 .reader-settings-pop {
@@ -791,4 +828,17 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
   /* 窄屏:标题让位,设置弹层占满安全宽度 */
   .reader-title { min-width: 0; font-size: var(--fs-md); }
   .reader-settings-pop { position: fixed; top: 56px; right: 12px; left: 12px; width: auto; }
+
+  /* 全书阅读:目录收成左侧抽屉,点头部「目录」按钮开合,不挤正文 */
+  .reader-toc-btn { display: inline-block; flex-shrink: 0; }
+  .reader-toc { display: none; }
+  .reader-toc.open {
+    display: block;
+    position: absolute;
+    top: 0; bottom: 0; left: 0;
+    width: min(260px, 82%);
+    background: var(--surface);
+    box-shadow: var(--shadow-lg);
+    z-index: 2;
+  }
 }
