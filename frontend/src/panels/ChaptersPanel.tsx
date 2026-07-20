@@ -20,6 +20,40 @@ function Paragraphs({ text }: { text: string }) {
   return <>{paras.map((p, i) => <p key={i}>{p}</p>)}</>;
 }
 
+/** 阅读器个性化设置:背景主题/字体/字号,localStorage 持久化,不登录、跨项目生效 */
+type ReaderTheme = "paper" | "kraft" | "night";
+type ReaderFont = "song" | "hei" | "kai";
+type ReaderSize = "sm" | "md" | "lg";
+interface ReaderPrefs { theme: ReaderTheme; font: ReaderFont; size: ReaderSize; }
+const READER_PREFS_KEY = "reader-prefs";
+const DEFAULT_READER_PREFS: ReaderPrefs = { theme: "kraft", font: "song", size: "md" };
+
+function loadReaderPrefs(): ReaderPrefs {
+  try {
+    const raw = localStorage.getItem(READER_PREFS_KEY);
+    if (!raw) return DEFAULT_READER_PREFS;
+    return { ...DEFAULT_READER_PREFS, ...JSON.parse(raw) };
+  } catch {
+    return DEFAULT_READER_PREFS;
+  }
+}
+
+const THEME_OPTIONS: { v: ReaderTheme; label: string }[] = [
+  { v: "paper", label: "纸白" },
+  { v: "kraft", label: "牛皮纸" },
+  { v: "night", label: "暗夜" },
+];
+const FONT_OPTIONS: { v: ReaderFont; label: string; cls: string }[] = [
+  { v: "song", label: "宋体", cls: "rs-font-song" },
+  { v: "hei", label: "黑体", cls: "rs-font-hei" },
+  { v: "kai", label: "楷体", cls: "rs-font-kai" },
+];
+const SIZE_OPTIONS: { v: ReaderSize; label: string }[] = [
+  { v: "sm", label: "小" },
+  { v: "md", label: "标准" },
+  { v: "lg", label: "大" },
+];
+
 export default function ChaptersPanel({ pid, outlines }: Props) {
   const [chapters, setChapters] = useState<ChapterBrief[]>([]);
   const [current, setCurrent] = useState<ChapterDetail | null>(null);
@@ -34,9 +68,30 @@ export default function ChaptersPanel({ pid, outlines }: Props) {
   const [reader, setReader] = useState<ChapterDetail | null>(null);
   const [readerLoading, setReaderLoading] = useState(false);
   const [readerTab, setReaderTab] = useState<"final" | "draft">("final");
+  // 阅读器设置:主题/字体/字号 + 设置面板开合
+  const [readerPrefs, setReaderPrefs] = useState<ReaderPrefs>(loadReaderPrefs);
+  const [showReaderSettings, setShowReaderSettings] = useState(false);
+  const settingsRef = useRef<HTMLDivElement>(null);
   // 组件卸载时中止轮询,防止卸载后继续 setState
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  // 偏好变化即写入 localStorage(隐私模式等写失败时静默忽略)
+  useEffect(() => {
+    try { localStorage.setItem(READER_PREFS_KEY, JSON.stringify(readerPrefs)); } catch { /* ignore */ }
+  }, [readerPrefs]);
+
+  // 设置面板:点击面板外任意处收起
+  useEffect(() => {
+    if (!showReaderSettings) return;
+    const onDown = (e: MouseEvent) => {
+      if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) {
+        setShowReaderSettings(false);
+      }
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [showReaderSettings]);
 
   const reload = useCallback(async () => {
     setChapters(await api.listChapters(pid));
@@ -55,7 +110,7 @@ export default function ChaptersPanel({ pid, outlines }: Props) {
 
   // 阅读器:打开/翻章都走这里;默认看定稿,无定稿看草稿
   async function openReader(n: number) {
-    setReaderLoading(true); setErr("");
+    setReaderLoading(true); setErr(""); setShowReaderSettings(false);
     try {
       const detail = await api.getChapter(pid, n);
       setReader(detail);
@@ -248,7 +303,13 @@ export default function ChaptersPanel({ pid, outlines }: Props) {
 
       {(reader || readerLoading) && (
         <div className="reader-overlay" onClick={() => setReader(null)}>
-          <div className="reader" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="reader"
+            data-theme={readerPrefs.theme}
+            data-font={readerPrefs.font}
+            data-size={readerPrefs.size}
+            onClick={(e) => e.stopPropagation()}
+          >
             {reader ? (
               <>
                 <div className="reader-head">
@@ -271,6 +332,51 @@ export default function ChaptersPanel({ pid, outlines }: Props) {
                       >草稿</span>
                     </div>
                   )}
+                  <div className="reader-settings" ref={settingsRef}>
+                    <button className="btn-sm" onClick={() => setShowReaderSettings((v) => !v)}>
+                      设置
+                    </button>
+                    {showReaderSettings && (
+                      <div className="reader-settings-pop">
+                        <div className="rs-group">
+                          <div className="rs-label">背景</div>
+                          <div className="chips">
+                            {THEME_OPTIONS.map((o) => (
+                              <span
+                                key={o.v}
+                                className={"chip" + (readerPrefs.theme === o.v ? " on" : "")}
+                                onClick={() => setReaderPrefs((p) => ({ ...p, theme: o.v }))}
+                              >{o.label}</span>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="rs-group">
+                          <div className="rs-label">字体</div>
+                          <div className="chips">
+                            {FONT_OPTIONS.map((o) => (
+                              <span
+                                key={o.v}
+                                className={"chip " + o.cls + (readerPrefs.font === o.v ? " on" : "")}
+                                onClick={() => setReaderPrefs((p) => ({ ...p, font: o.v }))}
+                              >{o.label}</span>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="rs-group">
+                          <div className="rs-label">字号</div>
+                          <div className="chips">
+                            {SIZE_OPTIONS.map((o) => (
+                              <span
+                                key={o.v}
+                                className={"chip" + (readerPrefs.size === o.v ? " on" : "")}
+                                onClick={() => setReaderPrefs((p) => ({ ...p, size: o.v }))}
+                              >{o.label}</span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                   <button onClick={() => setReader(null)}>关闭</button>
                 </div>
                 <div className="reader-content">

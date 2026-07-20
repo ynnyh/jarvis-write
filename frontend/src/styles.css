@@ -559,6 +559,7 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 }
 .reader {
   background: var(--surface);
+  color: var(--text);
   width: 100%;
   max-width: 820px;
   height: 100%;
@@ -566,7 +567,70 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
   flex-direction: column;
   overflow: hidden;
   box-shadow: var(--shadow-lg);
+  /* 阅读排版默认值,由 data-font / data-size 覆盖 */
+  --reader-font: var(--font-serif);
+  --reader-fs: 17px;
 }
+
+/* ---- 阅读器背景主题:在 reader 作用域内覆盖设计令牌,头部/tabs/导航/徽章随之联动 ---- */
+.reader[data-theme="paper"] {
+  --surface: #fbfaf7;
+  --surface-2: #f1efe9;
+  --line: #e6e3da;
+  --line-strong: #d5d1c5;
+  --text: #2a2b2e;
+  --text-2: #60636a;
+  --text-3: #9a9da4;
+}
+.reader[data-theme="kraft"] {
+  --surface: #f3e8cf;
+  --surface-2: #e9dbbd;
+  --line: #dccba6;
+  --line-strong: #c9b78d;
+  --text: #3f3226;
+  --text-2: #6f5f4b;
+  --text-3: #9a8871;
+  --shadow-sm: 0 1px 2px rgba(63, 50, 38, 0.08);
+  --shadow-md: 0 1px 2px rgba(63, 50, 38, 0.08), 0 4px 12px rgba(63, 50, 38, 0.10);
+  /* 极淡纸质纹理:顶部柔光 + 细密纤维条纹,纯 CSS 无图片 */
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(255, 252, 240, 0.5) 0%, rgba(255, 252, 240, 0) 60%),
+    repeating-linear-gradient(0deg, rgba(120, 92, 50, 0.02) 0 2px, rgba(255, 255, 255, 0) 2px 4px),
+    var(--surface);
+}
+.reader[data-theme="night"] {
+  --surface: #1b1d21;
+  --surface-2: #26292f;
+  --line: #31343b;
+  --line-strong: #40444d;
+  --text: #c8ccd3;
+  --text-2: #9aa0a9;
+  --text-3: #6e747e;
+  --brand: #8b93ff;
+  --brand-weak: #272b47;
+  --ok: #55b98a;  --ok-weak: #1e2f27;
+  --err: #e06c6c; --err-weak: #352225;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+/* ---- 阅读器字体 ---- */
+.reader[data-font="song"] {
+  --reader-font: "Songti SC", "STSong", "SimSun", "Noto Serif CJK SC",
+    "Source Han Serif SC", serif;
+}
+.reader[data-font="hei"] {
+  --reader-font: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Noto Sans CJK SC", sans-serif;
+}
+.reader[data-font="kai"] {
+  --reader-font: "Kaiti SC", "STKaiti", "KaiTi", "Noto Serif CJK SC", cursive;
+}
+
+/* ---- 阅读器字号 ---- */
+.reader[data-size="sm"] { --reader-fs: 15px; }
+.reader[data-size="md"] { --reader-fs: 17px; }
+.reader[data-size="lg"] { --reader-fs: 19px; }
 .reader-head {
   display: flex;
   align-items: center;
@@ -593,13 +657,15 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
   padding: 32px 24px 48px;
   -webkit-overflow-scrolling: touch;
 }
-/* 正文:衬线、约 40 字行宽、1.85 行高 */
+/* 正文:中文书籍排版 —— 首行缩进 2em、小间距、两端对齐、行高 1.9、行宽 ≤40em */
 .reader-content p {
   max-width: 40em;
-  margin: 0 auto 1.1em;
-  font-family: var(--font-serif);
-  font-size: 16px;
-  line-height: 1.85;
+  margin: 0 auto 0.32em;
+  font-family: var(--reader-font);
+  font-size: var(--reader-fs);
+  line-height: 1.9;
+  text-align: justify;
+  text-indent: 2em;
 }
 .reader-nav {
   display: flex;
@@ -610,6 +676,29 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
   flex-shrink: 0;
 }
 .reader-nav button { margin-left: 0; }
+
+/* ---- 阅读器设置弹层:背景 / 字体 / 字号 ---- */
+.reader-settings { position: relative; }
+.reader-settings-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 5;
+  width: 248px;
+  max-width: calc(100vw - 24px);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-md);
+  padding: 12px 14px;
+}
+.rs-group + .rs-group { margin-top: 10px; }
+.rs-label { font-size: var(--fs-xs); color: var(--text-2); margin-bottom: 6px; }
+.reader-settings-pop .chip { padding: 4px 12px; font-size: var(--fs-xs); }
+/* 字体选项:chip 文字直接用对应字体预览 */
+.rs-font-song { font-family: "Songti SC", "STSong", "SimSun", "Noto Serif CJK SC", serif; }
+.rs-font-hei { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+.rs-font-kai { font-family: "Kaiti SC", "STKaiti", "KaiTi", cursive; }
 
 /* ==========================================================================
    响应式:≤900px 折叠布局;≤640px 触摸优化
@@ -679,4 +768,7 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
   .reader-head { padding: 10px 14px; }
   .reader-content { padding: 24px 16px 40px; }
   .reader-nav { padding: 10px 14px; }
+  /* 窄屏:标题让位,设置弹层占满安全宽度 */
+  .reader-title { min-width: 0; font-size: var(--fs-md); }
+  .reader-settings-pop { position: fixed; top: 56px; right: 12px; left: 12px; width: auto; }
 }
