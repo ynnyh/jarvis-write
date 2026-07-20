@@ -247,6 +247,40 @@ label.fl {
 .msg-ok { color: var(--ok); font-size: var(--fs-sm); }
 .msg-err { color: var(--err); font-size: var(--fs-sm); white-space: pre-wrap; }
 
+/* 全局引导横幅(未配置模型时,顶栏下方常驻) */
+.llm-banner {
+  background: var(--warn-weak);
+  border-bottom: 1px solid var(--warn-line);
+  color: var(--warn);
+  font-size: var(--fs-sm);
+  padding: var(--sp-2) var(--sp-5);
+  text-align: center;
+}
+.llm-banner a { color: var(--warn); font-weight: 600; margin-left: var(--sp-1); }
+
+/* ---------- AI 起名下拉(TitleSuggest) ---------- */
+.ts-wrap { position: relative; display: inline-flex; align-items: center; gap: var(--sp-2); }
+.ts-wrap .spin { margin-right: 4px; }
+.ts-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: var(--z-topbar);
+  min-width: 220px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-md);
+  padding: var(--sp-1);
+}
+.ts-item {
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.ts-item:hover { background: var(--brand-weak); color: var(--brand); }
+
 /* ---------- 徽章 / chips ---------- */
 .badge {
   display: inline-block;

@@ -12,6 +12,8 @@ const IMP_BADGE: Record<string, string> = { critical: "err", major: "warn", mino
 export default function BoardPanel({ pid, outlines }: Props) {
   const maxCh = outlines.length ? Math.max(...outlines.map((o) => o.chapter_number)) : 1;
   const [atChapter, setAtChapter] = useState(maxCh);
+  // 输入框用字符串保存原始输入(允许清空重输),仅在解析合法时才切换章节时刻
+  const [atInput, setAtInput] = useState(String(maxCh));
   const [bible, setBible] = useState<BibleSnapshot | null>(null);
   const [foreshadows, setForeshadows] = useState<ForeshadowOut[]>([]);
   const [err, setErr] = useState("");
@@ -45,8 +47,13 @@ export default function BoardPanel({ pid, outlines }: Props) {
           <span className="muted">查看任意章节时刻的世界状态</span>
           <div className="grow" />
           <span className="muted">第</span>
-          <input type="number" min={1} max={maxCh} value={atChapter} className="input-xs"
-            onChange={(e) => setAtChapter(Math.max(1, Math.min(maxCh, Number(e.target.value) || 1)))} />
+          <input type="number" min={1} max={maxCh} value={atInput} className="input-xs"
+            onChange={(e) => {
+              const v = e.target.value;
+              setAtInput(v);
+              const n = Number(v);
+              if (v.trim() !== "" && Number.isInteger(n) && n >= 1 && n <= maxCh) setAtChapter(n);
+            }} />
           <span className="muted">章时刻 · {bible?.entities_count ?? 0} 实体 / {bible?.facts.length ?? 0} 条有效事实</span>
         </div>
         {err && <div className="msg-err mt-2">{err}</div>}

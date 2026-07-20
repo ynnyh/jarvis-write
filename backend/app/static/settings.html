@@ -49,9 +49,9 @@
   .msg { font-size: 13px; }
   .msg.ok { color: var(--ok); }
   .msg.err { color: var(--err); }
-  .emb-status { display: none; font-size: 13px; margin-top: 10px; padding: 8px 12px; border-radius: 8px; }
-  .emb-status.ok { display: block; background: #ecfdf5; color: var(--ok); }
-  .emb-status.err { display: block; background: #fef2f2; color: var(--err); }
+  .test-line { display: none; font-size: 13px; margin-top: 8px; padding: 8px 12px; border-radius: 8px; line-height: 1.6; }
+  .test-line.ok { display: block; background: #ecfdf5; color: var(--ok); }
+  .test-line.err { display: block; background: #fef2f2; color: var(--err); }
   .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
 </style>
 </head>
@@ -64,6 +64,11 @@
 
 <script>
 const NAMES = { deepseek: "DeepSeek", openai: "OpenAI (GPT)", gemini: "Google Gemini" };
+const DESCS = {
+  deepseek: "DeepSeek 官方 API。注意:官方没有 embedding 接口,语义记忆会降级。",
+  openai: "OpenAI 官方及兼容中转站——用中转站(如 token 站、API 超市)就选这张卡,填中转地址和中转里的模型名(如 deepseek-v4-pro)。",
+  gemini: "Google Gemini 官方 API。",
+};
 
 // 与 SPA 共用同一份登录态(同源 localStorage)
 const TOKEN = localStorage.getItem("jarvis_token") || "";
@@ -99,6 +104,7 @@ function card(p) {
       <span class="badge ${p.has_key ? "ok" : "no"}">${p.has_key ? "已配置" : "未配置"}</span>
       ${p.is_default ? '<span class="badge">默认模型</span>' : ""}
     </div>
+    <div class="hint" style="margin-bottom:8px">${DESCS[p.provider] || ""}</div>
     <div class="row">
       <div class="field">
         <label>API Key ${p.has_key ? "(已保存:" + p.api_key_masked + ",留空则不修改)" : ""}</label>
@@ -121,11 +127,12 @@ function card(p) {
       <button data-a="test">测试连接</button>
       <label class="default-pick">
         <input type="radio" name="default_provider" data-f="is_default" ${p.is_default ? "checked" : ""}>
-        设为默认
+        设为默认(生成时优先用这张卡;只配了一张卡可不设,会自动用它)
       </label>
       <span class="msg" data-f="msg"></span>
     </div>
-    <div class="emb-status" data-f="emb"></div>`;
+    <div class="test-line" data-f="chat"></div>
+    <div class="test-line" data-f="emb"></div>`;
 
   const $ = (sel) => el.querySelector(sel);
   const msg = $('[data-f=msg]');
@@ -147,21 +154,31 @@ function card(p) {
   };
 
   $('[data-a=test]').onclick = async () => {
+    const chat = $('[data-f=chat]');
     const emb = $('[data-f=emb]');
-    emb.className = "emb-status"; emb.textContent = "";
+    // 两条独立状态行:聊天模型 / embedding,结果互不遮盖
+    chat.className = "test-line"; chat.textContent = "";
+    emb.className = "test-line"; emb.textContent = "";
     msg.className = "msg"; msg.textContent = "测试中(最长 60 秒)...";
     const res = guard(await fetch(`/api/settings/providers/${p.provider}/test`, { method: "POST", headers: authHeaders() }));
     const r = await res.json();
-    if (r.ok) { msg.className = "msg ok"; msg.textContent = `连接成功 ✓ ${r.model}:${r.reply}`; }
-    else { msg.className = "msg err"; msg.textContent = "失败: " + r.error; }
-    if (r.embedding_ok) {
-      emb.className = "emb-status ok";
-      emb.textContent = "✓ embedding 可用（语义记忆已启用）";
+    msg.className = "msg"; msg.textContent = "";
+    // 第一行:聊天模型连通性(核心结果,独立醒目)
+    if (r.ok) {
+      chat.className = "test-line ok";
+      chat.textContent = `✓ 聊天模型连通(${r.model})：${r.reply}`;
     } else {
-      emb.className = "emb-status err";
-      emb.textContent = "✗ embedding 不可用——语义记忆已降级，写作只靠最近章节。原因：" +
-        (r.embedding_error || "未知") +
-        "。如果该 provider 是 DeepSeek 官方或中转站未开放 /embeddings，属于正常现象。";
+      chat.className = "test-line err";
+      chat.textContent = "✗ 聊天模型连接失败：" + r.error;
+    }
+    // 第二行:embedding(语义记忆),失败不影响聊天结论
+    if (r.embedding_ok) {
+      emb.className = "test-line ok";
+      emb.textContent = "✓ embedding（语义记忆）可用";
+    } else {
+      emb.className = "test-line err";
+      emb.textContent = "✗ embedding（语义记忆）不可用：" + (r.embedding_error || "未知原因") +
+        "。DeepSeek 官方或中转站未开放 /embeddings 属正常现象，仅影响长期记忆（语义检索降级为只靠最近章节）。";
     }
   };
 

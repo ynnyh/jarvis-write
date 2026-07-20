@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, Project, Tendency } from "../api";
 import TendencySelector from "../components/TendencySelector";
+import TitleSuggest from "../components/TitleSuggest";
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -13,8 +14,9 @@ export default function ProjectsPage() {
 
   const [title, setTitle] = useState("");
   const [topic, setTopic] = useState("");
-  const [chapters, setChapters] = useState(10);
-  const [words, setWords] = useState(3000);
+  // 数字输入用字符串保存原始输入(允许清空),提交时才解析校验
+  const [chapters, setChapters] = useState("10");
+  const [words, setWords] = useState("3000");
   const [tendency, setTendency] = useState<Tendency>({});
 
   // 重命名编辑态:editingId 为正在改名的项目
@@ -30,14 +32,23 @@ export default function ProjectsPage() {
 
   async function create() {
     if (!title.trim()) { setErr("请填写书名"); return; }
+    // 数字字段提交时解析:空→默认值,非法/越界→提示,不在输入过程中强制弹回
+    const chNum = chapters.trim() === "" ? 10 : Number(chapters);
+    if (!Number.isInteger(chNum) || chNum < 1 || chNum > 2000) {
+      setErr("目标章节数需为 1-2000 的整数"); return;
+    }
+    const wNum = words.trim() === "" ? 3000 : Number(words);
+    if (!Number.isInteger(wNum) || wNum < 200 || wNum > 20000) {
+      setErr("每章目标字数需为 200-20000 的整数"); return;
+    }
     setBusy(true); setErr("");
     try {
       const p = await api.createProject({
         title: title.trim(),
         topic: topic.trim(),
         genre: (tendency.genre as string) ?? "",
-        target_chapters: chapters,
-        target_words_per_chapter: words,
+        target_chapters: chNum,
+        target_words_per_chapter: wNum,
         global_tendency: tendency,
       });
       nav(`/project/${p.id}`);
@@ -106,17 +117,20 @@ export default function ProjectsPage() {
           <div className="row">
             <div>
               <label className="fl">书名 *</label>
-              <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="如:霓虹深渊" />
+              <div className="input-row">
+                <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="如:霓虹深渊" />
+                <TitleSuggest topic={topic} genre={(tendency.genre as string) ?? ""} onPick={setTitle} />
+              </div>
             </div>
             <div>
               <label className="fl">目标章节数</label>
               <input type="number" value={chapters} min={1} max={2000}
-                onChange={(e) => setChapters(Number(e.target.value) || 10)} />
+                onChange={(e) => setChapters(e.target.value)} />
             </div>
             <div>
               <label className="fl">每章目标字数</label>
               <input type="number" value={words} min={200} max={20000} step={500}
-                onChange={(e) => setWords(Number(e.target.value) || 3000)} />
+                onChange={(e) => setWords(e.target.value)} />
             </div>
           </div>
           <label className="fl">核心主题 / 一句话灵感(可留空,建好后到「灵感工坊」让 AI 帮你找)</label>
@@ -152,6 +166,7 @@ export default function ProjectsPage() {
                 <div className="actions mt-2">
                   <button className="btn-sm primary" disabled={busy} onClick={() => saveRename(p.id)}>保存</button>
                   <button className="btn-sm" disabled={busy} onClick={() => setEditingId(null)}>取消</button>
+                  <TitleSuggest topic={p.topic} genre={p.genre} onPick={setEditTitle} />
                 </div>
               </div>
             ) : (

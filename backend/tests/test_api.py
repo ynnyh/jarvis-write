@@ -266,6 +266,189 @@ def test_ping_llm_reports_embedding(client):
     assert r.json()["embedding_ok"] is True
 
 
+# ---------- AI 起名 ----------
+
+class _TitleAdapter:
+    """假适配器:返回带序号/书名号/空行的混乱输出,验证解析兜底。"""
+
+    def __init__(self, text: str):
+        self._text = text
+
+    async def ask(self, prompt, system=None):
+        return self._text
+
+
+def test_title_suggestion_ok(client):
+    """AI 起名:返回去序号/去书名号后的候选书名(最多 5 个)。"""
+    from unittest.mock import patch
+
+    headers = _setup_user_with_key(client, "title_user")
+    with patch(
+        "app.api.projects.create_llm_adapter",
+        return_value=_TitleAdapter("1. 霓虹深渊\n2. 《芯片猎人》\n- 深渊之下\n\n"),
+    ):
+        r = client.post(
+            "/api/projects/title-suggestion",
+            headers=headers,
+            json={"topic": "义体维修师捡到罪证芯片", "genre": "赛博朋克"},
+        )
+    assert r.status_code == 200, r.text
+    assert r.json()["titles"] == ["霓虹深渊", "芯片猎人", "深渊之下"]
+
+
+def test_title_suggestion_requires_key(client):
+    """未配置任何 key 时返回 400,并提示去设置页。"""
+    headers = _auth(_register(client, "title_nokey")["token"])
+    r = client.post(
+        "/api/projects/title-suggestion",
+        headers=headers,
+        json={"topic": "随便", "genre": ""},
+    )
+    assert r.status_code == 400
+    assert "尚未配置模型" in r.json()["detail"]
+
+
+def test_title_suggestion_llm_failure(client):
+    """LLM 调用抛错 → 502,带原因;返回空 → 502 提示重试。"""
+    from unittest.mock import patch
+
+    headers = _setup_user_with_key(client, "title_fail_user")
+
+    class _BoomAdapter:
+        async def ask(self, prompt, system=None):
+            raise RuntimeError("connection refused")
+
+    with patch("app.api.projects.create_llm_adapter", return_value=_BoomAdapter()):
+        r = client.post(
+            "/api/projects/title-suggestion",
+            headers=headers,
+            json={"topic": "t", "genre": ""},
+        )
+    assert r.status_code == 502
+    assert "connection refused" in r.json()["detail"]
+
+    with patch(
+        "app.api.projects.create_llm_adapter", return_value=_TitleAdapter("\n  \n")
+    ):
+        r = client.post(
+            "/api/projects/title-suggestion",
+            headers=headers,
+            json={"topic": "t", "genre": ""},
+        )
+    assert r.status_code == 502
+    assert "没有返回可用书名" in r.json()["detail"]
+
+
+# ---------- provider 配置状态(前端引导横幅用) ----------
+
+
+def test_provider_status_endpoint(client):
+    """未配置 key → configured=false;配置任一家(DB)后 → true。"""
+    headers = _auth(_register(client, "status_user")["token"])
+    r = client.get("/api/settings/providers/status", headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["configured"] is False
+
+    headers2 = _setup_user_with_key(client, "status_user2")
+    r = client.get("/api/settings/providers/status", headers=headers2)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["configured"] is True
+    assert body["providers"]["deepseek"] is True
+
+    # 未登录 → 401
+    assert client.get("/api/settings/providers/status").status_code == 401
+
+
+# ---------- 默认 provider 智能回落 / 空 key 清晰报错 ----------
+
+
+def _with_uid(client: TestClient, headers: dict, fn):
+    """在指定用户的 contextvar 下调用工厂函数(模拟请求上下文)。"""
+    from app.auth import current_user_id
+
+    me = client.get("/api/auth/me", headers=headers).json()
+    tok = current_user_id.set(me["id"])
+    try:
+        return fn()
+    finally:
+        current_user_id.reset(tok)
+
+
+def test_default_provider_falls_back_to_only_configured(client):
+    """只配了 openai(非默认)→ 回落到 openai,而不是死用 .env 的 deepseek。"""
+    from app.llm.factory import resolve_default_provider
+
+    headers = _auth(_register(client, "fb_openai_only")["token"])
+    r = client.put(
+        "/api/settings/providers/openai",
+        headers=headers,
+        json={"api_key": "sk-openai", "base_url": "", "model": "", "is_default": False},
+    )
+    assert r.status_code == 200, r.text
+
+    assert _with_uid(client, headers, resolve_default_provider) == "openai"
+
+
+def test_default_provider_prefers_db_default(client):
+    """DB 标了 is_default 的优先于回落:openai 有 key,deepseek 标默认 → deepseek。"""
+    from app.llm.factory import resolve_default_provider
+
+    headers = _auth(_register(client, "fb_db_default")["token"])
+    r = client.put(
+        "/api/settings/providers/openai",
+        headers=headers,
+        json={"api_key": "sk-openai", "base_url": "", "model": "", "is_default": False},
+    )
+    assert r.status_code == 200, r.text
+    r = client.put(
+        "/api/settings/providers/deepseek",
+        headers=headers,
+        json={
+            "api_key": "sk-deep",
+            "base_url": "https://api.deepseek.com",
+            "model": "deepseek-chat",
+            "is_default": True,
+        },
+    )
+    assert r.status_code == 200, r.text
+
+    assert _with_uid(client, headers, resolve_default_provider) == "deepseek"
+
+
+def test_generate_without_any_key_returns_400(client):
+    """完全没配 key 调生成类接口 → 400 清晰文案,不再是 500 LocalProtocolError。"""
+    headers = _auth(_register(client, "nokey_gen")["token"])
+    p = _create_project(client, headers)
+
+    r = client.post(
+        f"/api/projects/{p['id']}/architecture", headers=headers, json={"tendency": {}}
+    )
+    assert r.status_code == 400, r.text
+    assert "API key" in r.json()["detail"]
+    assert "模型设置" in r.json()["detail"]
+
+
+def test_create_adapter_empty_key_raises_400(client):
+    """工厂层兜底:空 key(含纯空白)直接抛 HTTPException(400)。"""
+    from fastapi import HTTPException as FastAPIHTTPException
+
+    from app.llm.factory import create_llm_adapter
+
+    headers = _auth(_register(client, "nokey_factory")["token"])
+
+    def _build():
+        return create_llm_adapter("deepseek")
+
+    try:
+        _with_uid(client, headers, _build)
+    except FastAPIHTTPException as exc:
+        assert exc.status_code == 400
+        assert "deepseek" in exc.detail
+    else:
+        raise AssertionError("空 key 应抛 HTTPException(400)")
+
+
 # ---------- 后台管理(阶段 9) ----------
 
 

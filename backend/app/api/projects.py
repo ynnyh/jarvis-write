@@ -10,6 +10,8 @@
 """
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -20,6 +22,11 @@ from app.db.models import Outline, Project
 from app.db.session import get_db
 from app.engines.pipeline.architecture import generate_architecture, save_architecture
 from app.engines.pipeline.blueprint import generate_blueprint, save_blueprint
+from app.llm.factory import (
+    create_llm_adapter,
+    resolve_default_provider,
+    resolve_provider_config,
+)
 from app.schemas.project import (
     ArchitectureOut,
     GenerateArchitectureRequest,
@@ -70,6 +77,62 @@ async def list_projects(db: Session = Depends(get_db)) -> list[Project]:
         .filter(Project.user_id == uid)
         .order_by(Project.id.desc())
     )
+
+
+# ---------- AI 起名 ----------
+
+# 书名 prompt:网文风格,只要名字不要解释
+_TITLE_PROMPT = """\
+你是网文编辑。根据下面的作品信息,起 4 个中文长篇小说书名。
+
+【主题/灵感】{topic}
+【类型】{genre}
+
+要求:
+1. 网文书名风格,有记忆点,2-12 字
+2. 4 个候选风格尽量拉开差异
+3. 只输出书名,一行一个,不要序号、不要书名号、不要任何解释
+"""
+
+
+class TitleSuggestRequest(BaseModel):
+    topic: str = ""
+    genre: str = ""
+
+
+class TitleSuggestResponse(BaseModel):
+    titles: list[str]
+
+
+@router.post("/title-suggestion", response_model=TitleSuggestResponse)
+async def suggest_titles(req: TitleSuggestRequest):
+    """AI 起名:用当前用户的默认模型生成 3-5 个候选书名。"""
+    provider = resolve_default_provider()
+    if not resolve_provider_config(provider)["api_key"]:
+        raise HTTPException(
+            status_code=400,
+            detail="尚未配置模型,请到「模型设置」页填写 API Key。",
+        )
+    prompt = _TITLE_PROMPT.format(
+        topic=req.topic.strip() or "(自由发挥)",
+        genre=req.genre.strip() or "不限",
+    )
+    adapter = create_llm_adapter(provider, max_tokens=300, timeout=60)
+    try:
+        raw = await adapter.ask(prompt)
+    except Exception as exc:  # noqa: BLE001 — 把失败原因直接反馈给用户
+        raise HTTPException(status_code=502, detail=f"书名生成失败: {exc}") from exc
+
+    # 逐行解析,容忍模型不守规矩的输出(序号/书名号/项目符号)
+    titles: list[str] = []
+    for line in raw.splitlines():
+        t = re.sub(r"^\s*(?:\d+[.、)]\s*|[-*•]\s*)", "", line).strip()
+        t = t.strip("《》\"'“” ")
+        if t and t not in titles:
+            titles.append(t)
+    if not titles:
+        raise HTTPException(status_code=502, detail="模型没有返回可用书名,请重试。")
+    return TitleSuggestResponse(titles=titles[:5])
 
 
 @router.get("/{project_id}", response_model=ProjectOut)

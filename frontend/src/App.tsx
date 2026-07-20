@@ -6,6 +6,8 @@ import LoginPage from "./pages/LoginPage";
 export default function App() {
   const [tokens, setTokens] = useState<string>("");
   const [me, setMe] = useState<Me | null>(null);
+  // 未配置模型引导:null=未探测,false=未配置(显示横幅)
+  const [llmConfigured, setLlmConfigured] = useState<boolean | null>(null);
   // 引导态:正在用已存 token 拉当前用户
   const [booting, setBooting] = useState<boolean>(!!token.get());
 
@@ -22,6 +24,14 @@ export default function App() {
       .catch(() => { token.clear(); setMe(null); })
       .finally(() => setBooting(false));
   }, []);
+
+  // 模型配置探测:登录后拉一次,未配置则显示全局引导横幅
+  useEffect(() => {
+    if (!me) { setLlmConfigured(null); return; }
+    api.providerStatus()
+      .then((s) => setLlmConfigured(s.configured))
+      .catch(() => setLlmConfigured(null));
+  }, [me]);
 
   // 用量轮询:登录后才拉
   useEffect(() => {
@@ -65,6 +75,12 @@ export default function App() {
         <span className="muted" title={me.is_admin ? "管理员" : "用户"}>{me.username}</span>
         <a className="linkbtn" onClick={logout}>退出</a>
       </div>
+      {llmConfigured === false && (
+        <div className="llm-banner">
+          还没有配置模型——大部分功能需要模型才能工作。
+          <a href="/settings" target="_blank" rel="noreferrer">去「模型设置」配置你的 key →</a>
+        </div>
+      )}
       <div className="wrap">
         <Outlet />
       </div>

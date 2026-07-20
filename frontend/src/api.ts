@@ -124,6 +124,12 @@ export interface InviteCodeListOut {
 // ---------- 接口 ----------
 export const api = {
   health: () => req<{ status: string; providers: ProviderState }>("GET", "/api/health"),
+  // 当前用户是否配置了至少一个可用模型(全局引导横幅用)
+  providerStatus: () =>
+    req<{ configured: boolean; providers: Record<string, boolean> }>(
+      "GET", "/api/settings/providers/status"),
+  suggestTitle: (topic: string, genre: string) =>
+    req<{ titles: string[] }>("POST", "/api/projects/title-suggestion", { topic, genre }, 60000),
 
   listProjects: () => req<Project[]>("GET", "/api/projects"),
   createProject: (p: Partial<Project>) => req<Project>("POST", "/api/projects", p),

@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import logging
 
+from fastapi import HTTPException
+
 from app.config import get_settings
 
 from .base import LLMAdapter
@@ -82,11 +84,24 @@ def resolve_provider_config(provider: str) -> dict:
 
 
 def resolve_default_provider() -> str:
-    """默认 provider:数据库里标了 is_default 的优先,否则用 .env。"""
+    """解析当前生效的默认 provider,按优先级回落:
+
+    ① 数据库里标了 is_default 且有 key 的;
+    ② .env default_provider,且它实际有 key(数据库或 .env 任一来源);
+    ③ 任何有 key 的 provider(按 _REGISTRY 注册顺序,稳定);
+    ④ 全都没有才返回 .env default_provider——此时 create_llm_adapter
+      会抛出 400「未配置 API key」,而不是发一个空 Bearer 请求。
+    """
     for name, cfg in _db_settings().items():
         if cfg.get("is_default") and cfg.get("api_key"):
             return name
-    return get_settings().default_provider
+    env_default = get_settings().default_provider
+    if resolve_provider_config(env_default)["api_key"]:
+        return env_default
+    for name in _REGISTRY:
+        if resolve_provider_config(name)["api_key"]:
+            return name
+    return env_default
 
 
 def create_llm_adapter(
@@ -103,6 +118,9 @@ def create_llm_adapter(
 
     provider 缺省用 Settings.default_provider；
     其余参数缺省从该 provider 的 Settings 配置回填。
+
+    api_key 为空时抛 HTTPException(400)——让 FastAPI 返回清晰错误,
+    而不是带着空 Bearer 头发请求(那会变成难以排查的 500)。
     """
     settings = get_settings()
     provider = (provider or resolve_default_provider()).lower()
@@ -115,8 +133,15 @@ def create_llm_adapter(
     cfg = resolve_provider_config(provider)
     adapter_cls = _REGISTRY[provider]
 
+    resolved_key = api_key if api_key is not None else cfg["api_key"]
+    if not (resolved_key or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail=f"未配置 {provider} 的 API key,请到「模型设置」页配置后再试。",
+        )
+
     return adapter_cls(
-        api_key=api_key if api_key is not None else cfg["api_key"],
+        api_key=resolved_key,
         base_url=base_url if base_url is not None else cfg["base_url"],
         model_name=model_name if model_name is not None else cfg["model"],
         temperature=(

@@ -18,6 +18,7 @@ from app.db.session import get_db
 from app.llm.embeddings import check_embedding
 from app.llm.factory import (
     _REGISTRY,
+    available_providers,
     create_llm_adapter,
     resolve_default_provider,
     resolve_provider_config,
@@ -62,6 +63,21 @@ class ProviderSettingIn(BaseModel):
     base_url: str = ""
     model: str = ""
     is_default: bool = False
+
+
+class ProviderStatus(BaseModel):
+    configured: bool
+    providers: dict[str, bool]
+
+
+@router.get("/providers/status", response_model=ProviderStatus)
+async def provider_status(user: User = Depends(get_current_user)):
+    """当前用户是否配置了至少一个可用的 LLM provider(DB key 或 .env 兜底)。
+
+    前端登录后据此显示「未配置模型」的全局引导横幅。
+    """
+    providers = available_providers()
+    return ProviderStatus(configured=any(providers.values()), providers=providers)
 
 
 class TestResult(BaseModel):
@@ -120,6 +136,7 @@ async def save_provider_setting(
         row = ProviderSetting(provider=name, user_id=user.id)
         db.add(row)
 
+    # 入库前 strip;空串/不传 = 不改动已存 key,纯空白 = 清除 key(存空串,回落 .env)
     if req.api_key is not None and req.api_key != "":
         row.api_key = req.api_key.strip()
     row.base_url = req.base_url.strip()
