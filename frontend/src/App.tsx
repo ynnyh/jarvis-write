@@ -58,6 +58,7 @@ export default function App() {
         <span className="muted">AI 长篇小说工作台</span>
         <div className="grow" />
         {tokens && <span className="muted" title="累计 LLM 用量">{tokens}</span>}
+        {me.is_admin && <Link to="/admin">管理</Link>}
         <a href="/settings" target="_blank" rel="noreferrer">模型设置</a>
         <a href="/docs" target="_blank" rel="noreferrer">API</a>
         <a href="https://github.com/ynnyh/jarvis-write" target="_blank" rel="noreferrer">GitHub</a>

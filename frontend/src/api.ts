@@ -106,6 +106,12 @@ export interface ProviderState { deepseek: boolean; openai: boolean; gemini: boo
 export interface AuthResult { token: string; username: string; is_admin: boolean; }
 export interface Me { id: number; username: string; is_admin: boolean; }
 export interface Idea { title: string; logline: string; hook: string; twist: string; }
+export interface AdminUser {
+  id: number; username: string; is_admin: boolean; is_active: boolean;
+  created_at: string; project_count: number;
+  total_prompt_tokens: number; total_completion_tokens: number; total_calls: number;
+}
+export interface InviteCodeState { code: string; source: "db" | "env"; }
 
 // ---------- 接口 ----------
 export const api = {
@@ -180,4 +186,16 @@ export const api = {
   login: (username: string, password: string) =>
     req<AuthResult>("POST", "/api/auth/login", { username, password }),
   me: () => req<Me>("GET", "/api/auth/me"),
+
+  // ---------- 后台管理(仅管理员可用) ----------
+  adminListUsers: () => req<AdminUser[]>("GET", "/api/admin/users"),
+  adminResetPassword: (id: number, password: string) =>
+    req<{ ok: boolean }>("POST", `/api/admin/users/${id}/reset-password`, { password }),
+  adminSetActive: (id: number, is_active: boolean) =>
+    req<{ ok: boolean; is_active: boolean }>("PATCH", `/api/admin/users/${id}`, { is_active }),
+  adminDeleteUser: (id: number) =>
+    req<{ ok: boolean; deleted_projects: number }>("DELETE", `/api/admin/users/${id}`),
+  adminGetInviteCode: () => req<InviteCodeState>("GET", "/api/admin/invite-code"),
+  adminSetInviteCode: (code: string) =>
+    req<InviteCodeState>("PUT", "/api/admin/invite-code", { code }),
 };

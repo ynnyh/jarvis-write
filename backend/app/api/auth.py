@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """鉴权接口:注册(带邀请码)/ 登录 / 当前用户。
 
-- 注册需填固定邀请码(config.invite_code),防止公网任意注册。
+- 注册需填邀请码:数据库 app_settings 里的优先,无记录时回落 .env 的
+  invite_code;两者皆空则关闭注册(见 admin 接口)。
 - 登录返回 JWT,前端存起来随请求带上。
 - 每个账号的 LLM key 独立(见 settings 接口),互不共用。
 """
@@ -18,7 +19,7 @@ from app.auth import (
     hash_password,
     verify_password,
 )
-from app.config import get_settings
+from app.api.admin import get_effective_invite_code
 from app.db.models import User
 from app.db.session import get_db
 
@@ -52,10 +53,11 @@ class UserOut(BaseModel):
 
 @router.post("/register", response_model=TokenOut)
 async def register(req: RegisterRequest, db: Session = Depends(get_db)):
-    settings = get_settings()
-    if not settings.invite_code:
+    # 邀请码:DB(app_settings)优先,无记录时回落 .env;空串 = 关闭注册
+    invite_code, _source = get_effective_invite_code(db)
+    if not invite_code:
         raise HTTPException(status_code=403, detail="本站未开放注册")
-    if req.invite_code.strip() != settings.invite_code:
+    if req.invite_code.strip() != invite_code:
         raise HTTPException(status_code=403, detail="邀请码不正确")
 
     uname = req.username.strip()
@@ -89,6 +91,8 @@ async def login(req: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == req.username.strip()).first()
     if user is None or not verify_password(req.password, user.password_hash):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="账号已被禁用,请联系管理员")
     return TokenOut(
         token=build_token(user.id), username=user.username, is_admin=user.is_admin
     )

@@ -264,3 +264,189 @@ def test_ping_llm_reports_embedding(client):
         )
     assert r.status_code == 200, r.text
     assert r.json()["embedding_ok"] is True
+
+
+# ---------- 后台管理(阶段 9) ----------
+
+
+def _admin_auth(client: TestClient) -> dict:
+    """初始管理员由启动迁移创建(用户名/密码取配置默认值)。"""
+    r = client.post(
+        "/api/auth/login", json={"username": "admin", "password": "admin12345"}
+    )
+    assert r.status_code == 200, r.text
+    return _auth(r.json()["token"])
+
+
+def test_admin_users_requires_admin(client):
+    """普通用户/未登录访问后台 → 403/401。"""
+    headers = _auth(_register(client, "not_admin")["token"])
+    assert client.get("/api/admin/users", headers=headers).status_code == 403
+    assert client.get("/api/admin/users").status_code == 401
+
+
+def test_admin_lists_users_with_stats(client):
+    """用户列表含项目数与用量汇总;admin 本身在列。"""
+    headers = _auth(_register(client, "stats_user")["token"])
+    _create_project(client, headers, "统计用书")
+
+    r = client.get("/api/admin/users", headers=_admin_auth(client))
+    assert r.status_code == 200, r.text
+    users = {u["username"]: u for u in r.json()}
+    assert "admin" in users
+    row = users["stats_user"]
+    assert row["project_count"] == 1
+    assert row["is_active"] is True
+    assert row["is_admin"] is False
+    assert row["total_calls"] == 0
+    assert row["created_at"]
+
+
+def test_disabled_user_login_and_token_blocked(client):
+    """禁用后:登录 403 带提示,旧 token 立即失效;启用后恢复。"""
+    user = _register(client, "disable_me")
+    headers = _auth(user["token"])
+    admin = _admin_auth(client)
+    uid = _me_id(client, headers)
+
+    r = client.patch(
+        f"/api/admin/users/{uid}", headers=admin, json={"is_active": False}
+    )
+    assert r.status_code == 200, r.text
+
+    # 旧 token 失效
+    assert client.get("/api/auth/me", headers=headers).status_code == 401
+    # 登录被拒
+    r = client.post(
+        "/api/auth/login",
+        json={"username": "disable_me", "password": "pass123"},
+    )
+    assert r.status_code == 403
+    assert "已被禁用" in r.json()["detail"]
+
+    # 启用后恢复登录
+    assert client.patch(
+        f"/api/admin/users/{uid}", headers=admin, json={"is_active": True}
+    ).status_code == 200
+    r = client.post(
+        "/api/auth/login",
+        json={"username": "disable_me", "password": "pass123"},
+    )
+    assert r.status_code == 200, r.text
+
+
+def _me_id(client: TestClient, headers: dict) -> int:
+    r = client.get("/api/auth/me", headers=headers)
+    assert r.status_code == 200, r.text
+    return r.json()["id"]
+
+
+def _me_id_via_admin(client: TestClient, admin_headers: dict, username: str) -> int:
+    r = client.get("/api/admin/users", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    return next(u["id"] for u in r.json() if u["username"] == username)
+
+
+def test_admin_reset_password(client):
+    """重置后旧密码登录失败,新密码可登录。"""
+    user = _register(client, "reset_me")
+    admin = _admin_auth(client)
+    uid = _me_id_via_admin(client, admin, "reset_me")
+
+    r = client.post(
+        f"/api/admin/users/{uid}/reset-password",
+        headers=admin,
+        json={"password": "newpass456"},
+    )
+    assert r.status_code == 200, r.text
+
+    assert client.post(
+        "/api/auth/login", json={"username": "reset_me", "password": "pass123"}
+    ).status_code == 401
+    r = client.post(
+        "/api/auth/login", json={"username": "reset_me", "password": "newpass456"}
+    )
+    assert r.status_code == 200, r.text
+    assert user["username"] == r.json()["username"]
+
+
+def test_admin_delete_user_cascades(client):
+    """删用户后:其项目及关联数据清空,账号本身消失。"""
+    from app.db.models import Outline, Project, User
+    from app.db.session import SessionLocal
+
+    headers = _auth(_register(client, "delete_me")["token"])
+    p = _create_project(client, headers, "随主而逝")
+    db = SessionLocal()
+    try:
+        db.add(Outline(project_id=p["id"], chapter_number=1, title="第一章"))
+        db.commit()
+    finally:
+        db.close()
+
+    admin = _admin_auth(client)
+    uid = _me_id_via_admin(client, admin, "delete_me")
+    r = client.delete(f"/api/admin/users/{uid}", headers=admin)
+    assert r.status_code == 200, r.text
+    assert r.json()["deleted_projects"] == 1
+
+    db = SessionLocal()
+    try:
+        assert db.get(User, uid) is None
+        assert db.get(Project, p["id"]) is None
+        assert db.query(Outline).filter_by(project_id=p["id"]).count() == 0
+    finally:
+        db.close()
+
+
+def test_admin_cannot_disable_or_delete_self(client):
+    admin = _admin_auth(client)
+    uid = _me_id_via_admin(client, admin, "admin")
+
+    r = client.patch(
+        f"/api/admin/users/{uid}", headers=admin, json={"is_active": False}
+    )
+    assert r.status_code == 400
+    r = client.delete(f"/api/admin/users/{uid}", headers=admin)
+    assert r.status_code == 400
+
+
+def test_invite_code_db_overrides_env(client):
+    """DB 邀请码优先于 .env;置空 = 关闭注册。最后恢复成 test-invite。"""
+    admin = _admin_auth(client)
+
+    # 初始:无 DB 记录,生效的是 .env 的 test-invite
+    r = client.get("/api/admin/invite-code", headers=admin)
+    assert r.json() == {"code": INVITE, "source": "env"}
+
+    # DB 设置后,DB 值生效,env 值不再可用
+    assert client.put(
+        "/api/admin/invite-code", headers=admin, json={"code": "db-code"}
+    ).status_code == 200
+    r = client.get("/api/admin/invite-code", headers=admin)
+    assert r.json() == {"code": "db-code", "source": "db"}
+    assert client.post(
+        "/api/auth/register",
+        json={"username": "inv_old", "password": "pass123", "invite_code": INVITE},
+    ).status_code == 403
+    r = client.post(
+        "/api/auth/register",
+        json={"username": "inv_new", "password": "pass123", "invite_code": "db-code"},
+    )
+    assert r.status_code == 200, r.text
+
+    # 置空 = 关闭注册
+    assert client.put(
+        "/api/admin/invite-code", headers=admin, json={"code": ""}
+    ).status_code == 200
+    r = client.post(
+        "/api/auth/register",
+        json={"username": "inv_closed", "password": "pass123", "invite_code": "db-code"},
+    )
+    assert r.status_code == 403
+    assert "未开放注册" in r.json()["detail"]
+
+    # 恢复成 test-invite,避免影响后续用例
+    assert client.put(
+        "/api/admin/invite-code", headers=admin, json={"code": INVITE}
+    ).status_code == 200

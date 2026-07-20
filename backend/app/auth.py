@@ -83,6 +83,10 @@ async def get_current_user(
     user = db.get(User, uid)
     if user is None:
         raise HTTPException(status_code=401, detail="账号不存在")
+    # 被禁用的账号:旧 token 立即失效,前端收到 401 会清 token 回登录页,
+    # 再次登录时由登录接口给出"账号已被禁用"的 403 提示
+    if not user.is_active:
+        raise HTTPException(status_code=401, detail="账号已被禁用,请联系管理员")
     current_user_id.set(user.id)
     return user
 

@@ -21,9 +21,11 @@ from app.db.models.setting import ProviderSetting
 from app.db.models.summary import ChapterSummary
 from app.db.models.usage import LlmUsage
 from app.db.models.user import User
+from app.db.models.app_setting import AppSetting
 
 __all__ = [
     "User",
+    "AppSetting",
     "Project",
     "Architecture",
     "Outline",

@@ -10,28 +10,13 @@
 """
 from __future__ import annotations
 
-import logging
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.api.deps import delete_project_cascade
 from app.auth import assert_project_owner, current_user_id, get_current_user
-from app.config import get_settings
-from app.db.models import (
-    Architecture,
-    Chapter,
-    ChapterSummary,
-    Entity,
-    Fact,
-    Foreshadowing,
-    KnowledgeState,
-    Outline,
-    OutlineVersion,
-    Project,
-    Relationship,
-    User,
-)
+from app.db.models import Outline, Project
 from app.db.session import get_db
 from app.engines.pipeline.architecture import generate_architecture, save_architecture
 from app.engines.pipeline.blueprint import generate_blueprint, save_blueprint
@@ -44,8 +29,6 @@ from app.schemas.project import (
     ProjectCreate,
     ProjectOut,
 )
-
-logger = logging.getLogger("jarvis-write.projects")
 
 router = APIRouter(
     prefix="/api/projects",
@@ -124,60 +107,11 @@ async def patch_project(
     return project
 
 
-def _delete_chroma_collection(project_id: int) -> None:
-    """删除项目对应的 Chroma 向量集合;集合/库不存在时静默跳过。"""
-    try:
-        import chromadb
-        from chromadb.config import Settings as ChromaSettings
-
-        client = chromadb.PersistentClient(
-            path=get_settings().chroma_persist_dir,
-            settings=ChromaSettings(anonymized_telemetry=False),
-        )
-        client.delete_collection(f"chapters_{project_id}")
-    except Exception as exc:  # noqa: BLE001 — 记忆库清理失败不阻塞删除
-        logger.warning("删除向量集合 chapters_%d 失败(可忽略): %s", project_id, exc)
-
-
 @router.delete("/{project_id}")
 async def delete_project(project_id: int, db: Session = Depends(get_db)) -> dict:
-    """删除项目及其全部关联数据(大纲/正文/摘要/事实库/伏笔等),不可恢复。
-
-    模型只在 architecture 上配了 ORM cascade,且 SQLite 默认不开外键约束,
-    因此逐表显式删除;llm_usage 无 project_id(按用户记账),不在清理范围。
-    """
+    """删除项目及其全部关联数据(级联逻辑见 deps.delete_project_cascade)。"""
     project = _get_project_or_404(db, project_id)
-
-    outline_ids = [
-        row.id
-        for row in db.query(Outline.id).filter(Outline.project_id == project_id)
-    ]
-    if outline_ids:
-        db.query(OutlineVersion).filter(
-            OutlineVersion.outline_id.in_(outline_ids)
-        ).delete(synchronize_session=False)
-    deleted_chapters = (
-        db.query(Chapter)
-        .filter(Chapter.project_id == project_id)
-        .delete(synchronize_session=False)
-    )
-    for model in (
-        ChapterSummary,
-        KnowledgeState,
-        Fact,
-        Relationship,
-        Entity,
-        Foreshadowing,
-        Outline,
-        Architecture,
-    ):
-        db.query(model).filter(model.project_id == project_id).delete(
-            synchronize_session=False
-        )
-    db.delete(project)
-    db.commit()
-
-    _delete_chroma_collection(project_id)
+    deleted_chapters = delete_project_cascade(db, project)
     return {"ok": True, "deleted_chapters": deleted_chapters}
 
 

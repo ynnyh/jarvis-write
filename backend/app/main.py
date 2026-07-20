@@ -29,6 +29,7 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 from app.api.auth import router as auth_router
+from app.api.admin import router as admin_router
 from app.api.chapters import router as chapters_router
 from app.api.consistency import router as consistency_router
 from app.api.inspire import router as inspire_router
@@ -89,6 +90,7 @@ def create_app() -> FastAPI:
 
     app.include_router(system_router)
     app.include_router(auth_router)
+    app.include_router(admin_router)
     app.include_router(projects_router)
     app.include_router(tendency_router)
     app.include_router(settings_router)

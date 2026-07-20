@@ -1,12 +1,13 @@
 # app/migrate.py
 # -*- coding: utf-8 -*-
-"""启动迁移(阶段 8:多用户)。
+"""启动迁移(阶段 8:多用户;阶段 9:后台管理)。
 
 用的是 create_all 而非 Alembic,已存在的 SQLite 库不会自动补新列。
 这里做幂等的轻量迁移:
 1. 给旧表补 user_id 列(SQLite 支持 ADD COLUMN);
-2. 建初始 admin 账号(用户名/密码来自配置);
-3. 把无主(user_id 为空)的存量数据归到 admin 名下。
+2. 给 users 表补 is_active 列(存量用户全部置为可用);
+3. 建初始 admin 账号(用户名/密码来自配置);
+4. 把无主(user_id 为空)的存量数据归到 admin 名下。
 
 每次启动都跑,全部幂等——补过的列/建过的账号会跳过。
 """
@@ -49,6 +50,22 @@ def _add_user_id_columns() -> None:
                     text(f"ALTER TABLE {table} ADD COLUMN user_id INTEGER")
                 )
                 logger.info("迁移:%s 补 user_id 列", table)
+
+
+def _add_is_active_column() -> None:
+    """阶段 9:给 users 表补 is_active 列(存量用户默认可用,幂等)。"""
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "users" not in insp.get_table_names():
+            return  # create_all 会新建,无需补列
+        if not _column_exists("users", "is_active"):
+            conn.execute(
+                text(
+                    "ALTER TABLE users ADD COLUMN is_active BOOLEAN "
+                    "NOT NULL DEFAULT 1"
+                )
+            )
+            logger.info("迁移:users 补 is_active 列")
 
 
 def _ensure_admin(db: Session) -> User:
@@ -95,6 +112,7 @@ def _claim_orphans(db: Session, admin_id: int) -> None:
 def run_migrations() -> None:
     """启动时调用。幂等。"""
     _add_user_id_columns()
+    _add_is_active_column()
     with session_scope() as db:
         admin = _ensure_admin(db)
         db.flush()
