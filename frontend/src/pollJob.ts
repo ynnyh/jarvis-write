@@ -3,7 +3,7 @@ import { api } from "./api";
 
 export interface PollJobOptions {
   intervalMs?: number;               // 轮询间隔,默认 3s
-  timeoutMs?: number;                // 超时上限,默认 10 分钟,超时 reject
+  timeoutMs?: number;                // 超时上限,默认 30 分钟,超时 reject
   signal?: AbortSignal;              // 外部中止(如组件卸载),abort 后 reject AbortError
   onStage?: (stage: string) => void; // 运行中的进度回调
 }
@@ -21,14 +21,28 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-/** 轮询 job,完成时 resolve 其 result;失败/超时/中止时 reject。 */
+/** 轮询 job,完成时 resolve 其 result;失败/超时/中止时 reject。
+ *  查询状态的网络抖动(如服务器繁忙导致单次请求超时)会自动重试,
+ *  连续 5 次失败才放弃;外部 signal abort 立即取消。 */
 export async function pollJob<T = unknown>(jobId: string, opts: PollJobOptions = {}): Promise<T> {
-  const { intervalMs = 3000, timeoutMs = 600_000, signal, onStage } = opts;
+  const { intervalMs = 3000, timeoutMs = 1_800_000, signal, onStage } = opts;
   const deadline = Date.now() + timeoutMs;
+  let failures = 0;
   for (;;) {
-    if (Date.now() > deadline) throw new Error("任务超时(超过 10 分钟未完成)");
+    if (Date.now() > deadline) throw new Error("任务超时(超过 30 分钟未完成)");
     await sleep(intervalMs, signal);
-    const job = await api.getJob(jobId);
+    let job;
+    try {
+      job = await api.getJob(jobId);
+      failures = 0;
+    } catch (e) {
+      // 外部取消:立即放弃;瞬时故障(网络/服务器繁忙):重试
+      if (signal?.aborted) throw e;
+      if (++failures >= 5) {
+        throw new Error("多次查询任务状态失败(网络不稳定),任务可能仍在后台运行,请稍后刷新查看");
+      }
+      continue;
+    }
     if (job.status === "running") { onStage?.(job.stage); continue; }
     if (job.status === "error") throw new Error(job.error ?? "任务失败");
     return job.result as unknown as T;

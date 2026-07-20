@@ -12,7 +12,9 @@ interface Props { pid: number; project: Project; outlines: Outline[]; }
 export default function ChaptersPanel({ pid, outlines }: Props) {
   const [chapters, setChapters] = useState<ChapterBrief[]>([]);
   const [current, setCurrent] = useState<ChapterDetail | null>(null);
-  const [busy, setBusy] = useState("");
+  // 进行中的章节任务:生成(kind=generate)或保存后同步一致性引擎(kind=sync)。
+  // 只锁「生成/重写」「保存」这类会起新任务的操作;阅读/打开/编辑不锁。
+  const [genJob, setGenJob] = useState<{ num: number; kind: "generate" | "sync"; stage: string } | null>(null);
   const [err, setErr] = useState("");
   const [genResult, setGenResult] = useState<GenerateChapterResponse | null>(null);
   const [genTendency, setGenTendency] = useState<Tendency>({});
@@ -61,36 +63,46 @@ export default function ChaptersPanel({ pid, outlines }: Props) {
 
   async function saveEdit() {
     if (!current) return;
+    const num = current.chapter_number;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    setBusy("保存正文…"); setErr("");
+    setGenJob({ num, kind: "sync", stage: "保存正文…" }); setErr("");
     try {
-      const updated = await api.editChapterContent(pid, current.chapter_number, editText);
+      const updated = await api.editChapterContent(pid, num, editText);
       setCurrent(updated);
       setEditing(false);
       await reload();
       // 手改后同步一致性引擎:重抽取 + 重建下游摘要 + 向量库
-      const { job_id } = await api.reExtractAsync(pid, current.chapter_number);
+      const { job_id } = await api.reExtractAsync(pid, num);
       await pollJob(job_id, {
         signal: ctrl.signal,
-        onStage: (stage) => setBusy(`同步一致性引擎:${stage}`),
+        onStage: (stage) => setGenJob({ num, kind: "sync", stage }),
       });
     } catch (e) {
-      if (!ctrl.signal.aborted) setErr(String(e));
-    } finally { if (!ctrl.signal.aborted) setBusy(""); }
+      if (!ctrl.signal.aborted) {
+        const msg = e instanceof Error ? e.message : String(e);
+        // 轮询中断(超时/网络抖动):任务可能仍在后台运行,刷新列表让用户看到真实进度
+        if (msg.startsWith("任务超时") || msg.startsWith("多次查询")) {
+          setErr(`进度查询中断:${msg}`);
+          await reload().catch(() => undefined);
+        } else {
+          setErr(msg);
+        }
+      }
+    } finally { if (!ctrl.signal.aborted) setGenJob(null); }
   }
 
   async function generate(n: number) {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setErr(""); setGenResult(null);
-    setBusy(`第 ${n} 章:排队中…`);
+    setGenJob({ num: n, kind: "generate", stage: "排队中…" });
     try {
       const { job_id } = await api.generateChapterAsync(pid, n, genTendency);
       // 轮询任务进度(五段:草稿→定稿→检查→抽取→摘要)
       const result = await pollJob<GenerateChapterResponse>(job_id, {
         signal: ctrl.signal,
-        onStage: (stage) => setBusy(`第 ${n} 章:${stage}`),
+        onStage: (stage) => setGenJob({ num: n, kind: "generate", stage }),
       });
       if (ctrl.signal.aborted) return;
       setGenResult(result);
@@ -102,13 +114,33 @@ export default function ChaptersPanel({ pid, outlines }: Props) {
       });
       await reload();
     } catch (e) {
-      if (!ctrl.signal.aborted) setErr(String(e));
-    } finally { if (!ctrl.signal.aborted) setBusy(""); }
+      if (!ctrl.signal.aborted) {
+        const msg = e instanceof Error ? e.message : String(e);
+        // 轮询中断(超时/网络抖动):任务可能仍在后台运行,刷新列表让用户看到真实进度
+        if (msg.startsWith("任务超时") || msg.startsWith("多次查询")) {
+          setErr(`进度查询中断:${msg}`);
+          await reload().catch(() => undefined);
+        } else {
+          setErr(msg);
+        }
+      }
+    } finally { if (!ctrl.signal.aborted) setGenJob(null); }
   }
 
   return (
     <div className="two-col">
       <div className="two-col-side">
+        {genJob && (
+          <div className="gen-banner">
+            <span className="spin" />
+            <span className="gen-banner-text">
+              {genJob.kind === "generate"
+                ? `第 ${genJob.num} 章生成中(${genJob.stage}),完成后可继续操作其他章节`
+                : `第 ${genJob.num} 章保存后同步一致性引擎(${genJob.stage}),完成后可继续其他操作`}
+            </span>
+          </div>
+        )}
+        {err && <div className="msg-err">{err}</div>}
         <div className="card card-compact">
           <div className="card-head mb-2">
             <h3 className="grow">章节</h3>
@@ -124,6 +156,11 @@ export default function ChaptersPanel({ pid, outlines }: Props) {
           {outlines.map((o) => {
             const ch = byNum.get(o.chapter_number);
             const st = ch?.status ?? "empty";
+            const generating = genJob?.num === o.chapter_number;
+            const genBlocked = !!genJob;
+            const genHint = generating
+              ? "本章任务进行中"
+              : `第 ${genJob?.num} 章任务进行中,完成后可继续操作`;
             return (
               <div key={o.chapter_number} className="fact-line fact-row">
                 <span className={"fact-title" + (ch ? " linkish" : "")}
@@ -133,21 +170,23 @@ export default function ChaptersPanel({ pid, outlines }: Props) {
                     {ch?.is_stale ? "大纲已变" : STATUS_CN[st] ?? st}
                   </span>
                   {ch && <span className="muted"> {ch.word_count}字</span>}
+                  {generating && (
+                    <span className="gen-stage"><span className="spin" />{genJob.stage}</span>
+                  )}
                 </span>
                 {ch && (
-                  <button className="btn-sm" disabled={!!busy} onClick={() => openReader(o.chapter_number)}>
+                  <button className="btn-sm" onClick={() => openReader(o.chapter_number)}>
                     阅读
                   </button>
                 )}
-                <button className="btn-sm" disabled={!!busy} onClick={() => generate(o.chapter_number)}>
+                <button className="btn-sm" disabled={genBlocked} title={genBlocked ? genHint : undefined}
+                  onClick={() => generate(o.chapter_number)}>
                   {ch ? "重写" : "生成"}
                 </button>
               </div>
             );
           })}
         </div>
-        {busy && <div className="card muted"><span className="spin" />{busy}</div>}
-        {err && <div className="msg-err">{err}</div>}
       </div>
 
       <div className="two-col-main">
@@ -196,10 +235,13 @@ export default function ChaptersPanel({ pid, outlines }: Props) {
                   </>
                 ) : (
                   <>
-                    <button className="primary" disabled={!!busy} onClick={saveEdit}>
-                      {busy && <span className="spin" />}保存(自动同步一致性引擎)
+                    <button className="primary" disabled={!!genJob}
+                      title={genJob ? `第 ${genJob.num} 章任务进行中,完成后可保存` : undefined}
+                      onClick={saveEdit}>
+                      {genJob?.kind === "sync" && genJob.num === current.chapter_number && <span className="spin" />}
+                      保存(自动同步一致性引擎)
                     </button>
-                    <button disabled={!!busy} onClick={() => setEditing(false)}>取消</button>
+                    <button onClick={() => setEditing(false)}>取消</button>
                   </>
                 )}
               </div>

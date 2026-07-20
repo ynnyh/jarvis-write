@@ -328,6 +328,25 @@ label.fl {
 }
 @keyframes sp { to { transform: rotate(360deg); } }
 
+/* 章节任务进行中:面板顶部进度条 + 章节行内阶段提示 */
+.gen-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: var(--brand-weak);
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-lg);
+  padding: 10px 14px;
+  margin-bottom: var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  box-shadow: var(--shadow-sm);
+}
+.gen-banner .spin { flex-shrink: 0; margin-right: 0; }
+.gen-banner-text { flex: 1; min-width: 0; line-height: 1.5; }
+.gen-stage { display: block; margin-top: 2px; color: var(--brand); font-size: var(--fs-xs); }
+.gen-stage .spin { width: 10px; height: 10px; margin-right: 4px; vertical-align: -1px; }
+
 /* ---------- 顶栏 ---------- */
 .topbar {
   position: sticky;
