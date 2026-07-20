@@ -116,6 +116,10 @@ export const api = {
   getProject: (id: number) => req<Project>("GET", `/api/projects/${id}`),
   patchProject: (id: number, patch: Partial<Project>) =>
     req<Project>("PATCH", `/api/projects/${id}`, patch),
+  renameProject: (id: number, title: string) =>
+    req<Project>("PATCH", `/api/projects/${id}`, { title }),
+  deleteProject: (id: number) =>
+    req<{ ok: boolean; deleted_chapters: number }>("DELETE", `/api/projects/${id}`),
 
   inspire: (spark: string, tendency: Tendency, count = 4) =>
     req<{ ideas: Idea[] }>("POST", "/api/inspire", { spark, tendency, count }, LLM_TIMEOUT),

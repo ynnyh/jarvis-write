@@ -75,6 +75,101 @@ def test_unauthenticated_401(client):
     assert client.get("/api/projects").status_code == 401
 
 
+# ---------- 项目重命名 / 删除 ----------
+
+
+def _create_project(client: TestClient, headers: dict, title: str = "测试书") -> dict:
+    r = client.post("/api/projects", headers=headers, json={"title": title})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_rename_project_ok(client):
+    headers = _auth(_register(client, "rename_owner")["token"])
+    p = _create_project(client, headers, "旧书名")
+
+    r = client.patch(f"/api/projects/{p['id']}", headers=headers, json={"title": "新书名"})
+    assert r.status_code == 200, r.text
+    assert r.json()["title"] == "新书名"
+
+    r = client.get(f"/api/projects/{p['id']}", headers=headers)
+    assert r.json()["title"] == "新书名"
+
+
+def test_rename_project_rejects_bad_title(client):
+    headers = _auth(_register(client, "rename_bad")["token"])
+    p = _create_project(client, headers)
+
+    assert client.patch(
+        f"/api/projects/{p['id']}", headers=headers, json={"title": "   "}
+    ).status_code == 400
+    assert client.patch(
+        f"/api/projects/{p['id']}", headers=headers, json={"title": "长" * 101}
+    ).status_code == 400
+
+
+def test_rename_project_not_owner_404(client):
+    """非 owner 改他人项目标题 → 404(不泄露存在性)。"""
+    a = _auth(_register(client, "rename_a")["token"])
+    b = _auth(_register(client, "rename_b")["token"])
+    p = _create_project(client, a)
+
+    r = client.patch(f"/api/projects/{p['id']}", headers=b, json={"title": "抢书名"})
+    assert r.status_code == 404
+
+
+def test_delete_project_cascades(client):
+    """删除后项目、大纲、章节、摘要、事实库全部查不到。"""
+    from app.db.models import Chapter, ChapterSummary, Entity, Outline, Project
+    from app.db.session import SessionLocal
+
+    headers = _auth(_register(client, "del_owner")["token"])
+    p = _create_project(client, headers, "要删的书")
+
+    # 直接落库一些关联数据(走 API 生成太慢且依赖 LLM)
+    db = SessionLocal()
+    try:
+        outline = Outline(project_id=p["id"], chapter_number=1, title="第一章")
+        db.add(outline)
+        db.flush()
+        db.add(Chapter(project_id=p["id"], outline_id=outline.id, chapter_number=1,
+                       final_content="正文", status="finalized"))
+        db.add(ChapterSummary(project_id=p["id"], chapter_number=1, rolling_summary="摘要"))
+        db.add(Entity(project_id=p["id"], entity_type="character", name="张三"))
+        db.commit()
+    finally:
+        db.close()
+
+    r = client.delete(f"/api/projects/{p['id']}", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True
+    assert body["deleted_chapters"] == 1
+
+    # 接口层:项目 404
+    assert client.get(f"/api/projects/{p['id']}", headers=headers).status_code == 404
+    # 数据库层:关联数据全部清空
+    db = SessionLocal()
+    try:
+        assert db.get(Project, p["id"]) is None
+        for model in (Chapter, ChapterSummary, Entity, Outline):
+            assert db.query(model).filter_by(project_id=p["id"]).count() == 0
+    finally:
+        db.close()
+
+
+def test_delete_project_not_owner_404(client):
+    """非 owner 删他人项目 → 404,且数据不受影响。"""
+    a = _auth(_register(client, "del_a")["token"])
+    b = _auth(_register(client, "del_b")["token"])
+    p = _create_project(client, a, "别删我")
+
+    r = client.delete(f"/api/projects/{p['id']}", headers=b)
+    assert r.status_code == 404
+
+    assert client.get(f"/api/projects/{p['id']}", headers=a).status_code == 200
+
+
 # ---------- embedding 可用性探测 ----------
 
 class _FakeResp:

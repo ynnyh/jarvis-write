@@ -383,12 +383,14 @@ label.fl {
   color: inherit;
   transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
 }
-a.proj-card:hover {
+.proj-card:hover {
   border-color: var(--brand);
   box-shadow: var(--shadow-md);
   transform: translateY(-1px);
-  text-decoration: none;
 }
+.proj-main { display: block; color: inherit; }
+.proj-main:hover { text-decoration: none; }
+.proj-main:hover .proj-title { color: var(--brand); }
 .proj-title { font-size: var(--fs-lg); font-weight: 600; margin: 0; }
 .proj-meta {
   color: var(--text-2);
@@ -398,8 +400,14 @@ a.proj-card:hover {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+/* 卡片底部操作行:进入链接居左,重命名/删除小按钮居右,窄屏可换行 */
+.proj-actions { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; margin-top: auto; }
+.proj-actions .proj-go { flex: 1; }
+.proj-actions button { margin-left: 0; }
+.proj-rename input { font-size: var(--fs-md); }
+.proj-confirm { margin-top: var(--sp-2); }
 .proj-go { align-self: flex-end; color: var(--text-3); font-size: var(--fs-sm); transition: color 0.15s; }
-a.proj-card:hover .proj-go { color: var(--brand); }
+.proj-card:hover .proj-go { color: var(--brand); }
 
 /* ---------- 项目工作台:统计条 + 分步导航 ---------- */
 .stat-strip { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }

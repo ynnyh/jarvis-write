@@ -13,3 +13,5 @@ _TMPDIR = tempfile.mkdtemp(prefix="jarvis-write-test-")
 # 环境变量优先级高于 .env,确保测试用独立库
 os.environ["DATABASE_URL"] = f"sqlite:///{_TMPDIR}/test.db"
 os.environ["INVITE_CODE"] = "test-invite"
+# 删除项目时会清 Chroma 向量集合,同样指向临时目录
+os.environ["CHROMA_PERSIST_DIR"] = f"{_TMPDIR}/chroma"
