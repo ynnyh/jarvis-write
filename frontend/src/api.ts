@@ -127,9 +127,13 @@ export interface CharacterFact {
   id: number; fact_type: string; content: string;
   valid_from: number; valid_until: number | null; importance: string;
 }
+export interface CharacterRelation {
+  other_name: string; description: string; valid_from: number; other_retired: boolean;
+}
 export interface CharacterCard {
   id: number; name: string; aliases: string[]; entity_type: string; retired: boolean;
   profile: string; key_facts: CharacterFact[]; appearance_chapters: number[];
+  relations: CharacterRelation[];
 }
 export interface CharactersOut { characters: CharacterCard[]; other_entities_count: number; }
 // 全书概览(看板「概览」页签):一次聚合章节状态/版本对照、伏笔区间、人物出场

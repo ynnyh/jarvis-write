@@ -644,6 +644,9 @@ label.fl {
 .char-aliases { margin-top: 4px; font-size: var(--fs-xs); }
 .char-chapters { margin-top: 6px; font-size: var(--fs-xs); }
 .char-card .linkbtn { margin-top: 4px; font-size: var(--fs-xs); }
+.char-relations { margin-top: 6px; font-size: var(--fs-xs); }
+.char-rel-head { margin-bottom: 2px; }
+.char-relations .fact-line.retired { opacity: 0.6; }
 
 .char-form {
   margin-top: var(--sp-3);

@@ -30,7 +30,8 @@ EXTRACTION_PROMPT = """\
     {{
       "entity": "实体名",
       "fact_type": "state|ability|possession|relationship|location",
-      "content": "新事实内容(如:左手截肢)",
+      "content": "新事实内容(如:左手截肢;relationship 时填关系描述,如:结为夫妻)",
+      "other_entity": "仅 fact_type=relationship 时必填:关系另一方的实体名,其他类型填null",
       "importance": "critical|major|minor",
       "replaces": "被此事实取代的旧事实内容原文,没有则null"
     }}
@@ -46,6 +47,7 @@ EXTRACTION_PROMPT = """\
 抽取规则:
 1. 只抽"会影响后续章节"的持久变化(受伤/痊愈/获得/失去/关系变化/位置迁移/身份揭露),不抽一次性动作
 2. fact_changes 的 replaces:如果新事实使旧事实失效(如"痊愈"取代"受伤"),必须填旧事实原文
+3. relationship 条目:entity 与 other_entity 必须是两个不同实体(优先用已知实体名),content 只写两人之间的当前关系(如:兄妹/反目成仇/拜为师徒),同一对人物只报一条最新关系
 3. 伏笔:本章新埋的用 plant;呼应强化已有的用 reinforce;明确揭晓的用 payoff
 4. knowledge_updates:谁在本章"得知"了什么。读者视角用 knower="reader"
 5. 宁缺毋滥,每类最多 8 条,按重要性取舍

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_project_or_404
 from app.auth import get_current_user
-from app.db.models import Entity, Fact, Foreshadowing, Outline
+from app.db.models import Entity, Fact, Foreshadowing, Outline, Relationship
 from app.db.session import get_db
 from app.engines.consistency import BibleService, ForeshadowScheduler
 
@@ -135,6 +135,18 @@ class CharacterFactOut(BaseModel):
     importance: str
 
 
+class RelationOut(BaseModel):
+    """人物卡上的关系行:该实体作为任一端、当前有效的关系边。
+
+    对方已退场时不过滤、只标记 other_retired:人物卡是作者档案视图,
+    退场语义是"生成不再注入、数据保留",与事实行保留一致。
+    """
+    other_name: str
+    description: str
+    valid_from: int
+    other_retired: bool
+
+
 class CharacterOut(BaseModel):
     id: int
     name: str
@@ -144,6 +156,7 @@ class CharacterOut(BaseModel):
     profile: str
     key_facts: list[CharacterFactOut]
     appearance_chapters: list[int]
+    relations: list[RelationOut]
 
 
 class CharactersOut(BaseModel):
@@ -175,8 +188,36 @@ def _appearance_chapters(
     return sorted(chapters)
 
 
+def _character_relations(db: Session, project_id: int, ent: Entity) -> list[RelationOut]:
+    """该实体作为任一端、当前有效(valid_until 为空)的关系边。"""
+    edges = (
+        db.query(Relationship)
+        .filter(
+            Relationship.project_id == project_id,
+            Relationship.valid_until.is_(None),
+            (Relationship.from_entity_id == ent.id)
+            | (Relationship.to_entity_id == ent.id),
+        )
+        .order_by(Relationship.valid_from, Relationship.id)
+        .all()
+    )
+    out = []
+    for e in edges:
+        other_id = e.to_entity_id if e.from_entity_id == ent.id else e.from_entity_id
+        other = db.get(Entity, other_id)
+        out.append(
+            RelationOut(
+                other_name=other.name if other else f"实体{other_id}",
+                description=e.relation,
+                valid_from=e.valid_from,
+                other_retired=bool(other.retired) if other else False,
+            )
+        )
+    return out
+
+
 def _character_out(db: Session, project_id: int, ent: Entity, outlines: list[Outline]) -> CharacterOut:
-    """组装单张人物卡:当前有效事实(前 N 条) + 出场章号并集。"""
+    """组装单张人物卡:当前有效事实(前 N 条) + 出场章号并集 + 关系边。"""
     facts = (
         db.query(Fact)
         .filter(
@@ -206,6 +247,7 @@ def _character_out(db: Session, project_id: int, ent: Entity, outlines: list[Out
             for f in facts[:_KEY_FACTS_LIMIT]
         ],
         appearance_chapters=_appearance_chapters(facts, ent, outlines),
+        relations=_character_relations(db, project_id, ent),
     )
 
 

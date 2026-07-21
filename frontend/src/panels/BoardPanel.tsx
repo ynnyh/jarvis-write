@@ -342,6 +342,20 @@ function CharactersBoard({ pid }: { pid: number }) {
               )}
               {!c.key_facts.length && <div className="muted">暂无有效事实。</div>}
 
+              {c.relations.length > 0 && (
+                <div className="char-relations">
+                  <div className="muted char-rel-head">关系</div>
+                  {c.relations.map((r, i) => (
+                    <div key={i} className={"fact-line" + (r.other_retired ? " retired" : "")}>
+                      → {r.other_name}:{r.description}
+                      <span className="muted">
+                        (自第{r.valid_from}章起{r.other_retired ? ",对方已退场" : ""})
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {c.appearance_chapters.length > 0 && (
                 <div className="muted char-chapters">
                   出场:{c.appearance_chapters.map((n) => `第${n}章`).join("、")}
