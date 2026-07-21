@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_project_or_404
 from app.auth import get_current_user
+from app.chapter_versions import snapshot_chapter
 from app.db.models import Chapter, Outline
 from app.db.session import get_db
 from app.engines.polish import ai_flavor_report, polish_fragment, polish_text
@@ -83,6 +84,8 @@ async def apply_chapter_polish(
     """把润色稿写回定稿(用户确认后)。"""
     get_project_or_404(db, project_id)
     ch = _chapter(db, project_id, n)
+    # 覆盖前留一版:润色不满意可回退到润色前
+    snapshot_chapter(db, ch, source="polished")
     ch.final_content = req.polished_text.strip()
     ch.word_count = len(ch.final_content)
     db.commit()

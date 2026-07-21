@@ -1,7 +1,8 @@
 // 写作面板:逐章生成 / 阅读;本章蓝图上下文置顶;润色移步「润色」工作区
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
-  api, ChapterBrief, ChapterDetail, flavorTitle, GenerateChapterResponse, Outline, Project, Tendency,
+  api, ChapterBrief, ChapterDetail, ChapterVersionBrief, ChapterVersionDetail,
+  flavorTitle, GenerateChapterResponse, Outline, Project, Tendency, VERSION_SOURCE_CN,
 } from "../api";
 import { pollJob } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
@@ -32,6 +33,10 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
   // 阅读器(全屏遮罩,共用组件 Reader):当前阅读章节
   const [reader, setReader] = useState<ChapterDetail | null>(null);
   const [readerLoading, setReaderLoading] = useState(false);
+  // 正文版本对比:versionsFor=打开历史的章号,versions=该章快照列表,compareVer=选中对比的旧版全文
+  const [versionsFor, setVersionsFor] = useState<number | null>(null);
+  const [versions, setVersions] = useState<ChapterVersionBrief[] | null>(null);
+  const [compareVer, setCompareVer] = useState<ChapterVersionDetail | null>(null);
   // 组件卸载时中止轮询,防止卸载后继续 setState
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -46,6 +51,7 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
     if (focusChapter == null || !chapters.length) return;
     if (chapters.some((c) => c.chapter_number === focusChapter)) {
       setErr(""); setGenResult(null); setEditing(false);
+      setVersionsFor(null); setVersions(null); setCompareVer(null);
       api.getChapter(pid, focusChapter)
         .then(setCurrent)
         .catch((e) => setErr(String(e)));
@@ -59,7 +65,7 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
     : null;
 
   async function open(n: number) {
-    setErr(""); setGenResult(null); setEditing(false);
+    setErr(""); setGenResult(null); setEditing(false); closeVersions();
     try { setCurrent(await api.getChapter(pid, n)); } catch (e) { setErr(String(e)); }
   }
 
@@ -133,10 +139,63 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
         outline_version_used: result.outline_version_used,
       });
       await reload();
+      // 重写完成:若有旧版快照,自动弹「旧版 vs 新版」对比供选择
+      await openVersions(n, true);
     } catch (e) {
       if (!ctrl.signal.aborted) {
         const msg = e instanceof Error ? e.message : String(e);
         // 轮询中断(超时/网络抖动):任务可能仍在后台运行,刷新列表让用户看到真实进度
+        if (msg.startsWith("任务超时") || msg.startsWith("多次查询")) {
+          setErr(`进度查询中断:${msg}`);
+          await reload().catch(() => undefined);
+        } else {
+          setErr(msg);
+        }
+      }
+    } finally { if (!ctrl.signal.aborted) setGenJob(null); }
+  }
+
+  function closeVersions() {
+    setVersionsFor(null); setVersions(null); setCompareVer(null);
+  }
+
+  // 打开某章历史版本。auto=true 时(重写刚完成)仅在确有旧版快照时才弹,并自动选中最新一版对比
+  async function openVersions(n: number, auto = false) {
+    setErr("");
+    try {
+      const list = await api.listChapterVersions(pid, n);
+      if (auto && !list.length) return;  // 首次生成无旧版,不打扰
+      setVersions(list); setVersionsFor(n); setCompareVer(null);
+      if (auto && list.length) {
+        setCompareVer(await api.getChapterVersion(pid, n, list[0].id));
+      }
+    } catch (e) { setErr(String(e)); }
+  }
+
+  async function selectVersion(n: number, v: ChapterVersionBrief) {
+    setErr("");
+    try { setCompareVer(await api.getChapterVersion(pid, n, v.id)); }
+    catch (e) { setErr(String(e)); }
+  }
+
+  // 回退到旧版:换回正文 → 同步一致性引擎(重抽取+摘要+向量,同 saveEdit)
+  async function restoreVersion(n: number, vid: number) {
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    setGenJob({ num: n, kind: "sync", stage: "回退正文…" }); setErr("");
+    try {
+      const updated = await api.restoreChapterVersion(pid, n, vid);
+      setCurrent(updated);
+      closeVersions();
+      await reload();
+      const { job_id } = await api.reExtractAsync(pid, n);
+      await pollJob(job_id, {
+        signal: ctrl.signal,
+        onStage: (stage) => setGenJob({ num: n, kind: "sync", stage }),
+      });
+    } catch (e) {
+      if (!ctrl.signal.aborted) {
+        const msg = e instanceof Error ? e.message : String(e);
         if (msg.startsWith("任务超时") || msg.startsWith("多次查询")) {
           setErr(`进度查询中断:${msg}`);
           await reload().catch(() => undefined);
@@ -247,6 +306,64 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
       </div>
 
       <div className="two-col-main">
+        {versionsFor !== null && versions !== null && (
+          <div className="card">
+            <div className="card-head mb-2">
+              <h3 className="grow">第{versionsFor}章 · 历史版本对比</h3>
+              <button className="btn-sm" onClick={closeVersions}>关闭</button>
+            </div>
+            {versions.length === 0 ? (
+              <div className="muted">
+                暂无历史版本。以后重写 / 润色 / 手改正文时,被覆盖的旧版会自动存到这里,可随时对比回退。
+              </div>
+            ) : (
+              <>
+                <div className="muted mb-2">
+                  选一个旧版和「当前版」左右对照。满意当前版就关掉;想要旧版点「回退」。
+                </div>
+                <div className="chips mb-2">
+                  {versions.map((v) => (
+                    <span key={v.id}
+                      className={"chip" + (compareVer?.id === v.id ? " on" : "")}
+                      onClick={() => selectVersion(versionsFor, v)}>
+                      v{v.version} · {VERSION_SOURCE_CN[v.source] ?? v.source} · {v.word_count}字
+                    </span>
+                  ))}
+                </div>
+                {compareVer && current && (
+                  <>
+                    <div className="split mt-2">
+                      <div>
+                        <div className="pane-title">
+                          旧版 v{compareVer.version}
+                          ({VERSION_SOURCE_CN[compareVer.source] ?? compareVer.source} · {compareVer.word_count}字)
+                        </div>
+                        <div className="pane pane-prose prose">
+                          <Paragraphs text={compareVer.final_content} />
+                        </div>
+                      </div>
+                      <div>
+                        <div className="pane-title">当前版({current.word_count}字)</div>
+                        <div className="pane pane-prose prose">
+                          <Paragraphs text={current.final_content || current.draft_content} />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="actions mt-3">
+                      <button className="primary" disabled={!!genJob}
+                        title={genJob ? "有任务进行中,完成后可回退" : undefined}
+                        onClick={() => restoreVersion(versionsFor, compareVer.id)}>
+                        回退到旧版 v{compareVer.version}(覆盖当前版并同步一致性引擎)
+                      </button>
+                      <button onClick={closeVersions}>保留当前版</button>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         {genResult && (
           <div className="card card-ok">
             <b>生成完成</b> {genResult.word_count} 字
@@ -296,6 +413,8 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
                       setEditText(current.final_content || current.draft_content);
                       setEditing(true);
                     }}>编辑正文</button>
+                    <button className="btn-sm" disabled={!!genJob}
+                      onClick={() => openVersions(current.chapter_number)}>历史版本</button>
                     <span className="muted">改文笔?去「润色」</span>
                   </>
                 ) : (

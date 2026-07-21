@@ -301,6 +301,11 @@ async def generate_chapter(
             chapter_number=chapter_number,
         )
         db.add(chapter)
+    else:
+        # 重写:覆盖前把当前正文存一版快照,供新旧对比与回滚
+        from app.chapter_versions import snapshot_chapter
+
+        snapshot_chapter(db, chapter, source="generated")
     chapter.outline_id = outline.id
     chapter.draft_content = draft
     chapter.final_content = final

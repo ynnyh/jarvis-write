@@ -2,7 +2,9 @@
 """章节正文。is_stale 是大纲级联引擎的关键失配标记。"""
 from __future__ import annotations
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin
@@ -32,3 +34,30 @@ class Chapter(Base, TimestampMixin):
     is_stale: Mapped[bool] = mapped_column(Boolean, default=False)
     # empty / drafting / drafted / finalized / stale
     status: Mapped[str] = mapped_column(String(20), default="empty")
+
+
+class ChapterVersion(Base):
+    """章节正文的历史快照,支撑「重生成/润色/手改」前的新旧对比与回滚。
+
+    与 OutlineVersion 对称:每次覆盖 chapters.final_content 前,先把当前正文
+    存成一版快照。空章(无正文)不存。source 记录这一版是被什么操作顶替的:
+      generated —— 被重新生成顶替(重写)
+      polished  —— 被整章润色顶替
+      edited    —— 被手动编辑顶替
+      restored  —— 被回滚操作顶替(回滚前的当前版也留痕)
+    """
+
+    __tablename__ = "chapter_versions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chapter_id: Mapped[int] = mapped_column(
+        ForeignKey("chapters.id", ondelete="CASCADE"), index=True
+    )
+    version: Mapped[int] = mapped_column(Integer)
+    draft_content: Mapped[str] = mapped_column(Text, default="")
+    final_content: Mapped[str] = mapped_column(Text, default="")
+    word_count: Mapped[int] = mapped_column(Integer, default=0)
+    source: Mapped[str] = mapped_column(String(20), default="generated")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

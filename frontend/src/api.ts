@@ -77,6 +77,17 @@ export interface GenerateChapterResponse extends ChapterDetail {
   extraction_stats: Record<string, unknown>;
   ai_flavor: FlavorInfo;
 }
+/** 章节正文历史版本(覆盖前的快照)。source: generated/polished/edited/restored */
+export interface ChapterVersionBrief {
+  id: number; version: number; source: string; word_count: number; created_at: string;
+}
+export interface ChapterVersionDetail extends ChapterVersionBrief {
+  final_content: string; draft_content: string;
+}
+/** 版本来源的中文说明 */
+export const VERSION_SOURCE_CN: Record<string, string> = {
+  generated: "重写前", polished: "润色前", edited: "编辑前", restored: "回滚前",
+};
 /** AI 味报告:score/summary 必备;categories 分类得分明细(新版后端返回,旧格式没有) */
 export interface FlavorInfo {
   score: number;
@@ -238,6 +249,12 @@ export const api = {
     req<ChapterDetail>("PUT", `/api/projects/${pid}/chapters/${n}/content`, { final_content }),
   reExtractAsync: (pid: number, n: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/chapters/${n}/re-extract-async`),
+  listChapterVersions: (pid: number, n: number) =>
+    req<ChapterVersionBrief[]>("GET", `/api/projects/${pid}/chapters/${n}/versions`),
+  getChapterVersion: (pid: number, n: number, vid: number) =>
+    req<ChapterVersionDetail>("GET", `/api/projects/${pid}/chapters/${n}/versions/${vid}`),
+  restoreChapterVersion: (pid: number, n: number, vid: number) =>
+    req<ChapterDetail>("POST", `/api/projects/${pid}/chapters/${n}/versions/${vid}/restore`),
   getJob: (jobId: string) =>
     req<{ status: string; stage: string; result: GenerateChapterResponse | null; error: string | null }>(
       "GET", `/api/jobs/${jobId}`),

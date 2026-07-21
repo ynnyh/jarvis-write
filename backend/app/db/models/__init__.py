@@ -8,7 +8,7 @@
 """
 from app.db.models.project import Project, Architecture
 from app.db.models.outline import Outline, OutlineVersion
-from app.db.models.chapter import Chapter
+from app.db.models.chapter import Chapter, ChapterVersion
 from app.db.models.story_bible import (
     Entity,
     Fact,
@@ -33,6 +33,7 @@ __all__ = [
     "Outline",
     "OutlineVersion",
     "Chapter",
+    "ChapterVersion",
     "Entity",
     "Fact",
     "Relationship",
