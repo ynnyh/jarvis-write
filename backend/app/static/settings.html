@@ -16,6 +16,9 @@
     font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
   }
   .wrap { max-width: 860px; margin: 0 auto; padding: 32px 20px 80px; }
+  .topline { display: flex; align-items: center; margin-bottom: 16px; }
+  .back { font-size: 14px; color: var(--brand); text-decoration: none; }
+  .back:hover { text-decoration: underline; }
   h1 { font-size: 22px; margin: 0 0 4px; }
   .sub { color: var(--muted); font-size: 14px; margin-bottom: 28px; }
   .card {
@@ -23,8 +26,8 @@
     border-radius: 12px; padding: 20px 22px; margin-bottom: 18px;
   }
   .card.optional { background: #fcfcff; border-style: dashed; }
-  .card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
-  .card-head h2 { font-size: 16px; margin: 0; text-transform: capitalize; }
+  .card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  .card-head h2 { font-size: 16px; margin: 0; flex: 1; min-width: 180px; }
   .badge {
     font-size: 12px; padding: 2px 10px; border-radius: 999px;
     background: var(--brand-weak); color: var(--brand);
@@ -58,6 +61,7 @@
 </head>
 <body>
 <div class="wrap">
+  <div class="topline"><a class="back" href="/app/">← 返回工作台</a></div>
   <h1>模型设置</h1>
   <div class="sub">配置各家大模型的 API Key。支持 OpenAI 兼容格式(DeepSeek 官方与中转站均可,改 Base URL 即可)。Key 保存在本地数据库。</div>
   <div id="cards"></div>
@@ -111,8 +115,8 @@ function embeddingCard(p) {
   el.className = "card optional";
   el.innerHTML = `
     <div class="card-head">
-      <h2>Embedding（语义记忆）· 可选但强烈建议</h2>
-      <span class="badge">可选</span>
+      <h2>Embedding（语义记忆）</h2>
+      <span class="badge">可选 · 建议配置</span>
       <span class="badge ${p.source === "none" ? "no" : "ok"}">当前生效：${EMB_SOURCE[p.source] || p.source}</span>
     </div>
     <div class="hint" style="margin-bottom:8px">
