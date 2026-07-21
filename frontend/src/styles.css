@@ -243,6 +243,7 @@ label.fl {
 }
 .notice-err { background: var(--err-weak); border-color: var(--err-line); color: var(--err); }
 .notice-warn { background: var(--warn-weak); border-color: var(--warn-line); color: var(--warn); }
+.notice-info { background: var(--brand-weak); border-color: var(--brand-line); color: var(--brand); }
 
 .msg-ok { color: var(--ok); font-size: var(--fs-sm); }
 .msg-err { color: var(--err); font-size: var(--fs-sm); white-space: pre-wrap; }

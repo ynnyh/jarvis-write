@@ -40,7 +40,7 @@ export default function InspirePanel({ project, onChanged }: Props) {
         global_tendency: tendency,
       });
       await onChanged();
-      setMsg(`已采用方案「${idea.title}」为本书主题。下一步:去「架构」生成顶层设计。`);
+      setMsg(`已采用方案「${idea.title}」为本书主题,已写入主题框,可继续微调后保存。下一步:去「架构」生成顶层设计。`);
     } catch (e) { setErr(String(e)); } finally { setBusy(""); }
   }
 
@@ -71,16 +71,66 @@ export default function InspirePanel({ project, onChanged }: Props) {
     } catch (e) { setSynErr(String(e)); } finally { setSynBusy(""); }
   }
 
+  const hasTopic = !!project.topic;
+
   return (
     <>
+      {!hasTopic && (
+        <div className="notice notice-info" style={{ marginTop: 0 }}>
+          第一步:让 AI 帮你想几个故事方向(点「给我灵感」),或者直接在下方「本书主题」里写下你的想法。
+        </div>
+      )}
+
       <div className="card">
-        <h2>本书主题</h2>
+        <h2>灵感工坊</h2>
         <div className="card-desc">
-          这是整本书的"一句话灵魂",架构、大纲、正文都会围绕它生成。可以直接写,也可以用下面的灵感工坊帮你找。
+          丢一个碎片进来(一个画面/一个设定/一句话,留空则按倾向自由发挥),AI 给你 4 个差异化的故事方案。
+        </div>
+        <div className="input-row">
+          <input type="text" value={spark} onChange={(e) => setSpark(e.target.value)}
+            placeholder='如:"一个能听见建筑物说话的拆迁评估员"'
+            onKeyDown={(e) => e.key === "Enter" && !busy && brainstorm()} />
+          <button className="primary" disabled={!!busy} onClick={brainstorm}>
+            {busy && <span className="spin" />}给我灵感
+          </button>
+        </div>
+        {busy && <div className="muted mt-2">{busy}</div>}
+        {err && <div className="msg-err mt-2">{err}</div>}
+        {msg && <div className="msg-ok mt-2">{msg}</div>}
+
+        {ideas.length > 0 && (
+          <div className="mt-4">
+            {ideas.map((idea, i) => (
+              <div key={i} className={"idea-card" + (picked === i ? " picked" : "")}>
+                <div className="idea-head">
+                  <h3>《{idea.title}》</h3>
+                  <button className="primary" disabled={!!busy} onClick={() => adopt(i)}>
+                    用这个方案
+                  </button>
+                </div>
+                <div className="idea-line">{idea.logline}</div>
+                <div className="muted mt-1">
+                  <b>钩子:</b>{idea.hook}
+                </div>
+                <div className="muted"><b>反转方向:</b>{idea.twist}</div>
+              </div>
+            ))}
+            <button disabled={!!busy} onClick={brainstorm}>都不满意,换一批</button>
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h2>{hasTopic ? "本书主题" : "本书主题(选定后可随时修改)"}</h2>
+        <div className="card-desc">
+          {hasTopic
+            ? "这是整本书的\"一句话灵魂\",架构、大纲、正文都会围绕它生成,可随时修改后重新保存。"
+            : "采用上面的灵感方案后会自动写到这里,也可以直接自己写。这是整本书的\"一句话灵魂\",架构、大纲、正文都会围绕它生成。"}
         </div>
         <textarea rows={3} value={topic} onChange={(e) => setTopic(e.target.value)}
           placeholder="如:落魄镖师接下一趟险镖,半路开箱验货时发现镖箱里藏着个大活人…" />
-        <label className="fl">全局写作倾向(题材/节奏/结构/基调,影响所有生成环节)</label>
+        <label className="fl">全局写作倾向(题材/节奏/结构/基调)</label>
+        <div className="hint mb-2">可不选——不选则由 AI 自由发挥;选了会影响所有生成环节的题材、节奏、结构与基调。</div>
         <TendencySelector node="outline" value={tendency} onChange={setTendency} compact />
         <div className="actions mt-3">
           <button className="primary" disabled={!!busy} onClick={saveTopic}>保存主题与倾向</button>
@@ -122,44 +172,6 @@ export default function InspirePanel({ project, onChanged }: Props) {
           {synErr && <div className="msg-err mt-2">{synErr}</div>}
         </div>
       )}
-
-      <div className="card">
-        <h2>灵感工坊</h2>
-        <div className="card-desc">
-          丢一个碎片进来(一个画面/一个设定/一句话,留空则按倾向自由发挥),AI 给你 4 个差异化的故事方案。
-        </div>
-        <div className="input-row">
-          <input type="text" value={spark} onChange={(e) => setSpark(e.target.value)}
-            placeholder='如:"一个能听见建筑物说话的拆迁评估员"'
-            onKeyDown={(e) => e.key === "Enter" && !busy && brainstorm()} />
-          <button className="primary" disabled={!!busy} onClick={brainstorm}>
-            {busy && <span className="spin" />}给我灵感
-          </button>
-        </div>
-        {busy && <div className="muted mt-2">{busy}</div>}
-        {err && <div className="msg-err mt-2">{err}</div>}
-
-        {ideas.length > 0 && (
-          <div className="mt-4">
-            {ideas.map((idea, i) => (
-              <div key={i} className={"idea-card" + (picked === i ? " picked" : "")}>
-                <div className="idea-head">
-                  <h3>《{idea.title}》</h3>
-                  <button className="primary" disabled={!!busy} onClick={() => adopt(i)}>
-                    用这个方案
-                  </button>
-                </div>
-                <div className="idea-line">{idea.logline}</div>
-                <div className="muted mt-1">
-                  <b>钩子:</b>{idea.hook}
-                </div>
-                <div className="muted"><b>反转方向:</b>{idea.twist}</div>
-              </div>
-            ))}
-            <button disabled={!!busy} onClick={brainstorm}>都不满意,换一批</button>
-          </div>
-        )}
-      </div>
     </>
   );
 }
