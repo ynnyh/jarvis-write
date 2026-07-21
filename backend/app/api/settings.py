@@ -3,8 +3,9 @@
 """站点设置接口:LLM provider 配置(设置页用)。
 
 GET  /api/settings/providers            三家配置(key 打码)+ 谁是默认
-PUT  /api/settings/providers/{name}     保存某家配置(存数据库)
-POST /api/settings/providers/{name}/test  用已存配置实际调一次模型
+                                        + 末尾一张 embedding 专用卡(伪 provider)
+PUT  /api/settings/providers/{name}     保存某家配置(存数据库);name=embedding 为专用 embedding 配置
+POST /api/settings/providers/{name}/test  用已存配置实际调一次模型;embedding 卡只测 embed
 """
 from __future__ import annotations
 
@@ -15,7 +16,12 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user
 from app.db.models import ProviderSetting, User
 from app.db.session import get_db
-from app.llm.embeddings import check_embedding
+from app.llm.embeddings import (
+    EMBEDDING_PROVIDER,
+    EmbeddingClient,
+    check_embedding,
+    resolve_embedding_config,
+)
 from app.llm.factory import (
     _REGISTRY,
     available_providers,
@@ -36,6 +42,12 @@ _DEFAULTS = {
     },
 }
 
+# embedding 专用卡的 placeholder(推荐免费/便宜渠道,仅前端展示用)
+_EMBEDDING_DEFAULTS = {
+    "base_url": "https://api.siliconflow.cn/v1",
+    "model": "BAAI/bge-m3",
+}
+
 
 def _mask(key: str) -> str:
     if not key:
@@ -54,6 +66,9 @@ class ProviderSettingOut(BaseModel):
     is_default: bool
     default_base_url: str
     default_model: str
+    # 当前生效来源:user=专用配置 / env=环境变量 / default=默认 provider /
+    # none=未配置;仅 embedding 卡使用,三家聊天卡恒为 ""
+    source: str = ""
 
 
 class ProviderSettingIn(BaseModel):
@@ -88,6 +103,40 @@ class TestResult(BaseModel):
     error: str = ""
     embedding_ok: bool = False
     embedding_error: str = ""
+    # 仅 embedding 卡测试用:生效来源(user/env/default/none)
+    source: str = ""
+
+
+def _effective_source() -> str:
+    """当前 embedding 生效来源;default 兜底但没 key 时记为 none。"""
+    cfg = resolve_embedding_config()
+    if cfg["source"] == "default" and not cfg["api_key"]:
+        return "none"
+    return cfg["source"]
+
+
+def _embedding_card(db: Session, user: User) -> ProviderSettingOut:
+    """伪 provider "embedding" 的卡片数据:字段取 DB 行(编辑用),
+    source 取当前生效来源;is_default 恒 false。"""
+    row = (
+        db.query(ProviderSetting)
+        .filter(
+            ProviderSetting.user_id == user.id,
+            ProviderSetting.provider == EMBEDDING_PROVIDER,
+        )
+        .first()
+    )
+    return ProviderSettingOut(
+        provider=EMBEDDING_PROVIDER,
+        api_key_masked=_mask(row.api_key) if row else "",
+        has_key=bool(row and row.api_key),
+        base_url=row.base_url if row else "",
+        model=row.model if row else "",
+        is_default=False,
+        default_base_url=_EMBEDDING_DEFAULTS["base_url"],
+        default_model=_EMBEDDING_DEFAULTS["model"],
+        source=_effective_source(),
+    )
 
 
 @router.get("/providers", response_model=list[ProviderSettingOut])
@@ -110,6 +159,8 @@ async def list_provider_settings(
                 default_model=_DEFAULTS[name]["model"],
             )
         )
+    # 列表末尾追加 embedding 专用卡(伪 provider,不进 LLM 注册表)
+    out.append(_embedding_card(db, user))
     return out
 
 
@@ -121,6 +172,29 @@ async def save_provider_setting(
     user: User = Depends(get_current_user),
 ):
     name = name.lower()
+    if name == EMBEDDING_PROVIDER:
+        # 伪 provider:专用 embedding 配置;is_default 无意义,忽略
+        row = (
+            db.query(ProviderSetting)
+            .filter(
+                ProviderSetting.user_id == user.id,
+                ProviderSetting.provider == EMBEDDING_PROVIDER,
+            )
+            .first()
+        )
+        if row is None:
+            row = ProviderSetting(provider=EMBEDDING_PROVIDER, user_id=user.id)
+            db.add(row)
+
+        # 与聊天卡同一语义:空串/不传 = 不改动已存 key,纯空白 = 清除 key
+        if req.api_key is not None and req.api_key != "":
+            row.api_key = req.api_key.strip()
+        row.base_url = req.base_url.strip()
+        row.model = req.model.strip()
+        row.is_default = False
+        db.commit()
+        return _embedding_card(db, user)
+
     if name not in _REGISTRY:
         raise HTTPException(status_code=404, detail=f"未知 provider: {name}")
 
@@ -175,6 +249,33 @@ async def test_provider(name: str, user: User = Depends(get_current_user)):
     是否降级);embedding 探测失败不影响聊天测试结果。
     """
     name = name.lower()
+    if name == EMBEDDING_PROVIDER:
+        # embedding 专用卡:用保存后生效的解析结果发一次真实 embed,没有聊天测试
+        cfg = resolve_embedding_config()
+        source = _effective_source()
+        if not cfg["api_key"]:
+            return TestResult(
+                ok=False,
+                provider=name,
+                model=cfg["model"],
+                error="尚未配置 embedding api_key",
+                source=source,
+            )
+        client = EmbeddingClient(timeout=30)
+        try:
+            await client.embed(["测试"])
+            return TestResult(
+                ok=True, provider=name, model=client.model, source=client.source
+            )
+        except Exception as exc:  # noqa: BLE001 — 测试接口,错误原样反馈给用户
+            return TestResult(
+                ok=False,
+                provider=name,
+                model=client.model,
+                error=str(exc)[:500],
+                source=client.source,
+            )
+
     if name not in _REGISTRY:
         raise HTTPException(status_code=404, detail=f"未知 provider: {name}")
 

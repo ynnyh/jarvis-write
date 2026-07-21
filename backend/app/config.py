@@ -49,9 +49,13 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./jarvis_write.db"
     chroma_persist_dir: str = "./chroma_data"
 
-    # Embedding(语义记忆用;走默认 provider 的 /embeddings 接口)
+    # Embedding(语义记忆用;默认走默认 provider 的 /embeddings 接口)
     embedding_model: str = "text-embedding-3-small"
     embedding_retrieval_k: int = 4
+    # 专用 embedding 渠道(可选):聊天渠道没有 /embeddings 接口时单独配置,
+    # 设置页保存的 per-user 配置优先于这两项
+    embedding_base_url: str = ""
+    embedding_api_key: str = ""
 
     # 请求默认参数(max_tokens 取 8192:推理类模型思考会占用输出配额)
     default_temperature: float = 0.7

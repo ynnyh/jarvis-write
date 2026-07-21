@@ -2,9 +2,14 @@
 # -*- coding: utf-8 -*-
 """Embedding 客户端:走 OpenAI 兼容 /embeddings 接口。
 
-用默认 provider 的 base_url + api_key(设置页配置)。embedding 可用性取决于
-provider:DeepSeek 官方没有 /embeddings 接口,部分中转站也未开放;不可用时
-上层记忆模块会优雅降级(只用最近章节,不做语义检索)。
+配置解析优先级(resolve_embedding_config):
+① 当前用户在设置页保存的专用 embedding 配置(provider_settings 里
+  provider="embedding" 的伪 provider 行,有 key 才算);
+② 环境变量 EMBEDDING_BASE_URL / EMBEDDING_API_KEY(+ EMBEDDING_MODEL);
+③ 默认 provider 的 base_url + key,模型取 settings.embedding_model。
+
+embedding 可用性取决于所配渠道:DeepSeek 官方没有 /embeddings 接口,部分
+中转站也未开放;不可用时上层记忆模块会优雅降级(只用最近章节,不做语义检索)。
 """
 from __future__ import annotations
 
@@ -13,9 +18,54 @@ import logging
 import httpx
 
 from app.config import get_settings
-from app.llm.factory import resolve_default_provider, resolve_provider_config
+from app.llm.factory import (
+    _db_settings,
+    resolve_default_provider,
+    resolve_provider_config,
+)
 
 logger = logging.getLogger("jarvis-write.embeddings")
+
+# provider_settings 表里专用 embedding 配置行的伪 provider 名
+EMBEDDING_PROVIDER = "embedding"
+
+
+def resolve_embedding_config() -> dict:
+    """解析当前生效的 embedding 配置,返回 {api_key, base_url, model, source}。
+
+    source ∈ {"user", "env", "default"}:分别表示专用配置(设置页)、
+    环境变量、默认 provider 兜底。default 兜底时可能没有 key(未配置),
+    调用方据此提示;memory 层调用失败会自行降级。
+    """
+    settings = get_settings()
+
+    # ① 设置页保存的专用 embedding 配置(有 key 才算)
+    db_cfg = _db_settings().get(EMBEDDING_PROVIDER, {})
+    if db_cfg.get("api_key"):
+        return {
+            "api_key": db_cfg["api_key"],
+            "base_url": (db_cfg.get("base_url") or "").rstrip("/"),
+            "model": db_cfg.get("model") or settings.embedding_model,
+            "source": "user",
+        }
+
+    # ② 环境变量专用配置
+    if settings.embedding_api_key:
+        return {
+            "api_key": settings.embedding_api_key,
+            "base_url": (settings.embedding_base_url or "").rstrip("/"),
+            "model": settings.embedding_model,
+            "source": "env",
+        }
+
+    # ③ 默认 provider 兜底(维持原行为)
+    cfg = resolve_provider_config(resolve_default_provider())
+    return {
+        "api_key": cfg["api_key"],
+        "base_url": (cfg["base_url"] or "").rstrip("/"),
+        "model": settings.embedding_model,
+        "source": "default",
+    }
 
 
 class EmbeddingClient:
@@ -26,11 +76,22 @@ class EmbeddingClient:
         timeout: int = 60,
     ) -> None:
         settings = get_settings()
-        self.provider = provider or resolve_default_provider()
-        cfg = resolve_provider_config(self.provider)
-        self.api_key = cfg["api_key"]
-        self.base_url = (cfg["base_url"] or "").rstrip("/")
-        self.model = model or settings.embedding_model
+        if provider is not None:
+            # 显式指定 provider:探测该 provider 自身的 /embeddings(设置页
+            # 聊天卡测试用),语义与专用 embedding 配置无关
+            self.provider = provider
+            cfg = resolve_provider_config(provider)
+            self.api_key = cfg["api_key"]
+            self.base_url = (cfg["base_url"] or "").rstrip("/")
+            self.model = model or settings.embedding_model
+            self.source = "default"
+        else:
+            self.provider = resolve_default_provider()
+            cfg = resolve_embedding_config()
+            self.api_key = cfg["api_key"]
+            self.base_url = cfg["base_url"]
+            self.model = model or cfg["model"]
+            self.source = cfg["source"]
         self.timeout = timeout
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
