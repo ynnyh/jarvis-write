@@ -9,11 +9,17 @@
   1. 往圣经里灌一批确定的硬事实(受伤/所持/位置/关系/认知/世界观规则)。
   2. 写一批正文片段,每片段要么"明确违反"某条事实(注入矛盾,标注 golden),
      要么"完全自洽"(clean,不该报警)。
-  3. 对每个片段真跑 check_chapter,统计:
+  3. 对每个片段真跑一致性检查,统计:
        - 召回率  = 命中的矛盾数 / 注入的矛盾总数(漏检的反面)
        - 误报率  = clean 片段被报警的比例(吹毛求疵的反面)
   4. 判定命中:检查器返回的 issues 里,有任一条的 type/描述指向被违反的那条事实。
      用关键词锚点(anchor)做宽松匹配——只要 issue 文本里出现该矛盾的核心词即算命中。
+
+关于检查入口:线上的 checker.check_chapter 只接受 chapter_number,不带出场名单,
+因此关系约束(需要出场名单才注入)与实体聚焦的事实都测不到。本脚本改用带出场
+名单的 hard_constraints_block + 同一套 CONSISTENCY_CHECK_PROMPT 自行调用适配器
+(见 _check_one),让状态/所持/位置/关系/认知各维度都能被真实测到——用的仍是
+线上同一套约束渲染与检查 prompt,只是把出场名单喂进去。
 
 用法(在服务器容器内或本地配好 key 后):
     PYTHONIOENCODING=utf-8 .venv/Scripts/python -m scripts.redteam_consistency
@@ -25,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from collections import defaultdict
 
 # ---------- 数据集:圣经硬事实 ----------
 # 每条 (entity, entity_type, fact_type, content, importance)
@@ -35,15 +42,14 @@ SEED_FACTS = [
     ("苏槿", "character", "location", "自第3章起被软禁在城郊别墅,不得外出", "critical"),
     ("林陌", "character", "state", "在第5章已死亡,死于枪伤", "critical"),
     ("赵会长", "character", "possession", "左手小指缺失,是二十年前赌债的抵偿", "major"),
+    # 认知盲区当作一条 state 事实登记,才能进硬约束块被检查器看到——
+    # knowledge_states 不进 hard_constraints_block,单独灌是死数据(见模块 docstring)。
+    ("周衍", "character", "knowledge",
+     "此刻尚不知道苏槿的真实身份是财团继承人,对此毫不知情", "major"),
 ]
 # 关系事实:(from, to, relation)
 SEED_RELATIONS = [
     ("周衍", "苏槿", "同父异母的兄妹,彼此知情"),
-]
-# 认知事实:谁知道什么(reader/角色)
-# (fact_content, knower, state) —— 用于 knowledge 维度矛盾
-SEED_KNOWLEDGE = [
-    ("苏槿的真实身份是财团继承人", "周衍", "unknown"),  # 周衍此刻还不知道
 ]
 
 ENTITY_TYPES = {e[0]: e[1] for e in SEED_FACTS}
@@ -63,7 +69,7 @@ CASES = [
     ),
     # 2. 所持:遗失的怀表又拿出来看
     dict(
-        id="V2-possession-watch", kind="violate", dim="state",
+        id="V2-possession-watch", kind="violate", dim="possession",
         chars=["周衍"],
         text="周衍从怀里掏出那只青铜怀表，"
              "指腹摩挲着表盖上熟悉的刻痕，表针指向凌晨三点。"
@@ -72,7 +78,7 @@ CASES = [
     ),
     # 3. 能力:不会开车的人却熟练驾驶
     dict(
-        id="V3-ability-drive", kind="violate", dim="state",
+        id="V3-ability-drive", kind="violate", dim="ability",
         chars=["苏槿"],
         text="苏槿跳上驾驶座，熟练地挂挡、踩下油门，"
              "车子在盘山公路上漂移过弯，她眼神冷静，双手稳稳控着方向盘，"
@@ -81,7 +87,7 @@ CASES = [
     ),
     # 4. 空间/位置:被软禁的人却出现在另一座城市
     dict(
-        id="V4-location-confined", kind="violate", dim="timeline",
+        id="V4-location-confined", kind="violate", dim="location",
         chars=["苏槿"],
         text="这天下午，苏槿独自走在千里之外的海港城老街上，"
              "买了一支冰淇淋，沿着栈桥慢慢逛，海风把她的头发吹得凌乱，"
@@ -98,7 +104,7 @@ CASES = [
     ),
     # 6. 关系:互相知情的兄妹却被写成初次见面的陌生人
     dict(
-        id="V6-relation-siblings", kind="violate", dim="knowledge",
+        id="V6-relation-siblings", kind="violate", dim="relation",
         chars=["周衍", "苏槿"],
         text="周衍第一次见到苏槿，礼貌地伸出手：“你好，请问我们以前见过吗？”"
              "苏槿摇头，两个陌生人客气地交换了名片，彼此毫无干系。",
@@ -111,11 +117,11 @@ CASES = [
         text="周衍盯着苏槿，一字一句地说：“我早就查清楚了，"
              "你就是那个财团继承人，这一切都是你在背后操控。”"
              "苏槿脸色骤变。",
-        anchors=["继承人", "身份", "不该知道", "得知"],
+        anchors=["继承人", "身份", "不知情", "知道", "认知"],
     ),
     # 8. 细节:缺失小指的手却"十指健全"
     dict(
-        id="V8-detail-finger", kind="violate", dim="state",
+        id="V8-detail-finger", kind="violate", dim="possession",
         chars=["赵会长"],
         text="赵会长十指交叉搁在桌上，左手小指上那枚翡翠戒指格外扎眼，"
              "他慢条斯理地转动着戒指，笑意不达眼底。",
@@ -151,11 +157,19 @@ CASES = [
              "缺了小指的左手安静地压在膝上。“这笔生意，我接了。”",
         anchors=[],
     ),
+    # clean:守口如瓶——周衍此刻仍未点破苏槿身份,符合认知盲区
+    dict(
+        id="C4-clean-knowledge", kind="clean", dim="knowledge",
+        chars=["周衍", "苏槿"],
+        text="周衍打量着眼前的苏槿，心里隐约觉得她不简单，却说不上来是什么。"
+             "他没有多问，只淡淡道：“合作愉快。”便转身离开。",
+        anchors=[],
+    ),
 ]
 
 
 def _hit(issues: list[dict], anchors: list[str]) -> bool:
-    """issue 文本(description + conflicting_fact + suggestion)含任一 anchor 即算命中。"""
+    """issue 文本(description + conflicting_fact + type + suggestion)含任一 anchor 即算命中。"""
     blob = " ".join(
         f"{i.get('description','')} {i.get('conflicting_fact','')} {i.get('type','')} {i.get('suggestion','')}"
         for i in issues
@@ -163,12 +177,12 @@ def _hit(issues: list[dict], anchors: list[str]) -> bool:
     return any(a in blob for a in anchors)
 
 
-async def _seed(db, project_id: int):
+def _seed(db, project_id: int):
     from app.engines.consistency import BibleService
 
     bible = BibleService(db, project_id)
-    # 灌事实:每条从其 valid_from 起生效。为让所有事实在测试章(第9章)都有效,
-    # state/possession 类的 valid_from 用 3~5,测试统一按第 9 章检查。
+    # 灌事实:每条从其 valid_from 起生效。所有事实统一在第3章登记,
+    # 测试统一按第9章视角检查——此时全部有效。
     changes = [
         {"entity": e, "fact_type": ft, "content": c, "importance": imp, "replaces": None}
         for (e, _t, ft, c, imp) in SEED_FACTS
@@ -178,8 +192,52 @@ async def _seed(db, project_id: int):
          "other_entity": b, "importance": "major", "replaces": None}
         for (a, b, r) in SEED_RELATIONS
     ]
-    bible.apply_extraction(3, {"fact_changes": changes + rels})
+    stats = bible.apply_extraction(3, {"fact_changes": changes + rels})
     db.commit()
+    return stats
+
+
+async def _check_one(db, project_id: int, chapter_number: int, case: dict) -> list[dict]:
+    """带出场名单的一致性检查:复用线上的约束渲染与检查 prompt。
+
+    等价于 checker.check_chapter,但把 case["chars"] 作为出场名单传给
+    hard_constraints_block,从而让关系约束与实体聚焦的事实都进入约束块。
+    """
+    from app.engines.consistency import BibleService
+    from app.engines.consistency.extractor import parse_llm_json
+    from app.llm.router import Task, get_adapter_for
+    from app.prompts.consistency import CONSISTENCY_CHECK_PROMPT
+
+    bible = BibleService(db, project_id)
+    active_facts = bible.hard_constraints_block(chapter_number, case.get("chars"))
+    if active_facts.startswith("(暂无"):
+        return []
+
+    prompt = CONSISTENCY_CHECK_PROMPT.format(
+        active_facts=active_facts,
+        rolling_summary="(无)",
+        chapter_number=chapter_number,
+        chapter_text=case["text"][:12000],
+    )
+    raw = await get_adapter_for(Task.CONSISTENCY).ask(prompt)
+    data = parse_llm_json(raw)
+    issues = data.get("issues") or []
+    return [i for i in issues if isinstance(i, dict)]
+
+
+async def _preflight() -> str | None:
+    """检查器上游可用性预检:返回错误说明字符串,None 表示可用。"""
+    try:
+        from app.llm.router import Task, get_adapter_for
+
+        raw = await get_adapter_for(Task.CONSISTENCY).ask(
+            "只回复两个字:就绪。不要有任何多余内容。"
+        )
+        if not raw or not raw.strip():
+            return "上游返回空内容——请确认 CONSISTENCY 任务对应的 provider/key 已配置。"
+        return None
+    except Exception as exc:  # noqa: BLE001
+        return f"上游调用失败:{type(exc).__name__}: {exc}"
 
 
 async def main() -> int:
@@ -189,13 +247,23 @@ async def main() -> int:
     from app.db.base import Base
     import app.db.models  # noqa: F401
     from app.db.models import Project
-    from app.engines.consistency.checker import check_chapter
 
     # 多用户环境:允许用 REDTEAM_USER_ID 复用某账号的 key
     uid = os.environ.get("REDTEAM_USER_ID")
     if uid:
         from app.auth import current_user_id
         current_user_id.set(int(uid))
+
+    # 预检:key/上游不通时给出可读指引,而不是让每个片段静默漏检成"0 issue"
+    err = await _preflight()
+    if err:
+        print("=" * 60)
+        print("⛔ 上游预检未通过,红队测试无法进行:")
+        print("   " + err)
+        print("   处理:配好 CONSISTENCY 任务的 provider 与 key(设置页或 .env),")
+        print("        多用户环境可加 REDTEAM_USER_ID=<账号id> 复用其 key。")
+        print("=" * 60)
+        return 2
 
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
@@ -205,30 +273,34 @@ async def main() -> int:
                 target_chapters=20, target_words_per_chapter=2000)
     db.add(p)
     db.commit()
-    await _seed(db, p.id)
+    seed_stats = _seed(db, p.id)
+    print(f"=== 圣经灌入统计: {seed_stats} ===")
 
     from app.engines.consistency import BibleService
     bible = BibleService(db, p.id)
-    print("=== 已灌入圣经硬约束(第9章视角) ===")
-    print(bible.hard_constraints_block(9, [e[0] for e in SEED_FACTS]))
+    CHECK_AT = 9
+    all_chars = sorted({c for case in CASES for c in case["chars"]})
+    print("=== 已灌入圣经硬约束(第9章视角,全体出场) ===")
+    print(bible.hard_constraints_block(CHECK_AT, all_chars))
     print("=" * 60)
 
-    CHECK_AT = 9
     violate_total = 0
     violate_hit = 0
     clean_total = 0
     clean_false_alarm = 0
     rows = []
+    # 分维度召回:命中/总数
+    per_dim: dict[str, list[int]] = defaultdict(lambda: [0, 0])
 
     for case in CASES:
-        issues = await check_chapter(
-            db, p.id, CHECK_AT, case["text"], rolling_summary=""
-        )
+        issues = await _check_one(db, p.id, CHECK_AT, case)
         n_issues = len(issues)
         if case["kind"] == "violate":
             violate_total += 1
             hit = _hit(issues, case["anchors"])
             violate_hit += 1 if hit else 0
+            per_dim[case["dim"]][1] += 1
+            per_dim[case["dim"]][0] += 1 if hit else 0
             verdict = "命中✓" if hit else "漏检✗"
             rows.append((case["id"], case["dim"], verdict, n_issues))
         else:
@@ -241,18 +313,26 @@ async def main() -> int:
         for it in issues:
             print(f"    · [{case['id']}] {it.get('type','?')}/{it.get('severity','?')}: "
                   f"{it.get('description','')[:80]}")
+        # 漏检时补印锚点,方便判断是 LLM 没抓到还是锚点定得太窄
+        if case["kind"] == "violate" and not _hit(issues, case["anchors"]):
+            print(f"    ⚠ [{case['id']}] 漏检——期望命中锚点之一: {case['anchors']}")
 
     print("=" * 60)
-    print(f"{'CASE':<22}{'维度':<10}{'结果':<8}{'issues'}")
+    print(f"{'CASE':<22}{'维度':<12}{'结果':<8}{'issues'}")
     for cid, dim, verdict, n in rows:
-        print(f"{cid:<22}{dim:<10}{verdict:<8}{n}")
+        print(f"{cid:<22}{dim:<12}{verdict:<8}{n}")
+    print("=" * 60)
+    print("分维度召回:")
+    for dim, (hit, tot) in sorted(per_dim.items()):
+        rate = hit / tot if tot else 0.0
+        print(f"  {dim:<12}{hit}/{tot} = {rate:.0%}")
     print("=" * 60)
     recall = violate_hit / violate_total if violate_total else 0.0
     fp_rate = clean_false_alarm / clean_total if clean_total else 0.0
     print(f"召回率(抓到的矛盾/注入的矛盾): {violate_hit}/{violate_total} = {recall:.0%}")
     print(f"误报率(clean 被报警/clean 总数): {clean_false_alarm}/{clean_total} = {fp_rate:.0%}")
     print("=" * 60)
-    # 门槛:召回 >= 80% 且误报 <= 33%(clean 3 条允许最多误报 1 条)才算通过
+    # 门槛:召回 >= 80% 且误报 <= 34%(clean 允许少量误报)才算通过
     ok = recall >= 0.8 and fp_rate <= 0.34
     print("红队结论:", "通过 ✅" if ok else "未达标 ⚠️（见上方漏检/误报明细）")
     return 0 if ok else 1
