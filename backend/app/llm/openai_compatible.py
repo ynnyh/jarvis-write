@@ -11,7 +11,7 @@ from typing import AsyncIterator
 
 import httpx
 
-from app.llm.base import LLMAdapter, LLMMessage, LLMResponse
+from app.llm.base import LLMAdapter, LLMMessage, LLMResponse, check_upstream
 
 
 class OpenAICompatibleAdapter(LLMAdapter):
@@ -46,8 +46,10 @@ class OpenAICompatibleAdapter(LLMAdapter):
                 headers=self._headers(),
                 json=self._payload(messages, stream=False),
             )
-            resp.raise_for_status()
-            data = resp.json()
+            data = check_upstream(
+                resp,
+                hint="确认 Base URL 含 /v1 且渠道支持 OpenAI 协议",
+            )
 
         choice = data["choices"][0]["message"].get("content") or ""
         usage = data.get("usage", {})

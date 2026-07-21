@@ -85,7 +85,9 @@ function OverviewBoard({ pid, onGotoChapter }: { pid: number; onGotoChapter?: (n
   // 最新已生成章号:判断伏笔是否逾期
   const currentCh = chapters.reduce((m, c) => (c.status !== "empty" ? Math.max(m, c.chapter_number) : m), 0);
   const nums = Array.from({ length: maxCh }, (_, i) => i + 1);
-  const tickStep = Math.max(1, Math.ceil(maxCh / 24));
+  // 刻度密度:窄屏(手机)稀疏一些,避免数字挤成一团
+  const dense = typeof window !== "undefined" && window.innerWidth <= 640;
+  const tickStep = Math.max(1, Math.ceil(maxCh / (dense ? 8 : 24)));
 
   return (
     <>

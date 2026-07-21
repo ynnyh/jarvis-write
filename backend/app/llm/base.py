@@ -9,8 +9,45 @@
 from __future__ import annotations
 
 import abc
+import json
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Literal
+
+import httpx
+
+
+def check_upstream(resp: httpx.Response, *, hint: str = "") -> dict:
+    """校验上游响应并返回 JSON;异常时抛出用户可读的错误。
+
+    - HTTP 错误:带上状态码和上游错误消息(若有);
+    - 非 JSON(常见于 Base URL 填错/协议不匹配,上游回了 HTML 错误页):
+      说明原因并附 hint(如"中转站请用 OpenAI 卡")。
+    """
+    if resp.status_code >= 400:
+        msg = f"上游返回 HTTP {resp.status_code}"
+        try:
+            err = resp.json()
+            detail = (err.get("error") or {}).get("message") or err.get("message")
+            if detail:
+                msg += f": {detail}"
+        except Exception:  # noqa: BLE001
+            snippet = resp.text[:80].strip()
+            if snippet:
+                msg += f"(响应非 JSON,开头: {snippet})"
+        if hint:
+            msg += f"。{hint}"
+        raise RuntimeError(msg)
+    try:
+        return resp.json()
+    except json.JSONDecodeError:
+        snippet = resp.text[:80].strip()
+        msg = (
+            f"上游返回了非 JSON 内容(HTTP {resp.status_code}),通常是 Base URL 填错"
+            f"或该渠道不支持此协议(响应开头: {snippet})"
+        )
+        if hint:
+            msg += f"。{hint}"
+        raise RuntimeError(msg) from None
 
 Role = Literal["system", "user", "assistant"]
 

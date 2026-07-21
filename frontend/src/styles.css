@@ -768,6 +768,12 @@ label.fl {
 .ov-fs-bar.abandoned { background: var(--text-3); }
 .ov-fs-bar.overdue { background: var(--err); }
 
+/* 伏笔时间线窄屏自适应:取消最小宽度,标签收窄,区间条按百分比压缩 */
+@media (max-width: 640px) {
+  .ov-fs { min-width: 0; }
+  .ov-fs-label { width: 88px; }
+}
+
 /* 事实行右侧的小 × 删除(及其两步确认) */
 .fact-del {
   height: auto;

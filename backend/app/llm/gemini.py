@@ -13,7 +13,7 @@ from typing import AsyncIterator
 
 import httpx
 
-from app.llm.base import LLMAdapter, LLMMessage, LLMResponse
+from app.llm.base import LLMAdapter, LLMMessage, LLMResponse, check_upstream
 
 
 class GeminiAdapter(LLMAdapter):
@@ -52,8 +52,10 @@ class GeminiAdapter(LLMAdapter):
         url = f"{self._base()}/models/{self.model_name}:generateContent?key={self.api_key}"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             resp = await client.post(url, json=self._payload(messages))
-            resp.raise_for_status()
-            data = resp.json()
+            data = check_upstream(
+                resp,
+                hint="Gemini 卡仅支持 Google 原生协议;中转站(含卖 Gemini 模型的)请改用 OpenAI 卡",
+            )
 
         parts = data["candidates"][0]["content"]["parts"]
         text = "".join(p.get("text", "") for p in parts)

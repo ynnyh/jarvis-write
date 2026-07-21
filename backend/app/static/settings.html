@@ -72,7 +72,7 @@ const NAMES = { deepseek: "DeepSeek", openai: "OpenAI (GPT)", gemini: "Google Ge
 const DESCS = {
   deepseek: "DeepSeek 官方 API。注意:官方没有 embedding 接口,语义记忆会降级。",
   openai: "OpenAI 官方及兼容中转站——用中转站(如 token 站、API 超市)就选这张卡,填中转地址和中转里的模型名(如 deepseek-v4-pro)。",
-  gemini: "Google Gemini 官方 API。",
+  gemini: "仅 Google 官方原生 API。注意:中转站(包括卖 Gemini 模型的)一律走 OpenAI 卡,填中转地址。",
 };
 
 // 与 SPA 共用同一份登录态(同源 localStorage)
