@@ -170,11 +170,5 @@ async def polish_chapter_fragment(
 
 @router.post("/api/polish/ai-flavor")
 async def check_ai_flavor(req: FlavorRequest):
-    """只做 AI 味检测(纯规则,不调 LLM,即时返回)。"""
-    report = ai_flavor_report(req.text)
-    return {
-        "score": report.score,
-        "hits": report.hits,
-        "summary": report.summary(),
-        "total_chars": report.total_chars,
-    }
+    """只做 AI 味检测(纯规则,不调 LLM,即时返回)。含分类得分与命中明细。"""
+    return ai_flavor_report(req.text).to_dict()

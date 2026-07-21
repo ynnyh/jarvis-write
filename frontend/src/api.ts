@@ -75,7 +75,22 @@ export interface ChapterDetail extends ChapterBrief {
 export interface GenerateChapterResponse extends ChapterDetail {
   consistency_issues: Record<string, string>[];
   extraction_stats: Record<string, unknown>;
-  ai_flavor: { score: number; summary: string };
+  ai_flavor: FlavorInfo;
+}
+/** AI 味报告:score/summary 必备;categories 分类得分明细(新版后端返回,旧格式没有) */
+export interface FlavorInfo {
+  score: number;
+  summary: string;
+  categories?: Record<string, { count: number; weight: number; score: number }>;
+}
+/** hover 展示用:summary + 分类得分明细(兼容无明细的旧格式) */
+export function flavorTitle(f: FlavorInfo): string {
+  if (!f.categories || !Object.keys(f.categories).length) return f.summary;
+  const cats = Object.entries(f.categories)
+    .sort((a, b) => b[1].score - a[1].score)
+    .map(([k, v]) => `${k}×${v.count}`)
+    .join("、");
+  return `${f.summary}\n分类明细:${cats}`;
 }
 export interface Chip { label: string; directive: string; }
 export interface Dimension { key: string; label: string; select: "single" | "multi"; chips: Chip[]; }
@@ -102,7 +117,7 @@ export interface ForeshadowOut {
 }
 export interface PolishResult {
   polished: string; locked_facts: string[]; violations: Record<string, string>[];
-  flavor_before: { score: number; summary: string }; flavor_after: { score: number; summary: string };
+  flavor_before: FlavorInfo; flavor_after: FlavorInfo;
 }
 export interface ProviderState { deepseek: boolean; openai: boolean; gemini: boolean; }
 export interface AuthResult { token: string; username: string; is_admin: boolean; }
@@ -203,7 +218,8 @@ export const api = {
     req<{ polished: string; notes: string | null }>(
       "POST", `/api/projects/${pid}/chapters/${n}/polish-fragment`, { fragment, direction }, LLM_TIMEOUT),
   aiFlavor: (text: string) =>
-    req<{ score: number; summary: string; hits: Record<string, number> }>("POST", "/api/polish/ai-flavor", { text }),
+    req<FlavorInfo & { hits?: Record<string, unknown>[]; total_chars?: number }>(
+      "POST", "/api/polish/ai-flavor", { text }),
 
   // ---------- 鉴权 ----------
   register: (username: string, password: string, invite_code: string) =>

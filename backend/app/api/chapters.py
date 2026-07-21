@@ -61,8 +61,13 @@ class GenerateChapterResponse(ChapterDetail):
 
 
 def _flavor_dict(text: str) -> dict:
+    """生成结果卡的 AI 味字段:score/summary + 分类得分明细(hover 展示用)。"""
     report = ai_flavor_report(text)
-    return {"score": report.score, "summary": report.summary()}
+    return {
+        "score": report.score,
+        "summary": report.summary(),
+        "categories": report.categories,
+    }
 
 
 @router.post("/{chapter_number}/generate", response_model=GenerateChapterResponse)

@@ -1,7 +1,7 @@
 // 写作面板:逐章生成 / 阅读;本章蓝图上下文置顶;润色移步「润色」工作区
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
-  api, ChapterBrief, ChapterDetail, GenerateChapterResponse, Outline, Project, Tendency,
+  api, ChapterBrief, ChapterDetail, flavorTitle, GenerateChapterResponse, Outline, Project, Tendency,
 } from "../api";
 import { pollJob } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
@@ -234,7 +234,7 @@ export default function ChaptersPanel({ pid, outlines }: Props) {
           <div className="card card-ok">
             <b>生成完成</b> {genResult.word_count} 字
             {genResult.ai_flavor && (
-              <span className="badge" title={genResult.ai_flavor.summary}>
+              <span className="badge" title={flavorTitle(genResult.ai_flavor)}>
                 AI味 {genResult.ai_flavor.score} /千字
               </span>
             )}

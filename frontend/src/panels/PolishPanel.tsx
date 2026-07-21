@@ -1,6 +1,6 @@
 // 润色工作区:选章或贴文本 → 选风格 → 左右对照预览 → 应用
 import { useCallback, useEffect, useState } from "react";
-import { api, ChapterBrief, PolishResult, Tendency } from "../api";
+import { api, ChapterBrief, flavorTitle, PolishResult, Tendency } from "../api";
 import TendencySelector from "../components/TendencySelector";
 
 interface Props { pid: number; }
@@ -102,7 +102,10 @@ export default function PolishPanel({ pid }: Props) {
       {result && (
         <div className="card">
           <div className="mb-3">
-            <span className="badge">AI味 {result.flavor_before.score} → {result.flavor_after.score} /千字</span>
+            <span className="badge"
+              title={`润色前:${flavorTitle(result.flavor_before)}\n润色后:${flavorTitle(result.flavor_after)}`}>
+              AI味 {result.flavor_before.score} → {result.flavor_after.score} /千字
+            </span>
             <span className="badge ok">锁定事实 {result.locked_facts.length} 条</span>
             {result.violations.length
               ? <span className="badge err">⚠ 事实违规 {result.violations.length} 处</span>
