@@ -614,6 +614,10 @@ label.fl {
 .fact-line { padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: var(--fs-sm); }
 .fact-line:last-child { border-bottom: none; }
 .fact-row { display: flex; align-items: center; gap: 6px; }
+/* 章节行内重写意见输入区 */
+.revise-box textarea { min-height: 72px; font-size: var(--fs-sm); }
+.revise-box .chips { margin: 6px 0; }
+.revise-actions { display: flex; gap: 6px; }
 .fact-check { display: flex; gap: var(--sp-2); }
 .fact-check input[type="checkbox"] { margin-top: 4px; flex-shrink: 0; }
 .fact-title { flex: 1; min-width: 0; }

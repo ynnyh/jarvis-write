@@ -33,6 +33,7 @@ logger = logging.getLogger("jarvis-write.chapter")
 
 _RECENT_TAIL_CHARS = 900   # 每章取结尾多少字作直接上文
 _RECENT_WINDOW = 2         # 直接注入最近几章的结尾
+_REVISION_EXCERPT_CHARS = 1500  # 重写时上一版正文注入草稿 prompt 的截断长度
 
 
 def _strip_meta(text: str) -> str:
@@ -69,6 +70,26 @@ def _recent_tail(db: Session, project_id: int, current: int) -> str:
         if ch and ch.final_content:
             parts.append(f"(第{n}章结尾)…{ch.final_content[-_RECENT_TAIL_CHARS:]}")
     return "\n\n".join(parts) or "(本章是第一章,无上文)"
+
+
+def _revision_block(revision: str | None, previous_text: str) -> str:
+    """重写意见注入块:仅当上一版正文存在且用户给了修改意见时生成。
+
+    上一版正文截断为前 _REVISION_EXCERPT_CHARS 字,作反面参照,避免 token 爆炸。
+    """
+    revision = (revision or "").strip()
+    if not revision or not previous_text.strip():
+        return ""
+    excerpt = previous_text[:_REVISION_EXCERPT_CHARS]
+    if len(previous_text) > _REVISION_EXCERPT_CHARS:
+        excerpt += "……(后略)"
+    return (
+        "【重写要求】这是重写:上一版正文用户不满意,修改意见如下:\n"
+        f"{revision}\n"
+        "请在保持本章蓝图、人物状态与伏笔约束不变的前提下,针对以上意见改进。\n\n"
+        "【上一版正文(反面参照,仅供对照问题,不可照抄)】\n"
+        f"{excerpt}"
+    )
 
 
 def _rolling_summary(db: Session, project_id: int, current: int) -> str:
@@ -151,10 +172,13 @@ async def generate_chapter(
     chapter_number: int,
     tendency: Tendency | None = None,
     progress=None,
+    revision: str | None = None,
 ) -> tuple[Chapter, list[dict], dict]:
     """生成一章:草稿 → 定稿 → 一致性检查 → 抽取写圣经 → 摘要 → 入库。
 
     progress: 可选回调 fn(stage_text),五段各报一次(异步任务进度用)。
+    revision: 重写时用户的修改意见;仅当本章已有正文时连同上一版
+        (截断)注入草稿 prompt,首次生成传了也会被忽略。
     返回 (Chapter, 一致性问题列表, 抽取统计)。
     """
 
@@ -205,6 +229,19 @@ async def generate_chapter(
     ]
     avoid_repetition = avoid_block(recent_full)
 
+    # 重写场景:用户给了修改意见 → 连同上一版正文(截断)注入草稿 prompt
+    existing = (
+        db.query(Chapter)
+        .filter(
+            Chapter.project_id == project.id,
+            Chapter.chapter_number == chapter_number,
+        )
+        .first()
+    )
+    revision_block = _revision_block(
+        revision, existing.final_content if existing else ""
+    )
+
     # ---- 草稿 ----
     _report("1/5 生成草稿")
     logger.info("第 %d 章:生成草稿...", chapter_number)
@@ -218,6 +255,7 @@ async def generate_chapter(
         hard_constraints=hard_constraints,
         foreshadow_reminders=foreshadow_reminders,
         avoid_repetition=avoid_repetition,
+        revision_block=revision_block,
         chapter_role=outline.chapter_role,
         chapter_purpose=outline.chapter_purpose,
         suspense_level=outline.suspense_level,

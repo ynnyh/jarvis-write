@@ -1,5 +1,5 @@
 // 写作面板:逐章生成 / 阅读;本章蓝图上下文置顶;润色移步「润色」工作区
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
   api, ChapterBrief, ChapterDetail, GenerateChapterResponse, Outline, Project, Tendency,
 } from "../api";
@@ -21,6 +21,9 @@ export default function ChaptersPanel({ pid, outlines }: Props) {
   const [showTendency, setShowTendency] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
+  // 行内重写意见输入区:当前展开的章号(null=收起)与意见文本(可留空=直接重写)
+  const [reviseFor, setReviseFor] = useState<number | null>(null);
+  const [reviseText, setReviseText] = useState("");
   // 阅读器(全屏遮罩,共用组件 Reader):当前阅读章节
   const [reader, setReader] = useState<ChapterDetail | null>(null);
   const [readerLoading, setReaderLoading] = useState(false);
@@ -92,13 +95,13 @@ export default function ChaptersPanel({ pid, outlines }: Props) {
     } finally { if (!ctrl.signal.aborted) setGenJob(null); }
   }
 
-  async function generate(n: number) {
+  async function generate(n: number, revision = "") {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    setErr(""); setGenResult(null);
+    setErr(""); setGenResult(null); setReviseFor(null);
     setGenJob({ num: n, kind: "generate", stage: "排队中…" });
     try {
-      const { job_id } = await api.generateChapterAsync(pid, n, genTendency);
+      const { job_id } = await api.generateChapterAsync(pid, n, genTendency, revision);
       // 轮询任务进度(五段:草稿→定稿→检查→抽取→摘要)
       const result = await pollJob<GenerateChapterResponse>(job_id, {
         signal: ctrl.signal,
@@ -162,28 +165,65 @@ export default function ChaptersPanel({ pid, outlines }: Props) {
               ? "本章任务进行中"
               : `第 ${genJob?.num} 章任务进行中,完成后可继续操作`;
             return (
-              <div key={o.chapter_number} className="fact-line fact-row">
-                <span className={"fact-title" + (ch ? " linkish" : "")}
-                  onClick={() => ch && open(o.chapter_number)}>
-                  <b>第{o.chapter_number}章</b> {o.title}
-                  <span className={"badge " + (ch?.is_stale ? "err" : st === "finalized" ? "ok" : "")}>
-                    {ch?.is_stale ? "大纲已变" : STATUS_CN[st] ?? st}
+              <Fragment key={o.chapter_number}>
+                <div className="fact-line fact-row">
+                  <span className={"fact-title" + (ch ? " linkish" : "")}
+                    onClick={() => ch && open(o.chapter_number)}>
+                    <b>第{o.chapter_number}章</b> {o.title}
+                    <span className={"badge " + (ch?.is_stale ? "err" : st === "finalized" ? "ok" : "")}>
+                      {ch?.is_stale ? "大纲已变" : STATUS_CN[st] ?? st}
+                    </span>
+                    {ch && <span className="muted"> {ch.word_count}字</span>}
+                    {generating && (
+                      <span className="gen-stage"><span className="spin" />{genJob.stage}</span>
+                    )}
                   </span>
-                  {ch && <span className="muted"> {ch.word_count}字</span>}
-                  {generating && (
-                    <span className="gen-stage"><span className="spin" />{genJob.stage}</span>
+                  {ch && (
+                    <button className="btn-sm" onClick={() => openReader(o.chapter_number)}>
+                      阅读
+                    </button>
                   )}
-                </span>
-                {ch && (
-                  <button className="btn-sm" onClick={() => openReader(o.chapter_number)}>
-                    阅读
+                  <button className="btn-sm" disabled={genBlocked} title={genBlocked ? genHint : undefined}
+                    onClick={() => {
+                      if (ch) {
+                        // 重写:先展开行内意见输入区,不直接开跑
+                        setReviseFor(reviseFor === o.chapter_number ? null : o.chapter_number);
+                        setReviseText("");
+                      } else {
+                        generate(o.chapter_number);
+                      }
+                    }}>
+                    {ch ? "重写" : "生成"}
                   </button>
+                </div>
+                {reviseFor === o.chapter_number && (
+                  <div className="fact-line revise-box">
+                    <textarea
+                      rows={3}
+                      maxLength={500}
+                      placeholder="哪里不满意?比如:节奏太拖 / 对话不像这个角色 / 结尾太仓促;想要什么方向?比如:加强冲突、多些心理描写(可留空,直接重写)"
+                      value={reviseText}
+                      onChange={(e) => setReviseText(e.target.value)}
+                    />
+                    <div className="chips">
+                      {["节奏太慢", "对话生硬", "描写单薄"].map((c) => (
+                        <span key={c} className="chip"
+                          onClick={() => setReviseText((t) => ((t ? t.trimEnd() + ";" : "") + c).slice(0, 500))}>
+                          {c}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="revise-actions">
+                      <button className="primary btn-sm" disabled={genBlocked}
+                        title={genBlocked ? genHint : undefined}
+                        onClick={() => generate(o.chapter_number, reviseText.trim())}>
+                        开始重写
+                      </button>
+                      <button className="btn-sm" onClick={() => setReviseFor(null)}>取消</button>
+                    </div>
+                  </div>
                 )}
-                <button className="btn-sm" disabled={genBlocked} title={genBlocked ? genHint : undefined}
-                  onClick={() => generate(o.chapter_number)}>
-                  {ch ? "重写" : "生成"}
-                </button>
-              </div>
+              </Fragment>
             );
           })}
         </div>

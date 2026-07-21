@@ -50,6 +50,7 @@ CHAPTER_DRAFT_PROMPT = """\
 {foreshadow_reminders}
 
 {avoid_repetition}
+{revision_block}
 【本章蓝图】
 第{chapter_number}章《{chapter_title}》
 - 本章定位:{chapter_role}

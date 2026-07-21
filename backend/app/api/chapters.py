@@ -31,6 +31,8 @@ router = APIRouter(
 
 class GenerateChapterRequest(BaseModel):
     tendency: Tendency = Field(default_factory=dict)
+    # 重写时的修改意见(可选,最长 500 字;首次生成传了也会被引擎忽略)
+    revision: str = Field(default="", max_length=500)
 
 
 class ChapterBrief(BaseModel):
@@ -66,7 +68,8 @@ async def generate(
     project = get_project_or_404(db, project_id)
     try:
         chapter, issues, stats = await generate_chapter(
-            db, project, chapter_number, req.tendency
+            db, project, chapter_number, req.tendency,
+            revision=req.revision.strip(),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -95,6 +98,7 @@ async def generate_async(
             chapter, issues, stats = await generate_chapter(
                 session, project, chapter_number, req.tendency,
                 progress=lambda s: update_stage(job_id, s),
+                revision=req.revision.strip(),
             )
             session.commit()
             finish_job(job_id, {
