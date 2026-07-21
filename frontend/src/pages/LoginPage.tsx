@@ -1,5 +1,6 @@
 // 登录 / 注册页(阶段 8:多用户)。注册需邀请码。
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { api, token, Me } from "../api";
 
 interface Props { onAuthed: (me: Me) => void; }
@@ -69,6 +70,7 @@ export default function LoginPage({ onAuthed }: Props) {
       </div>
       <div className="muted auth-foot">
         开源项目 · <a href="https://github.com/ynnyh/jarvis-write" target="_blank" rel="noreferrer">GitHub</a> · Apache-2.0
+        · <Link to="/help">使用指南</Link>
       </div>
     </div>
   );

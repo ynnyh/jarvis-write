@@ -75,6 +75,7 @@ export interface ChapterDetail extends ChapterBrief {
 export interface GenerateChapterResponse extends ChapterDetail {
   consistency_issues: Record<string, string>[];
   extraction_stats: Record<string, unknown>;
+  ai_flavor: { score: number; summary: string };
 }
 export interface Chip { label: string; directive: string; }
 export interface Dimension { key: string; label: string; select: "single" | "multi"; chips: Chip[]; }

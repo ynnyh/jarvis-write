@@ -233,6 +233,14 @@ export default function ChaptersPanel({ pid, outlines }: Props) {
         {genResult && (
           <div className="card card-ok">
             <b>生成完成</b> {genResult.word_count} 字
+            {genResult.ai_flavor && (
+              <span className="badge" title={genResult.ai_flavor.summary}>
+                AI味 {genResult.ai_flavor.score} /千字
+              </span>
+            )}
+            {genResult.ai_flavor && (
+              <span className="muted"> 偏高可去「润色」,选「去AI味」方向</span>
+            )}
             {genResult.consistency_issues.length
               ? <div className="mt-2">
                   <span className="badge err">一致性问题 {genResult.consistency_issues.length}</span>

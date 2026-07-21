@@ -19,6 +19,7 @@ from app.auth import get_current_user
 from app.db.models import Chapter, Project
 from app.db.session import SessionLocal, get_db
 from app.engines.pipeline.chapter import generate_chapter
+from app.engines.polish import ai_flavor_report
 from app.jobs import create_job, fail_job, finish_job, update_stage
 from app.schemas.tendency import Tendency
 
@@ -51,10 +52,17 @@ class ChapterDetail(ChapterBrief):
 
 
 class GenerateChapterResponse(ChapterDetail):
-    """生成结果:正文 + 一致性检查问题 + 圣经抽取统计。"""
+    """生成结果:正文 + 一致性检查问题 + 圣经抽取统计 + AI 味指数。"""
 
     consistency_issues: list[dict] = []
     extraction_stats: dict = {}
+    # AI 味指数:纯规则统计(不调 LLM,零额外耗时),生成完成即给出
+    ai_flavor: dict = {}
+
+
+def _flavor_dict(text: str) -> dict:
+    report = ai_flavor_report(text)
+    return {"score": report.score, "summary": report.summary()}
 
 
 @router.post("/{chapter_number}/generate", response_model=GenerateChapterResponse)
@@ -77,6 +85,7 @@ async def generate(
     resp = GenerateChapterResponse.model_validate(chapter, from_attributes=True)
     resp.consistency_issues = issues
     resp.extraction_stats = stats
+    resp.ai_flavor = _flavor_dict(chapter.final_content)
     return resp
 
 
@@ -111,6 +120,7 @@ async def generate_async(
                 "outline_version_used": chapter.outline_version_used,
                 "consistency_issues": issues,
                 "extraction_stats": stats,
+                "ai_flavor": _flavor_dict(chapter.final_content),
             })
         except Exception as exc:  # noqa: BLE001 — 任务失败进 job 状态
             session.rollback()

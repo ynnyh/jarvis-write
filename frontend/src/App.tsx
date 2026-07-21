@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Link, Outlet } from "react-router-dom";
+import { Link, Outlet, useLocation } from "react-router-dom";
 import { api, token, setUnauthorizedHandler, Me } from "./api";
 import LoginPage from "./pages/LoginPage";
+import HelpPage from "./pages/HelpPage";
 
 export default function App() {
   const [tokens, setTokens] = useState<string>("");
@@ -10,6 +11,7 @@ export default function App() {
   const [llmConfigured, setLlmConfigured] = useState<boolean | null>(null);
   // 引导态:正在用已存 token 拉当前用户
   const [booting, setBooting] = useState<boolean>(!!token.get());
+  const location = useLocation();
 
   // 401 统一处理:清 token、回登录页
   useEffect(() => {
@@ -58,6 +60,14 @@ export default function App() {
   }
 
   if (!me) {
+    // 使用指南对未登录用户开放(新用户注册前就能看)
+    if (location.pathname === "/help") {
+      return (
+        <div className="wrap">
+          <HelpPage />
+        </div>
+      );
+    }
     return <LoginPage onAuthed={setMe} />;
   }
 
@@ -69,6 +79,7 @@ export default function App() {
         <div className="grow" />
         {tokens && <span className="muted" title="累计 LLM 用量">{tokens}</span>}
         {me.is_admin && <Link to="/admin">管理</Link>}
+        <Link to="/help">指南</Link>
         <a href="/settings" target="_blank" rel="noreferrer">模型设置</a>
         <a href="/docs" target="_blank" rel="noreferrer">API</a>
         <a className="topbar-gh" href="https://github.com/ynnyh/jarvis-write" target="_blank" rel="noreferrer">GitHub</a>

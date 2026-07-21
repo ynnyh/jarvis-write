@@ -114,6 +114,11 @@ export default function ProjectsPage() {
       {creating && (
         <div className="card">
           <h2>新建小说项目</h2>
+          {!projects.length && (
+            <div className="muted mb-2">
+              第一次用?先看 <Link to="/help">「使用指南」</Link> 了解六步流程。
+            </div>
+          )}
           <div className="row">
             <div>
               <label className="fl">书名 *</label>
