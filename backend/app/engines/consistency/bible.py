@@ -90,8 +90,21 @@ class BibleService:
     def hard_constraints_block(
         self, chapter_number: int, entity_names: list[str] | None = None
     ) -> str:
-        """渲染 Prompt 硬约束块:涉及角色在当前章的状态事实。"""
+        """渲染 Prompt 硬约束块:涉及角色在当前章的状态事实。
+
+        已退场(retired=True)的实体及其事实一律不注入——
+        作者退场某个人物后,后续生成不再受其状态约束;历史数据保留。
+        """
         facts = self.query_facts_at(chapter_number, entity_names)
+        retired_ids = {
+            row.id
+            for row in self.db.query(Entity.id).filter(
+                Entity.project_id == self.project_id,
+                Entity.retired.is_(True),
+            )
+        }
+        if retired_ids:
+            facts = [f for f in facts if f.entity_id not in retired_ids]
         if not facts:
             return "(暂无已登记的状态约束)"
         # critical 优先,同实体聚合

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -31,6 +31,9 @@ class Entity(Base):
     # 别名列表,防止 LLM 换称呼后认不出同一实体
     aliases: Mapped[list[Any]] = mapped_column(JSON, default=list)
     base_profile: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # 退场标记(作者手动管理):True 时生成注入不再包含该实体及其事实,
+    # 历史正文与事实全部保留,可随时恢复
+    retired: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class Fact(Base, TimestampMixin):

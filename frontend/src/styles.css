@@ -624,6 +624,49 @@ label.fl {
 
 .entity { margin-bottom: 10px; }
 
+/* ---------- 看板页签 / 人物卡 ---------- */
+.board-tabs { margin-bottom: var(--sp-3); }
+
+.char-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--sp-3);
+}
+.char-card {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  padding: var(--sp-3) 14px;
+}
+.char-card.retired { opacity: 0.55; }
+.char-card h3 { margin: 0; font-size: var(--fs-md); }
+.char-aliases { margin-top: 4px; font-size: var(--fs-xs); }
+.char-chapters { margin-top: 6px; font-size: var(--fs-xs); }
+.char-card .linkbtn { margin-top: 4px; font-size: var(--fs-xs); }
+
+.char-form {
+  margin-top: var(--sp-3);
+  padding: var(--sp-3) 14px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+}
+.char-form textarea { margin-top: var(--sp-2); }
+
+/* 事实行右侧的小 × 删除(及其两步确认) */
+.fact-del {
+  height: auto;
+  padding: 0 6px;
+  border: none;
+  background: none;
+  color: var(--text-3);
+  font-size: var(--fs-md);
+  line-height: 1.4;
+  margin-left: 0;
+}
+.fact-del:hover:not(:disabled) { background: none; color: var(--err); }
+.fact-confirm { font-size: var(--fs-xs); color: var(--err); white-space: nowrap; }
+.fact-confirm button { margin-left: 4px; }
+
 table.tbl { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
 table.tbl th, table.tbl td {
   text-align: left;

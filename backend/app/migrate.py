@@ -81,6 +81,22 @@ def _add_synopsis_column() -> None:
             logger.info("迁移:projects 补 synopsis 列")
 
 
+def _add_retired_column() -> None:
+    """给 entities 表补 retired 列(人物退场标记,存量一律活跃,幂等)。"""
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "entities" not in insp.get_table_names():
+            return  # create_all 会新建,无需补列
+        if not _column_exists("entities", "retired"):
+            conn.execute(
+                text(
+                    "ALTER TABLE entities ADD COLUMN retired BOOLEAN "
+                    "NOT NULL DEFAULT 0"
+                )
+            )
+            logger.info("迁移:entities 补 retired 列")
+
+
 def _ensure_admin(db: Session) -> User:
     settings = get_settings()
     admin = (
@@ -127,6 +143,7 @@ def run_migrations() -> None:
     _add_user_id_columns()
     _add_is_active_column()
     _add_synopsis_column()
+    _add_retired_column()
     with session_scope() as db:
         admin = _ensure_admin(db)
         db.flush()

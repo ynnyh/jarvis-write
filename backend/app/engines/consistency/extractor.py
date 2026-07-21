@@ -55,9 +55,13 @@ async def extract_and_apply(
         "foreshadow": scheduler.purge_chapter_ops(chapter_number),
     }
 
+    # 已退场实体不再注入抽取提示:不再为退场人物累积新事实
     known_entities = "\n".join(
         f"- {e.name}({e.entity_type})"
-        for e in db.query(Entity).filter(Entity.project_id == project_id)
+        for e in db.query(Entity).filter(
+            Entity.project_id == project_id,
+            Entity.retired.is_(False),
+        )
     ) or "(暂无)"
 
     active_facts = bible.hard_constraints_block(chapter_number)

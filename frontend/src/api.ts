@@ -115,6 +115,15 @@ export interface ForeshadowOut {
   expected_payoff_chapter: number | null; payoff_chapter: number | null;
   reinforcement_chapters: number[]; importance: string; is_due: boolean;
 }
+export interface CharacterFact {
+  id: number; fact_type: string; content: string;
+  valid_from: number; valid_until: number | null; importance: string;
+}
+export interface CharacterCard {
+  id: number; name: string; aliases: string[]; entity_type: string; retired: boolean;
+  profile: string; key_facts: CharacterFact[]; appearance_chapters: number[];
+}
+export interface CharactersOut { characters: CharacterCard[]; other_entities_count: number; }
 export interface PolishResult {
   polished: string; locked_facts: string[]; violations: Record<string, string>[];
   flavor_before: FlavorInfo; flavor_after: FlavorInfo;
@@ -205,6 +214,14 @@ export const api = {
     req<BibleSnapshot>("GET", `/api/projects/${pid}/bible?chapter=${chapter}`),
   foreshadowings: (pid: number, current: number) =>
     req<ForeshadowOut[]>("GET", `/api/projects/${pid}/foreshadowings?current_chapter=${current}`),
+  characters: (pid: number) =>
+    req<CharactersOut>("GET", `/api/projects/${pid}/characters`),
+  createCharacter: (pid: number, payload: { name: string; aliases?: string[]; profile?: string }) =>
+    req<CharacterCard>("POST", `/api/projects/${pid}/characters`, payload),
+  setCharacterRetired: (pid: number, entityId: number, retired: boolean) =>
+    req<CharacterCard>("PATCH", `/api/projects/${pid}/characters/${entityId}`, { retired }),
+  deleteFact: (pid: number, factId: number) =>
+    req<{ ok: boolean }>("DELETE", `/api/projects/${pid}/facts/${factId}`),
 
   tendencyCatalog: (node: string) => req<NodeCatalog>("GET", `/api/tendency/catalog/${node}`),
 
