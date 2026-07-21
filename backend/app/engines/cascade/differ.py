@@ -59,6 +59,78 @@ def _fmt(d: dict[str, Any]) -> str:
     return "\n".join(f"{k}: {v}" for k, v in d.items() if k != "chapter_number")
 
 
+def _persist_version(
+    db: Session,
+    outline: Outline,
+    snapshot: dict[str, Any],
+    content_hash: str,
+    change_type: str,
+    change_summary: str,
+) -> bool:
+    """落库:升版本 + 存快照 + 本章已有正文 → 失配标记。返回 own_chapter_stale。"""
+    outline.content_hash = content_hash
+    outline.current_version += 1
+    db.add(
+        OutlineVersion(
+            outline_id=outline.id,
+            version=outline.current_version,
+            snapshot=snapshot,
+            change_type=change_type,
+            change_summary=change_summary,
+        )
+    )
+
+    own_stale = False
+    ch = (
+        db.query(Chapter)
+        .filter(
+            Chapter.project_id == outline.project_id,
+            Chapter.chapter_number == outline.chapter_number,
+            Chapter.final_content != "",
+        )
+        .first()
+    )
+    if ch:
+        ch.is_stale = True
+        ch.status = "stale"
+        own_stale = True
+
+    db.flush()
+    return own_stale
+
+
+def apply_outline_revision(
+    db: Session,
+    outline: Outline,
+    updates: dict[str, Any],
+    *,
+    change_type: str = "major",
+    change_summary: str,
+) -> dict[str, Any]:
+    """版本化落库但跳过 diff 分级(修改指令批量改写场景用)。
+
+    与 apply_outline_edit 的区别:不做规则粗筛/LLM 精判/影响分析,
+    直接按调用方给的 change_type/change_summary 记版本。
+    内容无实质变化 → status=unchanged,不产生新版本。
+    """
+    for field, value in updates.items():
+        if field in OUTLINE_EDITABLE_FIELDS and value is not None:
+            setattr(outline, field, value)
+    new = outline_to_dict(outline)
+    new_hash = _outline_content_hash(new)
+    if new_hash == outline.content_hash:
+        return {"status": "unchanged", "own_chapter_stale": False}
+
+    own_stale = _persist_version(
+        db, outline, new, new_hash, change_type, change_summary
+    )
+    logger.info(
+        "大纲版本化落库: 第%d章 v%d [%s] %s",
+        outline.chapter_number, outline.current_version, change_type, change_summary,
+    )
+    return {"status": "saved", "own_chapter_stale": own_stale}
+
+
 async def apply_outline_edit(
     db: Session, outline: Outline, updates: dict[str, Any]
 ) -> dict[str, Any]:
@@ -111,36 +183,7 @@ async def apply_outline_edit(
             logger.warning("改动精判失败,保守按 major 处理: %s", exc)
             change_type = "major"
 
-    # ---- 落库:升版本 + 快照 ----
-    outline.content_hash = new_hash
-    outline.current_version += 1
-    db.add(
-        OutlineVersion(
-            outline_id=outline.id,
-            version=outline.current_version,
-            snapshot=new,
-            change_type=change_type,
-            change_summary=change_summary,
-        )
-    )
-
-    # ---- 本章已有正文 → 失配标记 ----
-    own_stale = False
-    ch = (
-        db.query(Chapter)
-        .filter(
-            Chapter.project_id == outline.project_id,
-            Chapter.chapter_number == outline.chapter_number,
-            Chapter.final_content != "",
-        )
-        .first()
-    )
-    if ch:
-        ch.is_stale = True
-        ch.status = "stale"
-        own_stale = True
-
-    db.flush()
+    own_stale = _persist_version(db, outline, new, new_hash, change_type, change_summary)
     logger.info(
         "大纲编辑: 第%d章 v%d [%s] %s",
         outline.chapter_number, outline.current_version, change_type, change_summary,

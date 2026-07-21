@@ -104,3 +104,34 @@ OUTLINE_REGENERATE_PROMPT = """\
 
 仅输出以上格式内容,不要解释。
 """
+
+# =============== 4. 修改指令解析(自然语言 → 受影响章大纲改写预览) ===============
+EDIT_DIRECTIVE_PROMPT = """\
+你是小说结构编辑。作者对整部小说提出了一条结构性修改指令,请判断哪些章节的大纲需要改写,并给出改写结果。
+
+【修改指令】
+{directive}
+
+【小说架构简报】
+{architecture_brief}
+
+【全部章节蓝图(章号/标题/简述)】
+{blueprint_digest}
+
+要求:
+1. 只改写确实受指令影响的章节,不受影响的不要列出
+2. new_summary 是改写后的完整"本章简述"(100字以内),不是改动说明
+3. new_title 仅在章节标题需要随之变化时给出,否则省略该字段
+4. change_reason 一句话说明该章为什么受指令影响
+5. 指令明显是"删除/不要某角色"时,suggest_retire 列出建议退场的人物名;否则为空数组
+6. 没有任何章节受影响时 items 为空数组,并在 analysis 里说明原因
+
+严格按 JSON 输出(不要 markdown 围栏,不要解释):
+{{
+  "analysis": "一两句总体判断",
+  "items": [
+    {{"chapter_number": 数字, "new_title": "新标题(可选)", "new_summary": "改写后的本章简述", "change_reason": "受影响原因"}}
+  ],
+  "suggest_retire": ["建议退场的人物名"]
+}}
+"""

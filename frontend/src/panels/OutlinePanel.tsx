@@ -1,6 +1,6 @@
 // 大纲工作区:蓝图生成 / 内联编辑 / 大改分级 → 影响分析 → 勾选级联
 import { useEffect, useRef, useState } from "react";
-import { api, EditResult, ImpactReport, Outline, Tendency } from "../api";
+import { api, DirectiveApplyResult, DirectiveItem, DirectivePreview, EditResult, ImpactReport, Outline, Tendency } from "../api";
 import { pollJob } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
 import type { Step } from "../pages/ProjectPage";
@@ -29,6 +29,13 @@ export default function OutlinePanel({ pid, outlines, hasArch, onChanged, onGoto
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [flash, setFlash] = useState("");
   const [genDone, setGenDone] = useState<number | null>(null);
+  // 修改指令:输入 → LLM 预览(可再编辑/勾选) → 应用
+  const [showDirective, setShowDirective] = useState(false);
+  const [directiveText, setDirectiveText] = useState("");
+  const [preview, setPreview] = useState<DirectivePreview | null>(null);
+  const [drafts, setDrafts] = useState<DirectiveItem[]>([]);
+  const [dirPicked, setDirPicked] = useState<Set<number>>(new Set());
+  const [dirResult, setDirResult] = useState<DirectiveApplyResult | null>(null);
   // 组件卸载时中止轮询,防止卸载后继续 setState
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -107,6 +114,35 @@ export default function OutlinePanel({ pid, outlines, hasArch, onChanged, onGoto
     } catch (e) { setErr(String(e)); } finally { setBusy(""); }
   }
 
+  async function runDirectiveParse() {
+    setBusy("分析修改指令的影响…"); setErr(""); setPreview(null); setDirResult(null);
+    try {
+      const r = await api.parseEditDirective(pid, directiveText);
+      setPreview(r);
+      setDrafts(r.items.map((i) => ({ ...i })));
+      setDirPicked(new Set(r.items.map((i) => i.chapter_number)));
+    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+  }
+
+  function closeDirective() {
+    setShowDirective(false); setPreview(null); setDrafts([]);
+    setDirPicked(new Set()); setDirResult(null);
+  }
+
+  async function applyDirective() {
+    const items = drafts.filter((d) => dirPicked.has(d.chapter_number));
+    if (!items.length) return;
+    setBusy(`应用修改(第 ${items.map((i) => i.chapter_number).join("、")} 章)…`); setErr("");
+    try {
+      const r = await api.applyEditDirective(pid, items);
+      setDirResult(r);
+      setPreview(null); setDrafts([]); setDirectiveText("");
+      await onChanged();
+    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+  }
+
+  const oldOf = (n: number) => outlines.find((o) => o.chapter_number === n);
+
   return (
     <>
       <div className="card">
@@ -119,6 +155,11 @@ export default function OutlinePanel({ pid, outlines, hasArch, onChanged, onGoto
               </button>
               <button className="btn-sm" onClick={() => setExpanded(new Set())}>全部收起</button>
             </>
+          )}
+          {outlines.length > 0 && (
+            <button onClick={() => (showDirective ? closeDirective() : setShowDirective(true))}>
+              修改指令
+            </button>
           )}
           <button onClick={() => setShowGen(!showGen)}>
             {outlines.length ? "重新生成蓝图" : "生成蓝图"}
@@ -155,6 +196,90 @@ export default function OutlinePanel({ pid, outlines, hasArch, onChanged, onGoto
                 )}
               </>
             ))}
+          </div>
+        )}
+        {showDirective && (
+          <div className="mt-3">
+            <div className="muted">用一句话描述结构性修改,AI 改写受影响章的大纲,你确认后才生效。</div>
+            <textarea rows={2} value={directiveText}
+              placeholder="如:不要男二,让他的戏份并给女主 / 把反派改成男主的哥哥"
+              onChange={(e) => setDirectiveText(e.target.value)} />
+            {!preview && !dirResult && (
+              <button className="primary mt-2" disabled={!!busy || !directiveText.trim()} onClick={runDirectiveParse}>
+                {busy && <span className="spin" />}分析影响
+              </button>
+            )}
+
+            {preview && (
+              <div className="card card-warn mt-3">
+                <b>影响预览</b>
+                <div className="card-desc mt-1">{preview.analysis}</div>
+                {preview.suggest_retire.length > 0 && (
+                  <div className="msg-err mt-2">
+                    建议到「看板→人物」将以下角色退场:{preview.suggest_retire.join("、")}(退场后生成不再注入)
+                  </div>
+                )}
+                {preview.items.length === 0 ? (
+                  <>
+                    <div className="msg-ok mt-2">没有章节受该指令影响。</div>
+                    <div className="actions mt-2"><button onClick={closeDirective}>关闭</button></div>
+                  </>
+                ) : (
+                  <>
+                    {drafts.map((d) => {
+                      const old = oldOf(d.chapter_number);
+                      return (
+                        <div key={d.chapter_number} className="fact-line fact-check">
+                          <input type="checkbox" checked={dirPicked.has(d.chapter_number)}
+                            onChange={(e) => {
+                              const s = new Set(dirPicked);
+                              if (e.target.checked) s.add(d.chapter_number); else s.delete(d.chapter_number);
+                              setDirPicked(s);
+                            }} />
+                          <div className="grow">
+                            <b>第{d.chapter_number}章</b>{" "}
+                            {d.new_title && old && d.new_title !== old.title
+                              ? <span>{old.title} → <b>{d.new_title}</b></span>
+                              : <span>{old?.title}</span>}
+                            <div className="muted mt-1">旧:{old?.summary || "—"}</div>
+                            <textarea rows={3} className="mt-1" value={d.new_summary}
+                              onChange={(e) => setDrafts(drafts.map((x) =>
+                                x.chapter_number === d.chapter_number ? { ...x, new_summary: e.target.value } : x))} />
+                            <div className="muted">{d.change_reason}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div className="actions mt-2">
+                      <button className="primary" disabled={!!busy || !dirPicked.size} onClick={applyDirective}>
+                        {busy && <span className="spin" />}应用修改({dirPicked.size} 章)
+                      </button>
+                      <button disabled={!!busy} onClick={closeDirective}>取消</button>
+                    </div>
+                    <div className="muted mt-1">应用后将保存大纲新版本,并把已有正文的章节标记为「与新大纲不符」。</div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {dirResult && (
+              <div className="card card-ok mt-3">
+                <b>✓ 已应用修改</b>
+                <div className="muted mt-1">
+                  {dirResult.updated.length
+                    ? `已更新第 ${dirResult.updated.join("、")} 章大纲`
+                    : "内容无实质变化,未产生新版本"}
+                  {dirResult.stale_chapters.length > 0 &&
+                    `;第 ${dirResult.stale_chapters.join("、")} 章正文已标记失配——可到「写作」重生成这些章节(或用「编辑本章」保存大改后的级联入口批量重生成)`}
+                </div>
+                <div className="actions mt-2">
+                  <button onClick={closeDirective}>完成</button>
+                  {onGotoStep && dirResult.stale_chapters.length > 0 && (
+                    <button className="primary" onClick={() => onGotoStep("write")}>去写作重生成 →</button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
         {busy && <div className="muted mt-2"><span className="spin" />{busy}</div>}

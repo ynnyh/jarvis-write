@@ -105,6 +105,14 @@ export interface ImpactReport { source_chapter: number; affected: ImpactItem[]; 
 export interface CascadeResult {
   updated: number[]; stale_chapters: number[]; warnings: string[]; outlines: Outline[];
 }
+export interface DirectiveItem {
+  chapter_number: number; new_title: string | null;
+  new_summary: string; change_reason: string;
+}
+export interface DirectivePreview {
+  analysis: string; items: DirectiveItem[]; suggest_retire: string[];
+}
+export interface DirectiveApplyResult { updated: number[]; stale_chapters: number[]; }
 export interface FactOut {
   entity: string; fact_type: string; content: string;
   valid_from: number; valid_until: number | null; importance: string;
@@ -192,6 +200,12 @@ export const api = {
   cascade: (pid: number, source: number, chapters: number[], reasons: Record<number, string>) =>
     req<CascadeResult>("POST", `/api/projects/${pid}/outlines/cascade`,
       { source_chapter: source, chapter_numbers: chapters, reasons, tendency: {} }, LLM_TIMEOUT),
+
+  // 修改指令:自然语言结构改 → 预览 → 应用(版本化 + 正文失配标记,不自动级联)
+  parseEditDirective: (pid: number, directive: string) =>
+    req<DirectivePreview>("POST", `/api/projects/${pid}/edit-directive`, { directive }, LLM_TIMEOUT),
+  applyEditDirective: (pid: number, items: { chapter_number: number; new_title?: string | null; new_summary: string }[]) =>
+    req<DirectiveApplyResult>("POST", `/api/projects/${pid}/edit-directive/apply`, { items }),
 
   listChapters: (pid: number) => req<ChapterBrief[]>("GET", `/api/projects/${pid}/chapters`),
   getChapter: (pid: number, n: number) => req<ChapterDetail>("GET", `/api/projects/${pid}/chapters/${n}`),
