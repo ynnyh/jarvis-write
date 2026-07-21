@@ -241,6 +241,85 @@ async def save_provider_setting(
     )
 
 
+class DeleteResult(BaseModel):
+    # deleted=True:已删除;False:配置连通正常,需前端二次确认(needs_confirm=True)
+    deleted: bool
+    needs_confirm: bool = False
+    reason: str = ""
+
+
+async def _provider_alive(name: str) -> bool:
+    """现场探测某聊天 provider 是否连通(删除前的二次确认判定)。
+    任何失败/未配置都视为不连通(可直接删),不抛异常。"""
+    try:
+        if not resolve_provider_config(name)["api_key"]:
+            return False
+        adapter = create_llm_adapter(name, max_tokens=32, timeout=30)
+        await adapter.complete(adapter.to_messages("ping"))
+        return True
+    except Exception:  # noqa: BLE001 — 探测失败即视为不连通,允许直接删
+        return False
+
+
+async def _embedding_alive() -> bool:
+    """现场探测 embedding 专用配置是否连通,判定逻辑同上。"""
+    try:
+        cfg = resolve_embedding_config()
+        if cfg["source"] != "user" or not cfg["api_key"]:
+            # 只对"专用配置"负责;回落来源的连通性不该拦删除
+            return False
+        await EmbeddingClient(timeout=30).embed(["测试"])
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+@router.delete("/providers/{name}", response_model=DeleteResult)
+async def delete_provider_setting(
+    name: str,
+    confirmed: bool = False,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """删除某 provider 的配置行(清空,回落 .env / 默认来源)。
+
+    交互约定(见需求):连不通的配置允许直接删;已确认连通的配置需二次确认。
+    - confirmed=False(默认):先现场探测一次连通性。
+        · 不连通 → 直接删,deleted=True
+        · 连通   → 不删,返回 needs_confirm=True,由前端弹窗确认
+    - confirmed=True:跳过探测,直接删(前端确认后带此参数重发)。
+    """
+    name = name.lower()
+    is_embedding = name == EMBEDDING_PROVIDER
+    if not is_embedding and name not in _REGISTRY:
+        raise HTTPException(status_code=404, detail=f"未知 provider: {name}")
+
+    row = (
+        db.query(ProviderSetting)
+        .filter(
+            ProviderSetting.user_id == user.id,
+            ProviderSetting.provider == name,
+        )
+        .first()
+    )
+    if row is None:
+        # 没有存过配置:视为已是空态,幂等返回成功
+        return DeleteResult(deleted=True)
+
+    if not confirmed:
+        alive = await (_embedding_alive() if is_embedding else _provider_alive(name))
+        if alive:
+            return DeleteResult(
+                deleted=False,
+                needs_confirm=True,
+                reason="该配置当前连接正常,确认要删除吗?",
+            )
+
+    db.delete(row)
+    db.commit()
+    return DeleteResult(deleted=True)
+
+
 @router.post("/providers/{name}/test", response_model=TestResult)
 async def test_provider(name: str, user: User = Depends(get_current_user)):
     """用当前已存配置实际调一次模型(设置页的「测试连接」按钮)。

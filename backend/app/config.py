@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     # Embedding(语义记忆用;默认走默认 provider 的 /embeddings 接口)
     embedding_model: str = "text-embedding-3-small"
     embedding_retrieval_k: int = 4
+    # 部分中转站的 embedding 接口很慢(实测单条 20s),入库整章几十段更慢;
+    # 超时给足 + 分批发送 + 失败轻量重试,避免误降级丢向量。
+    embedding_timeout: int = 180
+    embedding_batch_size: int = 16
+    embedding_max_retries: int = 2
     # 专用 embedding 渠道(可选):聊天渠道没有 /embeddings 接口时单独配置,
     # 设置页保存的 per-user 配置优先于这两项
     embedding_base_url: str = ""

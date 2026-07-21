@@ -48,6 +48,8 @@
     background: #fff; font-size: 14px; cursor: pointer;
   }
   button.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+  button.danger { color: var(--err); border-color: #f3c0c0; }
+  button.danger:hover { background: #fef2f2; }
   button:disabled { opacity: .5; cursor: not-allowed; }
   .default-pick { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
   .msg { font-size: 13px; }
@@ -145,6 +147,7 @@ function embeddingCard(p) {
     <div class="actions">
       <button class="primary" data-a="save">保存</button>
       <button data-a="test">测试</button>
+      ${p.has_key ? '<button class="danger" data-a="del">删除</button>' : ""}
       <span class="msg" data-f="msg"></span>
     </div>
     <div class="test-line" data-f="emb"></div>`;
@@ -184,6 +187,9 @@ function embeddingCard(p) {
     }
   };
 
+  const delBtn = $('[data-a=del]');
+  if (delBtn) delBtn.onclick = () => delProvider("embedding", "Embedding（语义记忆）", msg);
+
   return el;
 }
 
@@ -217,6 +223,7 @@ function card(p) {
     <div class="actions">
       <button class="primary" data-a="save">保存</button>
       <button data-a="test">测试连接</button>
+      ${p.has_key ? '<button class="danger" data-a="del">删除</button>' : ""}
       <label class="default-pick">
         <input type="radio" name="default_provider" data-f="is_default" ${p.is_default ? "checked" : ""}>
         设为默认(生成时优先用这张卡;只配了一张卡可不设,会自动用它)
@@ -274,7 +281,38 @@ function card(p) {
     }
   };
 
+  const del = $('[data-a=del]');
+  if (del) del.onclick = () => deleteProvider(p.provider, msg);
+
   return el;
+}
+
+// 删除某 provider 配置:先不带 confirmed 请求,后端现场探测——
+// 连不通直接删;连通则返回 needs_confirm,弹窗确认后带 confirmed 重发。
+async function deleteProvider(provider, msg) {
+  msg.className = "msg"; msg.textContent = "删除中(可能先测一次连通性)...";
+  let res = guard(await fetch(`/api/settings/providers/${provider}`, {
+    method: "DELETE", headers: authHeaders(),
+  }));
+  if (!res.ok) {
+    const e = await res.json();
+    msg.className = "msg err"; msg.textContent = "删除失败: " + (e.detail || res.status);
+    return;
+  }
+  let r = await res.json();
+  if (r.deleted) { msg.className = "msg ok"; msg.textContent = "已删除 ✓"; setTimeout(load, 500); return; }
+  if (r.needs_confirm) {
+    msg.className = "msg"; msg.textContent = "";
+    if (!confirm((r.reason || "该配置当前连接正常,确认删除?") + "\n\n删除后将回落到默认/环境配置。")) {
+      msg.textContent = "已取消"; return;
+    }
+    msg.textContent = "删除中...";
+    res = guard(await fetch(`/api/settings/providers/${provider}?confirmed=true`, {
+      method: "DELETE", headers: authHeaders(),
+    }));
+    if (res.ok) { msg.className = "msg ok"; msg.textContent = "已删除 ✓"; setTimeout(load, 500); }
+    else { const e = await res.json(); msg.className = "msg err"; msg.textContent = "删除失败: " + (e.detail || res.status); }
+  }
 }
 
 load();

@@ -278,3 +278,118 @@ def test_embedding_test_failure(client):
     assert body["ok"] is False
     assert body["source"] == "user"
     assert "401" in body["error"]
+
+
+# ---------- DELETE /providers/{name} ----------
+
+
+def _delete(client: TestClient, headers: dict, name: str, confirmed: bool = False):
+    url = f"/api/settings/providers/{name}"
+    if confirmed:
+        url += "?confirmed=true"
+    return client.request("DELETE", url, headers=headers)
+
+
+def test_delete_embedding_disconnected_removes_directly(client):
+    """embedding 专用配置连不通(embed 抛错)→ 不需确认,直接删。"""
+    headers = _setup_deepseek_key(client, "emb_del_dead")
+    _put_embedding(
+        client, headers,
+        api_key="sk-emb-dead", base_url="https://x/v1", model="bge-m3",
+    )
+    with patch(
+        "app.api.settings.EmbeddingClient.embed",
+        new=AsyncMock(side_effect=RuntimeError("connect timeout")),
+    ):
+        r = _delete(client, headers, "embedding")
+    assert r.status_code == 200, r.text
+    assert r.json()["deleted"] is True
+    # 删后回落到 default(此前配了 deepseek key),不再是 user 专用
+    assert _embedding_card(client, headers)["source"] != "user"
+
+
+def test_delete_embedding_alive_needs_confirm_then_force(client):
+    """embedding 连通 → needs_confirm;不带 confirmed 不删;带 confirmed 强删。"""
+    headers = _setup_deepseek_key(client, "emb_del_alive")
+    _put_embedding(
+        client, headers,
+        api_key="sk-emb-alive", base_url="https://x/v1", model="bge-m3",
+    )
+    with patch(
+        "app.api.settings.EmbeddingClient.embed",
+        new=AsyncMock(return_value=[[0.1, 0.2, 0.3]]),
+    ):
+        r = _delete(client, headers, "embedding")
+    body = r.json()
+    assert body["deleted"] is False
+    assert body["needs_confirm"] is True
+    # 未确认 → 配置仍在
+    assert _embedding_card(client, headers)["source"] == "user"
+    # 带 confirmed 强删(此时不再探测)
+    r2 = _delete(client, headers, "embedding", confirmed=True)
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["deleted"] is True
+    assert _embedding_card(client, headers)["source"] != "user"
+
+
+def test_delete_embedding_no_row_is_idempotent(client):
+    """从没配过 embedding → 删除幂等返回 deleted=True,不报错。"""
+    headers = _setup_deepseek_key(client, "emb_del_none")
+    r = _delete(client, headers, "embedding")
+    assert r.status_code == 200, r.text
+    assert r.json()["deleted"] is True
+
+
+def test_delete_chat_provider_disconnected_removes(client):
+    """聊天卡连不通(complete 抛错)→ 直接删,回落 .env(has_key=False)。"""
+    headers = _setup_deepseek_key(client, "chat_del_dead")
+    with patch(
+        "app.api.settings.create_llm_adapter",
+        side_effect=RuntimeError("HTTP 503 no channel"),
+    ):
+        r = _delete(client, headers, "deepseek")
+    assert r.status_code == 200, r.text
+    assert r.json()["deleted"] is True
+    cards = client.get("/api/settings/providers", headers=headers).json()
+    ds = [c for c in cards if c["provider"] == "deepseek"][0]
+    assert ds["has_key"] is False
+
+
+def test_delete_chat_provider_alive_needs_confirm(client):
+    """聊天卡连通 → needs_confirm,不带 confirmed 不删。"""
+    headers = _setup_deepseek_key(client, "chat_del_alive")
+
+    class _FakeResp:
+        model = "deepseek-chat"
+        content = "pong"
+
+    class _FakeAdapter:
+        def to_messages(self, *_a, **_k):
+            return []
+
+        async def complete(self, *_a, **_k):
+            return _FakeResp()
+
+    with patch(
+        "app.api.settings.create_llm_adapter", return_value=_FakeAdapter()
+    ):
+        r = _delete(client, headers, "deepseek")
+        body = r.json()
+        assert body["deleted"] is False
+        assert body["needs_confirm"] is True
+    # 未确认 → key 仍在
+    cards = client.get("/api/settings/providers", headers=headers).json()
+    ds = [c for c in cards if c["provider"] == "deepseek"][0]
+    assert ds["has_key"] is True
+
+
+def test_delete_unknown_provider_404(client):
+    headers = _auth(_register(client, "del_unknown")["token"])
+    r = _delete(client, headers, "notaprovider")
+    assert r.status_code == 404
+
+
+def test_delete_requires_auth(client):
+    assert client.request(
+        "DELETE", "/api/settings/providers/deepseek"
+    ).status_code == 401

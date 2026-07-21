@@ -73,7 +73,7 @@ class EmbeddingClient:
         self,
         model: str | None = None,
         provider: str | None = None,
-        timeout: int = 60,
+        timeout: int | None = None,
     ) -> None:
         settings = get_settings()
         if provider is not None:
@@ -92,26 +92,58 @@ class EmbeddingClient:
             self.base_url = cfg["base_url"]
             self.model = model or cfg["model"]
             self.source = cfg["source"]
-        self.timeout = timeout
+        self.timeout = timeout if timeout is not None else settings.embedding_timeout
+        self.batch_size = max(1, settings.embedding_batch_size)
+        self.max_retries = max(1, settings.embedding_max_retries)
+
+    async def _embed_batch(
+        self, client: httpx.AsyncClient, texts: list[str]
+    ) -> list[list[float]]:
+        """单批向量化,含瞬时失败重试(超时/网络/5xx)。"""
+        last_exc: Exception | None = None
+        for attempt in range(self.max_retries):
+            try:
+                resp = await client.post(
+                    f"{self.base_url}/embeddings",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={"model": self.model, "input": texts},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                # OpenAI 格式:data[i].embedding,按 index 排序保证对齐
+                items = sorted(data["data"], key=lambda x: x.get("index", 0))
+                return [item["embedding"] for item in items]
+            except httpx.HTTPStatusError as exc:
+                # 4xx(鉴权/参数)重试无意义,直接抛;仅 5xx 才重试
+                if exc.response.status_code < 500:
+                    raise
+                last_exc = exc
+            except (httpx.TimeoutException, httpx.TransportError) as exc:
+                last_exc = exc
+            if attempt + 1 < self.max_retries:
+                logger.warning(
+                    "embedding 第 %d 次失败,重试: %s", attempt + 1, last_exc
+                )
+        assert last_exc is not None
+        raise last_exc
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        """批量向量化。失败抛异常,由调用方决定降级策略。"""
+        """批量向量化。失败抛异常,由调用方决定降级策略。
+
+        大批量按 batch_size 分块串行请求(中转站单请求慢/有上限时更稳),
+        每块含瞬时失败重试。任一块最终失败则整体抛出(调用方降级)。
+        """
         if not texts:
             return []
+        out: list[list[float]] = []
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.post(
-                f"{self.base_url}/embeddings",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={"model": self.model, "input": texts},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        # OpenAI 格式:data[i].embedding,按 index 排序保证对齐
-        items = sorted(data["data"], key=lambda x: x.get("index", 0))
-        return [item["embedding"] for item in items]
+            for i in range(0, len(texts), self.batch_size):
+                chunk = texts[i : i + self.batch_size]
+                out.extend(await self._embed_batch(client, chunk))
+        return out
 
 
 async def check_embedding(provider: str, timeout: int = 10) -> tuple[bool, str]:
