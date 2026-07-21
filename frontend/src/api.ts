@@ -132,6 +132,23 @@ export interface CharacterCard {
   profile: string; key_facts: CharacterFact[]; appearance_chapters: number[];
 }
 export interface CharactersOut { characters: CharacterCard[]; other_entities_count: number; }
+// 全书概览(看板「概览」页签):一次聚合章节状态/版本对照、伏笔区间、人物出场
+export interface OverviewChapter {
+  chapter_number: number; title: string; chapter_role: string;
+  status: string; word_count: number; is_stale: boolean;
+  outline_version_used: number | null; outline_current_version: number;
+  characters_involved: string[];
+}
+export interface OverviewForeshadow {
+  content: string; status: string;
+  planted_chapter: number; expected_chapter: number | null; resolved_chapter: number | null;
+}
+export interface OverviewCharacter { name: string; retired: boolean; chapters: number[]; }
+export interface OverviewOut {
+  chapters: OverviewChapter[];
+  foreshadowings: OverviewForeshadow[];
+  characters: OverviewCharacter[];
+}
 export interface PolishResult {
   polished: string; locked_facts: string[]; violations: Record<string, string>[];
   flavor_before: FlavorInfo; flavor_after: FlavorInfo;
@@ -230,6 +247,8 @@ export const api = {
     req<ForeshadowOut[]>("GET", `/api/projects/${pid}/foreshadowings?current_chapter=${current}`),
   characters: (pid: number) =>
     req<CharactersOut>("GET", `/api/projects/${pid}/characters`),
+  overview: (pid: number) =>
+    req<OverviewOut>("GET", `/api/projects/${pid}/overview`),
   createCharacter: (pid: number, payload: { name: string; aliases?: string[]; profile?: string }) =>
     req<CharacterCard>("POST", `/api/projects/${pid}/characters`, payload),
   setCharacterRetired: (pid: number, entityId: number, retired: boolean) =>

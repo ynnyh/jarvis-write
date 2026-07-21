@@ -161,6 +161,20 @@ class CharacterPatch(BaseModel):
     retired: bool
 
 
+def _appearance_chapters(
+    facts: list[Fact], ent: Entity, outlines: list[Outline]
+) -> list[int]:
+    """出场章号 = 当前有效事实的 source_chapter ∪ 大纲出场名单命中(按实体名匹配)。
+
+    人物卡与全书概览共用,保证两个视图数字一致。
+    """
+    chapters = {f.source_chapter for f in facts if f.source_chapter > 0}
+    for o in outlines:
+        if ent.name in (o.characters_involved or []):
+            chapters.add(o.chapter_number)
+    return sorted(chapters)
+
+
 def _character_out(db: Session, project_id: int, ent: Entity, outlines: list[Outline]) -> CharacterOut:
     """组装单张人物卡:当前有效事实(前 N 条) + 出场章号并集。"""
     facts = (
@@ -173,11 +187,6 @@ def _character_out(db: Session, project_id: int, ent: Entity, outlines: list[Out
         .all()
     )
     facts.sort(key=lambda f: (_IMP_ORDER.get(f.importance, 1), f.valid_from))
-    chapters = {f.source_chapter for f in facts if f.source_chapter > 0}
-    # 事实覆盖不到的章节,用大纲的出场名单补齐(按实体名匹配)
-    for o in outlines:
-        if ent.name in (o.characters_involved or []):
-            chapters.add(o.chapter_number)
     return CharacterOut(
         id=ent.id,
         name=ent.name,
@@ -196,7 +205,7 @@ def _character_out(db: Session, project_id: int, ent: Entity, outlines: list[Out
             )
             for f in facts[:_KEY_FACTS_LIMIT]
         ],
-        appearance_chapters=sorted(chapters),
+        appearance_chapters=_appearance_chapters(facts, ent, outlines),
     )
 
 

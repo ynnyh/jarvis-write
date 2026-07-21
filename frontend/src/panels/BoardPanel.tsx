@@ -1,10 +1,11 @@
-// 一致性看板:人物卡管理 + 故事圣经(时序快照) + 伏笔四态面板
+// 一致性看板:全书概览(进度地图) + 人物卡管理 + 故事圣经(时序快照) + 伏笔四态面板
 import { useCallback, useEffect, useState } from "react";
 import {
   api, BibleSnapshot, CharacterCard, CharactersOut, FactOut, ForeshadowOut, Outline,
+  OverviewChapter, OverviewOut,
 } from "../api";
 
-interface Props { pid: number; outlines: Outline[]; }
+interface Props { pid: number; outlines: Outline[]; onGotoChapter?: (n: number) => void; }
 
 const FS_CN: Record<string, string> = {
   planted: "已埋设", reinforced: "已强化", paid_off: "已回收", abandoned: "已弃用",
@@ -12,14 +13,14 @@ const FS_CN: Record<string, string> = {
 const IMP_BADGE: Record<string, string> = { critical: "err", major: "warn", minor: "" };
 const FACT_PREVIEW = 3;
 
-type Tab = "characters" | "bible" | "foreshadow";
+type Tab = "overview" | "characters" | "bible" | "foreshadow";
 
-export default function BoardPanel({ pid, outlines }: Props) {
-  const [tab, setTab] = useState<Tab>("characters");
+export default function BoardPanel({ pid, outlines, onGotoChapter }: Props) {
+  const [tab, setTab] = useState<Tab>("overview");
   return (
     <>
       <div className="chips board-tabs">
-        {([["characters", "人物"], ["bible", "故事圣经"], ["foreshadow", "伏笔"]] as [Tab, string][]).map(
+        {([["overview", "概览"], ["characters", "人物"], ["bible", "故事圣经"], ["foreshadow", "伏笔"]] as [Tab, string][]).map(
           ([key, label]) => (
             <span key={key} className={"chip" + (tab === key ? " on" : "")} onClick={() => setTab(key)}>
               {label}
@@ -27,9 +28,181 @@ export default function BoardPanel({ pid, outlines }: Props) {
           ),
         )}
       </div>
+      {tab === "overview" && <OverviewBoard pid={pid} onGotoChapter={onGotoChapter} />}
       {tab === "characters" && <CharactersBoard pid={pid} />}
       {tab === "bible" && <BibleBoard pid={pid} outlines={outlines} />}
       {tab === "foreshadow" && <ForeshadowBoard pid={pid} outlines={outlines} />}
+    </>
+  );
+}
+
+/* ================= 全书概览 ================= */
+
+// 格子状态:生成中 > 失配(is_stale 或版本不一致) > 已定稿/草稿/未生成
+function cellState(c: OverviewChapter): string {
+  if (c.status === "drafting") return "drafting";
+  if (c.is_stale || (c.outline_version_used != null
+    && c.outline_version_used !== c.outline_current_version)) return "stale";
+  return c.status;
+}
+
+const CELL_CN: Record<string, string> = {
+  empty: "未生成", drafting: "生成中", drafted: "草稿", finalized: "定稿", stale: "失配",
+};
+
+function chapterTip(c: OverviewChapter): string {
+  const lines = [
+    `第${c.chapter_number}章${c.title ? `《${c.title}》` : ""}`,
+  ];
+  if (c.chapter_role) lines.push(`定位:${c.chapter_role}`);
+  lines.push(c.status === "empty" ? "未生成" : `${c.word_count} 字`);
+  if (c.outline_version_used != null) {
+    const mismatch = c.outline_version_used !== c.outline_current_version;
+    lines.push(
+      `正文基于 v${c.outline_version_used} / 大纲 v${c.outline_current_version}`
+      + (mismatch ? "(版本不一致,建议重写)" : ""),
+    );
+  } else {
+    lines.push(`大纲 v${c.outline_current_version}`);
+  }
+  if (c.characters_involved.length) lines.push(`出场:${c.characters_involved.join("、")}`);
+  return lines.join("\n");
+}
+
+function OverviewBoard({ pid, onGotoChapter }: { pid: number; onGotoChapter?: (n: number) => void }) {
+  const [data, setData] = useState<OverviewOut | null>(null);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      setErr("");
+      try { setData(await api.overview(pid)); } catch (e) { setErr(String(e)); }
+    })();
+  }, [pid]);
+
+  const chapters = data?.chapters ?? [];
+  const maxCh = chapters.length ? Math.max(...chapters.map((c) => c.chapter_number)) : 1;
+  // 最新已生成章号:判断伏笔是否逾期
+  const currentCh = chapters.reduce((m, c) => (c.status !== "empty" ? Math.max(m, c.chapter_number) : m), 0);
+  const nums = Array.from({ length: maxCh }, (_, i) => i + 1);
+  const tickStep = Math.max(1, Math.ceil(maxCh / 24));
+
+  return (
+    <>
+      {err && <div className="msg-err mb-2">{err}</div>}
+
+      {/* ---- 章节网格地图 ---- */}
+      <div className="card">
+        <div className="card-head">
+          <h2>章节地图</h2>
+          <span className="muted">每章一格,点格子跳到写作</span>
+          <div className="grow" />
+          <span className="badge">未生成</span>
+          <span className="badge warn">草稿</span>
+          <span className="badge ok">定稿</span>
+          <span className="badge err">大纲已变</span>
+        </div>
+        <div className="ov-grid mt-2">
+          {chapters.map((c) => {
+            const st = cellState(c);
+            return (
+              <button key={c.chapter_number} type="button"
+                className={"ov-cell st-" + st} title={chapterTip(c)}
+                onClick={() => onGotoChapter?.(c.chapter_number)}>
+                <b>{c.chapter_number}</b>
+                <span>{CELL_CN[st] ?? st}</span>
+              </button>
+            );
+          })}
+          {!chapters.length && <div className="muted">暂无大纲。</div>}
+        </div>
+      </div>
+
+      {/* ---- 人物出场时间线 ---- */}
+      <div className="card">
+        <div className="card-head">
+          <h2>人物出场</h2>
+          <span className="muted">{data?.characters.length ?? 0} 位人物 × {maxCh} 章</span>
+        </div>
+        <div className="ov-scroll mt-2">
+          <table className="tbl ov-timeline">
+            <thead>
+              <tr>
+                <th className="ov-name">人物</th>
+                {nums.map((n) => <th key={n}>{n}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {(data?.characters ?? []).map((c) => {
+                const on = new Set(c.chapters);
+                return (
+                  <tr key={c.name}>
+                    <td className={"ov-name" + (c.retired ? " retired" : "")}>
+                      {c.name}{c.retired && <span className="muted">(退场)</span>}
+                    </td>
+                    {nums.map((n) => <td key={n} className={on.has(n) ? "on" : ""} />)}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {data && !data.characters.length && (
+            <div className="muted">暂无人物。生成章节后自动抽取,或在「人物」页签登记。</div>
+          )}
+        </div>
+      </div>
+
+      {/* ---- 伏笔时间线 ---- */}
+      <div className="card">
+        <div className="card-head">
+          <h2>伏笔时间线</h2>
+          <div className="grow" />
+          <span className="ov-key"><i className="ov-sw planted" />已埋设</span>
+          <span className="ov-key"><i className="ov-sw reinforced" />已强化</span>
+          <span className="ov-key"><i className="ov-sw paid_off" />已回收</span>
+          <span className="ov-key"><i className="ov-sw abandoned" />已弃用</span>
+          <span className="ov-key"><i className="ov-sw overdue" />逾期未收</span>
+        </div>
+        <div className="ov-scroll mt-2">
+          <div className="ov-fs">
+            <div className="ov-fs-axis">
+              <span className="ov-fs-label" />
+              <div className="ov-fs-ticks">
+                {nums.map((n) => (
+                  <span key={n} className="ov-fs-tick">
+                    {n === 1 || n === maxCh || n % tickStep === 0 ? n : ""}
+                  </span>
+                ))}
+              </div>
+            </div>
+            {(data?.foreshadowings ?? []).map((f, i) => {
+              const end = f.resolved_chapter ?? f.expected_chapter ?? maxCh;
+              const overdue = f.expected_chapter != null && f.resolved_chapter == null
+                && f.expected_chapter <= currentCh;
+              const cls = overdue ? "overdue" : f.status;
+              const range = `第${f.planted_chapter}章埋设 → `
+                + (f.resolved_chapter ? `第${f.resolved_chapter}章回收`
+                  : f.expected_chapter ? `预期第${f.expected_chapter}章回收` : "未设预期回收");
+              return (
+                <div key={i} className="ov-fs-row">
+                  <span className="ov-fs-label" title={f.content}>{f.content}</span>
+                  <div className="ov-fs-track">
+                    <div className={"ov-fs-bar " + cls}
+                      style={{
+                        left: `${((f.planted_chapter - 1) / maxCh) * 100}%`,
+                        width: `${(Math.max(end - f.planted_chapter + 1, 1) / maxCh) * 100}%`,
+                      }}
+                      title={`${f.content}\n${FS_CN[f.status] ?? f.status}${overdue ? " · 逾期未收" : ""}\n${range}`} />
+                  </div>
+                </div>
+              );
+            })}
+            {data && !data.foreshadowings.length && (
+              <div className="muted">暂无登记伏笔。</div>
+            )}
+          </div>
+        </div>
+      </div>
     </>
   );
 }

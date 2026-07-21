@@ -7,9 +7,14 @@ import { pollJob } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
 import Reader, { Paragraphs, STATUS_CN } from "../components/Reader";
 
-interface Props { pid: number; project: Project; outlines: Outline[]; }
+interface Props {
+  pid: number; project: Project; outlines: Outline[];
+  // 看板「概览」点章节格子跳来:聚焦章号(已生成则打开正文),消费后经回调清空
+  focusChapter?: number | null;
+  onFocusConsumed?: () => void;
+}
 
-export default function ChaptersPanel({ pid, outlines }: Props) {
+export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusConsumed }: Props) {
   const [chapters, setChapters] = useState<ChapterBrief[]>([]);
   const [current, setCurrent] = useState<ChapterDetail | null>(null);
   // 进行中的章节任务:生成(kind=generate)或保存后同步一致性引擎(kind=sync)。
@@ -35,6 +40,18 @@ export default function ChaptersPanel({ pid, outlines }: Props) {
     setChapters(await api.listChapters(pid));
   }, [pid]);
   useEffect(() => { reload().catch((e) => setErr(String(e))); }, [reload]);
+
+  // 看板「概览」跳章:章节列表就绪后打开该章正文;未生成的章只落到写作列表
+  useEffect(() => {
+    if (focusChapter == null || !chapters.length) return;
+    if (chapters.some((c) => c.chapter_number === focusChapter)) {
+      setErr(""); setGenResult(null); setEditing(false);
+      api.getChapter(pid, focusChapter)
+        .then(setCurrent)
+        .catch((e) => setErr(String(e)));
+    }
+    onFocusConsumed?.();
+  }, [focusChapter, chapters, pid, onFocusConsumed]);
 
   const byNum = new Map(chapters.map((c) => [c.chapter_number, c]));
   const currentOutline = current

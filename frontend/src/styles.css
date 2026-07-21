@@ -652,6 +652,118 @@ label.fl {
 }
 .char-form textarea { margin-top: var(--sp-2); }
 
+/* ---------- 看板:全书概览 ---------- */
+/* 窄屏:时间线/伏笔图超出宽度时横向滚动 */
+.ov-scroll { overflow-x: auto; }
+
+/* 章节网格地图 */
+.ov-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.ov-cell {
+  width: 46px;
+  height: 40px;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: 10px;
+  line-height: 1.2;
+}
+.ov-cell b { font-size: var(--fs-sm); color: var(--text-2); }
+.ov-cell.st-drafted { background: var(--warn-weak); border-color: var(--warn-line); color: var(--warn); }
+.ov-cell.st-finalized { background: var(--ok-weak); border-color: var(--ok-line); color: var(--ok); }
+.ov-cell.st-stale { background: var(--err-weak); border-color: var(--err-line); color: var(--err); }
+.ov-cell.st-drafting {
+  background: var(--brand-weak);
+  border-color: var(--brand-line);
+  color: var(--brand);
+  animation: ov-pulse 1.2s ease-in-out infinite;
+}
+@keyframes ov-pulse { 50% { opacity: 0.45; } }
+
+/* 人物出场时间线:人物 × 章号,出场章涂色块 */
+.ov-timeline { min-width: max-content; }
+.ov-timeline th, .ov-timeline td { padding: 4px 6px; text-align: center; }
+.ov-timeline .ov-name {
+  position: sticky;
+  left: 0;
+  background: var(--surface);
+  text-align: left;
+  white-space: nowrap;
+}
+.ov-timeline thead .ov-name { background: var(--surface-2); }
+.ov-timeline .ov-name.retired { color: var(--text-3); }
+.ov-timeline td.on::after {
+  content: "";
+  display: block;
+  margin: 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--brand);
+}
+
+/* 伏笔时间线:埋设 → 预期/实际回收的区间条 */
+.ov-key { font-size: var(--fs-xs); color: var(--text-2); }
+.ov-sw {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  margin: 0 4px 0 10px;
+  vertical-align: -1px;
+}
+.ov-sw.planted { background: var(--brand); }
+.ov-sw.reinforced { background: var(--warn); }
+.ov-sw.paid_off { background: var(--ok); }
+.ov-sw.abandoned { background: var(--text-3); }
+.ov-sw.overdue { background: var(--err); }
+.ov-fs { min-width: 640px; }
+.ov-fs-axis, .ov-fs-row { display: flex; align-items: center; gap: var(--sp-3); }
+.ov-fs-row { margin-top: 6px; }
+.ov-fs-label {
+  width: 160px;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.ov-fs-ticks { flex: 1; display: flex; }
+.ov-fs-tick {
+  flex: 1;
+  font-size: 10px;
+  color: var(--text-3);
+  text-align: center;
+  border-left: 1px solid var(--line);
+}
+.ov-fs-track {
+  flex: 1;
+  position: relative;
+  height: 18px;
+  background: var(--surface-2);
+  border-radius: var(--r-sm);
+}
+.ov-fs-bar {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  min-width: 4px;
+  border-radius: 4px;
+}
+.ov-fs-bar.planted { background: var(--brand); }
+.ov-fs-bar.reinforced { background: var(--warn); }
+.ov-fs-bar.paid_off { background: var(--ok); }
+.ov-fs-bar.abandoned { background: var(--text-3); }
+.ov-fs-bar.overdue { background: var(--err); }
+
 /* 事实行右侧的小 × 删除(及其两步确认) */
 .fact-del {
   height: auto;

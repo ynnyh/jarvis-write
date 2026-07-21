@@ -32,6 +32,8 @@ export default function ProjectPage() {
   const [err, setErr] = useState("");
   // 全书阅读模式(有已生成章节时,标题行出现「阅读全书」入口)
   const [readingBook, setReadingBook] = useState(false);
+  // 看板「概览」点章节格子 → 跳写作步并打开该章(消费后清空)
+  const [focusChapter, setFocusChapter] = useState<number | null>(null);
 
   const reload = useCallback(async () => {
     const p = await api.getProject(pid);
@@ -110,13 +112,15 @@ export default function ProjectPage() {
           )}
           {step === "write" && (
             outlines.length
-              ? <ChaptersPanel pid={pid} project={project} outlines={outlines} />
+              ? <ChaptersPanel pid={pid} project={project} outlines={outlines}
+                  focusChapter={focusChapter} onFocusConsumed={() => setFocusChapter(null)} />
               : <div className="card muted">先在「大纲」生成章节蓝图,才能开始写作。</div>
           )}
           {step === "polish" && <PolishPanel pid={pid} />}
           {step === "board" && (
             outlines.length
-              ? <BoardPanel pid={pid} outlines={outlines} />
+              ? <BoardPanel pid={pid} outlines={outlines}
+                  onGotoChapter={(n) => { setStep("write"); setFocusChapter(n); }} />
               : <div className="card muted">生成章节后,这里会展示故事圣经与伏笔追踪。</div>
           )}
         </div>
