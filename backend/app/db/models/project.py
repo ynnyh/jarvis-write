@@ -28,6 +28,10 @@ class Project(Base, TimestampMixin):
     target_words_per_chapter: Mapped[int] = mapped_column(Integer, default=3000)
     # 全局倾向:标签组合 JSON,如 {"pace": "快节奏", "tone": ["热血"], ...}
     global_tendency: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # 结构化故事概念(灵感工坊产出):logline/hook/twist/protagonist/conflict/setting
+    # 六字段 JSON,喂养架构生成的核心种子;可空(老项目只有 topic 一句话)。
+    # 见 app/schemas/concept.py。topic 保留为 logline 的镜像,下游 title/简介仍读 topic。
+    concept: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     # 书籍简介(网文风格 150-300 字,可 AI 生成也可手改);老库由迁移补列
     synopsis: Mapped[str | None] = mapped_column(Text, nullable=True)
     # draft / outlining / writing / done

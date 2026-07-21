@@ -105,7 +105,7 @@ export default function ProjectPage() {
         </div>
 
         <div className="flow-main">
-          {step === "inspire" && <InspirePanel project={project} onChanged={reload} />}
+          {step === "inspire" && <InspirePanel project={project} onChanged={reload} onGotoStep={setStep} />}
           {step === "arch" && <ArchPanel project={project} arch={arch} onChanged={reload} />}
           {step === "outline" && (
             <OutlinePanel pid={pid} outlines={outlines} hasArch={!!arch} onChanged={reload} onGotoStep={setStep} />

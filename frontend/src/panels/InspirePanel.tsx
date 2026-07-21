@@ -1,58 +1,152 @@
-// 灵感工作区:碎片 → AI 扩展方案 → 采用为主题;主题可随时改
-import { useState } from "react";
-import { api, Idea, Project, Tendency } from "../api";
+// 灵感工作区:碎片/想法 → 结构化「故事概念」→ 定为本书概念
+// 三条路并存:AI 出方案(结构化) / 指令式局部改 / 对话式从零捏
+import { useEffect, useRef, useState } from "react";
+import {
+  api, ChatTurn, Concept, CONCEPT_FIELDS, EMPTY_CONCEPT, conceptIsEmpty,
+  Project, Tendency,
+} from "../api";
 import TendencySelector from "../components/TendencySelector";
+import type { Step } from "../pages/ProjectPage";
 
-interface Props { project: Project; onChanged: () => Promise<void>; }
+interface Props { project: Project; onChanged: () => Promise<void>; onGotoStep?: (step: Step) => void; }
 
-export default function InspirePanel({ project, onChanged }: Props) {
-  const [topic, setTopic] = useState(project.topic);
-  const [spark, setSpark] = useState("");
+// 从项目已存概念/主题恢复当前草稿:有 concept 用 concept,否则把 topic 灌进 logline
+function conceptFromProject(p: Project): Concept {
+  if (p.concept && !conceptIsEmpty(p.concept)) return { ...EMPTY_CONCEPT, ...p.concept };
+  return { ...EMPTY_CONCEPT, logline: p.topic ?? "" };
+}
+
+// 只读概念卡:展示六字段(空字段淡出)
+function ConceptView({ c }: { c: Concept }) {
+  return (
+    <div className="concept-grid">
+      {CONCEPT_FIELDS.map((f) => (
+        <div key={f.key} className={"concept-field" + (c[f.key].trim() ? "" : " empty")}>
+          <span className="cf-label">{f.label}</span>
+          <span className="cf-value">{c[f.key].trim() || <span className="muted">（未填）</span>}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// 可编辑概念卡:六字段 textarea
+function ConceptEditor({ c, onChange }: { c: Concept; onChange: (c: Concept) => void }) {
+  return (
+    <div className="concept-edit">
+      {CONCEPT_FIELDS.map((f) => (
+        <div key={f.key} className="concept-edit-row">
+          <label className="fl">{f.label} <span className="hint">· {f.hint}</span></label>
+          <textarea rows={f.key === "logline" || f.key === "protagonist" ? 2 : 1}
+            value={c[f.key]}
+            onChange={(e) => onChange({ ...c, [f.key]: e.target.value })} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default function InspirePanel({ project, onChanged, onGotoStep }: Props) {
+  // 当前正在打磨的概念草稿(三条路都往它上收敛)
+  const [concept, setConcept] = useState<Concept>(() => conceptFromProject(project));
+  const [editing, setEditing] = useState(false);
   const [tendency, setTendency] = useState<Tendency>(project.global_tendency ?? {});
-  const [synopsis, setSynopsis] = useState(project.synopsis ?? "");
-  const [ideas, setIdeas] = useState<Idea[]>([]);
-  const [picked, setPicked] = useState<number | null>(null);
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+
+  // 出方案
+  const [spark, setSpark] = useState("");
+  const [ideas, setIdeas] = useState<Concept[]>([]);
+
+  // 指令式改:输入 → 预览(带 diff)→ 采纳
+  const [directive, setDirective] = useState("");
+  const [refinePreview, setRefinePreview] = useState<{ concept: Concept; changed: (keyof Concept)[]; note: string } | null>(null);
+
+  // 对话式
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatLog, setChatLog] = useState<ChatTurn[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
+
+  // 简介(沿用旧逻辑,项目已有主题后出现)
+  const [synopsis, setSynopsis] = useState(project.synopsis ?? "");
   const [synBusy, setSynBusy] = useState("");
   const [synMsg, setSynMsg] = useState("");
   const [synErr, setSynErr] = useState("");
 
+  const hasConcept = !conceptIsEmpty(concept);
+  const savedConcept = !conceptIsEmpty(project.concept) || !!project.topic;
+
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatLog, busy]);
+
+  function flash(m: string) { setMsg(m); setErr(""); }
+
+  // ---------- 出方案 ----------
   async function brainstorm() {
-    setBusy("AI 正在扩展灵感方案(约1-2分钟)…"); setErr(""); setMsg("");
+    setBusy("AI 正在扩展故事概念(约1-2分钟)…"); setErr(""); setMsg("");
     try {
-      const r = await api.inspire(spark || topic, tendency, 4);
-      setIdeas(r.ideas); setPicked(null);
+      const r = await api.inspire(spark, tendency, 4);
+      setIdeas(r.ideas);
     } catch (e) { setErr(String(e)); } finally { setBusy(""); }
   }
 
-  async function adopt(i: number) {
-    const idea = ideas[i];
-    setPicked(i);
-    const newTopic = `${idea.logline}(核心钩子:${idea.hook})`;
-    setTopic(newTopic);
-    setBusy("写入项目主题…");
+  function useIdea(c: Concept) {
+    setConcept({ ...EMPTY_CONCEPT, ...c });
+    setIdeas([]); setEditing(false); setRefinePreview(null);
+    flash("已载入该方案为当前概念,可继续用「让 AI 改一处」或手动编辑打磨,满意后「定为本书概念」。");
+  }
+
+  // ---------- 指令式改 ----------
+  async function runRefine() {
+    if (!directive.trim()) return;
+    setBusy("AI 正在按你的意见改写概念…"); setErr(""); setMsg("");
+    try {
+      const r = await api.refineConcept(concept, directive, tendency);
+      setRefinePreview({ concept: r.concept, changed: r.changed, note: r.note });
+    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+  }
+
+  function acceptRefine() {
+    if (!refinePreview) return;
+    setConcept(refinePreview.concept);
+    setRefinePreview(null); setDirective("");
+    flash("已应用改动到当前概念。");
+  }
+
+  // ---------- 对话式 ----------
+  async function sendChat() {
+    const text = chatInput.trim();
+    if (!text) return;
+    const nextLog: ChatTurn[] = [...chatLog, { role: "user", content: text }];
+    setChatLog(nextLog); setChatInput("");
+    setBusy("策划思考中…"); setErr("");
+    try {
+      const r = await api.chatConcept(nextLog, concept, tendency);
+      setChatLog([...nextLog, { role: "assistant", content: r.reply }]);
+      if (!conceptIsEmpty(r.concept)) setConcept(r.concept);
+    } catch (e) {
+      setErr(String(e));
+      setChatLog(nextLog);  // 回退到用户发言,允许重发
+    } finally { setBusy(""); }
+  }
+
+  // ---------- 定概念 / 保存 ----------
+  async function commitConcept() {
+    if (!hasConcept) { setErr("概念还是空的,先捏出点内容。"); return; }
+    setBusy("写入本书概念…"); setErr(""); setMsg("");
     try {
       await api.patchProject(project.id, {
-        topic: newTopic,
-        title: project.title || idea.title,
+        concept,
+        title: project.title,
         global_tendency: tendency,
       });
       await onChanged();
-      setMsg(`已采用方案「${idea.title}」为本书主题,已写入主题框,可继续微调后保存。下一步:去「架构」生成顶层设计。`);
+      flash("已定为本书概念,主题已同步。下一步:去「架构」按此概念生成顶层设计。");
     } catch (e) { setErr(String(e)); } finally { setBusy(""); }
   }
 
-  async function saveTopic() {
-    setBusy("保存…"); setErr(""); setMsg("");
-    try {
-      await api.patchProject(project.id, { topic, global_tendency: tendency });
-      await onChanged();
-      setMsg("主题与全局倾向已保存。");
-    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
-  }
-
+  // ---------- 简介 ----------
   async function genSynopsis() {
     setSynBusy("AI 正在撰写书籍简介(约1分钟)…"); setSynErr(""); setSynMsg("");
     try {
@@ -61,7 +155,6 @@ export default function InspirePanel({ project, onChanged }: Props) {
       setSynMsg("简介已生成,可继续修改,点「保存简介」写入项目。");
     } catch (e) { setSynErr(String(e)); } finally { setSynBusy(""); }
   }
-
   async function saveSynopsis() {
     setSynBusy("保存…"); setSynErr(""); setSynMsg("");
     try {
@@ -71,20 +164,56 @@ export default function InspirePanel({ project, onChanged }: Props) {
     } catch (e) { setSynErr(String(e)); } finally { setSynBusy(""); }
   }
 
-  const hasTopic = !!project.topic;
-
   return (
     <>
-      {!hasTopic && (
+      {!savedConcept && (
         <div className="notice notice-info" style={{ marginTop: 0 }}>
-          第一步:让 AI 帮你想几个故事方向(点「给我灵感」),或者直接在下方「本书主题」里写下你的想法。
+          第一步:把你的想法捏成一个「故事概念」。三种方式随便用——让 AI 给方案、对着方案让 AI 改、或直接和 AI 边聊边捏。满意后「定为本书概念」。
         </div>
       )}
 
+      {/* ===== 当前概念(核心) ===== */}
       <div className="card">
-        <h2>灵感工坊</h2>
+        <div className="card-head">
+          <h2 className="grow">当前故事概念</h2>
+          {hasConcept && !editing && (
+            <button className="btn-sm" onClick={() => setEditing(true)}>手动编辑</button>
+          )}
+          {editing && (
+            <button className="btn-sm" onClick={() => setEditing(false)}>完成编辑</button>
+          )}
+        </div>
+        <div className="card-desc mt-1">
+          整本书的地基。架构、大纲、正文都会围绕它展开——这里对了,后面才立得住。
+        </div>
+        {hasConcept || editing ? (
+          editing
+            ? <ConceptEditor c={concept} onChange={setConcept} />
+            : <ConceptView c={concept} />
+        ) : (
+          <div className="muted mt-2">还没有概念。用下面三种方式之一开始。</div>
+        )}
+        <label className="fl mt-3">全局写作倾向(题材/节奏/结构/基调)</label>
+        <div className="hint mb-2">可不选——影响所有生成环节;定概念时一并保存。</div>
+        <TendencySelector node="outline" value={tendency} onChange={setTendency} compact />
+        <div className="actions mt-3">
+          <button className="primary" disabled={!!busy || !hasConcept} onClick={commitConcept}>
+            {busy && <span className="spin" />}定为本书概念
+          </button>
+          {savedConcept && hasConcept && onGotoStep && (
+            <button disabled={!!busy} onClick={() => onGotoStep("arch")}>去架构 →</button>
+          )}
+        </div>
+        {busy && <div className="muted mt-2"><span className="spin" />{busy}</div>}
+        {msg && <div className="msg-ok mt-2">{msg}</div>}
+        {err && <div className="msg-err mt-2">{err}</div>}
+      </div>
+
+      {/* ===== 路 1:AI 出方案 ===== */}
+      <div className="card">
+        <h3>① 让 AI 给几个方案</h3>
         <div className="card-desc">
-          丢一个碎片进来(一个画面/一个设定/一句话,留空则按倾向自由发挥),AI 给你 4 个差异化的故事方案。
+          丢一个碎片(一个画面/一句设定,留空则按倾向自由发挥),AI 给 4 个差异化的完整概念。
         </div>
         <div className="input-row">
           <input type="text" value={spark} onChange={(e) => setSpark(e.target.value)}
@@ -94,25 +223,17 @@ export default function InspirePanel({ project, onChanged }: Props) {
             {busy && <span className="spin" />}给我灵感
           </button>
         </div>
-        {busy && <div className="muted mt-2">{busy}</div>}
-        {err && <div className="msg-err mt-2">{err}</div>}
-        {msg && <div className="msg-ok mt-2">{msg}</div>}
-
         {ideas.length > 0 && (
-          <div className="mt-4">
+          <div className="mt-3">
             {ideas.map((idea, i) => (
-              <div key={i} className={"idea-card" + (picked === i ? " picked" : "")}>
+              <div key={i} className="idea-card">
                 <div className="idea-head">
-                  <h3>《{idea.title}》</h3>
-                  <button className="primary" disabled={!!busy} onClick={() => adopt(i)}>
-                    用这个方案
+                  <h3 className="grow">{idea.logline || "（无标题）"}</h3>
+                  <button className="primary btn-sm" disabled={!!busy} onClick={() => useIdea(idea)}>
+                    用这个
                   </button>
                 </div>
-                <div className="idea-line">{idea.logline}</div>
-                <div className="muted mt-1">
-                  <b>钩子:</b>{idea.hook}
-                </div>
-                <div className="muted"><b>反转方向:</b>{idea.twist}</div>
+                <ConceptView c={idea} />
               </div>
             ))}
             <button disabled={!!busy} onClick={brainstorm}>都不满意,换一批</button>
@@ -120,32 +241,93 @@ export default function InspirePanel({ project, onChanged }: Props) {
         )}
       </div>
 
+      {/* ===== 路 2:指令式局部改 ===== */}
+      {hasConcept && (
+        <div className="card">
+          <h3>② 让 AI 改一处</h3>
+          <div className="card-desc">
+            对当前概念说一句怎么改——AI 只动相关字段,给你新旧对照,确认才生效。
+          </div>
+          <div className="input-row">
+            <input type="text" value={directive} onChange={(e) => setDirective(e.target.value)}
+              placeholder='如:"主角换成女性" / "反转再狠一点" / "背景搬到民国"'
+              onKeyDown={(e) => e.key === "Enter" && !busy && directive.trim() && runRefine()} />
+            <button className="primary" disabled={!!busy || !directive.trim()} onClick={runRefine}>
+              {busy && <span className="spin" />}改
+            </button>
+          </div>
+          {refinePreview && (
+            <div className="card card-warn mt-3">
+              <b>改动预览</b>
+              {refinePreview.note && <div className="card-desc mt-1">{refinePreview.note}</div>}
+              {refinePreview.changed.length === 0 ? (
+                <div className="msg-ok mt-2">AI 认为无需改动(或改动可忽略)。</div>
+              ) : (
+                <div className="mt-2">
+                  {CONCEPT_FIELDS.filter((f) => refinePreview.changed.includes(f.key)).map((f) => (
+                    <div key={f.key} className="refine-diff">
+                      <div className="cf-label">{f.label}</div>
+                      <div className="diff-old">旧:{concept[f.key].trim() || "（空）"}</div>
+                      <div className="diff-new">新:{refinePreview.concept[f.key].trim() || "（空）"}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="actions mt-2">
+                <button className="primary" disabled={!!busy || !refinePreview.changed.length}
+                  onClick={acceptRefine}>采纳改动</button>
+                <button disabled={!!busy} onClick={() => setRefinePreview(null)}>取消</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ===== 路 3:对话式从零捏 ===== */}
       <div className="card">
-        <h2>{hasTopic ? "本书主题" : "本书主题(选定后可随时修改)"}</h2>
+        <div className="card-head">
+          <h3 className="grow">③ 和 AI 边聊边捏</h3>
+          <button className="btn-sm" onClick={() => setChatOpen(!chatOpen)}>
+            {chatOpen ? "收起" : "开始对话"}
+          </button>
+        </div>
         <div className="card-desc">
-          {hasTopic
-            ? "这是整本书的\"一句话灵魂\",架构、大纲、正文都会围绕它生成,可随时修改后重新保存。"
-            : "采用上面的灵感方案后会自动写到这里,也可以直接自己写。这是整本书的\"一句话灵魂\",架构、大纲、正文都会围绕它生成。"}
+          没头绪时最好用——一问一答帮你把想法聊清楚,右侧「当前概念」会随对话实时长出来。
         </div>
-        <textarea rows={3} value={topic} onChange={(e) => setTopic(e.target.value)}
-          placeholder="如:落魄镖师接下一趟险镖,半路开箱验货时发现镖箱里藏着个大活人…" />
-        <label className="fl">全局写作倾向(题材/节奏/结构/基调)</label>
-        <div className="hint mb-2">可不选——不选则由 AI 自由发挥;选了会影响所有生成环节的题材、节奏、结构与基调。</div>
-        <TendencySelector node="outline" value={tendency} onChange={setTendency} compact />
-        <div className="actions mt-3">
-          <button className="primary" disabled={!!busy} onClick={saveTopic}>保存主题与倾向</button>
-          {msg && <span className="msg-ok">{msg}</span>}
-        </div>
+        {chatOpen && (
+          <div className="mt-2">
+            <div className="chat-log">
+              {chatLog.length === 0 && (
+                <div className="muted">对 AI 说说你的模糊想法,比如"想写个关于复仇的故事,但不落俗套"。</div>
+              )}
+              {chatLog.map((m, i) => (
+                <div key={i} className={"chat-msg " + m.role}>
+                  <span className="chat-who">{m.role === "user" ? "你" : "策划"}</span>
+                  <span className="chat-text">{m.content}</span>
+                </div>
+              ))}
+              {busy && chatOpen && <div className="chat-msg assistant"><span className="chat-who">策划</span><span className="chat-text muted"><span className="spin" />思考中…</span></div>}
+              <div ref={chatEndRef} />
+            </div>
+            <div className="input-row mt-2">
+              <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)}
+                placeholder="说点什么…" disabled={!!busy}
+                onKeyDown={(e) => e.key === "Enter" && !busy && sendChat()} />
+              <button className="primary" disabled={!!busy || !chatInput.trim()} onClick={sendChat}>
+                发送
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
-      {project.topic && (
+      {/* ===== 简介(定概念后) ===== */}
+      {savedConcept && (
         <div className="card">
           <h2>书籍简介</h2>
           {synopsis.trim() ? (
             <>
-              <div className="card-desc">
-                展示在「阅读全书」目录栏顶部,也可用于书籍页介绍。可随意修改后保存。
-              </div>
+              <div className="card-desc">展示在「阅读全书」目录栏顶部。可随意修改后保存。</div>
               <textarea rows={5} value={synopsis} onChange={(e) => setSynopsis(e.target.value)} />
               <div className="actions mt-3">
                 <button className="primary" disabled={!!synBusy} onClick={saveSynopsis}>保存简介</button>
@@ -158,7 +340,7 @@ export default function InspirePanel({ project, onChanged }: Props) {
           ) : (
             <>
               <div className="card-desc">
-                还没有简介。让 AI 根据主题{project.genre ? `与题材(${project.genre})` : ""}写一段 150-300 字的网文风简介,吸引人但不剧透结局。
+                让 AI 根据概念{project.genre ? `与题材(${project.genre})` : ""}写一段 150-300 字的网文风简介,吸引人但不剧透结局。
               </div>
               <div className="actions mt-3">
                 <button className="primary" disabled={!!synBusy} onClick={genSynopsis}>

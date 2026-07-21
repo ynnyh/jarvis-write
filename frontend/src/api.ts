@@ -54,6 +54,7 @@ export interface Project {
   id: number; title: string; topic: string; genre: string;
   target_chapters: number; target_words_per_chapter: number;
   global_tendency: Tendency; status: string;
+  concept?: Concept | null;
   synopsis?: string | null;
 }
 export interface Architecture {
@@ -171,7 +172,30 @@ export interface PolishResult {
 export interface ProviderState { deepseek: boolean; openai: boolean; gemini: boolean; }
 export interface AuthResult { token: string; username: string; is_admin: boolean; }
 export interface Me { id: number; username: string; is_admin: boolean; }
-export interface Idea { title: string; logline: string; hook: string; twist: string; }
+/** 结构化故事概念(灵感工坊产出)。六字段全可空,渐进成形。 */
+export interface Concept {
+  logline: string; hook: string; twist: string;
+  protagonist: string; conflict: string; setting: string;
+}
+/** 概念字段的展示顺序与中文标签(与后端 CONCEPT_FIELDS 一致) */
+export const CONCEPT_FIELDS: { key: keyof Concept; label: string; hint: string }[] = [
+  { key: "logline", label: "一句话故事", hint: "主角 + 核心冲突 + 赌注" },
+  { key: "hook", label: "核心钩子", hint: "读者为什么想追下去" },
+  { key: "twist", label: "潜在反转", hint: "藏着的大转折方向" },
+  { key: "protagonist", label: "主角", hint: "身份 / 目标 / 困境" },
+  { key: "conflict", label: "核心冲突", hint: "主要对立面" },
+  { key: "setting", label: "世界·背景", hint: "时代 / 场景 / 基调" },
+];
+export const EMPTY_CONCEPT: Concept = {
+  logline: "", hook: "", twist: "", protagonist: "", conflict: "", setting: "",
+};
+/** 六字段是否全空 */
+export function conceptIsEmpty(c: Concept | null | undefined): boolean {
+  return !c || CONCEPT_FIELDS.every((f) => !(c[f.key] ?? "").trim());
+}
+export interface RefineResult { concept: Concept; changed: (keyof Concept)[]; note: string; }
+export interface ChatTurn { role: "user" | "assistant"; content: string; }
+export interface ChatResult { reply: string; concept: Concept; }
 export interface AdminUser {
   id: number; username: string; is_admin: boolean; is_active: boolean;
   created_at: string; project_count: number;
@@ -208,7 +232,11 @@ export const api = {
     req<{ ok: boolean; deleted_chapters: number }>("DELETE", `/api/projects/${id}`),
 
   inspire: (spark: string, tendency: Tendency, count = 4) =>
-    req<{ ideas: Idea[] }>("POST", "/api/inspire", { spark, tendency, count }, LLM_TIMEOUT),
+    req<{ ideas: Concept[] }>("POST", "/api/inspire", { spark, tendency, count }, LLM_TIMEOUT),
+  refineConcept: (concept: Concept, directive: string, tendency: Tendency = {}) =>
+    req<RefineResult>("POST", "/api/inspire/refine", { concept, directive, tendency }, LLM_TIMEOUT),
+  chatConcept: (messages: ChatTurn[], concept: Concept | null, tendency: Tendency = {}) =>
+    req<ChatResult>("POST", "/api/inspire/chat", { messages, concept, tendency }, LLM_TIMEOUT),
   generateSynopsis: (id: number) =>
     req<{ synopsis: string }>("POST", `/api/projects/${id}/synopsis`, {}, LLM_TIMEOUT),
   patchArchitecture: (id: number, patch: Partial<Architecture>) =>

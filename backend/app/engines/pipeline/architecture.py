@@ -22,9 +22,21 @@ from app.prompts import (
     PLOT_ARCHITECTURE_PROMPT,
     WORLD_BUILDING_PROMPT,
 )
+from app.schemas.concept import Concept, coerce_concept
 from app.schemas.tendency import Tendency
 
 logger = logging.getLogger("jarvis-write.pipeline")
+
+
+def _render_topic_block(topic: str, concept: Concept | dict | None) -> str:
+    """把结构化概念渲染成喂给核心种子的富文本;无概念时回落 topic 一句话。
+
+    向后兼容:存量项目 concept 为 None,只有 topic。有概念但字段全空时也回落。
+    """
+    c = concept if isinstance(concept, Concept) else coerce_concept(concept)
+    if not c.is_empty():
+        return c.render()
+    return (topic or "").strip() or "(自由发挥)"
 
 
 @dataclass
@@ -51,12 +63,15 @@ async def generate_architecture(
     genre: str,
     number_of_chapters: int,
     word_number: int,
+    concept: Concept | dict | None = None,
     tendency: Tendency | None = None,
     global_tendency: Tendency | None = None,
     progress=None,
 ) -> ArchitectureResult:
     """执行雪花四步,返回完整架构。纯生成,不落库。
 
+    concept: 结构化故事概念(灵感工坊产出),优先于 topic 喂给核心种子;
+             为空/None 时回落到 topic 一句话(向后兼容存量项目)。
     progress: 可选回调 fn(stage_text),四步各报一次(异步任务进度用)。
     """
 
@@ -70,6 +85,7 @@ async def generate_architecture(
     assembled = assemble_tendency("outline", tendency, global_tendency)
     style_block = render_style_block(assembled)
     adapter = get_adapter_for(Task.ARCHITECTURE)
+    topic_block = _render_topic_block(topic, concept)
 
     # Step 1: 核心种子
     logger.info("架构生成 1/4:核心种子...")
@@ -77,7 +93,7 @@ async def generate_architecture(
     core_seed = (
         await adapter.ask(
             CORE_SEED_PROMPT.format(
-                topic=topic,
+                topic=topic_block,
                 genre=genre,
                 number_of_chapters=number_of_chapters,
                 word_number=word_number,

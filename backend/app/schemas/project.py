@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.schemas.concept import Concept
 from app.schemas.tendency import Tendency
 
 
@@ -27,6 +28,7 @@ class ProjectOut(BaseModel):
     target_chapters: int
     target_words_per_chapter: int
     global_tendency: dict[str, Any]
+    concept: Concept | None = None
     synopsis: str | None = None
     status: str
 

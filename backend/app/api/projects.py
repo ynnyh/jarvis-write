@@ -33,6 +33,7 @@ from app.llm.factory import (
     resolve_default_provider,
     resolve_provider_config,
 )
+from app.schemas.concept import Concept
 from app.schemas.project import (
     ArchitectureOut,
     GenerateArchitectureRequest,
@@ -211,6 +212,7 @@ class ProjectPatch(BaseModel):
     target_chapters: int | None = None
     target_words_per_chapter: int | None = None
     global_tendency: dict | None = None
+    concept: Concept | None = None
     synopsis: str | None = None
 
 
@@ -218,7 +220,11 @@ class ProjectPatch(BaseModel):
 async def patch_project(
     project_id: int, req: ProjectPatch, db: Session = Depends(get_db)
 ) -> Project:
-    """修改项目信息(重命名标题、灵感区确定主题、调整全局倾向等)。"""
+    """修改项目信息(重命名标题、灵感区确定主题、调整全局倾向等)。
+
+    定概念:传 concept 时落库结构化概念,并把 topic 同步为 logline
+    (下游 title/简介仍读 topic,保持单一真相源)。显式传 topic 优先于同步。
+    """
     project = _get_project_or_404(db, project_id)
     updates = req.model_dump(exclude_none=True)
     if "title" in updates:
@@ -228,6 +234,12 @@ async def patch_project(
         if len(title) > 100:
             raise HTTPException(status_code=400, detail="标题过长,最多 100 字")
         updates["title"] = title
+    if "concept" in updates:
+        # concept 存为纯 dict(JSON 列);topic 跟随 logline,除非本次显式改了 topic
+        concept: Concept = req.concept  # 已通过 pydantic 校验
+        updates["concept"] = concept.model_dump()
+        if "topic" not in updates and concept.logline.strip():
+            updates["topic"] = concept.logline.strip()
     for field, value in updates.items():
         setattr(project, field, value)
     db.commit()
@@ -283,6 +295,7 @@ async def generate_project_architecture(
         genre=project.genre,
         number_of_chapters=project.target_chapters,
         word_number=project.target_words_per_chapter,
+        concept=project.concept,
         tendency=req.tendency,
         global_tendency=project.global_tendency,
     )
@@ -311,6 +324,7 @@ async def generate_project_architecture_async(
                 genre=project.genre,
                 number_of_chapters=project.target_chapters,
                 word_number=project.target_words_per_chapter,
+                concept=project.concept,
                 tendency=req.tendency,
                 global_tendency=project.global_tendency,
                 progress=lambda s: update_stage(job_id, s),

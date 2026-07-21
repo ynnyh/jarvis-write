@@ -599,6 +599,48 @@ label.fl {
 .idea-head h3 { flex: 1; margin: 0; }
 .idea-line { margin-top: 6px; line-height: 1.7; }
 
+/* ---------- 故事概念(灵感工坊) ---------- */
+.concept-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 18px;
+  margin-top: 10px;
+}
+.concept-field { display: flex; gap: 8px; line-height: 1.6; font-size: var(--fs-sm); }
+.concept-field.empty { opacity: 0.55; }
+.cf-label {
+  flex-shrink: 0; min-width: 4.5em; color: var(--brand);
+  font-weight: 500; text-align: right;
+}
+.cf-value { flex: 1; white-space: pre-wrap; word-break: break-word; }
+.idea-card .concept-grid { grid-template-columns: 1fr; gap: 4px; margin-top: 8px; }
+
+.concept-edit { margin-top: 10px; }
+.concept-edit-row { margin-bottom: 8px; }
+.concept-edit-row textarea { margin-top: 2px; }
+
+.refine-diff { padding: 8px 0; border-bottom: 1px dashed var(--line); }
+.refine-diff:last-child { border-bottom: none; }
+.refine-diff .cf-label {
+  display: block; text-align: left; min-width: 0; margin-bottom: 2px;
+}
+.diff-old { color: var(--muted); text-decoration: line-through; line-height: 1.6; }
+.diff-new { color: var(--ok); line-height: 1.6; }
+
+/* ---------- 对话式构思 ---------- */
+.chat-log {
+  max-height: 340px; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px; margin-top: 8px; background: var(--bg-weak, transparent);
+}
+.chat-msg { display: flex; gap: 8px; margin-bottom: 10px; line-height: 1.7; }
+.chat-msg .chat-who {
+  flex-shrink: 0; min-width: 2.5em; font-weight: 500; font-size: var(--fs-xs);
+}
+.chat-msg.user .chat-who { color: var(--brand); }
+.chat-msg.assistant .chat-who { color: var(--ok); }
+.chat-text { flex: 1; white-space: pre-wrap; word-break: break-word; }
+
 /* ---------- 倾向选择器 ---------- */
 .dim { margin-bottom: 14px; }
 .dim.compact { margin-bottom: var(--sp-2); }

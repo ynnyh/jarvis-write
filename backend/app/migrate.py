@@ -97,6 +97,23 @@ def _add_retired_column() -> None:
             logger.info("迁移:entities 补 retired 列")
 
 
+def _add_concept_column() -> None:
+    """给 projects 表补 concept 列(结构化故事概念 JSON,幂等)。
+
+    SQLite 的 JSON 底层是 TEXT;存量项目该列为 NULL,由灵感工坊逐步填充,
+    架构生成在 concept 为空时回落到 topic 一句话(向后兼容)。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "projects" not in insp.get_table_names():
+            return  # create_all 会新建,无需补列
+        if not _column_exists("projects", "concept"):
+            conn.execute(
+                text("ALTER TABLE projects ADD COLUMN concept JSON")
+            )
+            logger.info("迁移:projects 补 concept 列")
+
+
 def _ensure_admin(db: Session) -> User:
     settings = get_settings()
     admin = (
@@ -143,6 +160,7 @@ def run_migrations() -> None:
     _add_user_id_columns()
     _add_is_active_column()
     _add_synopsis_column()
+    _add_concept_column()
     _add_retired_column()
     with session_scope() as db:
         admin = _ensure_admin(db)
