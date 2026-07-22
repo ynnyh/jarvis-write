@@ -2,7 +2,7 @@
 // 当前步骤进 URL(/project/:id/:step),刷新/后退/分享链接都不丢位置
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { api, Architecture, ChapterBrief, Outline, Project } from "../api";
+import { useProject, useArchitecture, useOutlines, useChapters, useInvalidateProject } from "../hooks/queries";
 import InspirePanel from "../panels/InspirePanel";
 import ArchPanel from "../panels/ArchPanel";
 import OutlinePanel from "../panels/OutlinePanel";
@@ -88,11 +88,14 @@ export default function ProjectPage() {
   const { id, step: stepParam } = useParams();
   const pid = Number(id);
   const nav = useNavigate();
-  const [project, setProject] = useState<Project | null>(null);
-  const [arch, setArch] = useState<Architecture | null>(null);
-  const [outlines, setOutlines] = useState<Outline[]>([]);
-  const [chapters, setChapters] = useState<ChapterBrief[]>([]);
-  const [err, setErr] = useState("");
+
+  // React Query 数据获取(替代手动 useState + reload)
+  const { data: project, error: projectErr } = useProject(pid);
+  const { data: arch } = useArchitecture(pid);
+  const { data: outlines = [] } = useOutlines(pid);
+  const { data: chapters = [] } = useChapters(pid);
+  const reload = useInvalidateProject(pid);
+
   // 全书阅读模式(有已生成章节时,标题行出现「阅读全书」入口)
   const [readingBook, setReadingBook] = useState(false);
   // 看板「概览」点章节格子 → 跳写作步并打开该章(消费后清空)
@@ -108,21 +111,9 @@ export default function ProjectPage() {
     [nav, pid],
   );
 
-  const reload = useCallback(async () => {
-    const p = await api.getProject(pid);
-    setProject(p);
-    try { setArch(await api.getArchitecture(pid)); } catch { setArch(null); }
-    setOutlines(await api.listOutlines(pid));
-    setChapters(await api.listChapters(pid));
-  }, [pid]);
-
-  useEffect(() => {
-    reload().catch((e) => setErr(String(e)));
-  }, [reload]);
-
   // URL 未带步骤(旧链接/首次进入):按进度定位到该干活的环节
   useEffect(() => {
-    if (project === null) return;
+    if (!project) return;
     // 起步流未完成的草稿:回到起步流继续
     if (project.setup_state) {
       nav(`/new/${pid}/${project.setup_state}`, { replace: true });
@@ -137,7 +128,7 @@ export default function ProjectPage() {
     nav(`/project/${pid}/${target}`, { replace: true });
   }, [project, arch, outlines, step, nav, pid]);
 
-  if (!project) return <div className="muted">{err || "加载中…"}</div>;
+  if (!project) return <div className="muted">{projectErr ? String(projectErr) : "加载中…"}</div>;
 
   const wordsTotal = chapters.reduce((s, c) => s + c.word_count, 0);
   const staleCount = chapters.filter((c) => c.is_stale).length;
@@ -234,7 +225,7 @@ export default function ProjectPage() {
             <StepGuide step={step} next={nextHint?.label}
               onNext={nextHint ? () => setStep(nextHint.to) : undefined} />
           )}          {step === "inspire" && <InspirePanel project={project} onChanged={reload} onGotoStep={setStep} />}
-          {step === "arch" && <ArchPanel project={project} arch={arch} onChanged={reload} />}
+          {step === "arch" && <ArchPanel project={project} arch={arch ?? null} onChanged={reload} />}
           {step === "outline" && (
             <OutlinePanel pid={pid} project={project} outlines={outlines} hasArch={!!arch} onChanged={reload} onGotoStep={setStep} />
           )}

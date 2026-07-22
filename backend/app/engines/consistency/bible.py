@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 
+from sqlalchemy import String, cast
 from sqlalchemy.orm import Session
 
 from app.db.models import Entity, Fact, KnowledgeState, Relationship
@@ -25,17 +26,33 @@ class BibleService:
 
     # ---------- 实体 ----------
     def find_entity(self, name: str) -> Entity | None:
-        """按名字或别名找实体。"""
+        """按名字或别名找实体。
+
+        精确名字走 SQL 索引;别名回退只加载有别名的实体子集(远小于全表)。
+        """
         name = name.strip()
         if not name:
             return None
-        ents = (
+        # 优先精确匹配 name(SQL 索引命中)
+        ent = (
             self.db.query(Entity)
-            .filter(Entity.project_id == self.project_id)
+            .filter(Entity.project_id == self.project_id, Entity.name == name)
+            .first()
+        )
+        if ent:
+            return ent
+        # 别名回退:只加载有别名的实体(JSON 存储可能 unicode 转义,LIKE 不可靠)
+        candidates = (
+            self.db.query(Entity)
+            .filter(
+                Entity.project_id == self.project_id,
+                Entity.aliases != "[]",
+                Entity.aliases.isnot(None),
+            )
             .all()
         )
-        for e in ents:
-            if e.name == name or name in (e.aliases or []):
+        for e in candidates:
+            if name in (e.aliases or []):
                 return e
         return None
 
@@ -73,15 +90,16 @@ class BibleService:
                 (Fact.valid_until.is_(None)) | (Fact.valid_until >= chapter_number)
             )
         )
-        facts = q.all()
         if entity_names:
             ids = set()
             for name in entity_names:
                 ent = self.find_entity(str(name))
                 if ent:
                     ids.add(ent.id)
-            facts = [f for f in facts if f.entity_id in ids]
-        return facts
+            if not ids:
+                return []
+            q = q.filter(Fact.entity_id.in_(ids))
+        return q.all()
 
     def _entity_name(self, entity_id: int) -> str:
         ent = self.db.get(Entity, entity_id)
@@ -323,16 +341,21 @@ class BibleService:
         已存在相同 relation 的有效边 → 视为无变化,不重复落库。
         返回是否真正写了新边。
         """
-        pair = {a.id, b.id}
-        open_edges = (
+        from sqlalchemy import or_, and_
+
+        # 只查这对实体的开放边(SQL 条件,不全表扫描)
+        same_pair = (
             self.db.query(Relationship)
             .filter(
                 Relationship.project_id == self.project_id,
                 Relationship.valid_until.is_(None),
+                or_(
+                    and_(Relationship.from_entity_id == a.id, Relationship.to_entity_id == b.id),
+                    and_(Relationship.from_entity_id == b.id, Relationship.to_entity_id == a.id),
+                ),
             )
             .all()
         )
-        same_pair = [e for e in open_edges if {e.from_entity_id, e.to_entity_id} == pair]
         if any(e.relation == relation for e in same_pair):
             return False
         for e in same_pair:
