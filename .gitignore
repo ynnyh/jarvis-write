@@ -24,3 +24,4 @@ backend/scripts/stress_report.jsonl
 .vscode/
 .DS_Store
 Thumbs.db
+frontend/package-lock.json

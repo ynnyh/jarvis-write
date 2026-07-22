@@ -1,10 +1,11 @@
 # 多阶段构建:前端 build → 后端运行时(FastAPI 托管前端产物)
 FROM node:22-slim AS frontend
+RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /fe
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci --no-fund --no-audit
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile --no-fund --audit=false
 COPY frontend/ ./
-RUN npm run build
+RUN pnpm run build
 
 FROM python:3.12-slim
 WORKDIR /srv
