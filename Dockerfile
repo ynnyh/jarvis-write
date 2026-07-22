@@ -3,7 +3,7 @@ FROM node:22-slim AS frontend
 RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /fe
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile --config.minimumReleaseAge=0
+RUN pnpm install --frozen-lockfile --config.minimumReleaseAge=0 --registry=https://registry.npmmirror.com
 COPY frontend/ ./
 RUN pnpm run build
 
