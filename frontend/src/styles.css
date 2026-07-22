@@ -1571,3 +1571,43 @@ html, body { max-width: 100%; overflow-x: hidden; }
   .topbar { flex-wrap: wrap; row-gap: 4px; }
   .toast-viewport { width: calc(100vw - 24px); right: 12px; }
 }
+
+/* ---------- 编辑部 ---------- */
+.ed-tabs { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.ed-tab {
+  flex: 1 1 150px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.ed-tab:hover { border-color: var(--brand); }
+.ed-tab.on { border-color: var(--brand); background: var(--brand-weak); }
+.ed-tab b { display: block; font-size: var(--fs-md); }
+.ed-tab span { display: block; color: var(--text-2); font-size: var(--fs-xs); margin-top: 2px; }
+
+.score-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.score-item {
+  flex: 1 1 90px;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 12px 8px;
+  background: var(--surface-2);
+}
+.score-item b { display: block; font-size: var(--fs-2xl); color: var(--brand); }
+.score-item.low b { color: var(--err); }
+.score-item span { color: var(--text-2); font-size: var(--fs-xs); }
+
+.proof-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.proof-item input { margin-top: 3px; width: 16px; height: 16px; flex-shrink: 0; }
+.proof-item .badge { flex-shrink: 0; }
+.proof-body { flex: 1; min-width: 0; display: grid; gap: 3px; font-size: var(--fs-sm); }
+.notice-warn { background: var(--warn-weak); border: 1px solid var(--warn-line); color: var(--warn); border-radius: var(--r-md); padding: 10px 14px; }

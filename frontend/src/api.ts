@@ -221,6 +221,25 @@ export interface InviteCodeListOut {
   // 表为空时仍在生效的旧单码(app_settings/env);有记录后为 null
   legacy_fallback: { code: string; source: "db" | "env" } | null;
 }
+/** 编辑部预设优化动作 */
+export interface EditorAction { key: string; label: string; directive: string; }
+export interface ChapterReview {
+  chapter_number: number;
+  scores: { plot: number; prose: number; pacing: number; character: number };
+  comment: string;
+  suggestions: string[];
+}
+export interface ProofIssue { type: string; original: string; suggestion: string; reason: string; }
+export interface AuditReport {
+  written_chapters: number;
+  target_chapters: number;
+  stale_chapters: number[];
+  holes: number[];
+  foreshadow: {
+    total: number; open: number; resolved: number;
+    overdue: { description: string; planted: number; expected: number | null; status: string }[];
+  };
+}
 
 // ---------- 接口 ----------
 export const api = {
@@ -350,6 +369,19 @@ export const api = {
   generateQueue: (pid: number, chapter_numbers: number[], tendency: Tendency = {}) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/chapters/generate-queue`,
       { chapter_numbers, tendency }),
+
+  // ---- 编辑部:主编评分 / 校对 / 审核报告 / 优化动作目录 ----
+  editorialActions: () =>
+    req<{ prose: EditorAction[]; outline: EditorAction[] }>("GET", "/api/editorial/actions"),
+  reviewChapterAsync: (pid: number, n: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/chapters/${n}/review-async`, {}),
+  proofreadAsync: (pid: number, n: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/chapters/${n}/proofread-async`, {}),
+  proofreadApply: (pid: number, n: number, fixes: { original: string; suggestion: string }[]) =>
+    req<{ applied: { original: string; suggestion: string }[]; failed: { original: string; reason: string }[]; word_count: number; final_content: string }>(
+      "POST", `/api/projects/${pid}/chapters/${n}/proofread-apply`, { fixes }),
+  auditReport: (pid: number) =>
+    req<AuditReport>("GET", `/api/projects/${pid}/audit-report`),
 
   polishChapter: (pid: number, n: number, tendency: Tendency) =>
     req<PolishResult>("POST", `/api/projects/${pid}/polish/chapter/${n}`, { tendency }, LLM_TIMEOUT),

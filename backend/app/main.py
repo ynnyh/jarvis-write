@@ -33,6 +33,7 @@ from app.api.admin import router as admin_router
 from app.api.chapters import router as chapters_router
 from app.api.consistency import router as consistency_router
 from app.api.edit_directive import router as edit_directive_router
+from app.api.editorial import router as editorial_router
 from app.api.inspire import router as inspire_router
 from app.api.misc import router as misc_router
 from app.api.outline import router as outline_router
@@ -101,6 +102,7 @@ def create_app() -> FastAPI:
     app.include_router(outline_router)
     app.include_router(overview_router)
     app.include_router(edit_directive_router)
+    app.include_router(editorial_router)
     app.include_router(polish_router)
     app.include_router(inspire_router)
     app.include_router(misc_router)

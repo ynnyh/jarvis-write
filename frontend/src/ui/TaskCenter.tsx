@@ -43,6 +43,10 @@ export function jobLabel(kind: string): string {
   if (m) return `第 ${m[1]} 章影响分析`;
   if (kind.startsWith("cascade-")) return "级联重生成";
   if (kind.startsWith("synopsis-")) return "简介生成";
+  m = kind.match(/^review-\d+-(\d+)$/);
+  if (m) return `第 ${m[1]} 章主编评分`;
+  m = kind.match(/^proofread-\d+-(\d+)$/);
+  if (m) return `第 ${m[1]} 章校对`;
   if (kind.startsWith("inspire-refine")) return "概念改写";
   if (kind.startsWith("inspire")) return "灵感方案";
   return kind;

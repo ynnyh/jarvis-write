@@ -4,7 +4,7 @@
 // 传入 polishCtx 时开启段落点选润色(选段 → 输方向 → 对照 → 替换并同步一致性引擎);
 // 传入 restoreScroll / onScrollPos 时支持全书阅读位置记忆(恢复与上报)。
 import { useEffect, useRef, useState } from "react";
-import { api, ChapterDetail } from "../api";
+import { api, ChapterDetail, EditorAction } from "../api";
 import { pollJob } from "../pollJob";
 
 export const STATUS_CN: Record<string, string> = {
@@ -123,6 +123,13 @@ export default function Reader({
   // 手动改段:选中段落直接改字(和 AI 润色共用替换+同步链路)
   const [editOpen, setEditOpen] = useState(false);
   const [editText, setEditText] = useState("");
+  // 编辑部预设优化动作(润色方向 chips;拉不到时退回内置四个)
+  const [proseActions, setProseActions] = useState<EditorAction[]>([]);
+  useEffect(() => {
+    if (!polishCtx) return;
+    api.editorialActions().then((a) => setProseActions(a.prose)).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [direction, setDirection] = useState("");
   const [polishing, setPolishing] = useState(false);
   const [polished, setPolished] = useState<string | null>(null);
@@ -416,12 +423,15 @@ export default function Reader({
                         onChange={(e) => setDirection(e.target.value)}
                       />
                       <div className="chips rp-chips">
-                        {DIRECTION_CHIPS.map((c) => (
+                        {(proseActions.length
+                          ? proseActions.map((a) => ({ label: a.label, value: a.directive }))
+                          : DIRECTION_CHIPS.map((c) => ({ label: c, value: c }))
+                        ).map((c) => (
                           <span
-                            key={c}
-                            className={"chip" + (direction === c ? " on" : "")}
-                            onClick={() => setDirection(c)}
-                          >{c}</span>
+                            key={c.label}
+                            className={"chip" + (direction === c.value ? " on" : "")}
+                            onClick={() => setDirection(c.value)}
+                          >{c.label}</span>
                         ))}
                       </div>
                       <div className="rp-actions">

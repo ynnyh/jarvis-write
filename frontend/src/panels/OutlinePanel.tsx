@@ -1,6 +1,6 @@
 // 大纲工作区:蓝图生成 / 内联编辑 / 大改分级 → 影响分析 → 勾选级联
 import { useEffect, useRef, useState } from "react";
-import { api, CascadeResult, DirectiveApplyResult, DirectiveItem, DirectivePreview, EditResult, ImpactReport, Outline, Tendency } from "../api";
+import { api, CascadeResult, DirectiveApplyResult, DirectiveItem, DirectivePreview, EditorAction, EditResult, ImpactReport, Outline, Tendency } from "../api";
 import { pollJob } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
 import { useJob } from "../ui/useJob";
@@ -34,6 +34,11 @@ export default function OutlinePanel({ pid, outlines, hasArch, onChanged, onGoto
   // 修改指令:输入 → LLM 预览(可再编辑/勾选) → 应用
   const [showDirective, setShowDirective] = useState(false);
   const [directiveText, setDirectiveText] = useState("");
+  // 编辑部预设优化动作(大纲级 chips:深化冲突/增加伏笔…,点了走指令改预览链路)
+  const [outlineActions, setOutlineActions] = useState<EditorAction[]>([]);
+  useEffect(() => {
+    api.editorialActions().then((a) => setOutlineActions(a.outline)).catch(() => undefined);
+  }, []);
   const [preview, setPreview] = useState<DirectivePreview | null>(null);
   const [drafts, setDrafts] = useState<DirectiveItem[]>([]);
   const [dirPicked, setDirPicked] = useState<Set<number>>(new Set());
@@ -334,6 +339,21 @@ export default function OutlinePanel({ pid, outlines, hasArch, onChanged, onGoto
                 </div>
                 <div className="actions mt-2">
                   <button className="btn-sm" onClick={() => startEdit(o)}>编辑本章</button>
+                  {outlineActions.length > 0 && (
+                    <span className="chips">
+                      <span className="hint">让 AI:</span>
+                      {outlineActions.map((a) => (
+                        <span key={a.key} className="chip" title={a.directive}
+                          onClick={() => {
+                            setShowDirective(true);
+                            setDirectiveText(`第${o.chapter_number}章:${a.directive}`);
+                            window.scrollTo({ top: 0, behavior: "smooth" });
+                          }}>
+                          {a.label}
+                        </span>
+                      ))}
+                    </span>
+                  )}
                 </div>
               </div>
             )}

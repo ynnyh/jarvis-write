@@ -7,7 +7,7 @@ import InspirePanel from "../panels/InspirePanel";
 import ArchPanel from "../panels/ArchPanel";
 import OutlinePanel from "../panels/OutlinePanel";
 import ChaptersPanel from "../panels/ChaptersPanel";
-import PolishPanel from "../panels/PolishPanel";
+import EditorialPanel from "../panels/EditorialPanel";
 import BoardPanel from "../panels/BoardPanel";
 import BookReader from "../components/BookReader";
 
@@ -18,7 +18,7 @@ const STEPS: { key: Step; no: number; label: string }[] = [
   { key: "arch", no: 2, label: "架构" },
   { key: "outline", no: 3, label: "大纲" },
   { key: "write", no: 4, label: "写作" },
-  { key: "polish", no: 5, label: "润色" },
+  { key: "polish", no: 5, label: "编辑部" },
   { key: "board", no: 6, label: "看板" },
 ];
 
@@ -45,9 +45,9 @@ const GUIDES: Record<Step, { what: string; ai: string; done: string }> = {
     done: "定稿的章节会计入总字数,可随时在「看板」查看全书状态。",
   },
   polish: {
-    what: "对已写好的段落做精修:润色文字、保持事实一致。",
-    ai: "AI 润色时会锁定既有设定不改动,润色稿应用前可手动微调。",
-    done: "可选步骤,想发布前再来也行。",
+    what: "编辑部三审:主编打分给建议、校对抓错别字语病、审核盯一致性;还有润色工作台精修文字。",
+    ai: "主编按情节/文笔/节奏/人物打分并给出最该改的三件事;校对的修复逐条勾选才生效。",
+    done: "可选步骤,建议每写完几章来过一遍。",
   },
   board: {
     what: "全书仪表盘:章节地图、人物卡、伏笔时间线、故事圣经。",
@@ -240,7 +240,7 @@ export default function ProjectPage() {
                   focusChapter={focusChapter} onFocusConsumed={() => setFocusChapter(null)} />
               : <div className="card muted">先在「大纲」生成章节蓝图,才能开始写作。</div>
           )}
-          {step === "polish" && <PolishPanel pid={pid} />}
+          {step === "polish" && <EditorialPanel pid={pid} />}
           {step === "board" && (
             outlines.length
               ? <BoardPanel pid={pid} outlines={outlines}

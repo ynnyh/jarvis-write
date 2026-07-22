@@ -2,7 +2,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
   api, ChapterBrief, ChapterDetail, ChapterVersionBrief, ChapterVersionDetail,
-  flavorTitle, GenerateChapterResponse, Outline, Project, Tendency, VERSION_SOURCE_CN,
+  EditorAction, flavorTitle, GenerateChapterResponse, Outline, Project, Tendency, VERSION_SOURCE_CN,
 } from "../api";
 import { pollJob } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
@@ -110,6 +110,11 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
   // 列表筛选(长书用):文本 + 状态
   const [filterText, setFilterText] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  // 编辑部预设优化动作(重写意见 chips)
+  const [proseActions, setProseActions] = useState<EditorAction[]>([]);
+  useEffect(() => {
+    api.editorialActions().then((a) => setProseActions(a.prose)).catch(() => undefined);
+  }, []);
 
   const shownOutlines = outlines.filter((o) => {
     const ch = byNum.get(o.chapter_number);
@@ -428,10 +433,10 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
                       onChange={(e) => setReviseText(e.target.value)}
                     />
                     <div className="chips">
-                      {["节奏太慢", "对话生硬", "描写单薄"].map((c) => (
-                        <span key={c} className="chip"
-                          onClick={() => setReviseText((t) => ((t ? t.trimEnd() + ";" : "") + c).slice(0, 500))}>
-                          {c}
+                      {proseActions.map((a) => (
+                        <span key={a.key} className="chip" title={a.directive}
+                          onClick={() => setReviseText((t) => ((t ? t.trimEnd() + ";" : "") + a.directive).slice(0, 500))}>
+                          {a.label}
                         </span>
                       ))}
                     </div>
