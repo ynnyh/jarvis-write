@@ -2,7 +2,7 @@
 // 通用异步操作 hook:替代各 Panel 中重复的 setBusy/setErr/try-catch-finally 模式。
 // 用法:const { run, busy, error } = useAsyncAction();
 //       await run(async () => { const r = await api.someCall(); /* handle */ });
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface AsyncActionState {
   busy: string;
@@ -37,16 +37,11 @@ export function useAsyncAction(abortOnUnmount = true) {
 
   const clearError = useCallback(() => setState((s) => ({ ...s, error: "" })), []);
 
-  // 卸载时 abort
-  const unmountRef = useRef(() => {
-    if (abortOnUnmount) abortRef.current?.abort();
-  });
-  // 注册卸载清理(仅一次)
-  const registered = useRef(false);
-  if (!registered.current) {
-    registered.current = true;
-    // 利用 useEffect 的 cleanup
-  }
+  // 卸载时 abort 进行中的请求
+  useEffect(() => {
+    if (!abortOnUnmount) return;
+    return () => { abortRef.current?.abort(); };
+  }, [abortOnUnmount]);
 
   return { ...state, run, clearError, abortController: abortRef };
 }
