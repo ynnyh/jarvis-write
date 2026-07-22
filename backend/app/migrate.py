@@ -136,6 +136,38 @@ def _add_setup_columns() -> None:
             logger.info("迁移:projects 补 macro_plan 列")
 
 
+def _add_word_guard_columns() -> None:
+    """给 projects 表补字数守卫配置列(幂等)。"""
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "projects" not in insp.get_table_names():
+            return
+        if not _column_exists("projects", "word_guard_enabled"):
+            conn.execute(
+                text(
+                    "ALTER TABLE projects ADD COLUMN word_guard_enabled "
+                    "BOOLEAN NOT NULL DEFAULT 1"
+                )
+            )
+            logger.info("迁移:projects 补 word_guard_enabled 列")
+        if not _column_exists("projects", "word_guard_ratio"):
+            conn.execute(
+                text(
+                    "ALTER TABLE projects ADD COLUMN word_guard_ratio "
+                    "REAL NOT NULL DEFAULT 1.5"
+                )
+            )
+            logger.info("迁移:projects 补 word_guard_ratio 列")
+        if not _column_exists("projects", "auto_split_enabled"):
+            conn.execute(
+                text(
+                    "ALTER TABLE projects ADD COLUMN auto_split_enabled "
+                    "BOOLEAN NOT NULL DEFAULT 1"
+                )
+            )
+            logger.info("迁移:projects 补 auto_split_enabled 列")
+
+
 def _ensure_admin(db: Session) -> User:
     settings = get_settings()
     admin = (
@@ -185,6 +217,7 @@ def run_migrations() -> None:
     _add_concept_column()
     _add_setup_columns()
     _add_retired_column()
+    _add_word_guard_columns()
     with session_scope() as db:
         admin = _ensure_admin(db)
         db.flush()

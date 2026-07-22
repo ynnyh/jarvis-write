@@ -548,6 +548,24 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
                   ))}
                 </div>
               : <span className="badge ok">一致性检查通过</span>}
+            {genResult.word_guard_action === "compressed" && (
+              <div className="mt-2">
+                <span className="badge">字数守卫:已压缩至目标范围</span>
+              </div>
+            )}
+            {genResult.word_guard_action === "split" && genResult.split_info && (
+              <div className="mt-2">
+                <span className="badge err">字数守卫:已自动拆章</span>
+                <div className="fact-line">
+                  原第{genResult.split_info.original_chapter}章 →
+                  第{genResult.split_info.original_chapter}章({genResult.split_info.part_a_words}字)
+                  + 第{genResult.split_info.new_chapter}章《{genResult.split_info.new_title}》({genResult.split_info.part_b_words}字)
+                </div>
+                {genResult.split_info.reason && (
+                  <div className="muted">断点:{genResult.split_info.reason}</div>
+                )}
+              </div>
+            )}
           </div>
         )}
 

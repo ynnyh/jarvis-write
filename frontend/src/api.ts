@@ -86,6 +86,16 @@ export interface GenerateChapterResponse extends ChapterDetail {
   consistency_issues: Record<string, string>[];
   extraction_stats: Record<string, unknown>;
   ai_flavor: FlavorInfo;
+  word_guard_action?: "none" | "compressed" | "split";
+  split_info?: {
+    original_chapter: number;
+    new_chapter: number;
+    new_title: string;
+    part_a_words: number;
+    part_b_words: number;
+    total_chapters_now: number;
+    reason: string;
+  };
 }
 /** 章节正文历史版本(覆盖前的快照)。source: generated/polished/edited/restored */
 export interface ChapterVersionBrief {

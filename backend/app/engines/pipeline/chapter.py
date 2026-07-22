@@ -27,6 +27,7 @@ from app.prompts.chapter import (
     CHAPTER_FINALIZE_PROMPT,
     ROLLING_SUMMARY_PROMPT,
 )
+from app.engines.pipeline.word_guard import GuardResult, word_count_guard
 from app.schemas.tendency import Tendency
 
 logger = logging.getLogger("jarvis-write.chapter")
@@ -268,6 +269,9 @@ async def generate_chapter(
         chapter_summary=outline.summary,
         next_chapter_brief=_next_chapter_brief(next_outline),
         word_number=project.target_words_per_chapter,
+        word_limit=int(project.target_words_per_chapter * 1.4),
+        scene_count=max(2, project.target_words_per_chapter // 1000),
+        scene_words=project.target_words_per_chapter // max(2, project.target_words_per_chapter // 1000),
         style_directives=style_block,
     )
     draft = _strip_meta(await get_adapter_for(Task.DRAFT).ask(draft_prompt))
@@ -286,6 +290,12 @@ async def generate_chapter(
         style_directives=style_block,
     )
     final = _strip_meta(await get_adapter_for(Task.FINALIZE).ask(finalize_prompt))
+
+    # ---- 字数守卫:超标压缩/拆章 ----
+    guard_result = await word_count_guard(
+        db, project, chapter_number, outline, final, style_block, report=_report
+    )
+    final = guard_result.final_text
 
     # ---- 落库 ----
     # 先结束生成期间一直开着的读事务:期间用量记录等已在别的连接提交,
@@ -374,4 +384,4 @@ async def generate_chapter(
         logger.info("第 %d 章重写,已重建下游摘要: %s", chapter_number, rebuilt)
 
     logger.info("第 %d 章完成,共 %d 字。", chapter_number, chapter.word_count)
-    return chapter, issues, extraction_stats
+    return chapter, issues, extraction_stats, guard_result

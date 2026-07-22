@@ -209,7 +209,7 @@ async def test_integration() -> None:
          patch.object(ch_mod.ChapterMemory, "retrieve", no_ret), \
          patch.object(ch_mod, "check_chapter", no_check), \
          patch.object(ch_mod, "extract_and_apply", no_extract):
-        _c, issues, stats = await ch_mod.generate_chapter(db, p, 4)
+        _c, issues, stats, _guard = await ch_mod.generate_chapter(db, p, 4)
 
     draft_prompt = adapter.prompts[0]
     ok = ("左手已截肢" in draft_prompt and "断刀的秘密" in draft_prompt

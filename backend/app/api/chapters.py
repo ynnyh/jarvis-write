@@ -53,12 +53,15 @@ class ChapterDetail(ChapterBrief):
 
 
 class GenerateChapterResponse(ChapterDetail):
-    """生成结果:正文 + 一致性检查问题 + 圣经抽取统计 + AI 味指数。"""
+    """生成结果:正文 + 一致性检查问题 + 圣经抽取统计 + AI 味指数 + 字数守卫结果。"""
 
     consistency_issues: list[dict] = []
     extraction_stats: dict = {}
     # AI 味指数:纯规则统计(不调 LLM,零额外耗时),生成完成即给出
     ai_flavor: dict = {}
+    # 字数守卫:none / compressed / split
+    word_guard_action: str = "none"
+    split_info: dict = {}
 
 
 def _flavor_dict(text: str) -> dict:
@@ -81,7 +84,7 @@ async def generate(
     """生成一章(草稿/定稿/检查/抽取/摘要,多次 LLM 调用,耗时较长)。"""
     project = get_project_or_404(db, project_id)
     try:
-        chapter, issues, stats = await generate_chapter(
+        chapter, issues, stats, guard_result = await generate_chapter(
             db, project, chapter_number, req.tendency,
             revision=req.revision.strip(),
         )
@@ -92,6 +95,8 @@ async def generate(
     resp.consistency_issues = issues
     resp.extraction_stats = stats
     resp.ai_flavor = _flavor_dict(chapter.final_content)
+    resp.word_guard_action = guard_result.action
+    resp.split_info = guard_result.split_info
     return resp
 
 
@@ -126,7 +131,7 @@ async def generate_async(
         session = SessionLocal()
         try:
             project = session.get(Project, project_id)
-            chapter, issues, stats = await generate_chapter(
+            chapter, issues, stats, guard_result = await generate_chapter(
                 session, project, chapter_number, req.tendency,
                 progress=lambda s: update_stage(job_id, s),
                 revision=req.revision.strip(),
@@ -143,6 +148,8 @@ async def generate_async(
                 "consistency_issues": issues,
                 "extraction_stats": stats,
                 "ai_flavor": _flavor_dict(chapter.final_content),
+                "word_guard_action": guard_result.action,
+                "split_info": guard_result.split_info,
             })
         except Exception as exc:  # noqa: BLE001 — 任务失败进 job 状态
             session.rollback()
@@ -197,7 +204,7 @@ async def generate_queue(
             session = SessionLocal()
             try:
                 project = session.get(Project, project_id)
-                chapter, _issues, _stats = await generate_chapter(
+                chapter, _issues, _stats, _guard = await generate_chapter(
                     session, project, n, req.tendency,
                     progress=lambda s, _n=n, _i=i: update_stage(
                         job_id, f"[{_i}/{total}] 第 {_n} 章:{s}"
