@@ -1,9 +1,9 @@
 # 多阶段构建:前端 build → 后端运行时(FastAPI 托管前端产物)
 FROM node:22-slim AS frontend
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@9 --activate
 WORKDIR /fe
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile --config.minimumReleaseAge=0 --config.onlyBuiltDependencies=esbuild --registry=https://registry.npmmirror.com
+RUN pnpm install --frozen-lockfile --registry=https://registry.npmmirror.com
 COPY frontend/ ./
 RUN pnpm run build
 
