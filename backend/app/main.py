@@ -41,6 +41,7 @@ from app.api.overview import router as overview_router
 from app.api.polish import router as polish_router
 from app.api.projects import router as projects_router
 from app.api.settings import router as settings_router
+from app.api.submission import router as submission_router
 from app.api.system import router as system_router
 from app.api.tendency import router as tendency_router
 from app.config import get_settings
@@ -107,6 +108,7 @@ def create_app() -> FastAPI:
     app.include_router(editorial_router)
     app.include_router(polish_router)
     app.include_router(inspire_router)
+    app.include_router(submission_router)
     app.include_router(misc_router)
 
     _static_dir = Path(__file__).resolve().parent / "static"

@@ -3,15 +3,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useProject, useArchitecture, useOutlines, useChapters, useInvalidateProject } from "../hooks/queries";
+import { downloadFile } from "../api";
+import { toast } from "../ui/Toaster";
 import InspirePanel from "../panels/InspirePanel";
 import ArchPanel from "../panels/ArchPanel";
 import OutlinePanel from "../panels/OutlinePanel";
 import ChaptersPanel from "../panels/ChaptersPanel";
 import EditorialPanel from "../panels/EditorialPanel";
 import BoardPanel from "../panels/BoardPanel";
+import SubmissionPanel from "../panels/SubmissionPanel";
 import BookReader from "../components/BookReader";
 
-export type Step = "inspire" | "arch" | "outline" | "write" | "polish" | "board";
+export type Step = "inspire" | "arch" | "outline" | "write" | "polish" | "board" | "publish";
 
 const STEPS: { key: Step; no: number; label: string }[] = [
   { key: "inspire", no: 1, label: "概念" },
@@ -20,6 +23,7 @@ const STEPS: { key: Step; no: number; label: string }[] = [
   { key: "write", no: 4, label: "写作" },
   { key: "polish", no: 5, label: "编辑部" },
   { key: "board", no: 6, label: "看板" },
+  { key: "publish", no: 7, label: "投稿" },
 ];
 
 // 各步引导:这一步干什么 / AI 会做什么 / 做完标准是什么
@@ -53,6 +57,11 @@ const GUIDES: Record<Step, { what: string; ai: string; done: string }> = {
     what: "全书仪表盘:章节地图、人物卡、伏笔时间线、故事圣经。",
     ai: "数据由一致性引擎自动维护,发现伏笔悬空或章节失配会在这里亮出来。",
     done: "随时可看,不阻塞任何步骤。",
+  },
+  publish: {
+    what: "把全书压缩成投稿表单要的内容:书名、标签、金句、简介、封面提示词,并多格式导出正文。",
+    ai: "AI 依据概念/架构/大纲一次产出候选,挑好微调后逐项复制去平台发表。",
+    done: "可选步骤,有定稿章节后即可投稿。",
   },
 };
 
@@ -169,6 +178,12 @@ export default function ProjectPage() {
     return null;
   })();
 
+  // 头部快捷导出:走鉴权下载(普通 <a> 不带 token 会 401)
+  function exportBook(path: string, ext: string) {
+    downloadFile(`/api/projects/${pid}/${path}`, `${project?.title || pid}.${ext}`)
+      .catch((e) => toast.err("导出失败", String(e)));
+  }
+
   return (
     <>
       <h1 className="project-head"><span className="project-title-text">{project.title}</span>
@@ -188,9 +203,11 @@ export default function ProjectPage() {
         {doneCount > 0 && (
           <div className="stat">导出
             <b className="stat-links">
-              <a href={`/api/projects/${pid}/export/txt`}>txt</a>
+              <a href={`/api/projects/${pid}/export/txt`}
+                onClick={(e) => { e.preventDefault(); exportBook("export/txt", "txt"); }}>txt</a>
               {" · "}
-              <a href={`/api/projects/${pid}/export/epub`}>epub</a>
+              <a href={`/api/projects/${pid}/export/epub`}
+                onClick={(e) => { e.preventDefault(); exportBook("export/epub", "epub"); }}>epub</a>
             </b>
           </div>
         )}
@@ -242,6 +259,7 @@ export default function ProjectPage() {
                   onGotoChapter={(n) => { setStep("write"); setFocusChapter(n); }} />
               : <div className="card muted">生成章节后,这里会展示故事圣经与伏笔追踪。</div>
           )}
+          {step === "publish" && <SubmissionPanel pid={pid} project={project} />}
         </div>
       </div>
 

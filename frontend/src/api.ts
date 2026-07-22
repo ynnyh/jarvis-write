@@ -44,6 +44,43 @@ async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 
   }
 }
 
+// 鉴权下载:导出接口需要 Bearer token,普通 <a href> 不会带 Authorization 头,
+// 所以用 fetch 拿 blob 再触发浏览器下载。filename 优先取 Content-Disposition。
+export async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  const headers: Record<string, string> = {};
+  const tk = token.get();
+  if (tk) headers["Authorization"] = `Bearer ${tk}`;
+  const res = await fetch(BASE + path, { headers });
+  if (!res.ok) {
+    if (res.status === 401) {
+      token.clear();
+      onUnauthorized?.();
+    }
+    let detail = `HTTP ${res.status}`;
+    try {
+      const j = await res.json();
+      detail = j.detail ?? JSON.stringify(j);
+    } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+  let name = fallbackName;
+  const disp = res.headers.get("Content-Disposition") || "";
+  // 兼容 filename*=UTF-8''xxx 与 filename="xxx" 两种写法
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(disp);
+  const plain = /filename="?([^";]+)"?/i.exec(disp);
+  if (star) name = decodeURIComponent(star[1]);
+  else if (plain) name = plain[1].trim();
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 // LLM 长任务统一超时:章节生成/架构生成可能 3-10 分钟
 const LLM_TIMEOUT = 900_000;
 
@@ -222,6 +259,16 @@ export function conceptIsEmpty(c: Concept | null | undefined): boolean {
 export interface RefineResult { concept: Concept; changed: (keyof Concept)[]; note: string; }
 export interface ChatTurn { role: "user" | "assistant"; content: string; }
 export interface ChatResult { reply: string; concept: Concept; }
+/** 投稿包:对齐知乎等平台投稿表单字段(标题/频道/时空/标签/金句/简介/封面提示词) */
+export interface SubmissionPackage {
+  titles: string[];
+  channel: string;
+  era: string;
+  tags: string[];
+  hooks: string[];
+  summaries: { short: string; medium: string; long: string };
+  cover_prompts: string[];
+}
 export interface AdminUser {
   id: number; username: string; is_admin: boolean; is_active: boolean;
   created_at: string; project_count: number;
@@ -301,6 +348,8 @@ export const api = {
     req<{ job_id: string }>("POST", `/api/projects/${pid}/outlines/cascade-async`, body),
   synopsisAsync: (pid: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/synopsis-async`, {}),
+  generateSubmissionAsync: (pid: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/submission/generate`, {}),
 
   inspire: (spark: string, tendency: Tendency, count = 4) =>
     req<{ ideas: Concept[] }>("POST", "/api/inspire", { spark, tendency, count }, LLM_TIMEOUT),

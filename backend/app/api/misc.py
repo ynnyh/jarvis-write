@@ -6,12 +6,16 @@ GET /api/jobs/{job_id}                任务进度(异步生成轮询)
 GET /api/usage                        Token 用量汇总
 GET /api/projects/{id}/export/txt     整本导出 txt
 GET /api/projects/{id}/export/epub    整本导出 epub
+GET /api/projects/{id}/export/md      整本导出 Markdown
+GET /api/projects/{id}/export/docx    整本导出 Word(中文排版)
+GET /api/projects/{id}/export/chapters-zip  按章拆成多个 txt 打包 zip
 """
 from __future__ import annotations
 
 import io
 import zipfile
 from html import escape
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
@@ -128,6 +132,16 @@ def _book(db: Session, project_id: int) -> tuple[Project, list[tuple[str, str]]]
     return project, items
 
 
+def _disposition(project: Project, ext: str, suffix: str = "") -> str:
+    """生成下载头:文件名用书名(剔除非法字符),UTF-8 百分号编码(RFC 5987),
+    并附一个纯 ASCII 回退名(老浏览器用)。书名为空时退回项目 id。
+    suffix 可选,拼在书名后用于区分同书的不同导出(如"(分章)")。"""
+    base = (project.title or "").strip()
+    safe = "".join(c for c in base if c not in '\\/:*?"<>|').strip() or str(project.id)
+    encoded = quote(f"{safe}{suffix}.{ext}", safe="")
+    return f"attachment; filename=\"{project.id}.{ext}\"; filename*=UTF-8''{encoded}"
+
+
 @router.get("/api/projects/{project_id}/export/txt")
 async def export_txt(project_id: int, db: Session = Depends(get_db)):
     project, items = _book(db, project_id)
@@ -138,9 +152,7 @@ async def export_txt(project_id: int, db: Session = Depends(get_db)):
     return Response(
         content=data,
         media_type="text/plain; charset=utf-8",
-        headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{project.id}.txt"
-        },
+        headers={"Content-Disposition": _disposition(project, "txt")},
     )
 
 
@@ -211,7 +223,95 @@ async def export_epub(project_id: int, db: Session = Depends(get_db)):
     return Response(
         content=buf.getvalue(),
         media_type="application/epub+zip",
-        headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{project.id}.epub"
-        },
+        headers={"Content-Disposition": _disposition(project, "epub")},
+    )
+
+
+@router.get("/api/projects/{project_id}/export/md")
+async def export_md(project_id: int, db: Session = Depends(get_db)):
+    """整本导出 Markdown:书名做一级标题,每章做二级标题。"""
+    project, items = _book(db, project_id)
+    parts = [f"# 《{project.title}》\n"]
+    for title, text in items:
+        paras = "\n\n".join(p.strip() for p in text.splitlines() if p.strip())
+        parts.append(f"\n## {title}\n\n{paras}\n")
+    data = "\n".join(parts).encode("utf-8")
+    return Response(
+        content=data,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": _disposition(project, "md")},
+    )
+
+
+@router.get("/api/projects/{project_id}/export/chapters-zip")
+async def export_chapters_zip(project_id: int, db: Session = Depends(get_db)):
+    """按章拆成多个 txt 打包 zip,方便分章发布。文件名带章号便于排序。"""
+    project, items = _book(db, project_id)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for i, (title, text) in enumerate(items, 1):
+            # 文件名:001 第1章 标题.txt(章号补零排序;剔除非法文件名字符)
+            safe = "".join(c for c in title if c not in '\\/:*?"<>|').strip()
+            z.writestr(f"{i:03d} {safe}.txt", f"{title}\n\n{text}")
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": _disposition(project, "zip", "(分章)")},
+    )
+
+
+def _set_cjk(run, font_name: str = "宋体") -> None:
+    """给 run 同时设 ascii 与 eastAsia 字体,避免中文走 Word 回退字体导致排版不一致。"""
+    from docx.oxml.ns import qn
+
+    run.font.name = font_name
+    rpr = run._element.get_or_add_rPr()
+    rfonts = rpr.get_or_add_rFonts()
+    rfonts.set(qn("w:eastAsia"), font_name)
+
+
+@router.get("/api/projects/{project_id}/export/docx")
+async def export_docx(project_id: int, db: Session = Depends(get_db)):
+    """整本导出 Word:中文排版(宋体、1.5倍行距、正文首行缩进2字符)。"""
+    from docx import Document
+    from docx.enum.text import WD_LINE_SPACING
+    from docx.shared import Pt
+
+    project, items = _book(db, project_id)
+    doc = Document()
+
+    # 全局正文样式:宋体 + 小四 + 1.5倍行距
+    normal = doc.styles["Normal"]
+    normal.font.name = "宋体"
+    normal.font.size = Pt(12)
+    normal._element.get_or_add_rPr().get_or_add_rFonts().set(
+        "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}eastAsia", "宋体"
+    )
+    normal.paragraph_format.line_spacing_rule = WD_LINE_SPACING.ONE_POINT_FIVE
+
+    # 书名(居中大标题)
+    t = doc.add_heading(level=0)
+    t.alignment = 1  # 居中
+    trun = t.add_run(f"《{project.title}》")
+    _set_cjk(trun, "微软雅黑")
+
+    for title, text in items:
+        h = doc.add_heading(level=1)
+        hrun = h.add_run(title)
+        _set_cjk(hrun, "微软雅黑")
+        for para in text.splitlines():
+            para = para.strip()
+            if not para:
+                continue
+            p = doc.add_paragraph()
+            p.paragraph_format.first_line_indent = Pt(24)  # 首行缩进约2字符
+            run = p.add_run(para)
+            _set_cjk(run, "宋体")
+
+    out = io.BytesIO()
+    doc.save(out)
+    return Response(
+        content=out.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": _disposition(project, "docx")},
     )

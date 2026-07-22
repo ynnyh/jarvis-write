@@ -1690,3 +1690,19 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .macro-seg b { color: var(--text); display: block; margin-bottom: 2px; }
 .macro-seg.done { border-left-color: var(--ok); opacity: 0.75; }
 .macro-seg.current { border-left-color: var(--brand); background: var(--brand-weak); border-radius: 0 var(--r-sm) var(--r-sm) 0; }
+
+/* ---------- 投稿面板 ---------- */
+.sub-panel { display: grid; gap: 14px; }
+.sub-kv { display: flex; align-items: center; gap: var(--sp-2); }
+.sub-kv b { font-size: var(--fs-md); }
+.sub-kv-input { max-width: 160px; }
+.sub-tag { display: inline-flex; align-items: center; gap: 6px; }
+.sub-tag > span { cursor: pointer; }
+.sub-tag-x {
+  font-style: normal; cursor: pointer; color: var(--text-3);
+  font-size: var(--fs-sm); line-height: 1; padding: 0 2px; border-radius: 3px;
+}
+.sub-tag-x:hover { color: var(--err); background: var(--err-weak); }
+.sub-summary { padding: 10px 0; border-top: 1px dashed var(--line); }
+.sub-summary:first-of-type { border-top: none; padding-top: 0; }
+.sub-summary textarea { width: 100%; }

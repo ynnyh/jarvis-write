@@ -8,3 +8,4 @@ python-dotenv==1.0.1
 chromadb==0.6.3
 PyJWT==2.10.1
 bcrypt==5.0.0
+python-docx==1.1.2
