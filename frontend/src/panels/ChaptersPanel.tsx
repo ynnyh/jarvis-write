@@ -24,9 +24,13 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
   const invalidateProject = useInvalidateProject(pid);
   const [chapters, setChapters] = useState<ChapterBrief[]>([]);
   const [current, setCurrent] = useState<ChapterDetail | null>(null);
-  // 进行中的章节任务:生成(kind=generate)或保存后同步一致性引擎(kind=sync)。
-  // 只锁「生成/重写」「保存」这类会起新任务的操作;阅读/打开/编辑不锁。
-  const [genJob, setGenJob] = useState<{ num: number; kind: "generate" | "sync"; stage: string } | null>(null);
+  // 进行中的「生成/重写」任务:阻塞式(顶部横幅 + 锁住章节列表操作)。
+  const [genJob, setGenJob] = useState<{ num: number; stage: string } | null>(null);
+  // 进行中的「保存后一致性同步」任务:非阻塞,仅显示轻量角标,不影响阅读/编辑其他章节。
+  const [syncJob, setSyncJob] = useState<{ num: number; stage: string } | null>(null);
+  // 保存正文后待用户确认是否同步的章号(null=无待确认)。小幅修改可跳过同步。
+  const [pendingSync, setPendingSync] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
   const [genResult, setGenResult] = useState<GenerateChapterResponse | null>(null);
   const [genTendency, setGenTendency] = useState<Tendency>({});
@@ -43,9 +47,10 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
   const [versionsFor, setVersionsFor] = useState<number | null>(null);
   const [versions, setVersions] = useState<ChapterVersionBrief[] | null>(null);
   const [compareVer, setCompareVer] = useState<ChapterVersionDetail | null>(null);
-  // 组件卸载时中止轮询,防止卸载后继续 setState
+  // 组件卸载时中止轮询,防止卸载后继续 setState(生成与同步各用一个,互不覆盖)
   const abortRef = useRef<AbortController | null>(null);
-  useEffect(() => () => abortRef.current?.abort(), []);
+  const syncAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => { abortRef.current?.abort(); syncAbortRef.current?.abort(); }, []);
 
   const reload = useCallback(async () => {
     setChapters(await api.listChapters(pid));
@@ -73,7 +78,8 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
     } catch { /* 损坏的草稿直接丢弃 */ }
   }, [pid]);
 
-  // 挂载时查有没有还在跑的章节任务(切走页面再回来的场景),有则接上轮询而不是装作没事
+  // 挂载时查有没有还在跑的任务(切走页面再回来的场景),有则接上轮询而不是装作没事。
+  // 生成任务 → 阻塞横幅;同步任务 → 非阻塞轻量角标(二者独立,可同时重连)。
   useEffect(() => {
     let cancelled = false;
     api.runningJobs(pid).then(({ jobs }) => {
@@ -85,31 +91,30 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
         abortRef.current = ctrl;
         if (tail === "queue") {
           // 连写队列:通用轮询,完成后刷新列表
-          setGenJob({ num: 0, kind: "generate", stage: gen.stage });
+          setGenJob({ num: 0, stage: gen.stage });
           pollJob(gen.job_id, {
             signal: ctrl.signal,
-            onStage: (stage) => setGenJob({ num: 0, kind: "generate", stage }),
+            onStage: (stage) => setGenJob({ num: 0, stage }),
           }).then(() => reload())
             .catch(() => reload().catch(() => undefined))
             .finally(() => { if (!ctrl.signal.aborted) setGenJob(null); });
         } else {
           const n = Number(tail);
-          setGenJob({ num: n, kind: "generate", stage: gen.stage });
+          setGenJob({ num: n, stage: gen.stage });
           trackGenerate(n, gen.job_id, ctrl);
         }
-        return;
       }
       const sync = jobs.find((j) => j.kind.startsWith(`re-extract-${pid}-`));
       if (sync) {
         const n = Number(sync.kind.split("-").pop());
         const ctrl = new AbortController();
-        abortRef.current = ctrl;
-        setGenJob({ num: n, kind: "sync", stage: sync.stage });
+        syncAbortRef.current = ctrl;
+        setSyncJob({ num: n, stage: sync.stage });
         pollJob(sync.job_id, {
           signal: ctrl.signal,
-          onStage: (stage) => setGenJob({ num: n, kind: "sync", stage }),
+          onStage: (stage) => setSyncJob({ num: n, stage }),
         }).catch(() => undefined)
-          .finally(() => { if (!ctrl.signal.aborted) setGenJob(null); });
+          .finally(() => { if (!ctrl.signal.aborted) setSyncJob(null); });
       }
     }).catch(() => undefined);
     return () => { cancelled = true; };
@@ -169,13 +174,13 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setErr(""); setGenResult(null);
-    setGenJob({ num: nums[0], kind: "generate", stage: `队列 ${nums.length} 章:排队中…` });
+    setGenJob({ num: nums[0], stage: `队列 ${nums.length} 章:排队中…` });
     setQueueMode(false); setQueuePicked(new Set());
     try {
       const { job_id } = await api.generateQueue(pid, nums, genTendency);
       await pollJob(job_id, {
         signal: ctrl.signal,
-        onStage: (stage) => setGenJob({ num: nums[0], kind: "generate", stage }),
+        onStage: (stage) => setGenJob({ num: nums[0], stage }),
       });
       if (ctrl.signal.aborted) return;
       await reload();
@@ -217,32 +222,43 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
   async function saveEdit() {
     if (!current) return;
     const num = current.chapter_number;
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    setGenJob({ num, kind: "sync", stage: "保存正文…" }); setErr("");
+    setSaving(true); setErr("");
     try {
+      // 只保存正文(快)。是否同步一致性引擎交给用户定夺,小幅修改可直接跳过。
       const updated = await api.editChapterContent(pid, num, editText);
       setCurrent(updated);
       setEditing(false);
       await reload();
-      // 手改后同步一致性引擎:重抽取 + 重建下游摘要 + 向量库
+      setPendingSync(num);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally { setSaving(false); }
+  }
+
+  // 同步一致性引擎(重抽取 + 重建下游摘要 + 向量库)。非阻塞:仅显示轻量角标,
+  // 用户可继续阅读/编辑其他章节。保存后确认、回退版本、挂载重连共用。
+  async function triggerSync(num: number) {
+    setPendingSync(null);
+    const ctrl = new AbortController();
+    syncAbortRef.current = ctrl;
+    setSyncJob({ num, stage: "启动同步…" });
+    try {
       const { job_id } = await api.reExtractAsync(pid, num);
       await pollJob(job_id, {
         signal: ctrl.signal,
-        onStage: (stage) => setGenJob({ num, kind: "sync", stage }),
+        onStage: (stage) => setSyncJob({ num, stage }),
       });
+      if (!ctrl.signal.aborted) toast.ok(`第 ${num} 章一致性同步完成`);
     } catch (e) {
       if (!ctrl.signal.aborted) {
         const msg = e instanceof Error ? e.message : String(e);
-        // 轮询中断(超时/网络抖动):任务可能仍在后台运行,刷新列表让用户看到真实进度
         if (msg.startsWith("任务超时") || msg.startsWith("多次查询")) {
-          setErr(`进度查询中断:${msg}`);
-          await reload().catch(() => undefined);
+          toast.err("同步进度查询中断", "任务可能仍在后台运行,稍后刷新可见最新状态");
         } else {
-          setErr(msg);
+          toast.err(`第 ${num} 章同步失败`, msg);
         }
       }
-    } finally { if (!ctrl.signal.aborted) setGenJob(null); }
+    } finally { if (!ctrl.signal.aborted) setSyncJob(null); }
   }
 
   // 轮询生成任务直至完成并落地结果(发起生成与「切走再回来重连」共用)
@@ -251,7 +267,7 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
       // 轮询任务进度(五段:草稿→定稿→检查→抽取→摘要)
       const result = await pollJob<GenerateChapterResponse>(jobId, {
         signal: ctrl.signal,
-        onStage: (stage) => setGenJob({ num: n, kind: "generate", stage }),
+        onStage: (stage) => setGenJob({ num: n, stage }),
       });
       if (ctrl.signal.aborted) return;
       setGenResult(result);
@@ -282,7 +298,7 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setErr(""); setGenResult(null); setReviseFor(null);
-    setGenJob({ num: n, kind: "generate", stage: "排队中…" });
+    setGenJob({ num: n, stage: "排队中…" });
     let jobId: string;
     try {
       ({ job_id: jobId } = await api.generateChapterAsync(pid, n, genTendency, revision));
@@ -317,32 +333,19 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
     catch (e) { setErr(String(e)); }
   }
 
-  // 回退到旧版:换回正文 → 同步一致性引擎(重抽取+摘要+向量,同 saveEdit)
+  // 回退到旧版:换回正文 → 自动同步一致性引擎。回退是整段替换(改动大)故不询问,
+  // 但同步本身非阻塞,只显角标,不挡操作。
   async function restoreVersion(n: number, vid: number) {
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    setGenJob({ num: n, kind: "sync", stage: "回退正文…" }); setErr("");
+    setErr("");
     try {
       const updated = await api.restoreChapterVersion(pid, n, vid);
       setCurrent(updated);
       closeVersions();
       await reload();
-      const { job_id } = await api.reExtractAsync(pid, n);
-      await pollJob(job_id, {
-        signal: ctrl.signal,
-        onStage: (stage) => setGenJob({ num: n, kind: "sync", stage }),
-      });
+      void triggerSync(n);
     } catch (e) {
-      if (!ctrl.signal.aborted) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (msg.startsWith("任务超时") || msg.startsWith("多次查询")) {
-          setErr(`进度查询中断:${msg}`);
-          await reload().catch(() => undefined);
-        } else {
-          setErr(msg);
-        }
-      }
-    } finally { if (!ctrl.signal.aborted) setGenJob(null); }
+      setErr(e instanceof Error ? e.message : String(e));
+    }
   }
 
   return (
@@ -352,12 +355,16 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
           <div className="gen-banner">
             <span className="spin" />
             <span className="gen-banner-text">
-              {genJob.kind === "generate"
-                ? genJob.num === 0 || genJob.stage.startsWith("[")
-                  ? `连写队列进行中(${genJob.stage})`
-                  : `第 ${genJob.num} 章生成中(${genJob.stage}),完成后可继续操作其他章节`
-                : `第 ${genJob.num} 章保存后同步一致性引擎(${genJob.stage}),完成后可继续其他操作`}
+              {genJob.num === 0 || genJob.stage.startsWith("[")
+                ? `连写队列进行中(${genJob.stage})`
+                : `第 ${genJob.num} 章生成中(${genJob.stage}),完成后可继续操作其他章节`}
             </span>
+          </div>
+        )}
+        {syncJob && (
+          <div className="sync-badge">
+            <span className="spin spin-sm" />
+            <span>第 {syncJob.num} 章同步一致性引擎中({syncJob.stage})· 不影响继续操作</span>
           </div>
         )}
         {err && <div className="msg-err">{err}</div>}
@@ -497,17 +504,31 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
                     </>
                   ) : (
                     <>
-                      <button className="btn-sm primary" disabled={!!genJob}
-                        title={genJob ? `第 ${genJob.num} 章任务进行中,完成后可保存` : undefined}
+                      <button className="btn-sm primary" disabled={!!genJob || saving}
+                        title={genJob ? `第 ${genJob.num} 章生成中,完成后可保存` : undefined}
                         onClick={saveEdit}>
-                        {genJob?.kind === "sync" && genJob.num === current.chapter_number && <span className="spin" />}
-                        保存(自动同步一致性引擎)
+                        {saving && <span className="spin spin-sm" />}
+                        保存正文
                       </button>
                       <button className="btn-sm" onClick={() => setEditing(false)}>取消</button>
                     </>
                   )}
                 </div>
               </div>
+              {pendingSync !== null && (
+                <div className="sync-ask mb-2">
+                  <span className="sync-ask-text">
+                    第 {pendingSync} 章已保存,要同步一致性引擎吗?
+                    <b className="hint">同步会更新人物状态、伏笔与后续章节的前情摘要;只改了几处措辞可以跳过。</b>
+                  </span>
+                  <span className="sync-ask-actions">
+                    <button className="primary btn-sm" disabled={!!syncJob}
+                      onClick={() => { if (pendingSync !== null) triggerSync(pendingSync); }}>立即同步</button>
+                    <button className="btn-sm" disabled={!!syncJob}
+                      onClick={() => setPendingSync(null)}>跳过</button>
+                  </span>
+                </div>
+              )}
               {!editing && <div className="content-head-tip">改文笔?去「润色」</div>}
               {editing ? (
                 <textarea

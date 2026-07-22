@@ -348,6 +348,45 @@ label.fl {
 .gen-stage { display: block; margin-top: 2px; color: var(--brand); font-size: var(--fs-xs); }
 .gen-stage .spin { width: 10px; height: 10px; margin-right: 4px; vertical-align: -1px; }
 
+/* 小尺寸 spinner(按钮内/角标内使用) */
+.spin-sm { width: 11px; height: 11px; border-width: 2px; margin-right: 4px; vertical-align: -1px; }
+
+/* 同步一致性引擎:非阻塞轻量角标(不抢视线,不挡操作) */
+.sync-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--warn-weak);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-full, 999px);
+  padding: 4px 12px;
+  margin-bottom: var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.sync-badge .spin { margin-right: 0; }
+
+/* 保存后「是否同步」询问条 */
+.sync-ask {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  background: var(--warn-weak);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-lg);
+  padding: 10px 14px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.sync-ask-text { flex: 1; min-width: 0; line-height: 1.6; }
+.sync-ask-text .hint { display: block; font-weight: normal; }
+.sync-ask-actions { display: inline-flex; gap: var(--sp-2); flex-shrink: 0; }
+@media (max-width: 640px) {
+  .sync-ask { flex-direction: column; align-items: stretch; }
+  .sync-ask-actions { justify-content: flex-end; }
+}
+
 /* ---------- 顶栏 ---------- */
 .topbar {
   position: sticky;
