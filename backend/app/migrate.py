@@ -168,6 +168,25 @@ def _add_word_guard_columns() -> None:
             logger.info("迁移:projects 补 auto_split_enabled 列")
 
 
+def _disable_word_guard_default() -> None:
+    """一次性把存量项目的字数守卫关掉(此前无 UI,全是默认开启,无人主动开过)。
+
+    用 SQLite PRAGMA user_version 做一次性标记:只在版本 0→1 时执行,
+    之后用户手动打开守卫也不会被重启覆盖。"""
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "projects" not in insp.get_table_names():
+            return
+        version = conn.execute(text("PRAGMA user_version")).scalar() or 0
+        if version >= 1:
+            return
+        conn.execute(
+            text("UPDATE projects SET word_guard_enabled = 0, auto_split_enabled = 0")
+        )
+        conn.execute(text("PRAGMA user_version = 1"))
+        logger.info("迁移:存量项目字数守卫统一关闭(user_version 0→1)")
+
+
 def _ensure_admin(db: Session) -> User:
     settings = get_settings()
     admin = (
@@ -218,6 +237,7 @@ def run_migrations() -> None:
     _add_setup_columns()
     _add_retired_column()
     _add_word_guard_columns()
+    _disable_word_guard_default()
     with session_scope() as db:
         admin = _ensure_admin(db)
         db.flush()

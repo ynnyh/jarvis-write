@@ -90,6 +90,9 @@ export type Tendency = Record<string, unknown>;
 export interface Project {
   id: number; title: string; topic: string; genre: string;
   target_chapters: number; target_words_per_chapter: number;
+  // 字数守卫:超标自动压缩/拆章,默认关闭(写作页开关控制)
+  word_guard_enabled?: boolean;
+  auto_split_enabled?: boolean;
   global_tendency: Tendency; status: string;
   concept?: Concept | null;
   synopsis?: string | null;

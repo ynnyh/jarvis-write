@@ -26,10 +26,11 @@ class Project(Base, TimestampMixin):
     genre: Mapped[str] = mapped_column(String(100), default="")
     target_chapters: Mapped[int] = mapped_column(Integer, default=30)
     target_words_per_chapter: Mapped[int] = mapped_column(Integer, default=3000)
-    # 字数守卫:finalize 后检查字数,超标则压缩/拆章
-    word_guard_enabled: Mapped[bool] = mapped_column(default=True)
+    # 字数守卫:finalize 后检查字数,超标则压缩/拆章。默认关闭(用户反馈约束太严),
+    # 由写作页开关控制;存量项目由迁移统一关掉。
+    word_guard_enabled: Mapped[bool] = mapped_column(default=False)
     word_guard_ratio: Mapped[float] = mapped_column(default=1.5)
-    auto_split_enabled: Mapped[bool] = mapped_column(default=True)
+    auto_split_enabled: Mapped[bool] = mapped_column(default=False)
     # 全局倾向:标签组合 JSON,如 {"pace": "快节奏", "tone": ["热血"], ...}
     global_tendency: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     # 结构化故事概念(灵感工坊产出):logline/hook/twist/protagonist/conflict/setting

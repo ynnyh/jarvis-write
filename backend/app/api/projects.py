@@ -289,6 +289,9 @@ class ProjectPatch(BaseModel):
     genre: str | None = None
     target_chapters: int | None = None
     target_words_per_chapter: int | None = None
+    # 字数守卫开关(写作页):超标自动压缩/拆章,默认关闭
+    word_guard_enabled: bool | None = None
+    auto_split_enabled: bool | None = None
     global_tendency: dict | None = None
     concept: Concept | None = None
     synopsis: str | None = None

@@ -1706,3 +1706,16 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .sub-summary { padding: 10px 0; border-top: 1px dashed var(--line); }
 .sub-summary:first-of-type { border-top: none; padding-top: 0; }
 .sub-summary textarea { width: 100%; }
+
+/* ---------- 写作页:正文头部 + 字数守卫开关 ---------- */
+.content-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
+.content-head-title { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
+.content-head-title h2 { margin: 0; }
+.content-head-meta { color: var(--text-2); font-size: var(--fs-sm); white-space: nowrap; }
+.content-head-actions { display: flex; align-items: center; gap: var(--sp-2); }
+.content-head-actions button + button { margin-left: 0; }
+.content-head-tip { color: var(--text-3); font-size: var(--fs-xs); margin-bottom: var(--sp-2); }
+.guard-toggle { display: flex; align-items: flex-start; gap: var(--sp-2); cursor: pointer; }
+.guard-toggle input { margin-top: 3px; }
+.guard-toggle span { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-sm); }
+.guard-toggle .hint { font-weight: 400; }

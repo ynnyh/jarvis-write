@@ -269,7 +269,6 @@ async def generate_chapter(
         chapter_summary=outline.summary,
         next_chapter_brief=_next_chapter_brief(next_outline),
         word_number=project.target_words_per_chapter,
-        word_limit=int(project.target_words_per_chapter * 1.4),
         scene_count=max(2, project.target_words_per_chapter // 1000),
         scene_words=project.target_words_per_chapter // max(2, project.target_words_per_chapter // 1000),
         style_directives=style_block,

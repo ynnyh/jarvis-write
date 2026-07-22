@@ -31,6 +31,9 @@ class ProjectOut(BaseModel):
     genre: str
     target_chapters: int
     target_words_per_chapter: int
+    # 字数守卫开关(写作页):超标自动压缩/拆章,默认关闭
+    word_guard_enabled: bool = False
+    auto_split_enabled: bool = False
     global_tendency: dict[str, Any]
     concept: Concept | None = None
     synopsis: str | None = None

@@ -5,6 +5,8 @@ import {
   EditorAction, GenerateChapterResponse, Outline, Project, Tendency,
 } from "../api";
 import { pollJob } from "../pollJob";
+import { useInvalidateProject } from "../hooks/queries";
+import { toast } from "../ui/Toaster";
 import TendencySelector from "../components/TendencySelector";
 import Reader, { Paragraphs } from "../components/Reader";
 import GenResultCard from "./chapters/GenResultCard";
@@ -18,7 +20,8 @@ interface Props {
   onFocusConsumed?: () => void;
 }
 
-export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusConsumed }: Props) {
+export default function ChaptersPanel({ pid, project, outlines, focusChapter, onFocusConsumed }: Props) {
+  const invalidateProject = useInvalidateProject(pid);
   const [chapters, setChapters] = useState<ChapterBrief[]>([]);
   const [current, setCurrent] = useState<ChapterDetail | null>(null);
   // 进行中的章节任务:生成(kind=generate)或保存后同步一致性引擎(kind=sync)。
@@ -48,6 +51,16 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
     setChapters(await api.listChapters(pid));
   }, [pid]);
   useEffect(() => { reload().catch((e) => setErr(String(e))); }, [reload]);
+
+  // 字数守卫开关:超标自动压缩/拆章。一个开关同时管压缩与拆章,默认关闭。
+  async function toggleGuard(on: boolean) {
+    try {
+      await api.patchProject(pid, { word_guard_enabled: on, auto_split_enabled: on });
+      await invalidateProject();
+      toast.ok(on ? "已开启字数守卫" : "已关闭字数守卫",
+        on ? "章节超出目标字数较多时会自动压缩或拆章" : "字数只做宽松参考,不再自动压缩/拆章");
+    } catch (e) { toast.err("开关保存失败", String(e)); }
+  }
 
   // 编辑部「按此重写」交接:挂载时消费预填的重写意见,展开对应章的重写框
   useEffect(() => {
@@ -426,6 +439,16 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
             );
           })}
         </div>
+        <div className="card card-compact mt-2">
+          <label className="guard-toggle">
+            <input type="checkbox" checked={!!project.word_guard_enabled}
+              onChange={(e) => toggleGuard(e.target.checked)} />
+            <span>
+              字数守卫
+              <b className="hint">超标自动压缩/拆章,默认关闭</b>
+            </span>
+          </label>
+        </div>
       </div>
 
       <div className="two-col-main">
@@ -457,33 +480,35 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
               </div>
             )}
             <div className="card">
-              <div className="card-head mb-2">
-                <h2 className="grow">
-                  第{current.chapter_number}章 正文
-                  <span className="hint"> {current.word_count}字</span>
-                </h2>
-                {!editing ? (
-                  <>
-                    <button onClick={() => {
-                      setEditText(current.final_content || current.draft_content);
-                      setEditing(true);
-                    }}>编辑正文</button>
-                    <button className="btn-sm" disabled={!!genJob}
-                      onClick={() => openVersions(current.chapter_number)}>历史版本</button>
-                    <span className="muted">改文笔?去「润色」</span>
-                  </>
-                ) : (
-                  <>
-                    <button className="primary" disabled={!!genJob}
-                      title={genJob ? `第 ${genJob.num} 章任务进行中,完成后可保存` : undefined}
-                      onClick={saveEdit}>
-                      {genJob?.kind === "sync" && genJob.num === current.chapter_number && <span className="spin" />}
-                      保存(自动同步一致性引擎)
-                    </button>
-                    <button onClick={() => setEditing(false)}>取消</button>
-                  </>
-                )}
+              <div className="content-head mb-2">
+                <div className="content-head-title">
+                  <h2>第{current.chapter_number}章</h2>
+                  <span className="content-head-meta">正文 · {current.word_count}字</span>
+                </div>
+                <div className="content-head-actions">
+                  {!editing ? (
+                    <>
+                      <button className="btn-sm" onClick={() => {
+                        setEditText(current.final_content || current.draft_content);
+                        setEditing(true);
+                      }}>编辑正文</button>
+                      <button className="btn-sm" disabled={!!genJob}
+                        onClick={() => openVersions(current.chapter_number)}>历史版本</button>
+                    </>
+                  ) : (
+                    <>
+                      <button className="btn-sm primary" disabled={!!genJob}
+                        title={genJob ? `第 ${genJob.num} 章任务进行中,完成后可保存` : undefined}
+                        onClick={saveEdit}>
+                        {genJob?.kind === "sync" && genJob.num === current.chapter_number && <span className="spin" />}
+                        保存(自动同步一致性引擎)
+                      </button>
+                      <button className="btn-sm" onClick={() => setEditing(false)}>取消</button>
+                    </>
+                  )}
+                </div>
               </div>
+              {!editing && <div className="content-head-tip">改文笔?去「润色」</div>}
               {editing ? (
                 <textarea
                   className="editor-area"
