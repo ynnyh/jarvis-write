@@ -1,0 +1,41 @@
+/* Tailwind v4 接入(渐进迁移期):
+   - 不引 preflight(基础样式重置),避免破坏现有 styles.css;
+   - @theme 把既有设计令牌(styles.css :root)映射为 Tailwind 颜色/间距,
+     新组件写 utility class,旧组件继续用 styles.css,逐步迁移。 */
+@layer theme, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@theme {
+  /* 颜色:直接引用 styles.css 的 CSS 变量,单一事实源,换肤自动跟随 */
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-text: var(--text);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-weak: var(--brand-weak);
+  --color-brand-line: var(--brand-line);
+  --color-ok: var(--ok);
+  --color-ok-weak: var(--ok-weak);
+  --color-ok-line: var(--ok-line);
+  --color-warn: var(--warn);
+  --color-warn-weak: var(--warn-weak);
+  --color-warn-line: var(--warn-line);
+  --color-err: var(--err);
+  --color-err-weak: var(--err-weak);
+  --color-err-line: var(--err-line);
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --shadow-sm: 0 1px 2px rgba(31, 32, 36, 0.05);
+  --shadow-md: 0 1px 2px rgba(31, 32, 36, 0.05), 0 4px 12px rgba(31, 32, 36, 0.06);
+  --shadow-lg: 0 16px 40px rgba(31, 32, 36, 0.16);
+}

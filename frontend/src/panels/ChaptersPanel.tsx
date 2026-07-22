@@ -46,6 +46,37 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
   }, [pid]);
   useEffect(() => { reload().catch((e) => setErr(String(e))); }, [reload]);
 
+  // 挂载时查有没有还在跑的章节任务(切走页面再回来的场景),有则接上轮询而不是装作没事
+  useEffect(() => {
+    let cancelled = false;
+    api.runningJobs(pid).then(({ jobs }) => {
+      if (cancelled) return;
+      const gen = jobs.find((j) => j.kind.startsWith(`chapter-${pid}-`));
+      if (gen) {
+        const n = Number(gen.kind.split("-").pop());
+        const ctrl = new AbortController();
+        abortRef.current = ctrl;
+        setGenJob({ num: n, kind: "generate", stage: gen.stage });
+        trackGenerate(n, gen.job_id, ctrl);
+        return;
+      }
+      const sync = jobs.find((j) => j.kind.startsWith(`re-extract-${pid}-`));
+      if (sync) {
+        const n = Number(sync.kind.split("-").pop());
+        const ctrl = new AbortController();
+        abortRef.current = ctrl;
+        setGenJob({ num: n, kind: "sync", stage: sync.stage });
+        pollJob(sync.job_id, {
+          signal: ctrl.signal,
+          onStage: (stage) => setGenJob({ num: n, kind: "sync", stage }),
+        }).catch(() => undefined)
+          .finally(() => { if (!ctrl.signal.aborted) setGenJob(null); });
+      }
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pid]);
+
   // 看板「概览」跳章:章节列表就绪后打开该章正文;未生成的章只落到写作列表
   useEffect(() => {
     if (focusChapter == null || !chapters.length) return;
@@ -118,15 +149,11 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
     } finally { if (!ctrl.signal.aborted) setGenJob(null); }
   }
 
-  async function generate(n: number, revision = "") {
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    setErr(""); setGenResult(null); setReviseFor(null);
-    setGenJob({ num: n, kind: "generate", stage: "排队中…" });
+  // 轮询生成任务直至完成并落地结果(发起生成与「切走再回来重连」共用)
+  async function trackGenerate(n: number, jobId: string, ctrl: AbortController) {
     try {
-      const { job_id } = await api.generateChapterAsync(pid, n, genTendency, revision);
       // 轮询任务进度(五段:草稿→定稿→检查→抽取→摘要)
-      const result = await pollJob<GenerateChapterResponse>(job_id, {
+      const result = await pollJob<GenerateChapterResponse>(jobId, {
         signal: ctrl.signal,
         onStage: (stage) => setGenJob({ num: n, kind: "generate", stage }),
       });
@@ -153,6 +180,22 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
         }
       }
     } finally { if (!ctrl.signal.aborted) setGenJob(null); }
+  }
+
+  async function generate(n: number, revision = "") {
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    setErr(""); setGenResult(null); setReviseFor(null);
+    setGenJob({ num: n, kind: "generate", stage: "排队中…" });
+    let jobId: string;
+    try {
+      ({ job_id: jobId } = await api.generateChapterAsync(pid, n, genTendency, revision));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+      setGenJob(null);
+      return;
+    }
+    await trackGenerate(n, jobId, ctrl);
   }
 
   function closeVersions() {

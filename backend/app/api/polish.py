@@ -20,6 +20,7 @@ from app.chapter_versions import snapshot_chapter
 from app.db.models import Chapter, Outline
 from app.db.session import get_db
 from app.engines.polish import ai_flavor_report, polish_fragment, polish_text
+from app.jobs import list_running, spawn_job
 from app.schemas.tendency import Tendency
 
 router = APIRouter(tags=["polish"], dependencies=[Depends(get_current_user)])
@@ -77,6 +78,26 @@ async def polish_chapter(
     return PolishResult(**result)
 
 
+@router.post("/api/projects/{project_id}/polish/chapter/{n}/async")
+async def polish_chapter_async(
+    project_id: int, n: int, req: ChapterPolishRequest, db: Session = Depends(get_db)
+):
+    """异步版整章润色:立即返回 job_id(整章 2-6 分钟,不再让前端死等)。"""
+    project = get_project_or_404(db, project_id)
+    ch = _chapter(db, project_id, n)
+    # 同章润色任务已在跑 → 复用
+    for jid, job in list_running(f"polish-{project_id}-"):
+        if job["kind"] == f"polish-{project_id}-{n}":
+            return {"job_id": jid}
+    text, global_tendency = ch.final_content, project.global_tendency
+
+    async def work(progress):
+        progress(f"AI 正在润色第 {n} 章")
+        return await polish_text(text, req.tendency, global_tendency)
+
+    return {"job_id": spawn_job(f"polish-{project_id}-{n}", work)}
+
+
 @router.post("/api/projects/{project_id}/polish/chapter/{n}/apply")
 async def apply_chapter_polish(
     project_id: int, n: int, req: ApplyPolishRequest, db: Session = Depends(get_db)
@@ -103,6 +124,21 @@ async def polish_segment_inget_project_or_404(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return PolishResult(**result)
+
+
+@router.post("/api/projects/{project_id}/polish/segment-async")
+async def polish_segment_async(
+    project_id: int, req: SegmentPolishRequest, db: Session = Depends(get_db)
+):
+    """异步版选段润色:立即返回 job_id。"""
+    project = get_project_or_404(db, project_id)
+    global_tendency = project.global_tendency
+
+    async def work(progress):
+        progress("AI 正在润色选段")
+        return await polish_text(req.text, req.tendency, global_tendency)
+
+    return {"job_id": spawn_job(f"polish-segment-{project_id}", work)}
 
 
 @router.post("/api/polish/segment", response_model=PolishResult)

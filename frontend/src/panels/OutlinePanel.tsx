@@ -1,8 +1,9 @@
 // 大纲工作区:蓝图生成 / 内联编辑 / 大改分级 → 影响分析 → 勾选级联
 import { useEffect, useRef, useState } from "react";
-import { api, DirectiveApplyResult, DirectiveItem, DirectivePreview, EditResult, ImpactReport, Outline, Tendency } from "../api";
+import { api, CascadeResult, DirectiveApplyResult, DirectiveItem, DirectivePreview, EditResult, ImpactReport, Outline, Tendency } from "../api";
 import { pollJob } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
+import { useJob } from "../ui/useJob";
 import type { Step } from "../pages/ProjectPage";
 
 interface Props {
@@ -16,6 +17,7 @@ interface Props {
 type Form = Partial<Outline>;
 
 export default function OutlinePanel({ pid, outlines, hasArch, onChanged, onGotoStep }: Props) {
+  const { run: runAsyncJob } = useJob();
   const [genTendency, setGenTendency] = useState<Tendency>({});
   const [showGen, setShowGen] = useState(!outlines.length);
   const [showAdv, setShowAdv] = useState(false);
@@ -91,11 +93,16 @@ export default function OutlinePanel({ pid, outlines, hasArch, onChanged, onGoto
   }
 
   async function runImpact(n: number) {
-    setBusy("分析下游影响(逐章判断,约1-3分钟)…"); setErr("");
+    setBusy("分析下游影响(逐章判断,约1-3分钟,可切到别处,进度看右上角任务)…"); setErr("");
     try {
-      const r = await api.impact(pid, n);
-      setImpact(r);
-      setPicked(new Set(r.affected.filter((a) => a.action === "regenerate").map((a) => a.chapter_number)));
+      const r = await runAsyncJob<ImpactReport>(
+        () => api.impactAsync(pid, n),
+        { kind: `impact-${pid}-${n}`, onStage: (s) => setBusy(`${s}…`) },
+      );
+      if (r) {
+        setImpact(r);
+        setPicked(new Set(r.affected.filter((a) => a.action === "regenerate").map((a) => a.chapter_number)));
+      }
     } catch (e) { setErr(String(e)); } finally { setBusy(""); }
   }
 
@@ -106,11 +113,18 @@ export default function OutlinePanel({ pid, outlines, hasArch, onChanged, onGoto
     try {
       const reasons: Record<number, string> = {};
       impact.affected.forEach((a) => { if (picked.has(a.chapter_number)) reasons[a.chapter_number] = a.reason; });
-      const r = await api.cascade(pid, n, chapters, reasons);
-      setFlash(`级联完成:已更新第 ${r.updated.join("、")} 章大纲` +
-        (r.stale_chapters.length ? `;第 ${r.stale_chapters.join("、")} 章正文标记失配` : ""));
-      setImpact(null); setEditResult(null); setEditingNum(null);
-      await onChanged();
+      const r = await runAsyncJob<CascadeResult>(
+        () => api.cascadeAsync(pid, {
+          source_chapter: n, chapter_numbers: chapters, reasons, tendency: {},
+        }),
+        { kind: `cascade-${pid}`, onStage: (s) => setBusy(`${s}…`) },
+      );
+      if (r) {
+        setFlash(`级联完成:已更新第 ${r.updated.join("、")} 章大纲` +
+          (r.stale_chapters.length ? `;第 ${r.stale_chapters.join("、")} 章正文标记失配` : ""));
+        setImpact(null); setEditResult(null); setEditingNum(null);
+        await onChanged();
+      }
     } catch (e) { setErr(String(e)); } finally { setBusy(""); }
   }
 

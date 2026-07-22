@@ -6,6 +6,7 @@ import {
   Project, Tendency,
 } from "../api";
 import TendencySelector from "../components/TendencySelector";
+import { useJob } from "../ui/useJob";
 import type { Step } from "../pages/ProjectPage";
 
 interface Props { project: Project; onChanged: () => Promise<void>; onGotoStep?: (step: Step) => void; }
@@ -47,6 +48,7 @@ function ConceptEditor({ c, onChange }: { c: Concept; onChange: (c: Concept) => 
 }
 
 export default function InspirePanel({ project, onChanged, onGotoStep }: Props) {
+  const { run: runJob } = useJob();
   // 当前正在打磨的概念草稿(三条路都往它上收敛)
   const [concept, setConcept] = useState<Concept>(() => conceptFromProject(project));
   const [editing, setEditing] = useState(false);
@@ -84,10 +86,13 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
 
   // ---------- 出方案 ----------
   async function brainstorm() {
-    setBusy("AI 正在扩展故事概念(约1-2分钟)…"); setErr(""); setMsg("");
+    setBusy("AI 正在扩展故事概念(约1-2分钟,可切到别处,进度看右上角任务)…"); setErr(""); setMsg("");
     try {
-      const r = await api.inspire(spark, tendency, 4);
-      setIdeas(r.ideas);
+      const r = await runJob<{ ideas: Concept[] }>(
+        () => api.inspireAsync(spark, tendency, 4),
+        { kind: "inspire", onStage: (s) => setBusy(`${s}…`) },
+      );
+      if (r) setIdeas(r.ideas);
     } catch (e) { setErr(String(e)); } finally { setBusy(""); }
   }
 
@@ -102,8 +107,11 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
     if (!directive.trim()) return;
     setBusy("AI 正在按你的意见改写概念…"); setErr(""); setMsg("");
     try {
-      const r = await api.refineConcept(concept, directive, tendency);
-      setRefinePreview({ concept: r.concept, changed: r.changed, note: r.note });
+      const r = await runJob<{ concept: Concept; changed: (keyof Concept)[]; note: string }>(
+        () => api.refineConceptAsync(concept, directive, tendency),
+        { kind: "inspire-refine" },
+      );
+      if (r) setRefinePreview({ concept: r.concept, changed: r.changed, note: r.note });
     } catch (e) { setErr(String(e)); } finally { setBusy(""); }
   }
 
@@ -150,9 +158,14 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
   async function genSynopsis() {
     setSynBusy("AI 正在撰写书籍简介(约1分钟)…"); setSynErr(""); setSynMsg("");
     try {
-      const r = await api.generateSynopsis(project.id);
-      setSynopsis(r.synopsis);
-      setSynMsg("简介已生成,可继续修改,点「保存简介」写入项目。");
+      const r = await runJob<{ synopsis: string }>(
+        () => api.synopsisAsync(project.id),
+        { kind: `synopsis-${project.id}` },
+      );
+      if (r) {
+        setSynopsis(r.synopsis);
+        setSynMsg("简介已生成,可继续修改,点「保存简介」写入项目。");
+      }
     } catch (e) { setSynErr(String(e)); } finally { setSynBusy(""); }
   }
   async function saveSynopsis() {
@@ -166,12 +179,6 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
 
   return (
     <>
-      {!savedConcept && (
-        <div className="notice notice-info" style={{ marginTop: 0 }}>
-          第一步:把你的想法捏成一个「故事概念」。三种方式随便用——让 AI 给方案、对着方案让 AI 改、或直接和 AI 边聊边捏。满意后「定为本书概念」。
-        </div>
-      )}
-
       {/* ===== 当前概念(核心) ===== */}
       <div className="card">
         <div className="card-head">

@@ -21,9 +21,27 @@ from sqlalchemy.orm import Session
 from app.auth import assert_project_owner, current_user_id, get_current_user
 from app.db.models import Chapter, LlmUsage, Outline, Project
 from app.db.session import get_db
-from app.jobs import get_job
+from app.jobs import get_job, list_for_user, list_running
 
 router = APIRouter(tags=["misc"], dependencies=[Depends(get_current_user)])
+
+
+@router.get("/api/jobs")
+async def my_jobs(all: bool = False):
+    """当前用户的后台任务(全局任务中心数据源)。all=true 时含近期已完成/失败的。"""
+    items = list_for_user(current_user_id.get(), running_only=not all)
+    return {
+        "jobs": [
+            {
+                "job_id": jid,
+                "kind": job["kind"],
+                "status": job["status"],
+                "stage": job["stage"],
+                "error": job.get("error"),
+            }
+            for jid, job in items
+        ]
+    }
 
 
 @router.get("/api/jobs/{job_id}")
@@ -34,6 +52,25 @@ async def job_status(job_id: str):
         raise HTTPException(status_code=404, detail="任务不存在或已被清理")
     job.pop("owner_id", None)  # 内部字段,不下发
     return job
+
+
+@router.get("/api/projects/{project_id}/running-jobs")
+async def project_running_jobs(project_id: int, db: Session = Depends(get_db)):
+    """本项目正在运行的后台任务。切走页面再回来时,前端据此重新接上轮询。"""
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    assert_project_owner(project)
+    jobs = []
+    # 章节类按前缀匹配(kind 带章号);架构/蓝图必须精确匹配,防 project 1 命中 11
+    for prefix in (f"chapter-{project_id}-", f"re-extract-{project_id}-"):
+        for jid, job in list_running(prefix):
+            jobs.append({"job_id": jid, "kind": job["kind"], "stage": job["stage"]})
+    for exact in (f"architecture-{project_id}", f"blueprint-{project_id}"):
+        for jid, job in list_running(exact):
+            if job["kind"] == exact:
+                jobs.append({"job_id": jid, "kind": job["kind"], "stage": job["stage"]})
+    return {"jobs": jobs}
 
 
 @router.get("/api/usage")

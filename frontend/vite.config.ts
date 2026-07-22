@@ -1,10 +1,11 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 // 构建产物挂在 FastAPI 的 /app 路径下;开发时代理后端路径(/settings、/docs 是后端自带页面,
 // /openapi.json 是 swagger 文档的数据源)。生产环境前后端同源,不走此代理,不受影响。
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   base: "/app/",
   server: {
     port: 5173,

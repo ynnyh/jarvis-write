@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, Architecture, Project, Tendency } from "../api";
 import { pollJob } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
+import { confirmDialog } from "../ui/ConfirmDialog";
 
 interface Props { project: Project; arch: Architecture | null; onChanged: () => Promise<void>; }
 
@@ -35,6 +36,16 @@ export default function ArchPanel({ project, arch, onChanged }: Props) {
   }, [arch]);
 
   async function regenerate() {
+    // 覆盖现有架构是重操作:已有架构时二次确认(未保存的手改也会被覆盖)
+    if (arch) {
+      const ok = await confirmDialog({
+        title: "重新生成整个架构?",
+        body: "现有四块内容(含未保存的手动修改)将被 AI 新生成的结果覆盖。已生成的大纲/正文不受影响,但可能与新架构失配。",
+        confirmText: "重新生成",
+        danger: true,
+      });
+      if (!ok) return;
+    }
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setBusy("架构生成:排队中…"); setErr(""); setMsg("");

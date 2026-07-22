@@ -1,14 +1,16 @@
 // TitleSuggest — 「✨ AI 起名」按钮 + 候选书名下拉(新建项目表单 / 重命名共用)
+// 主题为空也可用:后端会按类型/自由发挥盲出候选
 import { useEffect, useRef, useState } from "react";
-import { api } from "../api";
+import { api, Concept } from "../api";
 
 interface Props {
-  topic: string;                  // 主题/灵感,为空时禁用按钮
+  topic: string;                  // 主题/灵感(可空)
   genre?: string;                 // 类型(可空)
+  concept?: Concept | null;       // 已捏出的结构化概念(可空,给起名更多上下文)
   onPick: (title: string) => void;
 }
 
-export default function TitleSuggest({ topic, genre, onPick }: Props) {
+export default function TitleSuggest({ topic, genre, concept, onPick }: Props) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [titles, setTitles] = useState<string[]>([]);
@@ -29,7 +31,7 @@ export default function TitleSuggest({ topic, genre, onPick }: Props) {
     if (busy) return;
     setBusy(true); setErr("");
     try {
-      const r = await api.suggestTitle(topic.trim(), (genre ?? "").trim());
+      const r = await api.suggestTitle(topic.trim(), (genre ?? "").trim(), concept);
       setTitles(r.titles);
       setOpen(true);
     } catch (e) {
@@ -39,15 +41,13 @@ export default function TitleSuggest({ topic, genre, onPick }: Props) {
     }
   }
 
-  const disabled = !topic.trim();
-
   return (
     <div className="ts-wrap" ref={wrapRef}>
       <button
         type="button"
         className="btn-sm"
-        disabled={busy || disabled}
-        title={disabled ? "先填写主题/灵感,再让 AI 起名" : "让 AI 起几个候选书名"}
+        disabled={busy}
+        title={topic.trim() ? "让 AI 起几个候选书名" : "没填主题也行,AI 会自由发挥起名"}
         onClick={suggest}
       >
         {busy && <span className="spin" />}✨ AI 起名

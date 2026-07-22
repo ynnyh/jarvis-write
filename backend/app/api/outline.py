@@ -17,13 +17,14 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_project_or_404
 from app.auth import get_current_user
-from app.db.models import Outline, OutlineVersion
-from app.db.session import get_db
+from app.db.models import Outline, OutlineVersion, Project
+from app.db.session import SessionLocal, get_db
 from app.engines.cascade import (
     analyze_impact,
     apply_outline_edit,
     cascade_regenerate,
 )
+from app.jobs import list_running, spawn_job
 from app.schemas.project import OutlineOut
 from app.schemas.tendency import Tendency
 
@@ -139,6 +140,42 @@ async def impact(
     )
 
 
+@router.post("/{chapter_number}/impact-async")
+async def impact_async(
+    project_id: int, chapter_number: int, db: Session = Depends(get_db)
+):
+    """异步版影响分析:立即返回 job_id(分析 1-3 分钟)。"""
+    get_project_or_404(db, project_id)
+    _outline(db, project_id, chapter_number)  # 校验存在
+    for jid, job in list_running(f"impact-{project_id}-"):
+        if job["kind"] == f"impact-{project_id}-{chapter_number}":
+            return {"job_id": jid}
+
+    async def work(progress):
+        progress(f"分析第 {chapter_number} 章改动的下游影响")
+        session = SessionLocal()
+        try:
+            project = session.get(Project, project_id)
+            outline = (
+                session.query(Outline)
+                .filter(
+                    Outline.project_id == project_id,
+                    Outline.chapter_number == chapter_number,
+                )
+                .first()
+            )
+            result = await analyze_impact(session, project, outline)
+            return {
+                "source_chapter": result["source_chapter"],
+                "overall": result["overall"],
+                "affected": result["affected"],
+            }
+        finally:
+            session.close()
+
+    return {"job_id": spawn_job(f"impact-{project_id}-{chapter_number}", work)}
+
+
 @router.post("/cascade", response_model=CascadeResult)
 async def cascade(
     project_id: int, req: CascadeRequest, db: Session = Depends(get_db)
@@ -170,6 +207,55 @@ async def cascade(
         **result,
         outlines=[OutlineOut.model_validate(o, from_attributes=True) for o in outlines],
     )
+
+
+@router.post("/cascade-async")
+async def cascade_async(
+    project_id: int, req: CascadeRequest, db: Session = Depends(get_db)
+):
+    """异步版级联重生成:立即返回 job_id(可能重生成多章,数分钟)。"""
+    get_project_or_404(db, project_id)
+    for jid, job in list_running(f"cascade-{project_id}"):
+        if job["kind"] == f"cascade-{project_id}":
+            return {"job_id": jid}
+
+    async def work(progress):
+        progress(f"级联重生成 {len(req.chapter_numbers)} 章大纲")
+        session = SessionLocal()
+        try:
+            project = session.get(Project, project_id)
+            result = await cascade_regenerate(
+                session,
+                project,
+                req.source_chapter,
+                req.chapter_numbers,
+                reasons=req.reasons,
+                tendency=req.tendency,
+            )
+            session.commit()
+            outlines = (
+                session.query(Outline)
+                .filter(
+                    Outline.project_id == project_id,
+                    Outline.chapter_number.in_(result["updated"]),
+                )
+                .order_by(Outline.chapter_number)
+                .all()
+            )
+            return {
+                **result,
+                "outlines": [
+                    OutlineOut.model_validate(o, from_attributes=True).model_dump()
+                    for o in outlines
+                ],
+            }
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    return {"job_id": spawn_job(f"cascade-{project_id}", work)}
 
 
 @router.get("/{chapter_number}/versions", response_model=list[VersionOut])

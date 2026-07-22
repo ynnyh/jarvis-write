@@ -27,7 +27,7 @@ from app.engines.pipeline.architecture import generate_architecture, save_archit
 from app.engines.pipeline.blueprint import generate_blueprint, save_blueprint
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import render_style_block
-from app.jobs import create_job, fail_job, finish_job, update_stage
+from app.jobs import create_job, fail_job, finish_job, list_running, spawn_job, update_stage
 from app.llm.factory import (
     create_llm_adapter,
     resolve_default_provider,
@@ -61,10 +61,17 @@ def _get_project_or_404(db: Session, project_id: int) -> Project:
 
 @router.post("", response_model=ProjectOut)
 async def create_project(req: ProjectCreate, db: Session = Depends(get_db)) -> Project:
+    concept_dict = None
+    topic = req.topic
+    if req.concept is not None and not req.concept.is_empty():
+        concept_dict = req.concept.model_dump()
+        if not topic.strip() and req.concept.logline.strip():
+            topic = req.concept.logline.strip()
     project = Project(
         user_id=current_user_id.get(),
         title=req.title,
-        topic=req.topic,
+        topic=topic,
+        concept=concept_dict,
         genre=req.genre,
         target_chapters=req.target_chapters,
         target_words_per_chapter=req.target_words_per_chapter,
@@ -94,7 +101,7 @@ _TITLE_PROMPT = """\
 
 【主题/灵感】{topic}
 【类型】{genre}
-
+{concept_block}
 要求:
 1. 网文书名风格,有记忆点,2-12 字
 2. 4 个候选风格尽量拉开差异
@@ -105,6 +112,8 @@ _TITLE_PROMPT = """\
 class TitleSuggestRequest(BaseModel):
     topic: str = ""
     genre: str = ""
+    # 新建向导已捏出概念时传入,给起名更多上下文
+    concept: Concept | None = None
 
 
 class TitleSuggestResponse(BaseModel):
@@ -120,9 +129,13 @@ async def suggest_titles(req: TitleSuggestRequest):
             status_code=400,
             detail="尚未配置模型,请到「模型设置」页填写 API Key。",
         )
+    concept_block = ""
+    if req.concept is not None and not req.concept.is_empty():
+        concept_block = f"【故事概念】\n{req.concept.render()}\n"
     prompt = _TITLE_PROMPT.format(
         topic=req.topic.strip() or "(自由发挥)",
         genre=req.genre.strip() or "不限",
+        concept_block=concept_block,
     )
     adapter = create_llm_adapter(provider, max_tokens=300, timeout=60)
     try:
@@ -203,6 +216,44 @@ async def generate_synopsis(
     if not synopsis:
         raise HTTPException(status_code=502, detail="模型没有返回可用简介,请重试。")
     return SynopsisResponse(synopsis=synopsis)
+
+
+@router.post("/{project_id}/synopsis-async")
+async def generate_synopsis_async(project_id: int, db: Session = Depends(get_db)):
+    """异步版简介生成:立即返回 job_id。"""
+    project = _get_project_or_404(db, project_id)
+    if not project.topic.strip():
+        raise HTTPException(
+            status_code=400, detail="请先在「灵感」确定本书主题,再生成简介。"
+        )
+    for jid, job in list_running(f"synopsis-{project_id}"):
+        if job["kind"] == f"synopsis-{project_id}":
+            return {"job_id": jid}
+    core_seed = (
+        f"【核心种子】{project.architecture.core_seed}\n"
+        if project.architecture and project.architecture.core_seed.strip()
+        else ""
+    )
+    prompt = _SYNOPSIS_PROMPT.format(
+        title=project.title,
+        genre=project.genre.strip() or "不限",
+        topic=project.topic,
+        core_seed=core_seed,
+        style_block=render_style_block(
+            assemble_tendency("outline", project.global_tendency)
+        ),
+    )
+    adapter = create_llm_adapter(resolve_default_provider(), max_tokens=600, timeout=120)
+
+    async def work(progress):
+        progress("AI 正在撰写书籍简介")
+        raw = await adapter.ask(prompt)
+        synopsis = raw.strip().strip("《》\"'“” ")
+        if not synopsis:
+            raise RuntimeError("模型没有返回可用简介,请重试。")
+        return {"synopsis": synopsis}
+
+    return {"job_id": spawn_job(f"synopsis-{project_id}", work)}
 
 
 class ProjectPatch(BaseModel):
@@ -313,6 +364,10 @@ async def generate_project_architecture_async(
 ):
     """异步生成架构:立即返回 job_id,前端轮询 /api/jobs/{job_id} 看 1/4-4/4 进度。"""
     _get_project_or_404(db, project_id)  # 先校验存在与归属
+    # 防重复提交:同项目架构任务已在跑 → 复用(前端接上轮询即可)
+    for jid, _job in list_running(f"architecture-{project_id}"):
+        if _job["kind"] == f"architecture-{project_id}":
+            return {"job_id": jid}
     job_id = create_job(f"architecture-{project_id}")
 
     async def runner() -> None:
@@ -402,6 +457,10 @@ async def generate_project_blueprint_async(
         raise HTTPException(
             status_code=400, detail="请先生成顶层架构(POST .../architecture)"
         )
+    # 防重复提交:同项目蓝图任务已在跑 → 复用
+    for jid, _job in list_running(f"blueprint-{project_id}"):
+        if _job["kind"] == f"blueprint-{project_id}":
+            return {"job_id": jid}
     job_id = create_job(f"blueprint-{project_id}")
 
     async def runner() -> None:

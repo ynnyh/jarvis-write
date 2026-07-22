@@ -218,8 +218,9 @@ export const api = {
   providerStatus: () =>
     req<{ configured: boolean; providers: Record<string, boolean> }>(
       "GET", "/api/settings/providers/status"),
-  suggestTitle: (topic: string, genre: string) =>
-    req<{ titles: string[] }>("POST", "/api/projects/title-suggestion", { topic, genre }, 60000),
+  suggestTitle: (topic: string, genre: string, concept?: Concept | null) =>
+    req<{ titles: string[] }>("POST", "/api/projects/title-suggestion",
+      { topic, genre, concept: concept ?? null }, 60000),
 
   listProjects: () => req<Project[]>("GET", "/api/projects"),
   createProject: (p: Partial<Project>) => req<Project>("POST", "/api/projects", p),
@@ -230,6 +231,30 @@ export const api = {
     req<Project>("PATCH", `/api/projects/${id}`, { title }),
   deleteProject: (id: number) =>
     req<{ ok: boolean; deleted_chapters: number }>("DELETE", `/api/projects/${id}`),
+  // 本项目正在运行的后台任务(切走再回来时重新接上轮询)
+  runningJobs: (id: number) =>
+    req<{ jobs: { job_id: string; kind: string; stage: string }[] }>(
+      "GET", `/api/projects/${id}/running-jobs`),
+  // 当前用户全部后台任务(全局任务中心;all=true 含近期已完成)
+  myJobs: (all = false) =>
+    req<{ jobs: { job_id: string; kind: string; status: string; stage: string; error?: string | null }[] }>(
+      "GET", `/api/jobs${all ? "?all=true" : ""}`),
+
+  // ---- 异步 job 版长任务(返回 job_id,配合 pollJob/任务中心) ----
+  inspireAsync: (spark: string, tendency: Tendency, count = 4) =>
+    req<{ job_id: string }>("POST", "/api/inspire/async", { spark, tendency, count }),
+  refineConceptAsync: (concept: Concept, directive: string, tendency: Tendency = {}) =>
+    req<{ job_id: string }>("POST", "/api/inspire/refine-async", { concept, directive, tendency }),
+  polishChapterAsync: (pid: number, n: number, tendency: Tendency) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/polish/chapter/${n}/async`, { tendency }),
+  polishSegmentAsync: (pid: number, text: string, tendency: Tendency) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/polish/segment-async`, { text, tendency }),
+  impactAsync: (pid: number, n: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/outlines/${n}/impact-async`, {}),
+  cascadeAsync: (pid: number, body: object) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/outlines/cascade-async`, body),
+  synopsisAsync: (pid: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/synopsis-async`, {}),
 
   inspire: (spark: string, tendency: Tendency, count = 4) =>
     req<{ ideas: Concept[] }>("POST", "/api/inspire", { spark, tendency, count }, LLM_TIMEOUT),

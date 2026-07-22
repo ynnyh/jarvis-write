@@ -3,10 +3,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ChapterBrief, flavorTitle, PolishResult, Tendency } from "../api";
 import { pollJob } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
+import { useJob } from "../ui/useJob";
 
 interface Props { pid: number; }
 
 export default function PolishPanel({ pid }: Props) {
+  const { run: runAsyncJob } = useJob();
   const [chapters, setChapters] = useState<ChapterBrief[]>([]);
   const [mode, setMode] = useState<"chapter" | "segment">("chapter");
   const [chapterNum, setChapterNum] = useState<number | null>(null);
@@ -46,13 +48,20 @@ export default function PolishPanel({ pid }: Props) {
   async function run() {
     const text = mode === "chapter" ? original : segment;
     if (!text.trim()) { setErr("没有可润色的文本"); return; }
-    setBusy("润色中(抽事实锁定→润色→校验,约2-6分钟)…"); setErr(""); setMsg(""); setResult(null);
+    setBusy("润色中(抽事实锁定→润色→校验,约2-6分钟,可切到别处,进度看右上角任务)…");
+    setErr(""); setMsg(""); setResult(null);
     try {
       const r = mode === "chapter" && chapterNum !== null
-        ? await api.polishChapter(pid, chapterNum, tendency)
-        : await api.polishSegment(pid, text, tendency);
-      setResult(r);
-      setPolishedDraft(r.polished);
+        ? await runAsyncJob<PolishResult>(
+            () => api.polishChapterAsync(pid, chapterNum, tendency),
+            { kind: `polish-${pid}-${chapterNum}`, onStage: (s) => setBusy(`${s}…`) })
+        : await runAsyncJob<PolishResult>(
+            () => api.polishSegmentAsync(pid, text, tendency),
+            { kind: `polish-segment-${pid}` });
+      if (r) {
+        setResult(r);
+        setPolishedDraft(r.polished);
+      }
     } catch (e) { setErr(String(e)); } finally { setBusy(""); }
   }
 

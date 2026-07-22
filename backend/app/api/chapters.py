@@ -21,7 +21,7 @@ from app.db.models import Chapter, ChapterVersion, Project
 from app.db.session import SessionLocal, get_db
 from app.engines.pipeline.chapter import generate_chapter
 from app.engines.polish import ai_flavor_report
-from app.jobs import create_job, fail_job, finish_job, update_stage
+from app.jobs import create_job, fail_job, finish_job, list_running, update_stage
 from app.schemas.tendency import Tendency
 
 router = APIRouter(
@@ -104,6 +104,16 @@ async def generate_async(
 ):
     """异步生成:立即返回 job_id,前端轮询 /api/jobs/{job_id} 看五段进度。"""
     get_project_or_404(db, project_id)  # 先校验存在
+    # 防重复提交:同一项目同时只跑一个章节任务(生成或一致性同步)。
+    # 同章已在生成 → 直接复用该任务(前端接上轮询);他章在跑 → 明确拒绝。
+    for jid, job in list_running(f"chapter-{project_id}-") + list_running(f"re-extract-{project_id}-"):
+        running_num = int(job["kind"].rsplit("-", 1)[1])
+        if job["kind"].startswith("chapter-") and running_num == chapter_number:
+            return {"job_id": jid}
+        raise HTTPException(
+            status_code=409,
+            detail=f"第 {running_num} 章的任务还在进行中({job['stage']}),请等它完成再发起新的生成。",
+        )
     job_id = create_job(f"chapter-{project_id}-{chapter_number}")
 
     async def runner() -> None:
@@ -176,6 +186,10 @@ async def re_extract_async(
 ):
     """手改正文后:重抽取(幂等,先清旧账)→ 重建下游摘要 → 更新向量库。"""
     get_project_or_404(db, project_id)
+    # 同章同步任务已在跑 → 复用,不重复起
+    for jid, job in list_running(f"re-extract-{project_id}-"):
+        if job["kind"] == f"re-extract-{project_id}-{chapter_number}":
+            return {"job_id": jid}
     job_id = create_job(f"re-extract-{project_id}-{chapter_number}")
 
     async def runner() -> None:

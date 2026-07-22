@@ -160,6 +160,8 @@ async def rebuild_summaries_after(
             db.add(row)
         row.rolling_summary = new_summary.strip()
         db.flush()
+        # 每章提交一次:别拿着写事务跨下一轮 LLM 调用(阻塞并发写,快照也会过期)
+        db.commit()
         rebuilt.append(ch.chapter_number)
 
     logger.info("摘要链重建完成: %s", rebuilt)
@@ -286,6 +288,9 @@ async def generate_chapter(
     final = _strip_meta(await get_adapter_for(Task.FINALIZE).ask(finalize_prompt))
 
     # ---- 落库 ----
+    # 先结束生成期间一直开着的读事务:期间用量记录等已在别的连接提交,
+    # 旧快照直接升级写锁会撞 SQLITE_BUSY;commit 后用新事务写入。
+    db.commit()
     chapter = (
         db.query(Chapter)
         .filter(
@@ -314,6 +319,9 @@ async def generate_chapter(
     chapter.is_stale = False
     chapter.status = "finalized"
     db.flush()
+    # 正文立刻提交:后面一致性/抽取/摘要还有数分钟 LLM 调用,
+    # 不能拿着写锁跨这些 await(会把并发写卡到超时),失败也不该丢正文。
+    db.commit()
 
     # ---- 一致性检查(vs 本章之前的圣经状态) ----
     _report("3/5 一致性检查")
@@ -328,6 +336,8 @@ async def generate_chapter(
     extraction_stats = await extract_and_apply(
         db, project.id, chapter_number, final
     )
+    # 圣经/伏笔写入立刻提交,别拿着写锁跨下面的摘要 LLM 调用
+    db.commit()
 
     # ---- 滚动摘要更新 ----
     _report("5/5 更新前情摘要")
@@ -353,6 +363,7 @@ async def generate_chapter(
         db.add(srow)
     srow.rolling_summary = new_summary.strip()
     db.flush()
+    db.commit()
 
     # ---- 入向量库(失败自动降级,不阻塞) ----
     await memory.add_chapter(chapter_number, final)

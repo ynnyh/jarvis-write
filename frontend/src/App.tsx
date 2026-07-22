@@ -3,6 +3,10 @@ import { Link, Outlet, useLocation } from "react-router-dom";
 import { api, token, setUnauthorizedHandler, Me } from "./api";
 import LoginPage from "./pages/LoginPage";
 import HelpPage from "./pages/HelpPage";
+import { Toaster } from "./ui/Toaster";
+import { ConfirmHost } from "./ui/ConfirmDialog";
+import { ErrorBoundary } from "./ui/ErrorBoundary";
+import { TaskCenterBadge, TaskCenterProvider } from "./ui/TaskCenter";
 
 export default function App() {
   const [tokens, setTokens] = useState<string>("");
@@ -72,11 +76,12 @@ export default function App() {
   }
 
   return (
-    <>
+    <TaskCenterProvider enabled={!!me}>
       <div className="topbar">
         <Link to="/" className="logo">jarvis<span>·write</span></Link>
         <span className="muted">AI 长篇小说工作台</span>
         <div className="grow" />
+        <TaskCenterBadge />
         {tokens && <span className="muted" title="累计 LLM 用量">{tokens}</span>}
         {me.is_admin && <Link to="/admin">管理</Link>}
         <Link to="/help">指南</Link>
@@ -93,8 +98,12 @@ export default function App() {
         </div>
       )}
       <div className="wrap">
-        <Outlet />
+        <ErrorBoundary>
+          <Outlet />
+        </ErrorBoundary>
       </div>
-    </>
+      <Toaster />
+      <ConfirmHost />
+    </TaskCenterProvider>
   );
 }

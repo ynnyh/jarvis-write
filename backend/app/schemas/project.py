@@ -18,6 +18,8 @@ class ProjectCreate(BaseModel):
     target_chapters: int = Field(default=30, ge=1, le=2000)
     target_words_per_chapter: int = Field(default=3000, ge=200, le=20000)
     global_tendency: Tendency = Field(default_factory=dict)
+    # 新建向导第一步选定的结构化概念(可空;传入则落库并把 topic 同步为 logline)
+    concept: Concept | None = None
 
 
 class ProjectOut(BaseModel):

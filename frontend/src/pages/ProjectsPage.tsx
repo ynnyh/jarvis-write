@@ -1,66 +1,27 @@
-// 项目列表 + 新建(带全局倾向标签)
+// 项目列表 + 新建(三步向导:灵感→书名→设定)
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { api, Project, Tendency } from "../api";
-import TendencySelector from "../components/TendencySelector";
+import { Link } from "react-router-dom";
+import { api, Project } from "../api";
+import NewProjectWizard from "../components/NewProjectWizard";
 import TitleSuggest from "../components/TitleSuggest";
+import { confirmDialog } from "../ui/ConfirmDialog";
+import { toast } from "../ui/Toaster";
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const nav = useNavigate();
-
-  const [title, setTitle] = useState("");
-  const [topic, setTopic] = useState("");
-  // 数字输入用字符串保存原始输入(允许清空),提交时才解析校验
-  const [chapters, setChapters] = useState("10");
-  const [words, setWords] = useState("3000");
-  const [tendency, setTendency] = useState<Tendency>({});
 
   // 重命名编辑态:editingId 为正在改名的项目
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editTitle, setEditTitle] = useState("");
-  // 删除二次确认:deletingId 为待确认项目,chapCount 异步拉取
-  const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [chapCount, setChapCount] = useState<number | null>(null);
 
   useEffect(() => {
     api.listProjects().then(setProjects).catch((e) => setErr(String(e)));
   }, []);
 
-  async function create() {
-    if (!title.trim()) { setErr("请填写书名"); return; }
-    // 数字字段提交时解析:空→默认值,非法/越界→提示,不在输入过程中强制弹回
-    const chNum = chapters.trim() === "" ? 10 : Number(chapters);
-    if (!Number.isInteger(chNum) || chNum < 1 || chNum > 2000) {
-      setErr("目标章节数需为 1-2000 的整数"); return;
-    }
-    const wNum = words.trim() === "" ? 3000 : Number(words);
-    if (!Number.isInteger(wNum) || wNum < 200 || wNum > 20000) {
-      setErr("每章目标字数需为 200-20000 的整数"); return;
-    }
-    setBusy(true); setErr("");
-    try {
-      const p = await api.createProject({
-        title: title.trim(),
-        topic: topic.trim(),
-        genre: (tendency.genre as string) ?? "",
-        target_chapters: chNum,
-        target_words_per_chapter: wNum,
-        global_tendency: tendency,
-      });
-      nav(`/project/${p.id}`);
-    } catch (e) {
-      setErr(String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   function startRename(p: Project) {
-    setDeletingId(null);
     setEditingId(p.id);
     setEditTitle(p.title);
   }
@@ -80,23 +41,24 @@ export default function ProjectsPage() {
     }
   }
 
-  function startDelete(p: Project) {
+  async function startDelete(p: Project) {
     setEditingId(null);
-    setDeletingId(p.id);
-    setChapCount(null);
-    api.listChapters(p.id)
-      .then((chs) => setChapCount(chs.length))
-      .catch(() => setChapCount(null));
-  }
-
-  async function confirmDelete(id: number) {
+    // 拉真实章节数给确认弹层,让用户知道要删掉多少东西
+    const count = await api.listChapters(p.id).then((chs) => chs.length).catch(() => null);
+    const ok = await confirmDialog({
+      title: `删除《${p.title}》?`,
+      body: `将删除该项目及全部 ${count ?? "?"} 章正文、大纲、故事圣经,不可恢复。`,
+      confirmText: "确认删除",
+      danger: true,
+    });
+    if (!ok) return;
     setBusy(true); setErr("");
     try {
-      await api.deleteProject(id);
-      setProjects((ps) => ps.filter((p) => p.id !== id));
-      setDeletingId(null);
+      await api.deleteProject(p.id);
+      setProjects((ps) => ps.filter((x) => x.id !== p.id));
+      toast.ok(`已删除《${p.title}》`);
     } catch (e) {
-      setErr(String(e));
+      toast.err("删除失败", String(e));
     } finally {
       setBusy(false);
     }
@@ -112,44 +74,14 @@ export default function ProjectsPage() {
       </div>
 
       {creating && (
-        <div className="card">
-          <h2>新建小说项目</h2>
+        <>
           {!projects.length && (
             <div className="muted mb-2">
               第一次用?先看 <Link to="/help">「使用指南」</Link> 了解六步流程。
             </div>
           )}
-          <div className="row">
-            <div>
-              <label className="fl">书名 *</label>
-              <div className="input-row">
-                <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="如:雾都诡事" />
-                <TitleSuggest topic={topic} genre={(tendency.genre as string) ?? ""} onPick={setTitle} />
-              </div>
-            </div>
-            <div>
-              <label className="fl">目标章节数</label>
-              <input type="number" value={chapters} min={1} max={2000}
-                onChange={(e) => setChapters(e.target.value)} />
-            </div>
-            <div>
-              <label className="fl">每章目标字数</label>
-              <input type="number" value={words} min={200} max={20000} step={500}
-                onChange={(e) => setWords(e.target.value)} />
-            </div>
-          </div>
-          <label className="fl">核心主题 / 一句话灵感(可留空,建好后到「灵感工坊」让 AI 帮你找)</label>
-          <textarea rows={2} value={topic} onChange={(e) => setTopic(e.target.value)}
-            placeholder="如:落魄镖师接下一趟险镖,半路开箱验货时发现镖箱里藏着个大活人…(没想法就留空)" />
-          <label className="fl">全局写作倾向(整本书的默认基调,单次生成时还可临时调整)</label>
-          <TendencySelector node="outline" value={tendency} onChange={setTendency} />
-          <div className="actions mt-4">
-            <button className="primary" disabled={busy} onClick={create}>
-              {busy && <span className="spin" />}创建项目
-            </button>
-            {err && <span className="msg-err">{err}</span>}
-          </div>
-        </div>
+          <NewProjectWizard />
+        </>
       )}
 
       <div className="proj-grid">
@@ -186,23 +118,11 @@ export default function ProjectsPage() {
               </Link>
             )}
 
-            {deletingId === p.id ? (
-              <div className="notice notice-err proj-confirm">
-                <div>将删除《{p.title}》及全部 {chapCount ?? "…"} 章正文,不可恢复。确认删除?</div>
-                <div className="actions mt-2">
-                  <button className="btn-sm danger" disabled={busy} onClick={() => confirmDelete(p.id)}>
-                    {busy && <span className="spin" />}确认删除
-                  </button>
-                  <button className="btn-sm" disabled={busy} onClick={() => setDeletingId(null)}>取消</button>
-                </div>
-              </div>
-            ) : (
-              <div className="proj-actions">
-                <Link to={`/project/${p.id}`} className="proj-go">进入 →</Link>
-                <button className="btn-sm" onClick={() => startRename(p)}>重命名</button>
-                <button className="btn-sm danger" onClick={() => startDelete(p)}>删除</button>
-              </div>
-            )}
+            <div className="proj-actions">
+              <Link to={`/project/${p.id}`} className="proj-go">进入 →</Link>
+              <button className="btn-sm" onClick={() => startRename(p)}>重命名</button>
+              <button className="btn-sm danger" disabled={busy} onClick={() => startDelete(p)}>删除</button>
+            </div>
           </div>
         ))}
       </div>

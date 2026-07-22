@@ -16,10 +16,11 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.auth import get_current_user
+from app.auth import current_user_id, get_current_user
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import render_style_block
+from app.jobs import spawn_job
 from app.llm.base import LLMAdapter, LLMMessage
 from app.llm.router import Task, get_adapter_for
 from app.prompts.inspire import (
@@ -55,9 +56,7 @@ class InspireResponse(BaseModel):
     ideas: list[Concept]
 
 
-@router.post("", response_model=InspireResponse)
-async def inspire(req: InspireRequest) -> InspireResponse:
-    """从灵感碎片扩展出 N 个结构化故事概念(强模型,约 1-2 分钟)。"""
+async def _inspire_impl(req: InspireRequest) -> InspireResponse:
     assembled = assemble_tendency("outline", req.tendency)
     prompt = INSPIRE_PROMPT.format(
         spark=req.spark.strip() or "(空白,自由发挥)",
@@ -82,6 +81,24 @@ async def inspire(req: InspireRequest) -> InspireResponse:
     return InspireResponse(ideas=ideas)
 
 
+@router.post("", response_model=InspireResponse)
+async def inspire(req: InspireRequest) -> InspireResponse:
+    """从灵感碎片扩展出 N 个结构化故事概念(强模型,约 1-2 分钟)。"""
+    return await _inspire_impl(req)
+
+
+@router.post("/async")
+async def inspire_async(req: InspireRequest):
+    """异步版出方案:立即返回 job_id,前端轮询/任务中心接管。"""
+    uid = current_user_id.get()
+
+    async def work(progress):
+        progress("AI 正在扩展故事概念")
+        return (await _inspire_impl(req)).model_dump()
+
+    return {"job_id": spawn_job(f"inspire-u{uid}", work)}
+
+
 # ============================= 指令式改 =============================
 class RefineRequest(BaseModel):
     concept: Concept
@@ -98,6 +115,22 @@ class RefineResponse(BaseModel):
 @router.post("/refine", response_model=RefineResponse)
 async def refine(req: RefineRequest) -> RefineResponse:
     """指令式局部改:据修改意见改写当前概念,前端做字段级 diff 预览后落库。"""
+    return await _refine_impl(req)
+
+
+@router.post("/refine-async")
+async def refine_async(req: RefineRequest):
+    """异步版指令式改:立即返回 job_id。"""
+    uid = current_user_id.get()
+
+    async def work(progress):
+        progress("AI 正在按你的意见改写概念")
+        return (await _refine_impl(req)).model_dump()
+
+    return {"job_id": spawn_job(f"inspire-refine-u{uid}", work)}
+
+
+async def _refine_impl(req: RefineRequest) -> RefineResponse:
     directive = req.directive.strip()
     if not directive:
         raise HTTPException(status_code=400, detail="修改意见不能为空")

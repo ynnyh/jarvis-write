@@ -7,9 +7,14 @@
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 import threading
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Any
+
+logger = logging.getLogger("jarvis-write.jobs")
 
 _LOCK = threading.Lock()
 _JOBS: dict[str, dict[str, Any]] = {}
@@ -54,3 +59,44 @@ def get_job(job_id: str) -> dict[str, Any] | None:
     with _LOCK:
         job = _JOBS.get(job_id)
         return dict(job) if job else None
+
+
+def list_running(kind_prefix: str) -> list[tuple[str, dict[str, Any]]]:
+    """按 kind 前缀列出运行中的任务(去重复提交/断线重连用)。"""
+    with _LOCK:
+        return [
+            (jid, dict(job))
+            for jid, job in _JOBS.items()
+            if job["status"] == "running" and job["kind"].startswith(kind_prefix)
+        ]
+
+
+def list_for_user(owner_id: Any, running_only: bool = True) -> list[tuple[str, dict[str, Any]]]:
+    """某用户的任务(全局任务中心用)。running_only=False 时含近期已完成的。"""
+    with _LOCK:
+        return [
+            (jid, dict(job))
+            for jid, job in _JOBS.items()
+            if job.get("owner_id") == owner_id
+            and (not running_only or job["status"] == "running")
+        ]
+
+
+def spawn_job(kind: str, work: Callable[[Callable[[str], None]], Awaitable[Any]]) -> str:
+    """通用异步任务封装:建 job → 后台跑 work(progress) → 结果/异常落 job。
+
+    work 收到一个 progress(stage_text) 回调;返回值(可 JSON 化)作为 job result。
+    幂等由调用方自行处理(需要防重的先查 list_running 再调这里)。
+    """
+    job_id = create_job(kind)
+
+    async def runner() -> None:
+        try:
+            result = await work(lambda s: update_stage(job_id, s))
+            finish_job(job_id, result)
+        except Exception as exc:  # noqa: BLE001 — 任务失败进 job 状态
+            logger.warning("任务 %s(%s) 失败: %s", job_id, kind, exc, exc_info=True)
+            fail_job(job_id, str(exc)[:500])
+
+    asyncio.create_task(runner())
+    return job_id
