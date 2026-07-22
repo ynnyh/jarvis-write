@@ -65,9 +65,9 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
   const [directive, setDirective] = useState("");
   const [refinePreview, setRefinePreview] = useState<{ concept: Concept; changed: (keyof Concept)[]; note: string } | null>(null);
 
-  // 对话式
+  // 对话式(记录落库:刷新/切步骤不丢)
   const [chatOpen, setChatOpen] = useState(false);
-  const [chatLog, setChatLog] = useState<ChatTurn[]>([]);
+  const [chatLog, setChatLog] = useState<ChatTurn[]>(project.chat_log ?? []);
   const [chatInput, setChatInput] = useState("");
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -131,8 +131,11 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
     setBusy("策划思考中…"); setErr("");
     try {
       const r = await api.chatConcept(nextLog, concept, tendency);
-      setChatLog([...nextLog, { role: "assistant", content: r.reply }]);
+      const finalLog: ChatTurn[] = [...nextLog, { role: "assistant", content: r.reply }];
+      setChatLog(finalLog);
       if (!conceptIsEmpty(r.concept)) setConcept(r.concept);
+      // 对话记录落库(失败不打扰,下轮再存)
+      api.patchProject(project.id, { chat_log: finalLog }).catch(() => undefined);
     } catch (e) {
       setErr(String(e));
       setChatLog(nextLog);  // 回退到用户发言,允许重发

@@ -56,6 +56,10 @@ export interface Project {
   global_tendency: Tendency; status: string;
   concept?: Concept | null;
   synopsis?: string | null;
+  // 起步流:非空 = 创建未完成,值为停留步骤(idea/tone/title/scale/launch)
+  setup_state?: string | null;
+  // 灵感对话记录(对话式捏概念的持久化)
+  chat_log?: ChatTurn[] | null;
 }
 export interface Architecture {
   core_seed: string; character_dynamics: string;
@@ -104,8 +108,15 @@ export function flavorTitle(f: FlavorInfo): string {
     .join("、");
   return `${f.summary}\n分类明细:${cats}`;
 }
-export interface Chip { label: string; directive: string; }
-export interface Dimension { key: string; label: string; select: "single" | "multi"; chips: Chip[]; }
+export interface Chip {
+  label: string; directive: string;
+  // 两级题材库(仅 genre 维度):所属大类 key / 用户向一句话卖点
+  category?: string | null; desc?: string | null;
+}
+export interface Dimension {
+  key: string; label: string; select: "single" | "multi"; chips: Chip[];
+  categories?: { key: string; label: string }[] | null;
+}
 export interface NodeCatalog { node: string; label: string; dimensions: Dimension[]; }
 export interface EditResult {
   status: string; change_type: string | null; change_summary: string;
@@ -331,6 +342,14 @@ export const api = {
     req<{ ok: boolean }>("DELETE", `/api/projects/${pid}/facts/${factId}`),
 
   tendencyCatalog: (node: string) => req<NodeCatalog>("GET", `/api/tendency/catalog/${node}`),
+  // 题材推断:概念文本 → 大类 + 最贴流派 + 同类推荐(起步流基调步预填)
+  genreInfer: (text: string) =>
+    req<{ category: string; category_label: string; genre: string; suggestions: { label: string; desc: string; category: string }[] }>(
+      "POST", "/api/tendency/genre-infer", { text }, 120000),
+  // 连写队列:多章排队串行生成
+  generateQueue: (pid: number, chapter_numbers: number[], tendency: Tendency = {}) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/chapters/generate-queue`,
+      { chapter_numbers, tendency }),
 
   polishChapter: (pid: number, n: number, tendency: Tendency) =>
     req<PolishResult>("POST", `/api/projects/${pid}/polish/chapter/${n}`, { tendency }, LLM_TIMEOUT),

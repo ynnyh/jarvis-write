@@ -34,6 +34,11 @@ class Project(Base, TimestampMixin):
     concept: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     # 书籍简介(网文风格 150-300 字,可 AI 生成也可手改);老库由迁移补列
     synopsis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 起步流进度:创建即建草稿,记录停在哪一步(idea/tone/title/scale/launch);
+    # 空/NULL = 起步完成(老项目天然视为完成)。列表页据此显示"继续创建"。
+    setup_state: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # 灵感对话记录([{role, content}, ...]):对话式捏概念的持久化,刷新不丢
+    chat_log: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
     # draft / outlining / writing / done
     status: Mapped[str] = mapped_column(String(20), default="draft")
 

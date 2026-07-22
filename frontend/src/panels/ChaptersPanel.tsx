@@ -53,11 +53,23 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
       if (cancelled) return;
       const gen = jobs.find((j) => j.kind.startsWith(`chapter-${pid}-`));
       if (gen) {
-        const n = Number(gen.kind.split("-").pop());
+        const tail = gen.kind.split("-").pop()!;
         const ctrl = new AbortController();
         abortRef.current = ctrl;
-        setGenJob({ num: n, kind: "generate", stage: gen.stage });
-        trackGenerate(n, gen.job_id, ctrl);
+        if (tail === "queue") {
+          // 连写队列:通用轮询,完成后刷新列表
+          setGenJob({ num: 0, kind: "generate", stage: gen.stage });
+          pollJob(gen.job_id, {
+            signal: ctrl.signal,
+            onStage: (stage) => setGenJob({ num: 0, kind: "generate", stage }),
+          }).then(() => reload())
+            .catch(() => reload().catch(() => undefined))
+            .finally(() => { if (!ctrl.signal.aborted) setGenJob(null); });
+        } else {
+          const n = Number(tail);
+          setGenJob({ num: n, kind: "generate", stage: gen.stage });
+          trackGenerate(n, gen.job_id, ctrl);
+        }
         return;
       }
       const sync = jobs.find((j) => j.kind.startsWith(`re-extract-${pid}-`));
@@ -91,6 +103,58 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
   }, [focusChapter, chapters, pid, onFocusConsumed]);
 
   const byNum = new Map(chapters.map((c) => [c.chapter_number, c]));
+
+  // 连写队列:勾选多章 → 后端一个 job 串行生成
+  const [queueMode, setQueueMode] = useState(false);
+  const [queuePicked, setQueuePicked] = useState<Set<number>>(new Set());
+  // 列表筛选(长书用):文本 + 状态
+  const [filterText, setFilterText] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+
+  const shownOutlines = outlines.filter((o) => {
+    const ch = byNum.get(o.chapter_number);
+    if (filterText.trim()) {
+      const q = filterText.trim();
+      if (!o.title.includes(q) && String(o.chapter_number) !== q.replace(/^第|章$/g, "")) return false;
+    }
+    if (filterStatus === "unwritten" && ch) return false;
+    if (filterStatus === "finalized" && (!ch || ch.is_stale)) return false;
+    if (filterStatus === "stale" && !ch?.is_stale) return false;
+    return true;
+  });
+
+  function pickNextBatch() {
+    const unwritten = outlines
+      .filter((o) => !byNum.get(o.chapter_number))
+      .map((o) => o.chapter_number)
+      .slice(0, 5);
+    setQueuePicked(new Set(unwritten));
+  }
+
+  async function startQueue() {
+    const nums = [...queuePicked].sort((a, b) => a - b);
+    if (!nums.length) return;
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    setErr(""); setGenResult(null);
+    setGenJob({ num: nums[0], kind: "generate", stage: `队列 ${nums.length} 章:排队中…` });
+    setQueueMode(false); setQueuePicked(new Set());
+    try {
+      const { job_id } = await api.generateQueue(pid, nums, genTendency);
+      await pollJob(job_id, {
+        signal: ctrl.signal,
+        onStage: (stage) => setGenJob({ num: nums[0], kind: "generate", stage }),
+      });
+      if (ctrl.signal.aborted) return;
+      await reload();
+    } catch (e) {
+      if (!ctrl.signal.aborted) {
+        setErr(e instanceof Error ? e.message : String(e));
+        await reload().catch(() => undefined);
+      }
+    } finally { if (!ctrl.signal.aborted) setGenJob(null); }
+  }
+
   const currentOutline = current
     ? outlines.find((o) => o.chapter_number === current.chapter_number)
     : null;
@@ -257,7 +321,9 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
             <span className="spin" />
             <span className="gen-banner-text">
               {genJob.kind === "generate"
-                ? `第 ${genJob.num} 章生成中(${genJob.stage}),完成后可继续操作其他章节`
+                ? genJob.num === 0 || genJob.stage.startsWith("[")
+                  ? `连写队列进行中(${genJob.stage})`
+                  : `第 ${genJob.num} 章生成中(${genJob.stage}),完成后可继续操作其他章节`
                 : `第 ${genJob.num} 章保存后同步一致性引擎(${genJob.stage}),完成后可继续其他操作`}
             </span>
           </div>
@@ -266,6 +332,9 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
         <div className="card card-compact">
           <div className="card-head mb-2">
             <h3 className="grow">章节</h3>
+            <button className="btn-sm" onClick={() => { setQueueMode(!queueMode); setQueuePicked(new Set()); }}>
+              {queueMode ? "取消连写" : "连写多章"}
+            </button>
             <button className="btn-sm" onClick={() => setShowTendency(!showTendency)}>
               {showTendency ? "收起" : "正文倾向"}
             </button>
@@ -275,7 +344,29 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
               <TendencySelector node="chapter" value={genTendency} onChange={setGenTendency} compact />
             </div>
           )}
-          {outlines.map((o) => {
+          {queueMode && (
+            <div className="queue-bar mb-2">
+              <span className="hint">勾选要连写的章(按章号顺序串行生成,失败即停)</span>
+              <button className="btn-sm" onClick={pickNextBatch}>选未写的前 5 章</button>
+              <button className="primary btn-sm" disabled={!queuePicked.size || !!genJob}
+                onClick={startQueue}>
+                排队生成 {queuePicked.size || ""} 章
+              </button>
+            </div>
+          )}
+          {outlines.length > 12 && (
+            <div className="input-row mb-2">
+              <input type="text" value={filterText} onChange={(e) => setFilterText(e.target.value)}
+                placeholder="搜章名/章号…" />
+              <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+                <option value="">全部状态</option>
+                <option value="unwritten">未写</option>
+                <option value="finalized">已定稿</option>
+                <option value="stale">大纲已变</option>
+              </select>
+            </div>
+          )}
+          {shownOutlines.map((o) => {
             const ch = byNum.get(o.chapter_number);
             const st = ch?.status ?? "empty";
             const generating = genJob?.num === o.chapter_number;
@@ -286,6 +377,18 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
             return (
               <Fragment key={o.chapter_number}>
                 <div className="fact-line fact-row">
+                  {queueMode && (
+                    <input type="checkbox" className="queue-check"
+                      checked={queuePicked.has(o.chapter_number)}
+                      disabled={!!ch && !ch.is_stale}
+                      title={ch && !ch.is_stale ? "已写好的章不用排队" : undefined}
+                      onChange={(e) => {
+                        const next = new Set(queuePicked);
+                        if (e.target.checked) next.add(o.chapter_number);
+                        else next.delete(o.chapter_number);
+                        setQueuePicked(next);
+                      }} />
+                  )}
                   <span className={"fact-title" + (ch ? " linkish" : "")}
                     onClick={() => ch && open(o.chapter_number)}>
                     <b>第{o.chapter_number}章</b> {o.title}

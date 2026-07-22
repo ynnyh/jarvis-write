@@ -29,6 +29,7 @@ export const useTaskCenter = () => useContext(Ctx);
 
 /** kind → 人话标签(chapter-3-5 → 「第 5 章生成」) */
 export function jobLabel(kind: string): string {
+  if (/^chapter-\d+-queue$/.test(kind)) return "连写队列";
   let m = kind.match(/^chapter-\d+-(\d+)$/);
   if (m) return `第 ${m[1]} 章生成`;
   m = kind.match(/^re-extract-\d+-(\d+)$/);

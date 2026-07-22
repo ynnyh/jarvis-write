@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_project_or_404
 from app.auth import get_current_user
 from app.chapter_versions import snapshot_chapter
-from app.db.models import Chapter, ChapterVersion, Project
+from app.db.models import Chapter, ChapterVersion, Outline, Project
 from app.db.session import SessionLocal, get_db
 from app.engines.pipeline.chapter import generate_chapter
 from app.engines.polish import ai_flavor_report
@@ -104,10 +104,16 @@ async def generate_async(
 ):
     """异步生成:立即返回 job_id,前端轮询 /api/jobs/{job_id} 看五段进度。"""
     get_project_or_404(db, project_id)  # 先校验存在
-    # 防重复提交:同一项目同时只跑一个章节任务(生成或一致性同步)。
-    # 同章已在生成 → 直接复用该任务(前端接上轮询);他章在跑 → 明确拒绝。
+    # 防重复提交:同一项目同时只跑一个章节任务(生成/队列/一致性同步)。
+    # 同章已在生成 → 直接复用该任务(前端接上轮询);他章/队列在跑 → 明确拒绝。
     for jid, job in list_running(f"chapter-{project_id}-") + list_running(f"re-extract-{project_id}-"):
-        running_num = int(job["kind"].rsplit("-", 1)[1])
+        tail = job["kind"].rsplit("-", 1)[1]
+        if not tail.isdigit():
+            raise HTTPException(
+                status_code=409,
+                detail=f"连写队列还在进行中({job['stage']}),请等它完成再单独生成。",
+            )
+        running_num = int(tail)
         if job["kind"].startswith("chapter-") and running_num == chapter_number:
             return {"job_id": jid}
         raise HTTPException(
@@ -143,6 +149,76 @@ async def generate_async(
             fail_job(job_id, str(exc)[:500])
         finally:
             session.close()
+
+    asyncio.create_task(runner())
+    return {"job_id": job_id}
+
+
+class GenerateQueueRequest(BaseModel):
+    chapter_numbers: list[int] = Field(min_length=1, max_length=50)
+    tendency: dict = Field(default_factory=dict)
+
+
+@router.post("/generate-queue")
+async def generate_queue(
+    project_id: int,
+    req: GenerateQueueRequest,
+    db: Session = Depends(get_db),
+):
+    """连写队列:勾选多章排队,后台按章号顺序串行生成(滚动摘要链依赖顺序)。
+
+    一个 job 跑到底;某章失败即停止(后续章依赖它的前情摘要),已完成的章保留。
+    """
+    get_project_or_404(db, project_id)
+    nums = sorted(set(req.chapter_numbers))
+    # 校验:每章都得有蓝图
+    have = {
+        o.chapter_number
+        for o in db.query(Outline.chapter_number).filter(Outline.project_id == project_id)
+    }
+    missing = [n for n in nums if n not in have]
+    if missing:
+        raise HTTPException(
+            status_code=400, detail=f"第 {missing} 章还没有大纲蓝图,先去「大纲」生成。"
+        )
+    # 互斥:项目下任何章节任务(单章/队列/同步)在跑都拒绝
+    busy = list_running(f"chapter-{project_id}-") + list_running(f"re-extract-{project_id}-")
+    if busy:
+        raise HTTPException(
+            status_code=409,
+            detail=f"已有章节任务在进行中({busy[0][1]['stage']}),等它完成再排队。",
+        )
+    job_id = create_job(f"chapter-{project_id}-queue")
+
+    async def runner() -> None:
+        completed: list[dict] = []
+        total = len(nums)
+        for i, n in enumerate(nums, 1):
+            session = SessionLocal()
+            try:
+                project = session.get(Project, project_id)
+                chapter, _issues, _stats = await generate_chapter(
+                    session, project, n, req.tendency,
+                    progress=lambda s, _n=n, _i=i: update_stage(
+                        job_id, f"[{_i}/{total}] 第 {_n} 章:{s}"
+                    ),
+                )
+                session.commit()
+                completed.append({
+                    "chapter_number": n, "word_count": chapter.word_count,
+                })
+            except Exception as exc:  # noqa: BLE001 — 断链即停,保留已完成
+                session.rollback()
+                done = "、".join(str(c["chapter_number"]) for c in completed) or "无"
+                fail_job(
+                    job_id,
+                    f"第 {n} 章生成失败:{str(exc)[:300]}(已完成:{done};"
+                    "后续章节依赖本章摘要,已停止)",
+                )
+                return
+            finally:
+                session.close()
+        finish_job(job_id, {"completed": completed, "total": total})
 
     asyncio.create_task(runner())
     return {"job_id": job_id}

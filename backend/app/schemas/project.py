@@ -20,6 +20,8 @@ class ProjectCreate(BaseModel):
     global_tendency: Tendency = Field(default_factory=dict)
     # 新建向导第一步选定的结构化概念(可空;传入则落库并把 topic 同步为 logline)
     concept: Concept | None = None
+    # 起步流:创建草稿项目时标记停在哪步(idea/tone/title/scale/launch);不传=直接完成
+    setup_state: str | None = Field(default=None, max_length=20)
 
 
 class ProjectOut(BaseModel):
@@ -32,6 +34,8 @@ class ProjectOut(BaseModel):
     global_tendency: dict[str, Any]
     concept: Concept | None = None
     synopsis: str | None = None
+    setup_state: str | None = None
+    chat_log: list[Any] | None = None
     status: str
 
     model_config = {"from_attributes": True}

@@ -114,6 +114,25 @@ def _add_concept_column() -> None:
             logger.info("迁移:projects 补 concept 列")
 
 
+def _add_setup_columns() -> None:
+    """给 projects 表补 setup_state / chat_log 列(起步流 + 对话落库,幂等)。
+
+    存量项目 setup_state 为 NULL = 起步已完成;chat_log NULL = 无对话记录。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "projects" not in insp.get_table_names():
+            return
+        if not _column_exists("projects", "setup_state"):
+            conn.execute(
+                text("ALTER TABLE projects ADD COLUMN setup_state VARCHAR(20)")
+            )
+            logger.info("迁移:projects 补 setup_state 列")
+        if not _column_exists("projects", "chat_log"):
+            conn.execute(text("ALTER TABLE projects ADD COLUMN chat_log JSON"))
+            logger.info("迁移:projects 补 chat_log 列")
+
+
 def _ensure_admin(db: Session) -> User:
     settings = get_settings()
     admin = (
@@ -161,6 +180,7 @@ def run_migrations() -> None:
     _add_is_active_column()
     _add_synopsis_column()
     _add_concept_column()
+    _add_setup_columns()
     _add_retired_column()
     with session_scope() as db:
         admin = _ensure_admin(db)

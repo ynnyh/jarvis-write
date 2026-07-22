@@ -19,6 +19,9 @@ class ChipOut(BaseModel):
 
     label: str
     directive: str
+    # 两级题材库扩展字段(仅 genre 维度有):所属大类 key / 用户向一句话卖点
+    category: str | None = None
+    desc: str | None = None
 
 
 class DimensionOut(BaseModel):
@@ -28,6 +31,8 @@ class DimensionOut(BaseModel):
     label: str
     select: str = Field(description="single 单选 / multi 多选")
     chips: list[ChipOut]
+    # 两级题材库:大类清单 [{key, label}](仅 genre 维度有)
+    categories: list[dict[str, str]] | None = None
 
 
 class NodeCatalogOut(BaseModel):

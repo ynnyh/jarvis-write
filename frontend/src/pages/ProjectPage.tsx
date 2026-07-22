@@ -14,7 +14,7 @@ import BookReader from "../components/BookReader";
 export type Step = "inspire" | "arch" | "outline" | "write" | "polish" | "board";
 
 const STEPS: { key: Step; no: number; label: string }[] = [
-  { key: "inspire", no: 1, label: "灵感" },
+  { key: "inspire", no: 1, label: "概念" },
   { key: "arch", no: 2, label: "架构" },
   { key: "outline", no: 3, label: "大纲" },
   { key: "write", no: 4, label: "写作" },
@@ -122,7 +122,13 @@ export default function ProjectPage() {
 
   // URL 未带步骤(旧链接/首次进入):按进度定位到该干活的环节
   useEffect(() => {
-    if (step !== null || project === null) return;
+    if (project === null) return;
+    // 起步流未完成的草稿:回到起步流继续
+    if (project.setup_state) {
+      nav(`/new/${pid}/${project.setup_state}`, { replace: true });
+      return;
+    }
+    if (step !== null) return;
     let target: Step;
     if (!project.topic) target = "inspire";
     else if (!arch) target = "arch";
@@ -144,12 +150,29 @@ export default function ProjectPage() {
     outline: outlines.length > 0,
     write: doneCount > 0,
   };
+  // 进度地图:每步的完成度小字
+  const stepSub: Partial<Record<Step, string>> = {
+    inspire: project.topic ? "已定" : "未定",
+    arch: arch ? `v${arch.version}` : "未生成",
+    outline: outlines.length ? `${outlines.length}/${project.target_chapters} 章` : "未生成",
+    write: doneCount ? `${doneCount} 章 · ${Math.round(wordsTotal / 10000 * 10) / 10}万字` : "未开始",
+  };
   const NEXT: Partial<Record<Step, { to: Step; label: string }>> = {
     inspire: { to: "arch", label: "去架构 →" },
     arch: { to: "outline", label: "去大纲 →" },
     outline: { to: "write", label: "去写作 →" },
   };
   const nextHint = step && stepDone[step] ? NEXT[step] : undefined;
+
+  // 智能下一步建议:按项目状态只提示一件最该做的事
+  const suggestion: { text: string; to: Step; btn: string } | null = (() => {
+    if (!project.topic) return { text: "先把故事概念定下来——整本书的地基。", to: "inspire", btn: "去定概念" };
+    if (!arch) return { text: "概念已定,让 AI 生成全书架构(核心种子/角色/世界观/情节)。", to: "arch", btn: "去生成架构" };
+    if (!outlines.length) return { text: "架构就绪,下一步把它展开成逐章蓝图。", to: "outline", btn: "去生成大纲" };
+    if (staleCount > 0) return { text: `有 ${staleCount} 章正文与新大纲失配,建议优先处理。`, to: "write", btn: "去查看" };
+    if (doneCount < outlines.length) return { text: `已写 ${doneCount}/${outlines.length} 章,继续写下一章,或勾选多章排队连写。`, to: "write", btn: "去写作" };
+    return null;
+  })();
 
   return (
     <>
@@ -185,13 +208,24 @@ export default function ProjectPage() {
               className={"flow-step" + (step === s.key ? " on" : "") + (stepDone[s.key] ? " step-done" : "")}
               onClick={() => setStep(s.key)}>
               <span className="no">{stepDone[s.key] ? "✓" : s.no}</span>
-              {s.label}
+              <span className="flow-label">
+                {s.label}
+                {stepSub[s.key] && <span className="flow-sub">{stepSub[s.key]}</span>}
+              </span>
               {s.key === "write" && staleCount > 0 && <span className="dot" title="有章节与新大纲不符" />}
             </div>
           ))}
         </div>
 
         <div className="flow-main">
+          {suggestion && step !== suggestion.to && (
+            <div className="next-bar">
+              <span>💡 {suggestion.text}</span>
+              <button className="btn-sm primary" onClick={() => setStep(suggestion.to)}>
+                {suggestion.btn}
+              </button>
+            </div>
+          )}
           {step && (
             <StepGuide step={step} next={nextHint?.label}
               onNext={nextHint ? () => setStep(nextHint.to) : undefined} />

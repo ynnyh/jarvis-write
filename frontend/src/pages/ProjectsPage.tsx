@@ -1,17 +1,16 @@
-// 项目列表 + 新建(三步向导:灵感→书名→设定)
+// 项目列表;新建走 /new 创作起步流(建书即建草稿,五步走到点火)
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api, Project } from "../api";
-import NewProjectWizard from "../components/NewProjectWizard";
 import TitleSuggest from "../components/TitleSuggest";
 import { confirmDialog } from "../ui/ConfirmDialog";
 import { toast } from "../ui/Toaster";
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const nav = useNavigate();
 
   // 重命名编辑态:editingId 为正在改名的项目
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -68,21 +67,8 @@ export default function ProjectsPage() {
     <>
       <div className="page-head">
         <h1>我的小说</h1>
-        <button className="primary" onClick={() => setCreating(!creating)}>
-          {creating ? "收起" : "+ 新建小说"}
-        </button>
+        <button className="primary" onClick={() => nav("/new")}>+ 新建小说</button>
       </div>
-
-      {creating && (
-        <>
-          {!projects.length && (
-            <div className="muted mb-2">
-              第一次用?先看 <Link to="/help">「使用指南」</Link> 了解六步流程。
-            </div>
-          )}
-          <NewProjectWizard />
-        </>
-      )}
 
       <div className="proj-grid">
         {projects.map((p) => (
@@ -106,6 +92,14 @@ export default function ProjectsPage() {
                   <TitleSuggest topic={p.topic} genre={p.genre} onPick={setEditTitle} />
                 </div>
               </div>
+            ) : p.setup_state ? (
+              // 未完成起步流的草稿:引导继续
+              <Link to={`/new/${p.id}/${p.setup_state}`} className="proj-main">
+                <h2 className="proj-title">{p.title}
+                  <span className="badge badge-draft">创建未完成</span>
+                </h2>
+                <div className="proj-meta">{p.topic || "还没定概念"} · 继续创建 →</div>
+              </Link>
             ) : (
               <Link to={`/project/${p.id}`} className="proj-main">
                 <h2 className="proj-title">{p.title}
@@ -119,17 +113,21 @@ export default function ProjectsPage() {
             )}
 
             <div className="proj-actions">
-              <Link to={`/project/${p.id}`} className="proj-go">进入 →</Link>
+              {p.setup_state
+                ? <Link to={`/new/${p.id}/${p.setup_state}`} className="proj-go">继续创建 →</Link>
+                : <Link to={`/project/${p.id}`} className="proj-go">进入 →</Link>}
               <button className="btn-sm" onClick={() => startRename(p)}>重命名</button>
               <button className="btn-sm danger" disabled={busy} onClick={() => startDelete(p)}>删除</button>
             </div>
           </div>
         ))}
       </div>
-      {!projects.length && !creating && (
-        <div className="card muted">还没有项目。点右上角「新建小说」开始。</div>
+      {!projects.length && (
+        <div className="card muted">
+          还没有项目。点右上角「新建小说」开始;第一次用可先看 <Link to="/help">「使用指南」</Link>。
+        </div>
       )}
-      {err && !creating && <div className="msg-err">{err}</div>}
+      {err && <div className="msg-err">{err}</div>}
     </>
   );
 }

@@ -72,6 +72,7 @@ async def create_project(req: ProjectCreate, db: Session = Depends(get_db)) -> P
         title=req.title,
         topic=topic,
         concept=concept_dict,
+        setup_state=req.setup_state,
         genre=req.genre,
         target_chapters=req.target_chapters,
         target_words_per_chapter=req.target_words_per_chapter,
@@ -265,6 +266,10 @@ class ProjectPatch(BaseModel):
     global_tendency: dict | None = None
     concept: Concept | None = None
     synopsis: str | None = None
+    # 起步流进度:传 "" 表示起步完成(落库为 NULL)
+    setup_state: str | None = None
+    # 灵感对话记录(整段覆盖式保存)
+    chat_log: list | None = None
 
 
 @router.patch("/{project_id}", response_model=ProjectOut)
@@ -291,6 +296,10 @@ async def patch_project(
         updates["concept"] = concept.model_dump()
         if "topic" not in updates and concept.logline.strip():
             updates["topic"] = concept.logline.strip()
+    if updates.get("setup_state") == "":
+        updates["setup_state"] = None  # "" = 起步完成
+    if "chat_log" in updates and len(updates["chat_log"]) > 200:
+        updates["chat_log"] = updates["chat_log"][-200:]  # 防膨胀:只留最近 200 条
     for field, value in updates.items():
         setattr(project, field, value)
     db.commit()

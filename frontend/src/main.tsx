@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import ProjectsPage from "./pages/ProjectsPage";
 import ProjectPage from "./pages/ProjectPage";
+import OnboardingFlow from "./pages/OnboardingFlow";
 import AdminPage from "./pages/AdminPage";
 import HelpPage from "./pages/HelpPage";
 import "./styles.css";
@@ -24,6 +25,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <Routes>
           <Route element={<App />}>
             <Route index element={<ProjectsPage />} />
+            {/* 创作起步流:/new 建草稿 → /new/:id/:step 五步走 */}
+            <Route path="new/:id?/:step?" element={<OnboardingFlow />} />
             {/* 工作台步骤进 URL:/project/3/write;旧链接 /project/3 重定向由组件内处理 */}
             <Route path="project/:id/:step?" element={<ProjectPage />} />
             <Route path="admin" element={<AdminPage />} />
