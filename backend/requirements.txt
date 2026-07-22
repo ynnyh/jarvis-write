@@ -8,4 +8,3 @@ python-dotenv==1.0.1
 chromadb==0.6.3
 PyJWT==2.10.1
 bcrypt==5.0.0
-pytest==8.3.4
