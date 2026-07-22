@@ -70,6 +70,8 @@ async def lifespan(app: FastAPI):
     logger.info("建表完成,运行多用户迁移...")
     from app.migrate import run_migrations
     run_migrations()
+    from app.jobs import cleanup_stuck_jobs
+    cleanup_stuck_jobs()
     logger.info("服务就绪。")
     yield
 

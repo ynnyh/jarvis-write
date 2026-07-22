@@ -23,6 +23,7 @@ from app.db.models.usage import LlmUsage
 from app.db.models.user import User
 from app.db.models.app_setting import AppSetting
 from app.db.models.invite_code import InviteCode
+from app.db.models.job import Job
 
 __all__ = [
     "User",
@@ -43,4 +44,5 @@ __all__ = [
     "ProviderSetting",
     "ChapterSummary",
     "LlmUsage",
+    "Job",
 ]
