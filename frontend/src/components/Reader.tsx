@@ -115,6 +115,8 @@ export default function Reader({
   const contentRef = useRef<HTMLDivElement>(null);
   // 全书位置记忆:恢复滚动只在首个章节应用一次
   const restoreAppliedRef = useRef(false);
+  // 上一次的章号:区分「换章」(要重置滚动/收面板)与「同章内容更新」(保持阅读位置)
+  const prevChapterNumRef = useRef<number | null>(null);
   const scrollTimerRef = useRef<number | null>(null);
 
   // ---- 片段润色状态 ----
@@ -163,11 +165,16 @@ export default function Reader({
     return () => window.removeEventListener("mousedown", onDown);
   }, [showSettings]);
 
-  // 换章:默认看定稿(无定稿看草稿),收起设置/目录/润色,清除段落选择;
-  // 全书模式首章恢复到记忆的滚动位置,之后翻章回顶
+  // 换章 vs 同章内容更新:
+  // - 换章(章号变了):默认看定稿,收起设置/目录/润色,清除段落选择;全书模式首章恢复记忆位置,之后翻章回顶。
+  // - 同章内容更新(手动改/润色替换后 onApplied 回填同一章):保持滚动位置,不收回顶,避免阅读进度丢失。
   useEffect(() => {
     if (!chapter) return;
+    const num = chapter.chapter_number;
+    const switched = prevChapterNumRef.current !== num;
+    prevChapterNumRef.current = num;
     setTab(chapter.final_content ? "final" : "draft");
+    if (!switched) return; // 同章更新:不动滚动位置与面板
     setShowSettings(false);
     setTocOpen(false);
     setSelPara(null);
