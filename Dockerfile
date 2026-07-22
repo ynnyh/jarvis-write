@@ -9,7 +9,7 @@ RUN npm run build
 FROM python:3.12-slim
 WORKDIR /srv
 COPY backend/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com
 COPY backend/ ./backend/
 COPY --from=frontend /fe/dist ./frontend/dist
 # 数据目录(SQLite/Chroma 落这里,compose 用 volume 持久化)
