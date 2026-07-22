@@ -1659,3 +1659,22 @@ html, body { max-width: 100%; overflow-x: hidden; }
   .tbl { min-width: 560px; }
   .ov-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 }
+
+/* ---------- 主编建议(带原文举证) ---------- */
+.review-sug {
+  border-left: 3px solid var(--brand-line);
+  padding: 8px 0 8px 12px;
+  margin-top: 8px;
+}
+.review-sug .rs-head { display: flex; align-items: flex-start; gap: 10px; justify-content: space-between; }
+.review-sug .rs-head b { font-size: var(--fs-sm); flex: 1; min-width: 0; }
+.review-sug .rs-quote {
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  background: var(--surface-2);
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-family: var(--font-serif);
+}
+.review-sug .rs-fix { margin-top: 4px; color: var(--ok); font-size: var(--fs-sm); }

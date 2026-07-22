@@ -226,11 +226,12 @@ export interface InviteCodeListOut {
 }
 /** 编辑部预设优化动作 */
 export interface EditorAction { key: string; label: string; directive: string; }
+export interface ReviewSuggestion { evidence: string; issue: string; fix: string; }
 export interface ChapterReview {
   chapter_number: number;
   scores: { plot: number; prose: number; pacing: number; character: number };
   comment: string;
-  suggestions: string[];
+  suggestions: ReviewSuggestion[];
 }
 export interface ProofIssue { type: string; original: string; suggestion: string; reason: string; }
 export interface AuditReport {

@@ -1,6 +1,7 @@
 // 编辑部:主编评分 / 校对 / 审核报告 / 润色工作台(四个角色一站式)
 import { useEffect, useState } from "react";
-import { api, AuditReport, ChapterBrief, ChapterReview, ProofIssue } from "../api";
+import { useNavigate } from "react-router-dom";
+import { api, AuditReport, ChapterBrief, ChapterReview, ProofIssue, ReviewSuggestion } from "../api";
 import PolishPanel from "./PolishPanel";
 import { useJob } from "../ui/useJob";
 import { toast } from "../ui/Toaster";
@@ -24,6 +25,7 @@ const ISSUE_TYPE: Record<string, string> = {
 
 export default function EditorialPanel({ pid }: Props) {
   const { run: runJob } = useJob();
+  const nav = useNavigate();
   const [tab, setTab] = useState<Tab>("review");
   const [chapters, setChapters] = useState<ChapterBrief[]>([]);
   const [chapterNum, setChapterNum] = useState<number | null>(null);
@@ -52,6 +54,20 @@ export default function EditorialPanel({ pid }: Props) {
       api.auditReport(pid).then(setAudit).catch((e) => setErr(String(e)));
     }
   }, [tab, audit, pid]);
+
+  // 把主编建议打包成重写指令,交接给写作页(localStorage 中转,写作面板挂载时消费)
+  function toRewrite(sugs: ReviewSuggestion[]) {
+    if (!review) return;
+    const text = sugs
+      .map((s) => (s.evidence ? `"${s.evidence}"这里` : "") + s.issue + (s.fix ? `,改法:${s.fix}` : ""))
+      .join(";")
+      .slice(0, 500);
+    localStorage.setItem(`revise-draft-${pid}`, JSON.stringify({
+      num: review.chapter_number, text,
+    }));
+    toast.ok("意见已带到写作页", `第 ${review.chapter_number} 章的重写框已填好,确认后开跑`);
+    nav(`/project/${pid}/write`);
+  }
 
   async function runReview() {
     if (chapterNum === null) return;
@@ -146,10 +162,23 @@ export default function EditorialPanel({ pid }: Props) {
               {review.comment && <div className="notice notice-info mt-3">{review.comment}</div>}
               {review.suggestions.length > 0 && (
                 <div className="mt-3">
-                  <label className="fl">最该改的三件事(可复制到写作页的重写意见里)</label>
+                  <label className="fl">最该改的三件事(可一键转成本章重写指令)</label>
                   {review.suggestions.map((s, i) => (
-                    <div key={i} className="fact-line">{i + 1}. {s}</div>
+                    <div key={i} className="review-sug">
+                      <div className="rs-head">
+                        <b>{i + 1}. {s.issue}</b>
+                        <button className="btn-sm" title="带着这条意见去写作页重写本章"
+                          onClick={() => toRewrite([s])}>→ 按此重写</button>
+                      </div>
+                      {s.evidence && <blockquote className="rs-quote">"{s.evidence}"</blockquote>}
+                      {s.fix && <div className="rs-fix">改法:{s.fix}</div>}
+                    </div>
                   ))}
+                  <div className="actions mt-2">
+                    <button className="primary btn-sm" onClick={() => toRewrite(review.suggestions)}>
+                      全部意见转为重写指令,去写作页 →
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

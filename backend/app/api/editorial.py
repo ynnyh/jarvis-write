@@ -75,6 +75,7 @@ async def review_async(project_id: int, n: int, db: Session = Depends(get_db)):
         if outline else "(无蓝图)"
     )
     prompt = REVIEW_PROMPT.format(outline_block=outline_block, content=ch.final_content)
+    content = ch.final_content
 
     async def work(progress):
         progress(f"主编正在审读第 {n} 章")
@@ -86,11 +87,28 @@ async def review_async(project_id: int, n: int, db: Session = Depends(get_db)):
             k: max(1, min(10, int(scores.get(k) or 0))) if scores.get(k) else 0
             for k in ("plot", "prose", "pacing", "character")
         }
+        # 建议:结构化 {evidence, issue, fix};evidence 必须在正文里逐字存在(防举证幻觉),
+        # 找不到的置空但保留建议本身。兼容模型退化输出纯字符串的情况。
+        suggestions = []
+        for s in (data.get("suggestions") or [])[:3]:
+            if isinstance(s, str):
+                suggestions.append({"evidence": "", "issue": s.strip(), "fix": ""})
+                continue
+            if not isinstance(s, dict):
+                continue
+            evidence = str(s.get("evidence") or "").strip()
+            if evidence and evidence not in content:
+                evidence = ""
+            suggestions.append({
+                "evidence": evidence,
+                "issue": str(s.get("issue") or "").strip(),
+                "fix": str(s.get("fix") or "").strip(),
+            })
         return {
             "chapter_number": n,
             "scores": clean,
             "comment": str(data.get("comment") or "").strip(),
-            "suggestions": [str(s).strip() for s in (data.get("suggestions") or [])[:3]],
+            "suggestions": [s for s in suggestions if s["issue"] or s["fix"]],
         }
 
     return {"job_id": spawn_job(f"review-{project_id}-{n}", work)}

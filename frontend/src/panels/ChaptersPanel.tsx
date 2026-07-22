@@ -46,6 +46,17 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
   }, [pid]);
   useEffect(() => { reload().catch((e) => setErr(String(e))); }, [reload]);
 
+  // 编辑部「按此重写」交接:挂载时消费预填的重写意见,展开对应章的重写框
+  useEffect(() => {
+    const raw = localStorage.getItem(`revise-draft-${pid}`);
+    if (!raw) return;
+    localStorage.removeItem(`revise-draft-${pid}`);
+    try {
+      const { num, text } = JSON.parse(raw) as { num: number; text: string };
+      if (num && text) { setReviseFor(num); setReviseText(text); }
+    } catch { /* 损坏的草稿直接丢弃 */ }
+  }, [pid]);
+
   // 挂载时查有没有还在跑的章节任务(切走页面再回来的场景),有则接上轮询而不是装作没事
   useEffect(() => {
     let cancelled = false;
