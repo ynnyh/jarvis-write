@@ -5,6 +5,8 @@ import { pollJob } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
 import { useJob } from "../ui/useJob";
 import type { Step } from "../pages/ProjectPage";
+import DirectivePanel from "./outline/DirectivePanel";
+import OutlineItem from "./outline/OutlineItem";
 
 interface Props {
   pid: number;
@@ -280,88 +282,27 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
           </div>
         )}
         {showDirective && (
-          <div className="mt-3">
-            <div className="muted">用一句话描述结构性修改,AI 改写受影响章的大纲,你确认后才生效。</div>
-            <textarea rows={2} value={directiveText}
-              placeholder="如:不要男二,让他的戏份并给女主 / 把反派改成男主的哥哥"
-              onChange={(e) => setDirectiveText(e.target.value)} />
-            {!preview && !dirResult && (
-              <button className="primary mt-2" disabled={!!busy || !directiveText.trim()} onClick={runDirectiveParse}>
-                {busy && <span className="spin" />}分析影响
-              </button>
-            )}
-
-            {preview && (
-              <div className="card card-warn mt-3">
-                <b>影响预览</b>
-                <div className="card-desc mt-1">{preview.analysis}</div>
-                {preview.suggest_retire.length > 0 && (
-                  <div className="msg-err mt-2">
-                    建议到「看板→人物」将以下角色退场:{preview.suggest_retire.join("、")}(退场后生成不再注入)
-                  </div>
-                )}
-                {preview.items.length === 0 ? (
-                  <>
-                    <div className="msg-ok mt-2">没有章节受该指令影响。</div>
-                    <div className="actions mt-2"><button onClick={closeDirective}>关闭</button></div>
-                  </>
-                ) : (
-                  <>
-                    {drafts.map((d) => {
-                      const old = oldOf(d.chapter_number);
-                      return (
-                        <div key={d.chapter_number} className="fact-line fact-check">
-                          <input type="checkbox" checked={dirPicked.has(d.chapter_number)}
-                            onChange={(e) => {
-                              const s = new Set(dirPicked);
-                              if (e.target.checked) s.add(d.chapter_number); else s.delete(d.chapter_number);
-                              setDirPicked(s);
-                            }} />
-                          <div className="grow">
-                            <b>第{d.chapter_number}章</b>{" "}
-                            {d.new_title && old && d.new_title !== old.title
-                              ? <span>{old.title} → <b>{d.new_title}</b></span>
-                              : <span>{old?.title}</span>}
-                            <div className="muted mt-1">旧:{old?.summary || "—"}</div>
-                            <textarea rows={3} className="mt-1" value={d.new_summary}
-                              onChange={(e) => setDrafts(drafts.map((x) =>
-                                x.chapter_number === d.chapter_number ? { ...x, new_summary: e.target.value } : x))} />
-                            <div className="muted">{d.change_reason}</div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                    <div className="actions mt-2">
-                      <button className="primary" disabled={!!busy || !dirPicked.size} onClick={applyDirective}>
-                        {busy && <span className="spin" />}应用修改({dirPicked.size} 章)
-                      </button>
-                      <button disabled={!!busy} onClick={closeDirective}>取消</button>
-                    </div>
-                    <div className="muted mt-1">应用后将保存大纲新版本,并把已有正文的章节标记为「与新大纲不符」。</div>
-                  </>
-                )}
-              </div>
-            )}
-
-            {dirResult && (
-              <div className="card card-ok mt-3">
-                <b>✓ 已应用修改</b>
-                <div className="muted mt-1">
-                  {dirResult.updated.length
-                    ? `已更新第 ${dirResult.updated.join("、")} 章大纲`
-                    : "内容无实质变化,未产生新版本"}
-                  {dirResult.stale_chapters.length > 0 &&
-                    `;第 ${dirResult.stale_chapters.join("、")} 章正文已标记失配——可到「写作」重生成这些章节(或用「编辑本章」保存大改后的级联入口批量重生成)`}
-                </div>
-                <div className="actions mt-2">
-                  <button onClick={closeDirective}>完成</button>
-                  {onGotoStep && dirResult.stale_chapters.length > 0 && (
-                    <button className="primary" onClick={() => onGotoStep("write")}>去写作重生成 →</button>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+          <DirectivePanel
+            busy={busy}
+            directiveText={directiveText}
+            preview={preview}
+            drafts={drafts}
+            dirPicked={dirPicked}
+            dirResult={dirResult}
+            getOld={oldOf}
+            onDirectiveTextChange={setDirectiveText}
+            onRunParse={runDirectiveParse}
+            onTogglePick={(n, checked) => {
+              const s = new Set(dirPicked);
+              if (checked) s.add(n); else s.delete(n);
+              setDirPicked(s);
+            }}
+            onDraftChange={(n, summary) => setDrafts(drafts.map((x) =>
+              x.chapter_number === n ? { ...x, new_summary: summary } : x))}
+            onApply={applyDirective}
+            onClose={closeDirective}
+            onGotoStep={onGotoStep}
+          />
         )}
         {busy && <div className="muted mt-2"><span className="spin" />{busy}</div>}
         {flash && <div className="msg-ok mt-2">{flash}</div>}
@@ -380,128 +321,37 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
         </div>
       )}
 
-      {outlines.map((o) => {
-        const editing = editingNum === o.chapter_number;
-        const open = editing || expanded.has(o.chapter_number);
-        return (
-          <div key={o.id} className="outline-item">
-            <div className="head" onClick={editing ? undefined : () => toggleExpand(o.chapter_number)}>
-              <span className="num">第{o.chapter_number}章</span>
-              <b className="outline-title">{o.title}</b>
-              <span className="badge">{o.chapter_role || "—"}</span>
-              <span className="badge">v{o.current_version}</span>
-              {!editing && <span className="caret">{open ? "▾" : "▸"}</span>}
-            </div>
-
-            {open && !editing && (
-              <div className="outline-detail">
-                <div className="muted">{o.summary}</div>
-                <div className="meta-line">
-                  伏笔:{o.foreshadowing || "无"} · 人物:{(o.characters_involved ?? []).join("、") || "—"} · 场景:{o.scene_location || "—"}
-                </div>
-                <div className="actions mt-2">
-                  <button className="btn-sm" onClick={() => startEdit(o)}>编辑本章</button>
-                  {outlineActions.length > 0 && (
-                    <span className="chips">
-                      <span className="hint">让 AI:</span>
-                      {outlineActions.map((a) => (
-                        <span key={a.key} className="chip" title={a.directive}
-                          onClick={() => {
-                            setShowDirective(true);
-                            setDirectiveText(`第${o.chapter_number}章:${a.directive}`);
-                            window.scrollTo({ top: 0, behavior: "smooth" });
-                          }}>
-                          {a.label}
-                        </span>
-                      ))}
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {editing && (
-              <div className="mt-3">
-                <div className="row">
-                  <div>
-                    <label className="fl">标题</label>
-                    <input type="text" value={form.title as string}
-                      onChange={(e) => setForm({ ...form, title: e.target.value })} />
-                  </div>
-                  <div>
-                    <label className="fl">本章定位</label>
-                    <input type="text" value={form.chapter_role as string}
-                      onChange={(e) => setForm({ ...form, chapter_role: e.target.value })} />
-                  </div>
-                  <div>
-                    <label className="fl">场景地点</label>
-                    <input type="text" value={form.scene_location as string}
-                      onChange={(e) => setForm({ ...form, scene_location: e.target.value })} />
-                  </div>
-                </div>
-                <label className="fl">本章简述(改情节走向会触发大改分析)</label>
-                <textarea rows={4} value={form.summary as string}
-                  onChange={(e) => setForm({ ...form, summary: e.target.value })} />
-                <label className="fl">伏笔操作(埋设 / 强化 / 回收)</label>
-                <textarea rows={2} value={form.foreshadowing as string}
-                  onChange={(e) => setForm({ ...form, foreshadowing: e.target.value })} />
-                <div className="actions mt-3">
-                  <button className="primary" disabled={!!busy} onClick={() => save(o.chapter_number)}>
-                    {busy && <span className="spin" />}保存
-                  </button>
-                  <button disabled={!!busy} onClick={() => { setEditingNum(null); setEditResult(null); setImpact(null); }}>
-                    取消
-                  </button>
-                </div>
-
-                {editResult?.status === "saved" && editResult.needs_impact_analysis && (
-                  <div className="card card-warn mt-3">
-                    <b>大改</b><span className="badge warn">major</span>
-                    <div className="card-desc mt-1">{editResult.change_summary}</div>
-                    {editResult.own_chapter_stale && (
-                      <div className="msg-err">本章已有正文,已标记「与新大纲不符」。</div>
-                    )}
-                    {!impact && (
-                      <button className="primary" disabled={!!busy} onClick={() => runImpact(o.chapter_number)}>
-                        {busy && <span className="spin" />}分析下游影响
-                      </button>
-                    )}
-                    {impact && (
-                      <div className="mt-2">
-                        <div className="muted">{impact.overall}</div>
-                        {impact.affected.map((a) => (
-                          <div key={a.chapter_number} className="fact-line fact-check">
-                            <input type="checkbox" checked={picked.has(a.chapter_number)}
-                              onChange={(e) => {
-                                const s = new Set(picked);
-                                if (e.target.checked) s.add(a.chapter_number);
-                                else s.delete(a.chapter_number);
-                                setPicked(s);
-                              }} />
-                            <div>
-                              <b>第{a.chapter_number}章</b>
-                              <span className={"badge " + (a.action === "regenerate" ? "warn" : "")}>
-                                {a.action === "regenerate" ? "建议重生成" : "建议人工复核"}
-                              </span>
-                              <div className="muted">{a.reason}</div>
-                            </div>
-                          </div>
-                        ))}
-                        {impact.affected.length > 0 ? (
-                          <button className="primary mt-2"
-                            disabled={!!busy || !picked.size} onClick={() => runCascade(o.chapter_number)}>
-                            {busy && <span className="spin" />}级联重生成勾选的 {picked.size} 章
-                          </button>
-                        ) : <div className="msg-ok">无下游章节受影响。</div>}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })}
+      {outlines.map((o) => (
+        <OutlineItem
+          key={o.id}
+          outline={o}
+          editing={editingNum === o.chapter_number}
+          expanded={expanded.has(o.chapter_number)}
+          form={form}
+          busy={busy}
+          editResult={editingNum === o.chapter_number ? editResult : null}
+          impact={editingNum === o.chapter_number ? impact : null}
+          picked={picked}
+          outlineActions={outlineActions}
+          onToggleExpand={() => toggleExpand(o.chapter_number)}
+          onStartEdit={() => startEdit(o)}
+          onFormChange={setForm}
+          onSave={() => save(o.chapter_number)}
+          onCancelEdit={() => { setEditingNum(null); setEditResult(null); setImpact(null); }}
+          onRunImpact={() => runImpact(o.chapter_number)}
+          onTogglePick={(n, checked) => {
+            const s = new Set(picked);
+            if (checked) s.add(n); else s.delete(n);
+            setPicked(s);
+          }}
+          onRunCascade={() => runCascade(o.chapter_number)}
+          onDirectiveChip={(directive) => {
+            setShowDirective(true);
+            setDirectiveText(directive);
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+        />
+      ))}
     </>
   );
 }

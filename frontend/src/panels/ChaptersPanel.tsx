@@ -1,12 +1,15 @@
 // 写作面板:逐章生成 / 阅读;本章蓝图上下文置顶;润色移步「润色」工作区
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   api, ChapterBrief, ChapterDetail, ChapterVersionBrief, ChapterVersionDetail,
-  EditorAction, flavorTitle, GenerateChapterResponse, Outline, Project, Tendency, VERSION_SOURCE_CN,
+  EditorAction, GenerateChapterResponse, Outline, Project, Tendency,
 } from "../api";
 import { pollJob } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
-import Reader, { Paragraphs, STATUS_CN } from "../components/Reader";
+import Reader, { Paragraphs } from "../components/Reader";
+import GenResultCard from "./chapters/GenResultCard";
+import VersionCompare from "./chapters/VersionCompare";
+import ChapterListItem from "./chapters/ChapterListItem";
 
 interface Props {
   pid: number; project: Project; outlines: Outline[];
@@ -384,84 +387,42 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
           )}
           {shownOutlines.map((o) => {
             const ch = byNum.get(o.chapter_number);
-            const st = ch?.status ?? "empty";
             const generating = genJob?.num === o.chapter_number;
             const genBlocked = !!genJob;
             const genHint = generating
               ? "本章任务进行中"
               : `第 ${genJob?.num} 章任务进行中,完成后可继续操作`;
             return (
-              <Fragment key={o.chapter_number}>
-                <div className="fact-line fact-row">
-                  {queueMode && (
-                    <input type="checkbox" className="queue-check"
-                      checked={queuePicked.has(o.chapter_number)}
-                      disabled={!!ch && !ch.is_stale}
-                      title={ch && !ch.is_stale ? "已写好的章不用排队" : undefined}
-                      onChange={(e) => {
-                        const next = new Set(queuePicked);
-                        if (e.target.checked) next.add(o.chapter_number);
-                        else next.delete(o.chapter_number);
-                        setQueuePicked(next);
-                      }} />
-                  )}
-                  <span className={"fact-title" + (ch ? " linkish" : "")}
-                    onClick={() => ch && open(o.chapter_number)}>
-                    <b>第{o.chapter_number}章</b> {o.title}
-                    <span className={"badge " + (ch?.is_stale ? "err" : st === "finalized" ? "ok" : "")}>
-                      {ch?.is_stale ? "大纲已变" : STATUS_CN[st] ?? st}
-                    </span>
-                    {ch && <span className="muted"> {ch.word_count}字</span>}
-                    {generating && (
-                      <span className="gen-stage"><span className="spin" />{genJob.stage}</span>
-                    )}
-                  </span>
-                  {ch && (
-                    <button className="btn-sm" onClick={() => openReader(o.chapter_number)}>
-                      阅读
-                    </button>
-                  )}
-                  <button className="btn-sm" disabled={genBlocked} title={genBlocked ? genHint : undefined}
-                    onClick={() => {
-                      if (ch) {
-                        // 重写:先展开行内意见输入区,不直接开跑
-                        setReviseFor(reviseFor === o.chapter_number ? null : o.chapter_number);
-                        setReviseText("");
-                      } else {
-                        generate(o.chapter_number);
-                      }
-                    }}>
-                    {ch ? "重写" : "生成"}
-                  </button>
-                </div>
-                {reviseFor === o.chapter_number && (
-                  <div className="fact-line revise-box">
-                    <textarea
-                      rows={3}
-                      maxLength={500}
-                      placeholder="哪里不满意?比如:节奏太拖 / 对话不像这个角色 / 结尾太仓促;想要什么方向?比如:加强冲突、多些心理描写(可留空,直接重写)"
-                      value={reviseText}
-                      onChange={(e) => setReviseText(e.target.value)}
-                    />
-                    <div className="chips">
-                      {proseActions.map((a) => (
-                        <span key={a.key} className="chip" title={a.directive}
-                          onClick={() => setReviseText((t) => ((t ? t.trimEnd() + ";" : "") + a.directive).slice(0, 500))}>
-                          {a.label}
-                        </span>
-                      ))}
-                    </div>
-                    <div className="revise-actions">
-                      <button className="primary btn-sm" disabled={genBlocked}
-                        title={genBlocked ? genHint : undefined}
-                        onClick={() => generate(o.chapter_number, reviseText.trim())}>
-                        开始重写
-                      </button>
-                      <button className="btn-sm" onClick={() => setReviseFor(null)}>取消</button>
-                    </div>
-                  </div>
-                )}
-              </Fragment>
+              <ChapterListItem
+                key={o.chapter_number}
+                outline={o}
+                chapter={ch}
+                queueMode={queueMode}
+                queuePicked={queuePicked.has(o.chapter_number)}
+                generating={generating}
+                genBlocked={genBlocked}
+                genHint={genHint}
+                genStage={genJob?.stage ?? ""}
+                reviseOpen={reviseFor === o.chapter_number}
+                reviseText={reviseText}
+                proseActions={proseActions}
+                onOpen={() => open(o.chapter_number)}
+                onOpenReader={() => openReader(o.chapter_number)}
+                onToggleQueue={(checked) => {
+                  const next = new Set(queuePicked);
+                  if (checked) next.add(o.chapter_number);
+                  else next.delete(o.chapter_number);
+                  setQueuePicked(next);
+                }}
+                onToggleRevise={() => {
+                  setReviseFor(reviseFor === o.chapter_number ? null : o.chapter_number);
+                  setReviseText("");
+                }}
+                onReviseTextChange={setReviseText}
+                onGenerate={() => generate(o.chapter_number)}
+                onReviseSubmit={() => generate(o.chapter_number, reviseText.trim())}
+                onReviseCancel={() => setReviseFor(null)}
+              />
             );
           })}
         </div>
@@ -469,105 +430,19 @@ export default function ChaptersPanel({ pid, outlines, focusChapter, onFocusCons
 
       <div className="two-col-main">
         {versionsFor !== null && versions !== null && (
-          <div className="card">
-            <div className="card-head mb-2">
-              <h3 className="grow">第{versionsFor}章 · 历史版本对比</h3>
-              <button className="btn-sm" onClick={closeVersions}>关闭</button>
-            </div>
-            {versions.length === 0 ? (
-              <div className="muted">
-                暂无历史版本。以后重写 / 润色 / 手改正文时,被覆盖的旧版会自动存到这里,可随时对比回退。
-              </div>
-            ) : (
-              <>
-                <div className="muted mb-2">
-                  选一个旧版和「当前版」左右对照。满意当前版就关掉;想要旧版点「回退」。
-                </div>
-                <div className="chips mb-2">
-                  {versions.map((v) => (
-                    <span key={v.id}
-                      className={"chip" + (compareVer?.id === v.id ? " on" : "")}
-                      onClick={() => selectVersion(versionsFor, v)}>
-                      v{v.version} · {VERSION_SOURCE_CN[v.source] ?? v.source} · {v.word_count}字
-                    </span>
-                  ))}
-                </div>
-                {compareVer && current && (
-                  <>
-                    <div className="split mt-2">
-                      <div>
-                        <div className="pane-title">
-                          旧版 v{compareVer.version}
-                          ({VERSION_SOURCE_CN[compareVer.source] ?? compareVer.source} · {compareVer.word_count}字)
-                        </div>
-                        <div className="pane pane-prose prose">
-                          <Paragraphs text={compareVer.final_content} />
-                        </div>
-                      </div>
-                      <div>
-                        <div className="pane-title">当前版({current.word_count}字)</div>
-                        <div className="pane pane-prose prose">
-                          <Paragraphs text={current.final_content || current.draft_content} />
-                        </div>
-                      </div>
-                    </div>
-                    <div className="actions mt-3">
-                      <button className="primary" disabled={!!genJob}
-                        title={genJob ? "有任务进行中,完成后可回退" : undefined}
-                        onClick={() => restoreVersion(versionsFor, compareVer.id)}>
-                        回退到旧版 v{compareVer.version}(覆盖当前版并同步一致性引擎)
-                      </button>
-                      <button onClick={closeVersions}>保留当前版</button>
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-          </div>
+          <VersionCompare
+            chapterNumber={versionsFor}
+            versions={versions}
+            compareVer={compareVer}
+            current={current}
+            busy={!!genJob}
+            onClose={closeVersions}
+            onSelectVersion={(v) => selectVersion(versionsFor, v)}
+            onRestore={(vid) => restoreVersion(versionsFor, vid)}
+          />
         )}
 
-        {genResult && (
-          <div className="card card-ok">
-            <b>生成完成</b> {genResult.word_count} 字
-            {genResult.ai_flavor && (
-              <span className="badge" title={flavorTitle(genResult.ai_flavor)}>
-                AI味 {genResult.ai_flavor.score} /千字
-              </span>
-            )}
-            {genResult.ai_flavor && (
-              <span className="muted"> 偏高可去「润色」,选「去AI味」方向</span>
-            )}
-            {genResult.consistency_issues.length
-              ? <div className="mt-2">
-                  <span className="badge err">一致性问题 {genResult.consistency_issues.length}</span>
-                  {genResult.consistency_issues.map((i, k) => (
-                    <div key={k} className="fact-line">
-                      <b>[{i.severity}]</b> {i.description}
-                      <div className="muted">建议: {i.suggestion}</div>
-                    </div>
-                  ))}
-                </div>
-              : <span className="badge ok">一致性检查通过</span>}
-            {genResult.word_guard_action === "compressed" && (
-              <div className="mt-2">
-                <span className="badge">字数守卫:已压缩至目标范围</span>
-              </div>
-            )}
-            {genResult.word_guard_action === "split" && genResult.split_info && (
-              <div className="mt-2">
-                <span className="badge err">字数守卫:已自动拆章</span>
-                <div className="fact-line">
-                  原第{genResult.split_info.original_chapter}章 →
-                  第{genResult.split_info.original_chapter}章({genResult.split_info.part_a_words}字)
-                  + 第{genResult.split_info.new_chapter}章《{genResult.split_info.new_title}》({genResult.split_info.part_b_words}字)
-                </div>
-                {genResult.split_info.reason && (
-                  <div className="muted">断点:{genResult.split_info.reason}</div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+        {genResult && <GenResultCard result={genResult} />}
 
         {current ? (
           <>
