@@ -278,8 +278,8 @@ export default function AdminPage() {
         {!users.length && !err && <div className="muted">加载中…</div>}
       </div>
 
-      {msg && <div className="msg-ok">{msg}</div>}
-      {err && <div className="msg-err">{err}</div>}
+      {msg && <div className="msg-ok page-flash">{msg}</div>}
+      {err && <div className="msg-err page-flash">{err}</div>}
     </>
   );
 }

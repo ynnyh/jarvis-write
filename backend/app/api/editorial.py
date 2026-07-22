@@ -210,7 +210,7 @@ async def audit_report(project_id: int, db: Session = Depends(get_db)):
         and f.expected_payoff_chapter <= max_written
     ]
     open_count = sum(1 for f in fores if f.status in ("planted", "reinforced"))
-    resolved_count = sum(1 for f in fores if f.status == "resolved")
+    resolved_count = sum(1 for f in fores if f.status == "paid_off")
 
     # 大纲已生成但长期没写的章(跳章检查:前面留洞)
     outline_nums = [

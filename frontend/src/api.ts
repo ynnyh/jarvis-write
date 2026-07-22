@@ -60,6 +60,9 @@ export interface Project {
   setup_state?: string | null;
   // 灵感对话记录(对话式捏概念的持久化)
   chat_log?: ChatTurn[] | null;
+  // 列表页进度聚合(仅 GET /projects 填充)
+  written_chapters?: number;
+  total_words?: number;
 }
 export interface Architecture {
   core_seed: string; character_dynamics: string;
@@ -382,6 +385,12 @@ export const api = {
       "POST", `/api/projects/${pid}/chapters/${n}/proofread-apply`, { fixes }),
   auditReport: (pid: number) =>
     req<AuditReport>("GET", `/api/projects/${pid}/audit-report`),
+  // 指令改异步解析(应用仍走同步 apply,纯 DB 快)
+  parseEditDirectiveAsync: (pid: number, directive: string) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/outlines/edit-directive-async`, { directive }),
+  // 伏笔手动操作:弃用/恢复/标记回收/改预期章
+  patchForeshadow: (pid: number, fid: number, patch: { status?: string; expected_payoff_chapter?: number; payoff_chapter?: number; notes?: string }) =>
+    req<{ id: number; status: string }>("PATCH", `/api/projects/${pid}/foreshadowings/${fid}`, patch),
 
   polishChapter: (pid: number, n: number, tendency: Tendency) =>
     req<PolishResult>("POST", `/api/projects/${pid}/polish/chapter/${n}`, { tendency }, LLM_TIMEOUT),

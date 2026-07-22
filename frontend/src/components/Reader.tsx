@@ -125,6 +125,9 @@ export default function Reader({
   const [editText, setEditText] = useState("");
   // 编辑部预设优化动作(润色方向 chips;拉不到时退回内置四个)
   const [proseActions, setProseActions] = useState<EditorAction[]>([]);
+  // 替换后同步引擎的轮询:关阅读器时中止,防卸载后 setState
+  const applyAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => applyAbortRef.current?.abort(), []);
   useEffect(() => {
     if (!polishCtx) return;
     api.editorialActions().then((a) => setProseActions(a.prose)).catch(() => undefined);
@@ -235,6 +238,8 @@ export default function Reader({
       return;
     }
     const newContent = source.slice(0, at) + replacement + source.slice(at + selText.length);
+    const ctrl = new AbortController();
+    applyAbortRef.current = ctrl;
     setApplyStage("保存正文…"); setPolishErr("");
     try {
       const updated = await api.editChapterContent(polishCtx.pid, polishCtx.chapterNumber, newContent);
@@ -242,13 +247,17 @@ export default function Reader({
       // 与写作页手动保存一致:替换后重抽取 + 重建下游摘要 + 向量库
       setApplyStage("同步一致性引擎…");
       const { job_id } = await api.reExtractAsync(polishCtx.pid, polishCtx.chapterNumber);
-      await pollJob(job_id, { onStage: (s) => setApplyStage(s || "同步一致性引擎…") });
+      await pollJob(job_id, {
+        signal: ctrl.signal,
+        onStage: (s) => setApplyStage(s || "同步一致性引擎…"),
+      });
+      if (ctrl.signal.aborted) return;
       closePolish();
       setEditOpen(false);
       setSelPara(null);
     } catch (e) {
-      setPolishErr(e instanceof Error ? e.message : String(e));
-    } finally { setApplyStage(""); }
+      if (!ctrl.signal.aborted) setPolishErr(e instanceof Error ? e.message : String(e));
+    } finally { if (!ctrl.signal.aborted) setApplyStage(""); }
   }
 
   async function applyPolish() {

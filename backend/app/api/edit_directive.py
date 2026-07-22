@@ -22,6 +22,7 @@ from app.db.session import get_db
 from app.engines.cascade import apply_outline_revision
 from app.engines.common import chapter_architecture_brief, get_outline
 from app.engines.consistency.extractor import parse_llm_json
+from app.jobs import list_running, spawn_job
 from app.llm.router import Task, get_adapter_for
 from app.prompts.cascade import EDIT_DIRECTIVE_PROMPT
 
@@ -117,7 +118,50 @@ async def parse_directive(
     if not data:
         raise HTTPException(status_code=502, detail="指令解析失败(模型输出无法解析),请重试")
 
+    return _build_preview(data, {o.chapter_number for o in outlines})
+
+
+@router.post("/edit-directive-async")
+async def parse_directive_async(
+    project_id: int, req: DirectiveRequest, db: Session = Depends(get_db)
+):
+    """异步版指令解析:立即返回 job_id(解析 1-2 分钟,前端可切走)。"""
+    directive = req.directive.strip()
+    if not directive:
+        raise HTTPException(status_code=400, detail="修改指令不能为空")
+    if len(directive) > 500:
+        raise HTTPException(status_code=400, detail="修改指令过长(限500字)")
+    project = get_project_or_404(db, project_id)
+    outlines = (
+        db.query(Outline)
+        .filter(Outline.project_id == project_id)
+        .order_by(Outline.chapter_number)
+        .all()
+    )
+    if not outlines:
+        raise HTTPException(status_code=400, detail="还没有章节蓝图,请先生成蓝图")
+    for jid, job in list_running(f"directive-{project_id}"):
+        if job["kind"] == f"directive-{project_id}":
+            return {"job_id": jid}
+    prompt = EDIT_DIRECTIVE_PROMPT.format(
+        directive=directive,
+        architecture_brief=chapter_architecture_brief(project),
+        blueprint_digest=_blueprint_digest(outlines),
+    )
     valid_numbers = {o.chapter_number for o in outlines}
+
+    async def work(progress):
+        progress("分析修改指令的影响范围")
+        raw = await get_adapter_for(Task.IMPACT).ask(prompt)
+        data = parse_llm_json(raw)
+        if not data:
+            raise RuntimeError("指令解析失败(模型输出无法解析),请重试")
+        return _build_preview(data, valid_numbers).model_dump()
+
+    return {"job_id": spawn_job(f"directive-{project_id}", work)}
+
+
+def _build_preview(data: dict, valid_numbers: set[int]) -> DirectivePreview:
     items = []
     for i in data.get("items") or []:
         if not isinstance(i, dict):
@@ -138,7 +182,6 @@ async def parse_directive(
                 change_reason=str(i.get("change_reason") or "").strip(),
             )
         )
-
     suggest_retire = list(
         dict.fromkeys(
             s.strip() for s in (data.get("suggest_retire") or [])

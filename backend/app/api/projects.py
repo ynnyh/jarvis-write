@@ -85,13 +85,38 @@ async def create_project(req: ProjectCreate, db: Session = Depends(get_db)) -> P
 
 
 @router.get("", response_model=list[ProjectOut])
-async def list_projects(db: Session = Depends(get_db)) -> list[Project]:
+async def list_projects(db: Session = Depends(get_db)) -> list[ProjectOut]:
     uid = current_user_id.get()
-    return list(
+    projects = list(
         db.query(Project)
         .filter(Project.user_id == uid)
         .order_by(Project.id.desc())
     )
+    # 进度聚合:每项目已写章数/总字数,一条 group by 查询
+    from sqlalchemy import func
+
+    from app.db.models import Chapter
+
+    rows = (
+        db.query(
+            Chapter.project_id,
+            func.count(Chapter.id),
+            func.coalesce(func.sum(Chapter.word_count), 0),
+        )
+        .filter(
+            Chapter.project_id.in_([p.id for p in projects] or [0]),
+            Chapter.final_content != "",
+        )
+        .group_by(Chapter.project_id)
+        .all()
+    )
+    progress = {pid: (cnt, int(words)) for pid, cnt, words in rows}
+    out = []
+    for p in projects:
+        item = ProjectOut.model_validate(p, from_attributes=True)
+        item.written_chapters, item.total_words = progress.get(p.id, (0, 0))
+        out.append(item)
+    return out
 
 
 # ---------- AI 起名 ----------

@@ -107,7 +107,18 @@ export default function ProjectsPage() {
                   {p.genre && <span className="badge">{p.genre}</span>}
                 </h2>
                 <div className="proj-meta">
-                  {p.topic || "(未填主题)"} · 目标 {p.target_chapters} 章 × {p.target_words_per_chapter} 字
+                  {p.topic || "(未填主题)"}
+                </div>
+                <div className="proj-progress">
+                  <div className="pp-bar">
+                    <div className="pp-fill" style={{
+                      width: `${Math.min(100, Math.round(((p.written_chapters ?? 0) / Math.max(1, p.target_chapters)) * 100))}%`,
+                    }} />
+                  </div>
+                  <span className="pp-text">
+                    {p.written_chapters ?? 0}/{p.target_chapters} 章
+                    {(p.total_words ?? 0) > 0 && ` · ${((p.total_words ?? 0) / 10000).toFixed(1)} 万字`}
+                  </span>
                 </div>
               </Link>
             )}

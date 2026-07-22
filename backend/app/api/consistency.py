@@ -119,6 +119,46 @@ async def list_foreshadowings(
     return out
 
 
+class ForeshadowPatch(BaseModel):
+    """伏笔手动操作:弃用/恢复/手动标记回收/改预期回收章/备注。"""
+
+    status: str | None = None  # planted / paid_off / abandoned
+    expected_payoff_chapter: int | None = None
+    payoff_chapter: int | None = None
+    notes: str | None = None
+
+
+@router.patch("/foreshadowings/{fid}")
+async def patch_foreshadowing(
+    project_id: int, fid: int, req: ForeshadowPatch, db: Session = Depends(get_db)
+):
+    """手动管理伏笔:AI 判定不准时作者可以直接弃用、改预期章或标记已回收。"""
+    get_project_or_404(db, project_id)
+    f = db.get(Foreshadowing, fid)
+    if f is None or f.project_id != project_id:
+        raise HTTPException(status_code=404, detail="伏笔不存在")
+    if req.status is not None:
+        if req.status not in ("planted", "paid_off", "abandoned"):
+            raise HTTPException(status_code=400, detail="status 只能是 planted/paid_off/abandoned")
+        f.status = req.status
+        if req.status == "paid_off" and req.payoff_chapter is None and f.payoff_chapter is None:
+            f.payoff_chapter = f.expected_payoff_chapter
+    if req.expected_payoff_chapter is not None:
+        if req.expected_payoff_chapter < f.chapter_planted:
+            raise HTTPException(status_code=400, detail="预期回收章不能早于埋设章")
+        f.expected_payoff_chapter = req.expected_payoff_chapter
+    if req.payoff_chapter is not None:
+        f.payoff_chapter = req.payoff_chapter
+    if req.notes is not None:
+        f.notes = req.notes
+    db.commit()
+    return {
+        "id": f.id, "status": f.status,
+        "expected_payoff_chapter": f.expected_payoff_chapter,
+        "payoff_chapter": f.payoff_chapter, "notes": f.notes,
+    }
+
+
 # ---------- 人物管理闭环 ----------
 
 # 关键事实排序:重要度优先(critical > major > normal > minor),同级按起始章

@@ -1611,3 +1611,51 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .proof-item .badge { flex-shrink: 0; }
 .proof-body { flex: 1; min-width: 0; display: grid; gap: 3px; font-size: var(--fs-sm); }
 .notice-warn { background: var(--warn-weak); border: 1px solid var(--warn-line); color: var(--warn); border-radius: var(--r-md); padding: 10px 14px; }
+
+/* ---------- 阶段三:项目卡进度 / 伏笔操作 / 浮动反馈 / 阅读器错误 ---------- */
+.proj-progress { margin-top: 8px; display: flex; align-items: center; gap: 10px; }
+.pp-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.pp-fill { height: 100%; background: var(--brand); border-radius: 999px; transition: width 0.3s; }
+.pp-text { font-size: var(--fs-xs); color: var(--text-2); flex-shrink: 0; }
+
+.fs-ops { white-space: nowrap; }
+.fs-ops .btn-sm { margin-right: 6px; }
+
+/* 操作反馈浮层:长页面滚动到哪都看得见(Admin 等表格页用) */
+.page-flash {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 600;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+  padding: 10px 18px;
+}
+
+/* 全书阅读模式错误:浮在遮罩之上,不再被盖住 */
+.book-err {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1002;
+  background: var(--err-weak);
+  border: 1px solid var(--err-line);
+  border-radius: var(--r-md);
+  padding: 10px 18px;
+}
+
+/* 移动端:看板/管理表格横滑容器内滚,不撑破页面 */
+@media (max-width: 640px) {
+  .tbl { min-width: 560px; }
+  .ov-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+}

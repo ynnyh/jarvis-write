@@ -134,12 +134,17 @@ export default function OutlinePanel({ pid, outlines, hasArch, onChanged, onGoto
   }
 
   async function runDirectiveParse() {
-    setBusy("分析修改指令的影响…"); setErr(""); setPreview(null); setDirResult(null);
+    setBusy("分析修改指令的影响(可切到别处,进度看右上角任务)…"); setErr(""); setPreview(null); setDirResult(null);
     try {
-      const r = await api.parseEditDirective(pid, directiveText);
-      setPreview(r);
-      setDrafts(r.items.map((i) => ({ ...i })));
-      setDirPicked(new Set(r.items.map((i) => i.chapter_number)));
+      const r = await runAsyncJob<DirectivePreview>(
+        () => api.parseEditDirectiveAsync(pid, directiveText),
+        { kind: `directive-${pid}`, onStage: (s) => setBusy(`${s}…`) },
+      );
+      if (r) {
+        setPreview(r);
+        setDrafts(r.items.map((i) => ({ ...i })));
+        setDirPicked(new Set(r.items.map((i) => i.chapter_number)));
+      }
     } catch (e) { setErr(String(e)); } finally { setBusy(""); }
   }
 
