@@ -131,6 +131,9 @@ def _add_setup_columns() -> None:
         if not _column_exists("projects", "chat_log"):
             conn.execute(text("ALTER TABLE projects ADD COLUMN chat_log JSON"))
             logger.info("迁移:projects 补 chat_log 列")
+        if not _column_exists("projects", "macro_plan"):
+            conn.execute(text("ALTER TABLE projects ADD COLUMN macro_plan JSON"))
+            logger.info("迁移:projects 补 macro_plan 列")
 
 
 def _ensure_admin(db: Session) -> User:

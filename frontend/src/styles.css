@@ -1678,3 +1678,15 @@ html, body { max-width: 100%; overflow-x: hidden; }
   font-family: var(--font-serif);
 }
 .review-sug .rs-fix { margin-top: 4px; color: var(--ok); font-size: var(--fs-sm); }
+
+/* ---------- 卷纲(滚动规划指南针) ---------- */
+.macro-plan { display: grid; gap: 8px; }
+.macro-seg {
+  border-left: 3px solid var(--line-strong);
+  padding: 6px 0 6px 12px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.macro-seg b { color: var(--text); display: block; margin-bottom: 2px; }
+.macro-seg.done { border-left-color: var(--ok); opacity: 0.75; }
+.macro-seg.current { border-left-color: var(--brand); background: var(--brand-weak); border-radius: 0 var(--r-sm) var(--r-sm) 0; }

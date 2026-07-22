@@ -165,11 +165,15 @@ export default function ProjectPage() {
   const nextHint = step && stepDone[step] ? NEXT[step] : undefined;
 
   // 智能下一步建议:按项目状态只提示一件最该做的事
+  const plannedUpto = outlines.length ? Math.max(...outlines.map((o) => o.chapter_number)) : 0;
   const suggestion: { text: string; to: Step; btn: string } | null = (() => {
     if (!project.topic) return { text: "先把故事概念定下来——整本书的地基。", to: "inspire", btn: "去定概念" };
     if (!arch) return { text: "概念已定,让 AI 生成全书架构(核心种子/角色/世界观/情节)。", to: "arch", btn: "去生成架构" };
     if (!outlines.length) return { text: "架构就绪,下一步把它展开成逐章蓝图。", to: "outline", btn: "去生成大纲" };
     if (staleCount > 0) return { text: `有 ${staleCount} 章正文与新大纲失配,建议优先处理。`, to: "write", btn: "去查看" };
+    // 滚动规划:快写到已规划边界且全书还没铺满 → 提示展开下一卷
+    if (plannedUpto < project.target_chapters && doneCount >= outlines.length - 2)
+      return { text: `即将写到已规划边界(第 ${plannedUpto} 章),按实际剧情展开下一卷蓝图吧。`, to: "outline", btn: "展开下一卷" };
     if (doneCount < outlines.length) return { text: `已写 ${doneCount}/${outlines.length} 章,继续写下一章,或勾选多章排队连写。`, to: "write", btn: "去写作" };
     return null;
   })();
@@ -232,7 +236,7 @@ export default function ProjectPage() {
           )}          {step === "inspire" && <InspirePanel project={project} onChanged={reload} onGotoStep={setStep} />}
           {step === "arch" && <ArchPanel project={project} arch={arch} onChanged={reload} />}
           {step === "outline" && (
-            <OutlinePanel pid={pid} outlines={outlines} hasArch={!!arch} onChanged={reload} onGotoStep={setStep} />
+            <OutlinePanel pid={pid} project={project} outlines={outlines} hasArch={!!arch} onChanged={reload} onGotoStep={setStep} />
           )}
           {step === "write" && (
             outlines.length

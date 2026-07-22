@@ -71,9 +71,15 @@ async def generate_blueprint(
     tendency: Tendency | None = None,
     global_tendency: Tendency | None = None,
     progress=None,
+    start_chapter: int = 1,
+    end_chapter: int | None = None,
+    previous_tail: str = "",
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    """分块生成全书章节蓝图。返回 (章节 dict 列表, 警告列表)。纯生成,不落库。
+    """分块生成章节蓝图。返回 (章节 dict 列表, 警告列表)。纯生成,不落库。
 
+    滚动规划:传 start_chapter/end_chapter 只生成该区间(展开下一卷);
+    previous_tail 为上一卷蓝图尾部文本,保证跨卷衔接。
+    number_of_chapters 始终是全书总章数(prompt 里的全局语境)。
     progress: 可选回调 fn(stage_text),每块生成前/解析后各报一次(异步任务进度用)。
     """
 
@@ -88,15 +94,16 @@ async def generate_blueprint(
     style_block = render_style_block(assembled)
     adapter = get_adapter_for(Task.BLUEPRINT)
 
+    last = end_chapter or number_of_chapters
     all_chapters: list[dict[str, Any]] = []
     all_warnings: list[str] = []
-    raw_accumulated = ""
+    raw_accumulated = previous_tail
 
-    start = 1
-    while start <= number_of_chapters:
-        end = min(start + CHUNK_SIZE - 1, number_of_chapters)
+    start = start_chapter
+    while start <= last:
+        end = min(start + CHUNK_SIZE - 1, last)
         logger.info("蓝图生成:第 %d-%d 章...", start, end)
-        _report(f"生成中:第 {start}-{end} 章 / 共 {number_of_chapters} 章")
+        _report(f"生成中:第 {start}-{end} 章(本次规划到第 {last} 章 / 全书 {number_of_chapters} 章)")
 
         if start == 1 and end == number_of_chapters:
             # 一块装得下,用整书模板

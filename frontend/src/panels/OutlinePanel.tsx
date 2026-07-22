@@ -1,6 +1,6 @@
 // 大纲工作区:蓝图生成 / 内联编辑 / 大改分级 → 影响分析 → 勾选级联
 import { useEffect, useRef, useState } from "react";
-import { api, CascadeResult, DirectiveApplyResult, DirectiveItem, DirectivePreview, EditorAction, EditResult, ImpactReport, Outline, Tendency } from "../api";
+import { api, CascadeResult, DirectiveApplyResult, DirectiveItem, DirectivePreview, EditorAction, EditResult, ImpactReport, Outline, Project, Tendency } from "../api";
 import { pollJob } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
 import { useJob } from "../ui/useJob";
@@ -8,6 +8,7 @@ import type { Step } from "../pages/ProjectPage";
 
 interface Props {
   pid: number;
+  project?: Project;
   outlines: Outline[];
   hasArch: boolean;
   onChanged: () => Promise<void>;
@@ -16,7 +17,7 @@ interface Props {
 
 type Form = Partial<Outline>;
 
-export default function OutlinePanel({ pid, outlines, hasArch, onChanged, onGotoStep }: Props) {
+export default function OutlinePanel({ pid, project, outlines, hasArch, onChanged, onGotoStep }: Props) {
   const { run: runAsyncJob } = useJob();
   const [genTendency, setGenTendency] = useState<Tendency>({});
   const [showGen, setShowGen] = useState(!outlines.length);
@@ -70,6 +71,26 @@ export default function OutlinePanel({ pid, outlines, hasArch, onChanged, onGoto
       setShowGen(false);
       setExpanded(new Set());
       setGenDone(r.outlines.length);
+    } catch (e) {
+      if (!ctrl.signal.aborted) setErr(String(e));
+    } finally { if (!ctrl.signal.aborted) setBusy(""); }
+  }
+
+  // 滚动规划:展开下一卷蓝图(卷纲 + 已成文状态)
+  async function extendBlueprint() {
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    setBusy("展开下一卷:排队中…"); setErr("");
+    try {
+      const { job_id } = await api.extendBlueprintAsync(pid);
+      const r = await pollJob<{ outlines: Outline[]; planned_range: [number, number] }>(job_id, {
+        signal: ctrl.signal,
+        onStage: (stage) => setBusy(`展开下一卷:${stage}`),
+      });
+      if (ctrl.signal.aborted) return;
+      await onChanged();
+      setGenDone(r.outlines.length);
+      setFlash(`已展开第 ${r.planned_range[0]}-${r.planned_range[1]} 章蓝图。`);
     } catch (e) {
       if (!ctrl.signal.aborted) setErr(String(e));
     } finally { if (!ctrl.signal.aborted) setBusy(""); }
@@ -167,11 +188,36 @@ export default function OutlinePanel({ pid, outlines, hasArch, onChanged, onGoto
 
   const oldOf = (n: number) => outlines.find((o) => o.chapter_number === n);
 
+  // 滚动规划:已规划边界与"下一卷"区间(有卷纲按卷纲,没有按 30 章一卷)
+  const target = project?.target_chapters ?? 0;
+  const plannedUpto = outlines.length ? Math.max(...outlines.map((o) => o.chapter_number)) : 0;
+  const canExtend = plannedUpto > 0 && target > plannedUpto;
+  const nextSeg = (() => {
+    if (!canExtend) return null;
+    const seg = project?.macro_plan?.find((s) => s.start <= plannedUpto + 1 && plannedUpto + 1 <= s.end);
+    return { start: plannedUpto + 1, end: Math.min(seg?.end ?? plannedUpto + 30, target) };
+  })();
+  const [showMacro, setShowMacro] = useState(false);
+
   return (
     <>
       <div className="card">
         <div className="card-head">
-          <h2 className="grow">章节蓝图 <span className="badge">{outlines.length} 章</span></h2>
+          <h2 className="grow">章节蓝图 <span className="badge">
+            {target ? `已规划 ${outlines.length}/${target} 章` : `${outlines.length} 章`}
+          </span></h2>
+          {!!project?.macro_plan?.length && (
+            <button className="btn-sm" onClick={() => setShowMacro(!showMacro)}>
+              {showMacro ? "收起卷纲" : "卷纲"}
+            </button>
+          )}
+          {canExtend && nextSeg && (
+            <button className="primary btn-sm" disabled={!!busy} onClick={extendBlueprint}
+              title="按卷纲和已写正文的实际走向,展开下一段章节蓝图">
+              {busy.startsWith("展开") && <span className="spin" />}
+              展开下一卷(第 {nextSeg.start}-{nextSeg.end} 章)
+            </button>
+          )}
           {outlines.length > 0 && (
             <>
               <button className="btn-sm" onClick={() => setExpanded(new Set(outlines.map((o) => o.chapter_number)))}>
@@ -191,7 +237,18 @@ export default function OutlinePanel({ pid, outlines, hasArch, onChanged, onGoto
         </div>
         <div className="card-desc mt-2">
           每章都可直接编辑。动了情节的"大改"会自动分析下游影响,由你决定级联范围——不会出现"这里改了那里还是旧的"。
+          {target > 40 && !outlines.length && "长篇采用滚动规划:先出全书卷纲定方向,蓝图只铺第一卷,写到卷尾再按实际剧情展开下一卷——远期章节不再空洞跑偏。"}
         </div>
+        {showMacro && !!project?.macro_plan?.length && (
+          <div className="macro-plan mt-3">
+            {project.macro_plan.map((s, i) => (
+              <div key={i} className={"macro-seg" + (plannedUpto >= s.end ? " done" : plannedUpto >= s.start - 1 ? " current" : "")}>
+                <b>卷{i + 1}(第 {s.start}-{s.end} 章){plannedUpto >= s.end ? " ✓已规划" : plannedUpto + 1 >= s.start && plannedUpto < s.end ? " · 当前" : ""}</b>
+                <div>{s.goal}</div>
+              </div>
+            ))}
+          </div>
+        )}
         {showGen && (
           <div className="mt-3">
             {!hasArch && <div className="msg-err">请先在「架构」生成顶层架构。</div>}

@@ -36,6 +36,8 @@ class ProjectOut(BaseModel):
     synopsis: str | None = None
     setup_state: str | None = None
     chat_log: list[Any] | None = None
+    # 卷纲(滚动规划指南针,长书才有):[{start, end, goal}]
+    macro_plan: list[Any] | None = None
     status: str
     # 列表页进度(list 接口聚合填充;详情接口为 0)
     written_chapters: int = 0

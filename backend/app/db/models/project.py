@@ -39,6 +39,9 @@ class Project(Base, TimestampMixin):
     setup_state: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # 灵感对话记录([{role, content}, ...]):对话式捏概念的持久化,刷新不丢
     chat_log: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
+    # 卷纲(滚动规划的"指南针"):[{start, end, goal}, ...]。长书蓝图只铺当前卷,
+    # 写到卷尾再按卷纲+已成文状态展开下一卷;短书(≤阈值)为 NULL,一次铺完。
+    macro_plan: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
     # draft / outlining / writing / done
     status: Mapped[str] = mapped_column(String(20), default="draft")
 

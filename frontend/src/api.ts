@@ -63,6 +63,8 @@ export interface Project {
   // 列表页进度聚合(仅 GET /projects 填充)
   written_chapters?: number;
   total_words?: number;
+  // 卷纲(滚动规划指南针,长书才有)
+  macro_plan?: { start: number; end: number; goal: string }[] | null;
 }
 export interface Architecture {
   core_seed: string; character_dynamics: string;
@@ -310,6 +312,9 @@ export const api = {
     req<{ job_id: string }>("POST", `/api/projects/${id}/architecture-async`, { tendency }),
   generateBlueprintAsync: (id: number, tendency: Tendency) =>
     req<{ job_id: string }>("POST", `/api/projects/${id}/blueprint-async`, { tendency }),
+  // 滚动规划:展开下一卷蓝图(按卷纲+已成文状态)
+  extendBlueprintAsync: (id: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${id}/blueprint-extend-async`, {}),
   listOutlines: (id: number) => req<Outline[]>("GET", `/api/projects/${id}/outlines`),
 
   editOutline: (pid: number, n: number, updates: Partial<Outline>) =>
