@@ -120,6 +120,9 @@ export default function Reader({
   // ---- 片段润色状态 ----
   const [selPara, setSelPara] = useState<number | null>(null);
   const [polishOpen, setPolishOpen] = useState(false);
+  // 手动改段:选中段落直接改字(和 AI 润色共用替换+同步链路)
+  const [editOpen, setEditOpen] = useState(false);
+  const [editText, setEditText] = useState("");
   const [direction, setDirection] = useState("");
   const [polishing, setPolishing] = useState(false);
   const [polished, setPolished] = useState<string | null>(null);
@@ -171,12 +174,13 @@ export default function Reader({
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if (polishOpen) { closePolish(); return; }
+      if (editOpen) { setEditOpen(false); return; }
       if (selPara != null) { setSelPara(null); return; }
       onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, polishOpen, selPara]);
+  }, [onClose, polishOpen, editOpen, selPara]);
 
   // 卸载时清掉滚动防抖定时器
   useEffect(() => () => {
@@ -213,8 +217,9 @@ export default function Reader({
     } finally { setPolishing(false); }
   }
 
-  async function applyPolish() {
-    if (!polishCtx || !chapter || selText == null || polished == null) return;
+  // 把选中段替换为 replacement 并落库+同步一致性引擎(AI 润色应用与手动修改共用)
+  async function applyReplacement(replacement: string) {
+    if (!polishCtx || !chapter || selText == null) return;
     const source = chapter.final_content;
     // exact match 替换第一次出现;找不到(正文已被别处改过)则报错提示
     const at = source.indexOf(selText);
@@ -222,7 +227,7 @@ export default function Reader({
       setPolishErr("在定稿正文中找不到该段落(可能已被修改),请关闭阅读器重试");
       return;
     }
-    const newContent = source.slice(0, at) + polished + source.slice(at + selText.length);
+    const newContent = source.slice(0, at) + replacement + source.slice(at + selText.length);
     setApplyStage("保存正文…"); setPolishErr("");
     try {
       const updated = await api.editChapterContent(polishCtx.pid, polishCtx.chapterNumber, newContent);
@@ -232,10 +237,16 @@ export default function Reader({
       const { job_id } = await api.reExtractAsync(polishCtx.pid, polishCtx.chapterNumber);
       await pollJob(job_id, { onStage: (s) => setApplyStage(s || "同步一致性引擎…") });
       closePolish();
+      setEditOpen(false);
       setSelPara(null);
     } catch (e) {
       setPolishErr(e instanceof Error ? e.message : String(e));
     } finally { setApplyStage(""); }
+  }
+
+  async function applyPolish() {
+    if (polished == null) return;
+    await applyReplacement(polished);
   }
 
   return (
@@ -370,10 +381,13 @@ export default function Reader({
                   onSelect={polishEnabled ? (i) => setSelPara(i) : undefined}
                 />
               </div>
-              {polishEnabled && selPara != null && !polishOpen && (
+              {polishEnabled && selPara != null && !polishOpen && !editOpen && (
                 <div className="para-tools">
                   <button className="btn-sm primary" onClick={() => setPolishOpen(true)}>
                     ✨ 润色此段
+                  </button>
+                  <button className="btn-sm" onClick={() => { setEditText(selText ?? ""); setEditOpen(true); }}>
+                    ✍️ 手动改
                   </button>
                   <button className="btn-sm" onClick={() => setSelPara(null)}>取消选择</button>
                 </div>
@@ -442,6 +456,29 @@ export default function Reader({
                       </div>
                     </>
                   )}
+                  {polishErr && <div className="msg-err rp-err">{polishErr}</div>}
+                </div>
+              </div>
+            )}
+            {editOpen && selText != null && (
+              <div className="reader-polish" onClick={() => { if (!applyStage) setEditOpen(false); }}>
+                <div className="reader-polish-panel" onClick={(e) => e.stopPropagation()}>
+                  <div className="rp-label">手动修改此段(只动这一段,保存后自动同步一致性引擎)</div>
+                  <textarea
+                    rows={Math.min(12, Math.max(4, Math.ceil(editText.length / 40)))}
+                    value={editText}
+                    autoFocus
+                    onChange={(e) => setEditText(e.target.value)}
+                  />
+                  <div className="rp-actions">
+                    <button className="primary"
+                      disabled={!!applyStage || !editText.trim() || editText === selText}
+                      onClick={() => applyReplacement(editText.trim())}>
+                      {applyStage && <span className="spin" />}
+                      {applyStage || "保存修改"}
+                    </button>
+                    <button disabled={!!applyStage} onClick={() => setEditOpen(false)}>取消</button>
+                  </div>
                   {polishErr && <div className="msg-err rp-err">{polishErr}</div>}
                 </div>
               </div>

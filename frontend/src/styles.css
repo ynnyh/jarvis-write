@@ -1548,3 +1548,26 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 }
 .queue-check { width: 16px; height: 16px; flex-shrink: 0; }
 .badge-draft { background: var(--warn-weak); color: var(--warn); border-color: var(--warn-line); }
+
+/* ---------- 样式修补:步骤条断行 / 移动端横滚 ---------- */
+/* 步骤文字不许竖排断行;窄屏时步骤条整体横向滚动而不是撑破页面 */
+.wiz-step { white-space: nowrap; flex-shrink: 0; }
+.wiz-steps { overflow-x: auto; scrollbar-width: none; }
+.wiz-steps::-webkit-scrollbar { display: none; }
+
+/* 全局防横滚:根容器约束 + 易超宽元素收敛 */
+html, body { max-width: 100%; overflow-x: hidden; }
+.wrap { max-width: 100%; box-sizing: border-box; }
+.onboard-main, .flow-main, .card { min-width: 0; max-width: 100%; box-sizing: border-box; }
+.title-chips, .genre-cards, .entry-cards, .scale-cards { max-width: 100%; }
+.next-bar { flex-wrap: wrap; }
+
+@media (max-width: 640px) {
+  .onboard-side { position: static; }
+  .dossier-cover { width: 110px; max-height: 150px; }
+  .genre-card { max-width: 100%; flex: 1 1 45%; }
+  .entry-card { flex: 1 1 100%; }
+  .stat-strip { flex-wrap: wrap; }
+  .topbar { flex-wrap: wrap; row-gap: 4px; }
+  .toast-viewport { width: calc(100vw - 24px); right: 12px; }
+}
