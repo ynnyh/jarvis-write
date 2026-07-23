@@ -24,6 +24,7 @@ from app.engines.editorial import (
     judge_passed,
     proofread_chapter,
     review_chapter,
+    store_review_snapshot,
 )
 from app.engines.memory import ChapterMemory
 from app.engines.tendency import assemble_tendency
@@ -321,6 +322,7 @@ async def generate_chapter(
     )
     review_result: dict = {}
     revision_rounds = 0
+    proofread_fixed = 0  # 校对累计自动修复的硬伤数(回显给用户看"校对跑过了")
     while True:
         _report(
             "3/6 审校把关"
@@ -331,6 +333,7 @@ async def generate_chapter(
         proof = await proofread_chapter(final)
         if proof["issues"]:
             final, _applied, _failed = apply_proofread_fixes(final, proof["issues"])
+            proofread_fixed += len(_applied)
         # 主审打分 + 按项目阈值硬判达标
         review_result = await review_chapter(final, outline_block)
         if judge_passed(review_result["scores"], threshold):
@@ -354,6 +357,8 @@ async def generate_chapter(
         )
     review_result["revision_rounds"] = revision_rounds
     review_result["threshold"] = threshold
+    review_result["proofread_fixed"] = proofread_fixed
+    reviewed_text = final  # 审校对应的正文(字数守卫可能在其后改动,指纹以此为准)
     logger.info(
         "第 %d 章审校把关完成:达标=%s,四维=%s,回炉 %d 轮",
         chapter_number, review_result.get("passed"),
@@ -397,6 +402,8 @@ async def generate_chapter(
     chapter.outline_version_used = outline.current_version
     chapter.is_stale = False
     chapter.status = "finalized"
+    # 审校快照落库:编辑部打开时回显本次主审结果,免去用户再点一次「请主编审读」
+    store_review_snapshot(chapter, review_result, "generation", reviewed_text)
     db.flush()
     # 正文立刻提交:后面一致性/抽取/摘要还有数分钟 LLM 调用,
     # 不能拿着写锁跨这些 await(会把并发写卡到超时),失败也不该丢正文。

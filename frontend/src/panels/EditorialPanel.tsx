@@ -55,6 +55,17 @@ export default function EditorialPanel({ pid }: Props) {
     }
   }, [tab, audit, pid]);
 
+  // 回显:生成时/手动审校的结果都存在章节上,打开本页直接读最近一次,
+  // 正文改动后指纹失配后端返回 null,不会展示过期评分
+  useEffect(() => {
+    if (tab !== "review" || chapterNum === null) return;
+    let cancelled = false;
+    api.getReview(pid, chapterNum).then((r) => {
+      if (!cancelled && r.review) setReview(r.review);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [tab, chapterNum, pid]);
+
   // 把主编建议打包成重写指令,交接给写作页(localStorage 中转,写作面板挂载时消费)
   function toRewrite(sugs: ReviewSuggestion[]) {
     if (!review) return;
@@ -151,6 +162,16 @@ export default function EditorialPanel({ pid }: Props) {
           {busy && <div className="muted mt-2">{busy}(可切到别处,进度看右上角任务)</div>}
           {review && (
             <div className="mt-3">
+              <div className="review-meta">
+                <span className="badge">{review.source === "generation" ? "生成时审校" : "手动审校"}</span>
+                {review.reviewed_at && (
+                  <span className="hint">{new Date(review.reviewed_at).toLocaleString("zh-CN", {
+                    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+                  })}</span>
+                )}
+                {!!review.revision_rounds && <span className="hint">回炉 {review.revision_rounds} 轮</span>}
+                {!!review.proofread_fixed && <span className="hint">已自动修复 {review.proofread_fixed} 处硬伤</span>}
+              </div>
               <div className="score-row">
                 {Object.entries(review.scores).map(([k, v]) => (
                   <div key={k} className={"score-item" + (v > 0 && v < 6 ? " low" : "")}>

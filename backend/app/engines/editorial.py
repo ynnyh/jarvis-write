@@ -8,6 +8,10 @@
 """
 from __future__ import annotations
 
+import hashlib
+import json
+from datetime import datetime, timezone
+
 from app.engines.consistency.extractor import parse_llm_json
 from app.llm.router import Task, get_adapter_for
 from app.prompts.editorial import PROOFREAD_PROMPT, REVIEW_PROMPT
@@ -124,3 +128,38 @@ def build_revision_directive(review: dict) -> str:
         if seg:
             parts.append(seg)
     return ";".join(parts)[:500]
+
+
+# ---------- 审校快照(编辑部回显用) ----------
+
+def content_hash(text: str) -> str:
+    """正文 SHA-256 指纹(取前 16 位),用于判断审校快照是否对应当前正文。"""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def store_review_snapshot(chapter, review: dict, source: str, content: str) -> None:
+    """把主审结果写进章节快照字段(不 commit,由调用方随事务提交)。
+
+    source: "generation"(生成时审校)/ "manual"(编辑部手动主审)。
+    content: 本次审校所对应的正文——回显时指纹与当前正文一致才显示,
+    正文被编辑/润色/重写/回滚后自动失效,不会给用户看过期的评分。
+    """
+    snapshot = dict(review)
+    snapshot["source"] = source
+    snapshot["reviewed_at"] = datetime.now(timezone.utc).isoformat()
+    snapshot["content_hash"] = content_hash(content)
+    chapter.review_snapshot = json.dumps(snapshot, ensure_ascii=False)
+
+
+def load_review_snapshot(chapter) -> dict | None:
+    """读取章节审校快照;无快照、损坏或正文已改动(指纹不符)时返回 None。"""
+    raw = getattr(chapter, "review_snapshot", "") or ""
+    if not raw.strip():
+        return None
+    try:
+        snapshot = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    if snapshot.get("content_hash") != content_hash(chapter.final_content or ""):
+        return None
+    return snapshot

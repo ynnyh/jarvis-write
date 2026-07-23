@@ -327,6 +327,12 @@ export interface ChapterReview {
   // 后端按项目阈值硬判是否达标(四维均需 >= threshold)
   passed?: boolean;
   threshold?: number;
+  // 审校快照元信息:来源(generation=生成时审校 / manual=手动主审)、时间、
+  // 回炉轮数、生成时校对自动修复的硬伤数(回显时展示)
+  source?: "generation" | "manual";
+  reviewed_at?: string;
+  revision_rounds?: number;
+  proofread_fixed?: number;
 }
 export interface ProofIssue { type: string; original: string; suggestion: string; reason: string; }
 export interface AuditReport {
@@ -490,6 +496,9 @@ export const api = {
     req<{ prose: EditorAction[]; outline: EditorAction[] }>("GET", "/api/editorial/actions"),
   reviewChapterAsync: (pid: number, n: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/chapters/${n}/review-async`, {}),
+  // 回显:最近一次主审结果(生成时或手动);正文改动后为 null
+  getReview: (pid: number, n: number) =>
+    req<{ review: ChapterReview | null }>("GET", `/api/projects/${pid}/chapters/${n}/review`),
   proofreadAsync: (pid: number, n: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/chapters/${n}/proofread-async`, {}),
   proofreadApply: (pid: number, n: number, fixes: { original: string; suggestion: string }[]) =>

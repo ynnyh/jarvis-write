@@ -1707,6 +1707,7 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .ed-tab b { display: block; font-size: var(--fs-md); }
 .ed-tab span { display: block; color: var(--text-2); font-size: var(--fs-xs); margin-top: 2px; }
 
+.review-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
 .score-row { display: flex; gap: 12px; flex-wrap: wrap; }
 .score-item {
   flex: 1 1 90px;

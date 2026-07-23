@@ -34,6 +34,10 @@ class Chapter(Base, TimestampMixin):
     is_stale: Mapped[bool] = mapped_column(Boolean, default=False)
     # empty / drafting / drafted / finalized / stale
     status: Mapped[str] = mapped_column(String(20), default="empty")
+    # 最近一次主审结果快照(JSON):四维分/短评/建议/达标/回炉轮数/来源/时间 +
+    # 正文指纹(content_hash)。编辑部打开时指纹一致才回显,正文改动自动失效,
+    # 避免用户对着已改过的正文重复点「请主编审读」。
+    review_snapshot: Mapped[str] = mapped_column(Text, default="")
 
 
 class ChapterVersion(Base):
