@@ -228,6 +228,33 @@ def _claim_orphans(db: Session, admin_id: int) -> None:
             logger.info("迁移:%s 归属 admin 共 %d 行", table, result.rowcount)
 
 
+def _encrypt_existing_keys() -> None:
+    """把 provider_settings 里历史明文 api_key 加密回写(幂等:已加密的跳过)。
+
+    key 加密上线前存的是明文;上线后新写的带 ENC_PREFIX。这里把存量明文补加密,
+    之后 factory._db_settings 统一解密即可(见 app/crypto.py)。
+    """
+    from app.crypto import ENC_PREFIX, encrypt
+
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "provider_settings" not in insp.get_table_names():
+            return
+        rows = conn.execute(
+            text("SELECT id, api_key FROM provider_settings")
+        ).fetchall()
+        migrated = 0
+        for row_id, api_key in rows:
+            if api_key and not api_key.startswith(ENC_PREFIX):
+                conn.execute(
+                    text("UPDATE provider_settings SET api_key = :k WHERE id = :i"),
+                    {"k": encrypt(api_key), "i": row_id},
+                )
+                migrated += 1
+        if migrated:
+            logger.info("迁移:%d 条历史明文 LLM key 已加密", migrated)
+
+
 def run_migrations() -> None:
     """启动时调用。幂等。"""
     _add_user_id_columns()
@@ -238,6 +265,7 @@ def run_migrations() -> None:
     _add_retired_column()
     _add_word_guard_columns()
     _disable_word_guard_default()
+    _encrypt_existing_keys()
     with session_scope() as db:
         admin = _ensure_admin(db)
         db.flush()

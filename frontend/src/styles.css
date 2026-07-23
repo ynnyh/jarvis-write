@@ -978,6 +978,10 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 }
 /* 窄屏换行点:仅 ≤640px 媒体查询里显示(见文件底部) */
 .reader-head-br { display: none; }
+/* 同步询问/角标条:夹在头部与正文之间,非阻塞(不挡阅读/翻章) */
+.reader-sync-bar { padding: 10px 20px 0; flex-shrink: 0; }
+.reader-sync-bar .sync-badge { margin-bottom: 0; }
+@media (max-width: 640px) { .reader-sync-bar { padding: 8px 14px 0; } }
 .reader-title { flex: 1; margin: 0; min-width: 200px; font-size: var(--fs-lg); }
 .reader-tabs { display: flex; gap: 2px; background: var(--surface-2); border-radius: 999px; padding: 2px; }
 .reader-tab {

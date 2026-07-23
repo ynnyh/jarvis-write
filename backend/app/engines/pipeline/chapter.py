@@ -347,11 +347,12 @@ async def generate_chapter(
     # ---- 章后抽取:状态变化写回圣经/伏笔表(闭环) ----
     _report("4/5 抽取状态写入故事圣经")
     logger.info("第 %d 章:抽取状态变化...", chapter_number)
+    # extract_and_apply 自管事务纪律(入口丢掉上面 check_chapter 遗留的读快照、
+    # LLM 前后各提交),故这里无需再手工 commit —— S1「越写到后面越容易在 4/5 抽取处
+    # 随机报 database is locked」的根因正在于此前少了这道快照释放。
     extraction_stats = await extract_and_apply(
         db, project.id, chapter_number, final
     )
-    # 圣经/伏笔写入立刻提交,别拿着写锁跨下面的摘要 LLM 调用
-    db.commit()
 
     # ---- 滚动摘要更新 ----
     _report("5/5 更新前情摘要")

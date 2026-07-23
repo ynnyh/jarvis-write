@@ -59,6 +59,23 @@ logging.basicConfig(
 logger = logging.getLogger("jarvis-write")
 
 
+def _assert_secure_config() -> None:
+    """生产环境(APP_ENV=prod)拒绝以弱默认 JWT 密钥启动。
+
+    弱 jwt_secret 可被任何人用来伪造任意 user_id 的 JWT → 接管账号、读所有人的
+    小说与 per-user key。docker-compose 已用 ${JWT_SECRET:?} 强制,此处是「不走
+    compose、裸 uvicorn/docker run 起服务」时的兜底。dev 放行,不打扰本地开发/测试。
+    """
+    from app.config import DEFAULT_JWT_SECRET, get_settings
+
+    settings = get_settings()
+    if settings.app_env != "dev" and settings.jwt_secret == DEFAULT_JWT_SECRET:
+        raise RuntimeError(
+            "JWT_SECRET 仍是弱默认值,拒绝在非 dev 环境启动:请用环境变量设一个随机长串"
+            "(否则任何人都能伪造 JWT 接管账号)。见 docs/06-改造方案。"
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """启动时建表 + 幂等迁移。
@@ -66,6 +83,7 @@ async def lifespan(app: FastAPI):
     不用 Alembic:create_all 建缺失的表,migrate.py 负责给旧表补列、
     建初始 admin、把存量无主数据归到 admin(全部幂等,每次启动都跑)。
     """
+    _assert_secure_config()  # 生产弱密钥即拒启动(见函数注释)
     logger.info("建表中(SQLite)...")
     Base.metadata.create_all(bind=engine)
     logger.info("建表完成,运行多用户迁移...")
@@ -93,6 +111,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # 登录/注册按 IP 限流,挡撞库 / 批量刷号(单进程内存计数,见 ratelimit.py)
+    if settings.rate_limit_enabled:
+        from app.ratelimit import RateLimitMiddleware
+        app.add_middleware(RateLimitMiddleware)
 
     app.include_router(system_router)
     app.include_router(auth_router)

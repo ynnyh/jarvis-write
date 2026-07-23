@@ -51,6 +51,8 @@ def _db_settings() -> dict[str, dict]:
         if uid is None:
             return {}
 
+        from app.crypto import decrypt
+
         with session_scope() as db:
             rows = (
                 db.query(ProviderSetting)
@@ -59,7 +61,8 @@ def _db_settings() -> dict[str, dict]:
             )
             return {
                 r.provider: {
-                    "api_key": r.api_key,
+                    # 库里存的是密文(历史明文兼容),用时解密
+                    "api_key": decrypt(r.api_key),
                     "base_url": r.base_url,
                     "model": r.model,
                     "is_default": r.is_default,

@@ -11,6 +11,8 @@ services:
       - DATABASE_URL=sqlite:////srv/data/jarvis_write.db
       - CHROMA_PERSIST_DIR=/srv/data/chroma_data
       # ===== 多用户认证 =====
+      # 运行环境:prod → 启动自检拒绝弱默认 JWT 密钥(见 app/main.py、docs/06)
+      - APP_ENV=prod
       # 注册邀请码:固定共享码,发给要注册的人;留空则关闭注册。
       - INVITE_CODE=${INVITE_CODE:-}
       # JWT 签名密钥:务必设成随机长串(否则 token 可被伪造)。
