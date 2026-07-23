@@ -203,7 +203,8 @@ export default function AdminPage() {
             {busy && <span className="spin" />}创建
           </button>
         </div>
-        <table className="tbl" style={{ marginTop: 12 }}>
+        <div className="tbl-wrap">
+        <table className="tbl">
           <thead>
             <tr>
               <th>邀请码</th>
@@ -228,11 +229,13 @@ export default function AdminPage() {
             ))}
           </tbody>
         </table>
+        </div>
         {!codes.length && !legacy && <div className="muted">暂无邀请码</div>}
       </div>
 
       <div className="card">
         <div className="card-head"><h2>用户列表</h2></div>
+        <div className="tbl-wrap">
         <table className="tbl">
           <thead>
             <tr>
@@ -275,6 +278,7 @@ export default function AdminPage() {
             ))}
           </tbody>
         </table>
+        </div>
         {!users.length && !err && <div className="muted">加载中…</div>}
       </div>
 

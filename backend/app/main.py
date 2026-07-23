@@ -144,9 +144,18 @@ def create_app() -> FastAPI:
         return FileResponse(_static_dir / "settings.html")
 
     if _frontend_dist.exists():
+        # index.html 强制不缓存:否则浏览器缓存了旧 index,会一直引用旧哈希的
+        # JS/CSS,用户看不到更新。带哈希的 assets 可放心长缓存(文件名变即失效)。
+        class _NoCacheHTMLStatic(StaticFiles):
+            async def get_response(self, path, scope):
+                resp = await super().get_response(path, scope)
+                if path.endswith(".html") or path in ("", "."):
+                    resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+                return resp
+
         app.mount(
             "/app",
-            StaticFiles(directory=_frontend_dist, html=True),
+            _NoCacheHTMLStatic(directory=_frontend_dist, html=True),
             name="frontend",
         )
 

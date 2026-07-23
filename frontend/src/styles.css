@@ -879,6 +879,8 @@ table.tbl th, table.tbl td {
 }
 table.tbl th { color: var(--text-2); font-weight: 500; background: var(--surface-2); }
 table.tbl tbody tr:hover { background: var(--surface-2); }
+/* 宽表格滚动容器:表格超宽时容器内横向滚动,表格保持 table 布局(表头/内容列对齐) */
+.tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
 /* ==========================================================================
    章节阅读器(阅读模式):窄屏全屏,宽屏居中浮层
@@ -1220,6 +1222,16 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 .rd-input { margin-top: 12px; }
 .rd-input textarea { width: 100%; resize: vertical; }
 
+/* 架构研讨:对话流(复用 rd-*)+ AI 整理出的调整要求块 */
+.arch-discuss { display: flex; flex-direction: column; }
+.arch-discuss .rd-log { max-height: 46vh; border: 1px solid var(--line); border-radius: var(--r-md); }
+.arch-directive {
+  margin-top: 12px; padding: 12px;
+  background: var(--brand-weak); border: 1px solid var(--brand-line);
+  border-radius: var(--r-md);
+}
+.arch-directive textarea { width: 100%; resize: vertical; margin-top: 6px; }
+
 /* ==========================================================================
    响应式:≤900px 折叠布局;≤640px 触摸优化
    ========================================================================== */
@@ -1275,18 +1287,17 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
   input[type="number"],
   textarea,
   select { font-size: 16px; }
-
-  .chip { padding: 8px 14px; }
-  .narrow { max-width: 100%; }
-
-  /* 大纲折叠行:收紧内边距,标题已做省略号截断 */
-  .outline-item { padding: 10px 14px; }
-
-  .auth-card { padding: 28px 22px 22px; }
-  .auth-wrap { padding: var(--sp-4); }
-
-  /* 宽表格横向滑动,避免撑破布局 */
-  table.tbl { display: block; overflow-x: auto; white-space: nowrap; }
+  /* 故事概念:窄屏单列,标签转行首左对齐,值另起一行平铺(不再双列窄条)*/
+  .concept-grid { grid-template-columns: 1fr; gap: 10px 0; }
+  .concept-field { flex-direction: column; gap: 2px; }
+  .cf-label { text-align: left; min-width: 0; }
+  /* card-head 按钮行:窄屏按钮不挤压;标题占位收紧,按钮可自然换行 */
+  .card-head { gap: 8px 10px; }
+  .card-head button { flex-shrink: 0; }
+  /* 架构研讨对话:窄屏给更高的可视区 */
+  .arch-discuss .rd-log { max-height: 60vh; }
+  /* 宽表格:保持 table 布局(表头/内容列对齐),滚动交给 .tbl-wrap 容器 */
+  table.tbl { white-space: nowrap; }
 
   /* 顶栏:收紧间距;GitHub 链接在登录页/文档里也有入口,窄屏藏掉防破行 */
   .topbar { padding: 8px 12px; gap: 8px 12px; align-items: center; }

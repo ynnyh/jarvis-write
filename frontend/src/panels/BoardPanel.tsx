@@ -473,6 +473,7 @@ function ForeshadowBoard({ pid, outlines }: Props) {
       <div className="hint mt-1">AI 判定不准时可手动干预:弃用、标记已回收、改预期回收章。</div>
       {err && <div className="msg-err mt-2">{err}</div>}
       <div className="ov-scroll">
+      <div className="tbl-wrap">
       <table className="tbl">
         <thead>
           <tr><th>状态</th><th>伏笔</th><th>埋设</th><th>预期回收</th><th>实际回收</th><th>强化于</th><th>操作</th></tr>
@@ -527,6 +528,7 @@ function ForeshadowBoard({ pid, outlines }: Props) {
           ))}
         </tbody>
       </table>
+      </div>
       </div>
       {!foreshadows.length && <div className="muted">暂无登记伏笔。</div>}
     </div>

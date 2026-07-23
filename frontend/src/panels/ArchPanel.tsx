@@ -143,17 +143,6 @@ export default function ArchPanel({ project, arch, onChanged }: Props) {
         {err && <div className="msg-err mt-2">{err}</div>}
       </div>
 
-      {arch && BLOCKS.map((b) => (
-        <div key={b.key} className="card arch-block">
-          <h3>{b.label} <span className="hint">· {b.hint}</span></h3>
-          <textarea
-            rows={Math.min(14, Math.max(4, (form[b.key] ?? "").split("\n").length + 1))}
-            value={form[b.key] ?? ""}
-            onChange={(e) => { setForm({ ...form, [b.key]: e.target.value }); setDirty(true); }}
-          />
-        </div>
-      ))}
-
       {arch && (
         <div className="card">
           <div className="card-head">
@@ -219,6 +208,17 @@ export default function ArchPanel({ project, arch, onChanged }: Props) {
           )}
         </div>
       )}
+
+      {arch && BLOCKS.map((b) => (
+        <div key={b.key} className="card arch-block">
+          <h3>{b.label} <span className="hint">· {b.hint}</span></h3>
+          <textarea
+            rows={Math.min(14, Math.max(4, (form[b.key] ?? "").split("\n").length + 1))}
+            value={form[b.key] ?? ""}
+            onChange={(e) => { setForm({ ...form, [b.key]: e.target.value }); setDirty(true); }}
+          />
+        </div>
+      ))}
 
       {arch && (
         <div className="card">
