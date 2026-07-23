@@ -7,6 +7,7 @@ import { Toaster } from "./ui/Toaster";
 import { ConfirmHost } from "./ui/ConfirmDialog";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { TaskCenterBadge, TaskCenterProvider } from "./ui/TaskCenter";
+import UpdateBanner from "./ui/UpdateBanner";
 
 export default function App() {
   const [tokens, setTokens] = useState<string>("");
@@ -91,6 +92,7 @@ export default function App() {
         <span className="muted" title={me.is_admin ? "管理员" : "用户"}>{me.username}</span>
         <a className="linkbtn" onClick={logout}>退出</a>
       </div>
+      <UpdateBanner />
       {llmConfigured === false && (
         <div className="llm-banner">
           还没有配置模型——大部分功能需要模型才能工作。

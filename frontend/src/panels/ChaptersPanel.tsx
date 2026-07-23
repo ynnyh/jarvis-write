@@ -88,6 +88,18 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
     } catch (e) { toast.err("开关保存失败", String(e)); }
   }
 
+  // 编辑部审校把关配置:达标线 / 自动回炉开关 / 回炉上限。改完即存,失效缓存重拉。
+  async function patchReview(patch: {
+    review_pass_threshold?: number;
+    review_auto_revise?: boolean;
+    review_max_revisions?: number;
+  }) {
+    try {
+      await api.patchProject(pid, patch);
+      await invalidateProject();
+    } catch (e) { toast.err("审校配置保存失败", String(e)); }
+  }
+
   // 编辑部「按此重写」交接:挂载时消费预填的重写意见,展开对应章的重写框
   useEffect(() => {
     const raw = localStorage.getItem(`revise-draft-${pid}`);
@@ -478,6 +490,32 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
               <b className="hint">超标自动压缩/拆章,默认关闭</b>
             </span>
           </label>
+        </div>
+        <div className="card card-compact mt-2">
+          <label className="guard-toggle">
+            <input type="checkbox" checked={project.review_auto_revise !== false}
+              onChange={(e) => patchReview({ review_auto_revise: e.target.checked })} />
+            <span>
+              生成时审校把关
+              <b className="hint">定稿后自动校对修硬伤 + 主审打分,不达标带意见回炉</b>
+            </span>
+          </label>
+          <div className="mt-2 review-config">
+            <label className="hint">
+              达标线 四维均≥{" "}
+              <select value={project.review_pass_threshold ?? 7}
+                onChange={(e) => patchReview({ review_pass_threshold: Number(e.target.value) })}>
+                {[6, 7, 8, 9].map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </label>
+            <label className="hint">
+              回炉上限{" "}
+              <select value={project.review_max_revisions ?? 3}
+                onChange={(e) => patchReview({ review_max_revisions: Number(e.target.value) })}>
+                {[0, 1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n} 轮</option>)}
+              </select>
+            </label>
+          </div>
         </div>
       </div>
 

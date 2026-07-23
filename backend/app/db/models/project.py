@@ -31,6 +31,12 @@ class Project(Base, TimestampMixin):
     word_guard_enabled: Mapped[bool] = mapped_column(default=False)
     word_guard_ratio: Mapped[float] = mapped_column(default=1.5)
     auto_split_enabled: Mapped[bool] = mapped_column(default=False)
+    # 编辑部审校把关(生成时):定稿后自动跑校对(硬伤自修)+ 主审打分,不达标则
+    # 带主审意见自动回炉重走草稿+定稿,有上限。与字数守卫同类的按项目生成偏好。
+    # 阈值=四维(情节/文笔/节奏/人物)均需 >= 此值才算达标,默认 7,用户可调到 8/9。
+    review_pass_threshold: Mapped[int] = mapped_column(Integer, default=7)
+    review_auto_revise: Mapped[bool] = mapped_column(default=True)
+    review_max_revisions: Mapped[int] = mapped_column(Integer, default=3)
     # 全局倾向:标签组合 JSON,如 {"pace": "快节奏", "tone": ["热血"], ...}
     global_tendency: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     # 结构化故事概念(灵感工坊产出):logline/hook/twist/protagonist/conflict/setting

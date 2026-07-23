@@ -159,6 +159,14 @@ export default function EditorialPanel({ pid }: Props) {
                   </div>
                 ))}
               </div>
+              {review.passed !== undefined && (
+                <div className="mt-2">
+                  <span className={"badge " + (review.passed ? "ok" : "err")}>
+                    {review.passed ? "已达达标线" : "未达达标线"}
+                    {review.threshold ? `（四维均需 ≥${review.threshold}）` : ""}
+                  </span>
+                </div>
+              )}
               {review.comment && <div className="notice notice-info mt-3">{review.comment}</div>}
               {review.suggestions.length > 0 && (
                 <div className="mt-3">

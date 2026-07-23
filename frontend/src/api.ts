@@ -93,6 +93,10 @@ export interface Project {
   // 字数守卫:超标自动压缩/拆章,默认关闭(写作页开关控制)
   word_guard_enabled?: boolean;
   auto_split_enabled?: boolean;
+  // 编辑部审校把关(生成时):定稿后自动校对+主审打分,不达标带意见有上限回炉
+  review_pass_threshold?: number;
+  review_auto_revise?: boolean;
+  review_max_revisions?: number;
   global_tendency: Tendency; status: string;
   concept?: Concept | null;
   synopsis?: string | null;
@@ -135,6 +139,15 @@ export interface GenerateChapterResponse extends ChapterDetail {
     part_b_words: number;
     total_chapters_now: number;
     reason: string;
+  };
+  // 生成时编辑部审校把关结果(校对+主审+有上限回炉)
+  review?: {
+    scores: { plot: number; prose: number; pacing: number; character: number };
+    comment: string;
+    suggestions: ReviewSuggestion[];
+    passed: boolean;
+    revision_rounds: number;
+    threshold: number;
   };
 }
 /** 章节正文历史版本(覆盖前的快照)。source: generated/polished/edited/restored */
@@ -311,6 +324,9 @@ export interface ChapterReview {
   scores: { plot: number; prose: number; pacing: number; character: number };
   comment: string;
   suggestions: ReviewSuggestion[];
+  // 后端按项目阈值硬判是否达标(四维均需 >= threshold)
+  passed?: boolean;
+  threshold?: number;
 }
 export interface ProofIssue { type: string; original: string; suggestion: string; reason: string; }
 export interface AuditReport {
@@ -327,6 +343,10 @@ export interface AuditReport {
 // ---------- 接口 ----------
 export const api = {
   health: () => req<{ status: string; providers: ProviderState }>("GET", "/api/health"),
+  // 更新提醒:当前部署的 git commit + 最新一条更新日志(公开接口)
+  getVersion: () =>
+    req<{ commit: string; changelog: { title: string; body: string } }>(
+      "GET", "/api/version"),
   // 当前用户是否配置了至少一个可用模型(全局引导横幅用)
   providerStatus: () =>
     req<{ configured: boolean; providers: Record<string, boolean> }>(

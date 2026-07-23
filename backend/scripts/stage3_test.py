@@ -203,13 +203,19 @@ async def test_integration() -> None:
     async def no_ret(self, q, **k): return []
     async def no_check(*a, **k): return []
     async def no_extract(*a, **k): return {"bible": {"facts": 1}}
+    async def no_proofread(*a, **k): return {"issues": []}
+    async def no_review(*a, **k):
+        return {"scores": {"plot": 9, "prose": 9, "pacing": 9, "character": 9},
+                "comment": "", "suggestions": []}
 
     with patch.object(ch_mod, "get_adapter_for", return_value=adapter), \
          patch.object(ch_mod.ChapterMemory, "add_chapter", no_add), \
          patch.object(ch_mod.ChapterMemory, "retrieve", no_ret), \
          patch.object(ch_mod, "check_chapter", no_check), \
-         patch.object(ch_mod, "extract_and_apply", no_extract):
-        _c, issues, stats, _guard = await ch_mod.generate_chapter(db, p, 4)
+         patch.object(ch_mod, "extract_and_apply", no_extract), \
+         patch.object(ch_mod, "proofread_chapter", no_proofread), \
+         patch.object(ch_mod, "review_chapter", no_review):
+        _c, issues, stats, _guard, _review = await ch_mod.generate_chapter(db, p, 4)
 
     draft_prompt = adapter.prompts[0]
     ok = ("左手已截肢" in draft_prompt and "断刀的秘密" in draft_prompt

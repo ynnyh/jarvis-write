@@ -1,6 +1,10 @@
 services:
   jarvis-write:
-    build: .
+    build:
+      context: .
+      args:
+        # 部署时设 GIT_COMMIT=$(git rev-parse --short HEAD) 烤入当前提交号(更新提醒用)
+        GIT_COMMIT: ${GIT_COMMIT:-dev}
     container_name: jarvis-write
     ports:
       # 宿主机端口可用 PORT 覆盖(服务器上 8000 被占用时用 8080)

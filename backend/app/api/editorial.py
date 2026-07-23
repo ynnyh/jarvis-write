@@ -23,10 +23,13 @@ from app.auth import get_current_user
 from app.chapter_versions import snapshot_chapter
 from app.db.models import Chapter, Foreshadowing, Outline
 from app.db.session import get_db
-from app.engines.consistency.extractor import parse_llm_json
+from app.engines.editorial import (
+    apply_proofread_fixes,
+    judge_passed,
+    proofread_chapter,
+    review_chapter,
+)
 from app.jobs import list_running, spawn_job
-from app.llm.router import Task, get_adapter_for
-from app.prompts.editorial import PROOFREAD_PROMPT, REVIEW_PROMPT
 
 router = APIRouter(tags=["editorial"], dependencies=[Depends(get_current_user)])
 
@@ -60,7 +63,7 @@ def _chapter_with_content(db: Session, project_id: int, n: int) -> Chapter:
 
 @router.post("/api/projects/{project_id}/chapters/{n}/review-async")
 async def review_async(project_id: int, n: int, db: Session = Depends(get_db)):
-    get_project_or_404(db, project_id)
+    project = get_project_or_404(db, project_id)
     ch = _chapter_with_content(db, project_id, n)
     for jid, job in list_running(f"review-{project_id}-"):
         if job["kind"] == f"review-{project_id}-{n}":
@@ -74,42 +77,17 @@ async def review_async(project_id: int, n: int, db: Session = Depends(get_db)):
         f"标题:{outline.title}\n目的:{outline.chapter_purpose}\n概要:{outline.summary}"
         if outline else "(无蓝图)"
     )
-    prompt = REVIEW_PROMPT.format(outline_block=outline_block, content=ch.final_content)
     content = ch.final_content
+    threshold = project.review_pass_threshold
 
     async def work(progress):
         progress(f"主编正在审读第 {n} 章")
-        raw = await get_adapter_for(Task.CONSISTENCY).ask(prompt)
-        data = parse_llm_json(raw)
-        scores = data.get("scores") or {}
-        # 分数钳制到 1-10 整数,缺维度补 0(前端显示"—")
-        clean = {
-            k: max(1, min(10, int(scores.get(k) or 0))) if scores.get(k) else 0
-            for k in ("plot", "prose", "pacing", "character")
-        }
-        # 建议:结构化 {evidence, issue, fix};evidence 必须在正文里逐字存在(防举证幻觉),
-        # 找不到的置空但保留建议本身。兼容模型退化输出纯字符串的情况。
-        suggestions = []
-        for s in (data.get("suggestions") or [])[:3]:
-            if isinstance(s, str):
-                suggestions.append({"evidence": "", "issue": s.strip(), "fix": ""})
-                continue
-            if not isinstance(s, dict):
-                continue
-            evidence = str(s.get("evidence") or "").strip()
-            if evidence and evidence not in content:
-                evidence = ""
-            suggestions.append({
-                "evidence": evidence,
-                "issue": str(s.get("issue") or "").strip(),
-                "fix": str(s.get("fix") or "").strip(),
-            })
-        return {
-            "chapter_number": n,
-            "scores": clean,
-            "comment": str(data.get("comment") or "").strip(),
-            "suggestions": [s for s in suggestions if s["issue"] or s["fix"]],
-        }
+        result = await review_chapter(content, outline_block)
+        result["chapter_number"] = n
+        # 达标与否由后端按项目阈值硬判,不靠模型自报
+        result["passed"] = judge_passed(result["scores"], threshold)
+        result["threshold"] = threshold
+        return result
 
     return {"job_id": spawn_job(f"review-{project_id}-{n}", work)}
 
@@ -124,30 +102,12 @@ async def proofread_async(project_id: int, n: int, db: Session = Depends(get_db)
         if job["kind"] == f"proofread-{project_id}-{n}":
             return {"job_id": jid}
     content = ch.final_content
-    prompt = PROOFREAD_PROMPT.format(content=content)
 
     async def work(progress):
         progress(f"校对正在逐句检查第 {n} 章")
-        raw = await get_adapter_for(Task.CONSISTENCY).ask(prompt)
-        data = parse_llm_json(raw)
-        issues = []
-        for it in (data.get("issues") or [])[:20]:
-            if not isinstance(it, dict):
-                continue
-            original = str(it.get("original") or "")
-            suggestion = str(it.get("suggestion") or "")
-            # 只保留能在正文中唯一/首次定位到的问题,幻觉片段直接丢弃
-            if not original or not suggestion or original == suggestion:
-                continue
-            if original not in content:
-                continue
-            issues.append({
-                "type": str(it.get("type") or "typo"),
-                "original": original,
-                "suggestion": suggestion,
-                "reason": str(it.get("reason") or "").strip(),
-            })
-        return {"chapter_number": n, "issues": issues}
+        result = await proofread_chapter(content)
+        result["chapter_number"] = n
+        return result
 
     return {"job_id": spawn_job(f"proofread-{project_id}-{n}", work)}
 
@@ -166,20 +126,7 @@ async def proofread_apply(
     """
     get_project_or_404(db, project_id)
     ch = _chapter_with_content(db, project_id, n)
-    content = ch.final_content
-    applied, failed = [], []
-    for fix in req.fixes:
-        original = str(fix.get("original") or "")
-        suggestion = str(fix.get("suggestion") or "")
-        if not original or original == suggestion:
-            failed.append({"original": original, "reason": "无效修复项"})
-            continue
-        at = content.find(original)
-        if at < 0:
-            failed.append({"original": original, "reason": "正文中已找不到该片段"})
-            continue
-        content = content[:at] + suggestion + content[at + len(original):]
-        applied.append({"original": original, "suggestion": suggestion})
+    content, applied, failed = apply_proofread_fixes(ch.final_content, req.fixes)
     if applied:
         snapshot_chapter(db, ch, source="edited")
         ch.final_content = content

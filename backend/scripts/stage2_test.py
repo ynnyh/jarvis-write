@@ -148,12 +148,21 @@ async def test_chapter_flow() -> None:
     async def no_extract(*a, **kw):
         return {}
 
+    async def no_proofread(*a, **kw):
+        return {"issues": []}
+
+    async def no_review(*a, **kw):
+        return {"scores": {"plot": 9, "prose": 9, "pacing": 9, "character": 9},
+                "comment": "", "suggestions": []}
+
     with patch.object(ch_mod, "get_adapter_for", return_value=adapter), \
          patch.object(ch_mod.ChapterMemory, "add_chapter", no_add), \
          patch.object(ch_mod.ChapterMemory, "retrieve", no_retrieve), \
          patch.object(ch_mod, "check_chapter", no_check), \
-         patch.object(ch_mod, "extract_and_apply", no_extract):
-        c1, _issues, _stats, _guard = await ch_mod.generate_chapter(
+         patch.object(ch_mod, "extract_and_apply", no_extract), \
+         patch.object(ch_mod, "proofread_chapter", no_proofread), \
+         patch.object(ch_mod, "review_chapter", no_review):
+        c1, _issues, _stats, _guard, _review = await ch_mod.generate_chapter(
             db, p, 1, {"emotion_intensity": "平实"}
         )
         db.commit()
@@ -175,7 +184,7 @@ async def test_chapter_flow() -> None:
         check("逐章: 滚动摘要落库", s1 is not None and "前情摘要" in s1.rolling_summary)
 
         # 第 2 章:应注入第 1 章结尾与滚动摘要
-        c2, _, _, _ = await ch_mod.generate_chapter(db, p, 2)
+        c2, _, _, _, _ = await ch_mod.generate_chapter(db, p, 2)
         db.commit()
         draft2 = adapter.prompts[3]
         ok = ("(第1章结尾)" in draft2 and "前情摘要:主角完成了第一步" in draft2

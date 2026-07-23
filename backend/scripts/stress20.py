@@ -84,7 +84,7 @@ async def main(n_chapters: int) -> int:
         try:
             with session_scope() as db:
                 project = db.get(Project, pid)
-                chapter, issues, stats, _guard = await generate_chapter(db, project, n)
+                chapter, issues, stats, _guard, _review = await generate_chapter(db, project, n)
                 flavor = ai_flavor_report(chapter.final_content)
                 log_line({
                     "event": "chapter", "n": n,

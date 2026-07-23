@@ -296,6 +296,10 @@ class ProjectPatch(BaseModel):
     # 字数守卫开关(写作页):超标自动压缩/拆章,默认关闭
     word_guard_enabled: bool | None = None
     auto_split_enabled: bool | None = None
+    # 编辑部审校把关:达标阈值(四维均需 >=,1-10)/ 自动回炉开关 / 回炉上限(0-5)
+    review_pass_threshold: int | None = Field(default=None, ge=1, le=10)
+    review_auto_revise: bool | None = None
+    review_max_revisions: int | None = Field(default=None, ge=0, le=5)
     global_tendency: dict | None = None
     concept: Concept | None = None
     synopsis: str | None = None

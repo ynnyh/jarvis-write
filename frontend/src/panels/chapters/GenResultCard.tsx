@@ -24,6 +24,24 @@ export default function GenResultCard({ result }: { result: GenerateChapterRespo
             ))}
           </div>
         : <span className="badge ok">一致性检查通过</span>}
+      {result.review && (
+        <div className="mt-2">
+          <span className={"badge " + (result.review.passed ? "ok" : "err")}>
+            {result.review.passed ? "审校达标" : "审校未达标"}
+          </span>
+          <span className="muted">
+            {" "}情节{result.review.scores.plot}·文笔{result.review.scores.prose}·
+            节奏{result.review.scores.pacing}·人物{result.review.scores.character}
+            （达标线{result.review.threshold}）
+          </span>
+          {result.review.revision_rounds > 0 && (
+            <span className="badge"> 自动回炉 {result.review.revision_rounds} 轮</span>
+          )}
+          {result.review.comment && (
+            <div className="muted">主审:{result.review.comment}</div>
+          )}
+        </div>
+      )}
       {result.word_guard_action === "compressed" && (
         <div className="mt-2">
           <span className="badge">字数守卫:已压缩至目标范围</span>

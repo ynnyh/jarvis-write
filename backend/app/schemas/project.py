@@ -34,6 +34,10 @@ class ProjectOut(BaseModel):
     # 字数守卫开关(写作页):超标自动压缩/拆章,默认关闭
     word_guard_enabled: bool = False
     auto_split_enabled: bool = False
+    # 编辑部审校把关(生成时自动校对+主审+有上限回炉)
+    review_pass_threshold: int = 7
+    review_auto_revise: bool = True
+    review_max_revisions: int = 3
     global_tendency: dict[str, Any]
     concept: Concept | None = None
     synopsis: str | None = None

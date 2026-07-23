@@ -8,6 +8,10 @@
 """
 from __future__ import annotations
 
+import os
+import re
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.auth import get_current_user
@@ -68,3 +72,37 @@ async def ping_llm(req: PingLLMRequest) -> PingLLMResponse:
         embedding_ok=emb_ok,
         embedding_error=emb_err,
     )
+
+
+# CHANGELOG.md 在仓库根目录;容器里 Dockerfile 把它拷到 /srv(即本文件的 parents[3])。
+# 开发态 parents[3] 就是仓库根,同样命中。找不到则返回空,不报错。
+_CHANGELOG_PATH = Path(__file__).resolve().parents[3] / "CHANGELOG.md"
+
+
+def _latest_changelog(path: Path = _CHANGELOG_PATH) -> dict:
+    """解析 CHANGELOG.md 最新(第一个)一条 "## " 段,返回 {title, body}。"""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {"title": "", "body": ""}
+    # 按行首 "## " 切段;第 0 段是 "# 更新日志" 文件头,第 1 段才是最新一条
+    sections = re.split(r"(?m)^##\s+", text)
+    if len(sections) < 2:
+        return {"title": "", "body": ""}
+    lines = sections[1].strip().splitlines()
+    title = lines[0].strip() if lines else ""
+    body = "\n".join(lines[1:]).strip()
+    return {"title": title, "body": body}
+
+
+@router.get("/version", include_in_schema=False)
+async def version() -> dict:
+    """前端更新提醒用:返回当前部署的 git commit 与最新一条更新日志。
+
+    commit 由构建时 --build-arg GIT_COMMIT 烤进环境变量 APP_COMMIT;本地开发
+    没烤则为 "dev",前端据此跳过提示。公开接口(不含敏感信息),登录前也能查。
+    """
+    return {
+        "commit": os.environ.get("APP_COMMIT", "dev"),
+        "changelog": _latest_changelog(),
+    }

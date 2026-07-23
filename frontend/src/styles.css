@@ -259,6 +259,21 @@ label.fl {
 }
 .llm-banner a { color: var(--warn); font-weight: 600; margin-left: var(--sp-1); }
 
+/* 更新提醒横幅(发现新版本时,顶栏下方常驻,品牌色区别于未配置模型的警告横幅) */
+.update-banner {
+  background: var(--brand-weak);
+  border-bottom: 1px solid var(--brand-line);
+  color: var(--brand);
+  font-size: var(--fs-sm);
+  padding: var(--sp-2) var(--sp-5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.update-log { display: flex; flex-direction: column; gap: 4px; white-space: normal; }
+
 /* ---------- AI 起名下拉(TitleSuggest) ---------- */
 .ts-wrap { position: relative; display: inline-flex; align-items: center; gap: var(--sp-2); }
 .ts-wrap .spin { margin-right: 4px; }
@@ -1829,3 +1844,5 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .guard-toggle input { margin-top: 3px; }
 .guard-toggle span { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-sm); }
 .guard-toggle .hint { font-weight: 400; }
+.review-config { display: flex; align-items: center; gap: var(--sp-3); font-size: var(--fs-sm); }
+.review-config select { margin-left: 2px; }

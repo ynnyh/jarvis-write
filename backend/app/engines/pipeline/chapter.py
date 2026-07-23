@@ -18,6 +18,13 @@ from app.engines.consistency import BibleService, ForeshadowScheduler
 from app.engines.consistency.checker import check_chapter
 from app.engines.consistency.extractor import extract_and_apply
 from app.engines.consistency.repetition import avoid_block
+from app.engines.editorial import (
+    apply_proofread_fixes,
+    build_revision_directive,
+    judge_passed,
+    proofread_chapter,
+    review_chapter,
+)
 from app.engines.memory import ChapterMemory
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import render_style_block
@@ -181,13 +188,19 @@ async def generate_chapter(
     tendency: Tendency | None = None,
     progress=None,
     revision: str | None = None,
-) -> tuple[Chapter, list[dict], dict]:
-    """生成一章:草稿 → 定稿 → 一致性检查 → 抽取写圣经 → 摘要 → 入库。
+) -> tuple[Chapter, list[dict], dict, "GuardResult", dict]:
+    """生成一章:草稿 → 定稿 → 审校把关 → 一致性检查 → 抽取写圣经 → 摘要 → 入库。
 
-    progress: 可选回调 fn(stage_text),五段各报一次(异步任务进度用)。
+    progress: 可选回调 fn(stage_text),六段各报一次(异步任务进度用)。
     revision: 重写时用户的修改意见;仅当本章已有正文时连同上一版
         (截断)注入草稿 prompt,首次生成传了也会被忽略。
-    返回 (Chapter, 一致性问题列表, 抽取统计)。
+
+    审校把关(第 3 段):定稿后自动校对(硬伤精确替换自修)+ 主审打分,按项目
+    review_pass_threshold 硬判达标;不达标且 review_auto_revise 开启时,带主审意见
+    回炉重走草稿+定稿,封顶 review_max_revisions 轮,到点接受当前最好的一版。
+
+    返回 (Chapter, 一致性问题列表, 抽取统计, 字数守卫结果, 审校结果 dict)。
+    审校结果含 scores/comment/suggestions/passed/revision_rounds/threshold。
     """
 
     def _report(stage: str) -> None:
@@ -250,52 +263,104 @@ async def generate_chapter(
         revision, existing.final_content if existing else ""
     )
 
-    # ---- 草稿 ----
-    _report("1/5 生成草稿")
+    # ---- 草稿 + 定稿(封装成 _compose,审校回炉时复用) ----
+    async def _compose(rev_block: str, draft_label: str, finalize_label: str) -> tuple[str, str]:
+        """草稿 → 定稿。rev_block 注入草稿 prompt;返回 (草稿, 定稿)。"""
+        _report(draft_label)
+        draft_prompt = CHAPTER_DRAFT_PROMPT.format(
+            chapter_number=chapter_number,
+            chapter_title=outline.title,
+            architecture_brief=chapter_architecture_brief(project),
+            rolling_summary=rolling,
+            recent_tail=recent,
+            retrieved_context=retrieved_text,
+            hard_constraints=hard_constraints,
+            foreshadow_reminders=foreshadow_reminders,
+            avoid_repetition=avoid_repetition,
+            revision_block=rev_block,
+            chapter_role=outline.chapter_role,
+            chapter_purpose=outline.chapter_purpose,
+            suspense_level=outline.suspense_level,
+            foreshadowing=outline.foreshadowing,
+            characters_involved="、".join(map(str, outline.characters_involved)) or "(未指定)",
+            key_items="、".join(map(str, outline.key_items)) or "无",
+            scene_location=outline.scene_location,
+            chapter_summary=outline.summary,
+            next_chapter_brief=_next_chapter_brief(next_outline),
+            word_number=project.target_words_per_chapter,
+            scene_count=max(2, project.target_words_per_chapter // 1000),
+            scene_words=project.target_words_per_chapter // max(2, project.target_words_per_chapter // 1000),
+            style_directives=style_block,
+        )
+        d = _strip_meta(await get_adapter_for(Task.DRAFT).ask(draft_prompt))
+        _report(finalize_label)
+        finalize_prompt = CHAPTER_FINALIZE_PROMPT.format(
+            chapter_number=chapter_number,
+            chapter_title=outline.title,
+            chapter_purpose=outline.chapter_purpose,
+            foreshadowing=outline.foreshadowing,
+            chapter_summary=outline.summary,
+            rolling_summary=rolling,
+            draft_text=d,
+            style_directives=style_block,
+        )
+        f = _strip_meta(await get_adapter_for(Task.FINALIZE).ask(finalize_prompt))
+        return d, f
+
     logger.info("第 %d 章:生成草稿...", chapter_number)
-    draft_prompt = CHAPTER_DRAFT_PROMPT.format(
-        chapter_number=chapter_number,
-        chapter_title=outline.title,
-        architecture_brief=chapter_architecture_brief(project),
-        rolling_summary=rolling,
-        recent_tail=recent,
-        retrieved_context=retrieved_text,
-        hard_constraints=hard_constraints,
-        foreshadow_reminders=foreshadow_reminders,
-        avoid_repetition=avoid_repetition,
-        revision_block=revision_block,
-        chapter_role=outline.chapter_role,
-        chapter_purpose=outline.chapter_purpose,
-        suspense_level=outline.suspense_level,
-        foreshadowing=outline.foreshadowing,
-        characters_involved="、".join(map(str, outline.characters_involved)) or "(未指定)",
-        key_items="、".join(map(str, outline.key_items)) or "无",
-        scene_location=outline.scene_location,
-        chapter_summary=outline.summary,
-        next_chapter_brief=_next_chapter_brief(next_outline),
-        word_number=project.target_words_per_chapter,
-        scene_count=max(2, project.target_words_per_chapter // 1000),
-        scene_words=project.target_words_per_chapter // max(2, project.target_words_per_chapter // 1000),
-        style_directives=style_block,
-    )
-    draft = _strip_meta(await get_adapter_for(Task.DRAFT).ask(draft_prompt))
+    draft, final = await _compose(revision_block, "1/6 生成草稿", "2/6 定稿修订")
 
-    # ---- 定稿 ----
-    _report("2/5 定稿修订")
-    logger.info("第 %d 章:定稿修订...", chapter_number)
-    finalize_prompt = CHAPTER_FINALIZE_PROMPT.format(
-        chapter_number=chapter_number,
-        chapter_title=outline.title,
-        chapter_purpose=outline.chapter_purpose,
-        foreshadowing=outline.foreshadowing,
-        chapter_summary=outline.summary,
-        rolling_summary=rolling,
-        draft_text=draft,
-        style_directives=style_block,
+    # ---- 审校把关:校对硬伤自修 + 主审达标判定 + 有上限自动回炉 ----
+    # 达标与否由后端按项目阈值硬判;不达标则带主审意见回炉重走草稿+定稿,封顶
+    # review_max_revisions 轮,到点无论是否达标都接受当前最好的一版(不会无限回炉)。
+    threshold = project.review_pass_threshold
+    auto_revise = project.review_auto_revise
+    max_revisions = project.review_max_revisions
+    outline_block = (
+        f"标题:{outline.title}\n目的:{outline.chapter_purpose}\n概要:{outline.summary}"
     )
-    final = _strip_meta(await get_adapter_for(Task.FINALIZE).ask(finalize_prompt))
+    review_result: dict = {}
+    revision_rounds = 0
+    while True:
+        _report(
+            "3/6 审校把关"
+            if revision_rounds == 0
+            else f"3/6 审校把关(第 {revision_rounds}/{max_revisions} 轮回炉)"
+        )
+        # 校对硬伤:错字/语病/标点/重复,精确替换自修(幻觉片段已在引擎里过滤)
+        proof = await proofread_chapter(final)
+        if proof["issues"]:
+            final, _applied, _failed = apply_proofread_fixes(final, proof["issues"])
+        # 主审打分 + 按项目阈值硬判达标
+        review_result = await review_chapter(final, outline_block)
+        if judge_passed(review_result["scores"], threshold):
+            review_result["passed"] = True
+            break
+        review_result["passed"] = False
+        if not auto_revise or revision_rounds >= max_revisions:
+            break
+        # 不达标 → 主审意见拼成重写指令,回炉重走草稿+定稿
+        revision_rounds += 1
+        logger.info(
+            "第 %d 章审校未达标(四维=%s,阈值=%d),第 %d/%d 轮回炉",
+            chapter_number, review_result["scores"], threshold,
+            revision_rounds, max_revisions,
+        )
+        directive = build_revision_directive(review_result)
+        draft, final = await _compose(
+            _revision_block(directive, final),
+            f"3/6 审校把关(第 {revision_rounds}/{max_revisions} 轮回炉·草稿)",
+            f"3/6 审校把关(第 {revision_rounds}/{max_revisions} 轮回炉·定稿)",
+        )
+    review_result["revision_rounds"] = revision_rounds
+    review_result["threshold"] = threshold
+    logger.info(
+        "第 %d 章审校把关完成:达标=%s,四维=%s,回炉 %d 轮",
+        chapter_number, review_result.get("passed"),
+        review_result.get("scores"), revision_rounds,
+    )
 
-    # ---- 字数守卫:超标压缩/拆章 ----
+    # ---- 字数守卫:超标压缩/拆章(只对审校后的最终定稿跑一次) ----
     guard_result = await word_count_guard(
         db, project, chapter_number, outline, final, style_block, report=_report
     )
@@ -338,14 +403,14 @@ async def generate_chapter(
     db.commit()
 
     # ---- 一致性检查(vs 本章之前的圣经状态) ----
-    _report("3/5 一致性检查")
+    _report("4/6 一致性检查")
     logger.info("第 %d 章:一致性检查...", chapter_number)
     issues = await check_chapter(
         db, project.id, chapter_number, final, rolling_summary=rolling
     )
 
     # ---- 章后抽取:状态变化写回圣经/伏笔表(闭环) ----
-    _report("4/5 抽取状态写入故事圣经")
+    _report("5/6 抽取状态写入故事圣经")
     logger.info("第 %d 章:抽取状态变化...", chapter_number)
     # extract_and_apply 自管事务纪律(入口丢掉上面 check_chapter 遗留的读快照、
     # LLM 前后各提交),故这里无需再手工 commit —— S1「越写到后面越容易在 4/5 抽取处
@@ -355,7 +420,7 @@ async def generate_chapter(
     )
 
     # ---- 滚动摘要更新 ----
-    _report("5/5 更新前情摘要")
+    _report("6/6 更新前情摘要")
     logger.info("第 %d 章:更新前情摘要...", chapter_number)
     new_summary = await get_adapter_for(Task.SUMMARY).ask(
         ROLLING_SUMMARY_PROMPT.format(
@@ -389,4 +454,4 @@ async def generate_chapter(
         logger.info("第 %d 章重写,已重建下游摘要: %s", chapter_number, rebuilt)
 
     logger.info("第 %d 章完成,共 %d 字。", chapter_number, chapter.word_count)
-    return chapter, issues, extraction_stats, guard_result
+    return chapter, issues, extraction_stats, guard_result, review_result

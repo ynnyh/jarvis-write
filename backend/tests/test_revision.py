@@ -72,16 +72,32 @@ async def _fake_extract(*args, **kwargs):
     return {}
 
 
+async def _fake_proofread(*args, **kwargs):
+    # 审校把关里的校对:无硬伤,不触发精确替换
+    return {"issues": []}
+
+
+async def _fake_review(*args, **kwargs):
+    # 审校把关里的主审:四维满分 → 直接达标,不触发回炉(本测试只关心 revision 注入)
+    return {
+        "scores": {"plot": 9, "prose": 9, "pacing": 9, "character": 9},
+        "comment": "",
+        "suggestions": [],
+    }
+
+
 def _run_generate(db, project, revision: str | None) -> MockAdapter:
     """mock LLM 跑一遍 generate_chapter,返回记录了全部 prompt 的 adapter。"""
     from app.engines.pipeline import chapter as ch_mod
 
-    # 草稿 → 定稿 → 滚动摘要,共 3 次调用(检查/抽取已 patch 掉)
+    # 草稿 → 定稿 → 滚动摘要,共 3 次调用(检查/抽取/审校把关已 patch 掉)
     adapter = MockAdapter(["新版草稿", "新版定稿", "新滚动摘要"])
     with (
         patch.object(ch_mod, "get_adapter_for", return_value=adapter),
         patch.object(ch_mod, "check_chapter", new=_fake_check),
         patch.object(ch_mod, "extract_and_apply", new=_fake_extract),
+        patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
+        patch.object(ch_mod, "review_chapter", new=_fake_review),
         patch.object(ch_mod, "ChapterMemory", _FakeMemory),
     ):
         asyncio.run(ch_mod.generate_chapter(db, project, 1, revision=revision))
