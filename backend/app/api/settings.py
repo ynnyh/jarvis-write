@@ -14,8 +14,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
+from app.crypto import decrypt, encrypt
 from app.db.models import ProviderSetting, User
 from app.db.session import get_db
+from app.net_guard import assert_public_base_url
 from app.llm.embeddings import (
     EMBEDDING_PROVIDER,
     EmbeddingClient,
@@ -126,10 +128,11 @@ def _embedding_card(db: Session, user: User) -> ProviderSettingOut:
         )
         .first()
     )
+    key_plain = decrypt(row.api_key) if row else ""
     return ProviderSettingOut(
         provider=EMBEDDING_PROVIDER,
-        api_key_masked=_mask(row.api_key) if row else "",
-        has_key=bool(row and row.api_key),
+        api_key_masked=_mask(key_plain),
+        has_key=bool(key_plain),
         base_url=row.base_url if row else "",
         model=row.model if row else "",
         is_default=False,
@@ -172,6 +175,7 @@ async def save_provider_setting(
     user: User = Depends(get_current_user),
 ):
     name = name.lower()
+    assert_public_base_url(req.base_url)  # SSRF 防线:拒绝指向内网/本机的 base_url
     if name == EMBEDDING_PROVIDER:
         # 伪 provider:专用 embedding 配置;is_default 无意义,忽略
         row = (
@@ -188,7 +192,7 @@ async def save_provider_setting(
 
         # 与聊天卡同一语义:空串/不传 = 不改动已存 key,纯空白 = 清除 key
         if req.api_key is not None and req.api_key != "":
-            row.api_key = req.api_key.strip()
+            row.api_key = encrypt(req.api_key.strip())
         row.base_url = req.base_url.strip()
         row.model = req.model.strip()
         row.is_default = False
@@ -212,7 +216,7 @@ async def save_provider_setting(
 
     # 入库前 strip;空串/不传 = 不改动已存 key,纯空白 = 清除 key(存空串,回落 .env)
     if req.api_key is not None and req.api_key != "":
-        row.api_key = req.api_key.strip()
+        row.api_key = encrypt(req.api_key.strip())
     row.base_url = req.base_url.strip()
     row.model = req.model.strip()
 
