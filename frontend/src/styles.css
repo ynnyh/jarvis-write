@@ -1289,8 +1289,13 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
   table.tbl { display: block; overflow-x: auto; white-space: nowrap; }
 
   /* 顶栏:收紧间距;GitHub 链接在登录页/文档里也有入口,窄屏藏掉防破行 */
-  .topbar { gap: 8px 12px; }
+  .topbar { padding: 8px 12px; gap: 8px 12px; align-items: center; }
   .topbar-gh { display: none; }
+  /* 关掉弹性 spacer:否则它抢占首行空间,把链接挤到错乱的第二行。
+     去掉后所有项从左到右自然、整齐地流式换行(logo 在首,链接紧随)。 */
+  .topbar .grow { display: none; }
+  /* logo 独占首行,链接从第二行整齐排开,不再和 logo 挤在一起 */
+  .topbar .logo { flex-basis: 100%; }
 
   /* 项目页标题行:项目名可省略号截断,badge 跟随,「阅读全书」放不下时整体换行居左 */
   .project-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
