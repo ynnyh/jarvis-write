@@ -111,6 +111,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # 登录/注册按 IP 限流,挡撞库 / 批量刷号(单进程内存计数,见 ratelimit.py)
+    if settings.rate_limit_enabled:
+        from app.ratelimit import RateLimitMiddleware
+        app.add_middleware(RateLimitMiddleware)
 
     app.include_router(system_router)
     app.include_router(auth_router)

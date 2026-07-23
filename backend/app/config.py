@@ -74,6 +74,8 @@ class Settings(BaseSettings):
     # 运行环境:dev(默认,本地开发/测试放行弱默认密钥)/ prod(生产,弱默认即拒启动)。
     # 生产由 docker-compose 设 APP_ENV=prod;启动自检见 main.py。
     app_env: str = "dev"
+    # 敏感接口(登录/注册)按 IP 限流的开关:生产默认开,测试关(见 tests/conftest.py)
+    rate_limit_enabled: bool = True
     # 注册邀请码:固定共享码,只有填对才能注册(留空则关闭注册,任何人都不能注册)
     invite_code: str = ""
     # JWT 签名密钥:生产务必用环境变量覆盖成随机长串,否则 token 可被伪造
