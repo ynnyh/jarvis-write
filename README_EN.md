@@ -6,11 +6,21 @@
 
 The hard problem of AI-assisted novel writing isn't producing text — it's keeping a several-hundred-thousand-word story coherent: characters stay in character, foreshadowing gets paid off, and the outline stays editable. jarvis-write is not another "one-click novel generator." Text generation is delegated to the LLM; this project builds the **control layer** around it: a temporal story bible for facts, a foreshadowing scheduler for setups and payoffs, a cascading outline engine for edits, and a tag-based tendency system for style — so a long novel stays controllable, revisable, and traceable from the first chapter to the last.
 
-> We studied 8 open-source projects in this space. Pieces of the puzzle (consistency, foreshadowing, cascading updates, controllable style) exist scattered across them, but nobody assembled them into a complete system. That's what this project does. See [docs/00-overview.md](docs/00-overview.md) (Chinese).
+<!-- 📸 Screenshots / demo GIF TODO: suggested order — 1) writing workbench overview, 2) cascading-edit downstream-impact selection, 3) story bible / foreshadowing board. Drop images into docs/assets/ and embed here with <img src="docs/assets/xxx.png" width="820">. -->
+
+> 💬 **Want to try it without self-hosting?** Scan the QR code to join the QQ group and grab an **invite code** → [see Community below](#community)
+
+## ✨ Three things nobody else has
+
+Most AI writing tools stop at "generation." The value of jarvis-write is what comes after: the story stays **editable, coherent, and yours to steer**:
+
+- **🔗 Cascading outline updates** — edit any chapter of the outline at any time; the system grades the change (minor edits short-circuit at zero LLM cost), analyzes downstream impact, and regenerates affected chapters after you confirm. Existing prose is flagged as stale, and every outline version is kept for rollback. *No comparable open-source project does this.*
+- **🧭 Long-range consistency engine** — a temporal story bible (every fact is bound to the chapter range where it holds, so you can query "what state is the character in as of chapter N") plus a four-state foreshadowing scheduler (planted / reinforced / resolved / abandoned, with due-date reminders), with automatic post-chapter extraction of entities and facts back into the bible. Hundreds of thousands of words without contradicting itself.
+- **🎚️ Tag-based tendency system** — style, pacing, and tone are no longer hardcoded in prompts: chips + free-form input + savable presets, applied across outline, prose, and polishing. You stay in control end to end.
 
 ## Key Features
 
-- **Six-step generation pipeline**: seed → character dynamics → worldbuilding → plot architecture → chapter blueprint → chapter prose (built on mature Snowflake-Method-style prompts)
+- **Six-step generation pipeline**: seed → character dynamics → worldbuilding → plot architecture → chapter blueprint → chapter prose (built on a mature Snowflake-Method-style prompt system; see Acknowledgments)
 - **Long-range consistency engine**: a temporal story bible (every fact is bound to the chapter range where it holds, so you can query "character state as of chapter N"), a four-state foreshadowing scheduler (planted / reinforced / resolved / abandoned, with due-date reminders), and automatic post-chapter extraction of entities and facts back into the bible
 - **Chapter-by-chapter generation with consistency checks**: finalized chapters are automatically diffed against the story bible; conflicts are reported to the user for a decision, never silently rewritten; built-in repeated-phrase detection
 - **Cascading outline updates**: edit any chapter of the outline at any time — the system grades the change (minor edits short-circuit with zero LLM cost), analyzes downstream impact, and regenerates affected chapters after user confirmation; existing prose is flagged as stale, and every outline version is kept for rollback
@@ -52,7 +62,7 @@ Full setup, smoke tests, and directory layout: [backend/README.md](backend/READM
 
 | Setting | Description |
 |---|---|
-| `JWT_SECRET` | JWT signing key, **required** — must be a long random string (otherwise tokens can be forged on a public deployment) |
+| `JWT_SECRET` | JWT signing key, **required** — must be a long random string (otherwise tokens can be forged on a public deployment). With `APP_ENV=prod`, startup is **refused** if the weak default is still in use |
 | `ADMIN_PASSWORD` | Initial admin password, **required** (no default under Docker; the in-code default is for local development only) |
 | `INVITE_CODE` | Invite code for registration; **leave empty to disable registration entirely** |
 | LLM API keys | DeepSeek / OpenAI / Gemini supported. Each account configures its own key on the **settings page** (stored in the database, recommended); `.env` values act as a fallback |
@@ -66,7 +76,7 @@ The design docs are written in Chinese:
 
 | Document | Contents |
 |---|---|
-| [docs/00-overview.md](docs/00-overview.md) | Vision, comparison of 8 open-source projects, what we borrow vs. build |
+| [docs/00-overview.md](docs/00-overview.md) | Vision, design rationale, and how it compares to similar projects |
 | [docs/01-architecture.md](docs/01-architecture.md) | System architecture, code layout, technology choices |
 | [docs/02-data-model.md](docs/02-data-model.md) | Data model: all tables, fields, and relations |
 | [docs/03-engines.md](docs/03-engines.md) | The three core engines: consistency / outline cascade / polish |
@@ -102,6 +112,31 @@ cd frontend && npm run lint && npm run build
 ```
 
 There are also per-phase self-check scripts (`backend/scripts/stage*_test.py`) — see [backend/README.md](backend/README.md).
+
+<a id="community"></a>
+
+## 🫂 Community
+
+Questions, an **invite code to try the hosted instance**, feature requests, or just want to tinker together — join the QQ group:
+
+<p align="center">
+  <img src="docs/assets/qq-group-qr.jpg" alt="jarvis-write QQ group 1006352530" width="240">
+</p>
+
+<p align="center"><b>QQ group: 1006352530</b> · scan to join and <b>get a free trial invite code</b></p>
+
+## 🙏 Acknowledgments
+
+This project stands on the shoulders of several excellent open-source projects — the following capabilities draw on their ideas, with thanks (a full, source-read comparison lives in [docs/00-overview.md](docs/00-overview.md), in Chinese):
+
+- **Snowflake-Method prompt system** ← [AI_NovelGenerator](https://github.com/YILING0013/AI_NovelGenerator)
+- **Four-state foreshadowing tracking · bucketed weighted memory** ← [NovelClaw](https://github.com/iLearn-Lab/NovelClaw)
+- **Temporal truth store (facts bound to chapter ranges)** ← [knowrite](https://github.com/knoai/knowrite)
+- **Reader-known vs. character-known separation · reveal scheduling · repeated-phrase detection** ← [KazKozDev/NovelGenerator](https://github.com/KazKozDev/NovelGenerator)
+- **Knowledge-graph-style story bible** ← [graphify-novel](https://github.com/Anshler/graphify-novel)
+- **End-to-end web engineering & layering** ← [AI-Novel-Writing-Assistant](https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant)
+
+The **cascading outline update engine**, the **tag-based tendency system**, and the work of integrating these "pieces" into one coherent control layer are original to this project.
 
 ## License
 

@@ -4,13 +4,23 @@
 
 [English](README_EN.md) | 简体中文
 
-写长篇小说时，AI 工具的头号问题不是"写不出来"，而是写到几十万字后**人设崩、伏笔丢、大纲改不动**。jarvis-write 的定位不是又一个"一键生成器"——生成文字的活交给 LLM，本项目做的是包在 LLM 外面的**控制层**：故事圣经管事实、伏笔调度管回收、大纲级联管改动、倾向标签管风格，让长篇创作全程可控、可改、可追溯。
+写长篇小说时，AI 工具的头号问题不是"写不出来"，而是写到几十万字后**人设崩、伏笔丢、大纲改不动**。jarvis-write 不是又一个"一键生成器"——生成文字的活交给 LLM，本项目做的是包在 LLM 外面的**控制层**：故事圣经管事实、伏笔调度管回收、大纲级联管改动、倾向标签管风格，让长篇创作全程可控、可改、可追溯。
 
-> 调研过 8 个同类开源项目：一致性、伏笔、级联、可控倾向这些能力都能找到零星"零件"，但没人把它们拼成一台完整的车。本项目做的就是那台车的底盘和控制系统。详见 [docs/00-overview.md](docs/00-overview.md)。
+<!-- 📸 截图/演示 GIF 待补:建议依次放 1) 写作工作台全景 2) 大纲级联改动的下游影响勾选 3) 故事圣经/伏笔看板。把图片放进 docs/assets/ 后，在此处用 <img src="docs/assets/xxx.png" width="820"> 引入即可。 -->
+
+> 💬 **想直接试用、不想自己部署?** 扫码进 QQ 群领**邀请码**，开箱即用 → [见文末交流群](#community)
+
+## ✨ 三个别人没有的杀手锏
+
+市面上的 AI 写作工具大多止步于"生成"，jarvis-write 的价值在于生成之后还**改得动、不崩、你说了算**：
+
+- **🔗 大纲级联更新**——改任意一章大纲，系统自动做改动分级（小改零成本短路）、分析下游影响、你勾选后级联重生成；已有正文自动标记失配，大纲全程版本化可回退。*这一条，同类开源项目里一个都没做。*
+- **🧭 长程一致性引擎**——时序故事圣经（每条事实绑生效章节区间，可查"第 N 章时角色是什么状态"）+ 伏笔四态调度（埋设/强化/回收/弃用，到期自动提醒），章后自动抽取实体与事实写回圣经。几十万字不自相矛盾。
+- **🎚️ 标签化倾向系统**——风格/节奏/基调不再写死在 Prompt 里：chips + 自定义输入 + 预设模板，贯穿大纲、正文、润色三个节点，全程你说了算。
 
 ## 核心特性
 
-- **六步生成流水线**：种子 → 角色动力学 → 世界观 → 情节架构 → 章节蓝图 → 逐章正文（借鉴雪花写作法的成熟 Prompt 体系）
+- **六步生成流水线**：种子 → 角色动力学 → 世界观 → 情节架构 → 章节蓝图 → 逐章正文（成熟的雪花写作法 Prompt 体系，鸣谢见文末）
 - **长程一致性引擎**：时序故事圣经（每条事实绑定生效章节区间，可查"第 N 章时角色状态"）、伏笔四态调度（埋设/强化/回收/弃用，到期自动提醒）、章后自动抽取实体与事实写回圣经
 - **逐章生成 + 一致性检查**：定稿后自动与故事圣经比对找矛盾，问题列表交用户拍板，不擅自改稿；内置重复用词检测
 - **大纲级联更新**：随时改任意一章大纲，系统自动做改动分级（minor 零成本短路）→ 下游影响分析 → 用户勾选后级联重生成；已有正文自动标记失配，大纲全程版本化可回溯
@@ -51,7 +61,7 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 
 | 配置项 | 说明 |
 |---|---|
-| `JWT_SECRET` | JWT 签名密钥，**必填**，必须设为随机长串（公网部署否则 token 可被伪造） |
+| `JWT_SECRET` | JWT 签名密钥，**必填**，必须设为随机长串（公网部署否则 token 可被伪造）。`APP_ENV=prod` 下仍用弱默认值将**拒绝启动** |
 | `ADMIN_PASSWORD` | 初始管理员密码，**必填**（Docker 下无默认值；代码默认值仅限本地开发） |
 | `INVITE_CODE` | 注册邀请码：填对才能注册；**留空则关闭注册** |
 | LLM API key | 支持 DeepSeek / OpenAI / Gemini。每个账号登录后在**设置页**配自己的 key（存数据库，推荐）；也可用 `.env` 做兜底 |
@@ -63,7 +73,7 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 
 | 文档 | 内容 |
 |---|---|
-| [docs/00-overview.md](docs/00-overview.md) | 项目愿景、8 个开源项目的调研对比、借鉴与自研的边界 |
+| [docs/00-overview.md](docs/00-overview.md) | 项目愿景、设计思路，以及与同类项目的差异化对比 |
 | [docs/01-architecture.md](docs/01-architecture.md) | 系统架构、代码目录结构、技术选型理由 |
 | [docs/02-data-model.md](docs/02-data-model.md) | 数据模型：全部表结构、字段、关系 |
 | [docs/03-engines.md](docs/03-engines.md) | 三大核心引擎设计：一致性 / 大纲级联 / 润色 |
@@ -99,6 +109,31 @@ cd frontend && npm run lint && npm run build
 ```
 
 另有按阶段的自检脚本（`backend/scripts/stage*_test.py`），详见 [backend/README.md](backend/README.md)。
+
+<a id="community"></a>
+
+## 🫂 交流群
+
+遇到问题、想要**邀请码试用**、提需求或一起折腾，欢迎进 QQ 群：
+
+<p align="center">
+  <img src="docs/assets/qq-group-qr.jpg" alt="jarvis-write QQ 交流群 1006352530" width="240">
+</p>
+
+<p align="center"><b>QQ 群：1006352530</b> · 扫码进群，<b>领邀请码免费试用</b></p>
+
+## 🙏 鸣谢
+
+本项目站在许多优秀开源项目的肩上——下面这些能力借鉴了它们的思路，特此致谢（逐个读源码的完整对比见 [docs/00-overview.md](docs/00-overview.md)）：
+
+- **雪花写作法 Prompt 体系** ← [AI_NovelGenerator](https://github.com/YILING0013/AI_NovelGenerator)
+- **伏笔四态追踪 · 分桶加权记忆** ← [NovelClaw](https://github.com/iLearn-Lab/NovelClaw)
+- **事实绑章节区间的时序真相库** ← [knowrite](https://github.com/knoai/knowrite)
+- **读者/角色已知分离 · 揭示调度 · 重复用词检测** ← [KazKozDev/NovelGenerator](https://github.com/KazKozDev/NovelGenerator)
+- **知识图谱式 story bible 组织** ← [graphify-novel](https://github.com/Anshler/graphify-novel)
+- **Web 全流程工程化分层** ← [AI-Novel-Writing-Assistant](https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant)
+
+而**大纲级联更新引擎**、**标签化倾向系统**，以及把这些"零件"整合成一套连贯控制层的工作，是本项目自研的部分。
 
 ## License
 
