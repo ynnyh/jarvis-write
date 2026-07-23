@@ -1,8 +1,11 @@
 // 章节列表单行:状态徽标、生成/重写按钮、行内重写意见区
+import { useEffect, useState } from "react";
 import { ChapterBrief, EditorAction, Outline } from "../../api";
 import { STATUS_CN } from "../../components/Reader";
+import ReviseChat from "./ReviseChat";
 
 interface Props {
+  pid: number;
   outline: Outline;
   chapter: ChapterBrief | undefined;
   queueMode: boolean;
@@ -25,12 +28,17 @@ interface Props {
 }
 
 export default function ChapterListItem({
-  outline: o, chapter: ch, queueMode, queuePicked, generating, genBlocked,
+  pid, outline: o, chapter: ch, queueMode, queuePicked, generating, genBlocked,
   genHint, genStage, reviseOpen, reviseText, proseActions,
   onOpen, onOpenReader, onToggleQueue, onToggleRevise,
   onReviseTextChange, onGenerate, onReviseSubmit, onReviseCancel,
 }: Props) {
   const st = ch?.status ?? "empty";
+  // 重写框里的可选对话区开关;重写框收起时一并复位
+  const [chatOpen, setChatOpen] = useState(false);
+  useEffect(() => {
+    if (!reviseOpen) setChatOpen(false);
+  }, [reviseOpen]);
   return (
     <>
       <div className="fact-line fact-row">
@@ -79,6 +87,15 @@ export default function ChapterListItem({
               </span>
             ))}
           </div>
+          <div className="revise-chat-toggle">
+            <button type="button" className="linkish-btn" onClick={() => setChatOpen((v) => !v)}>
+              {chatOpen ? "收起对话 ↑" : "说不清?先和 AI 聊聊怎么改 ↓"}
+            </button>
+          </div>
+          {chatOpen && (
+            <ReviseChat pid={pid} n={o.chapter_number}
+              onApply={(d) => onReviseTextChange(d.slice(0, 500))} />
+          )}
           <div className="revise-actions">
             <button className="primary btn-sm" disabled={genBlocked}
               title={genBlocked ? genHint : undefined}

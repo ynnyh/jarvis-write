@@ -450,6 +450,7 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
             return (
               <ChapterListItem
                 key={o.chapter_number}
+                pid={pid}
                 outline={o}
                 chapter={ch}
                 queueMode={queueMode}

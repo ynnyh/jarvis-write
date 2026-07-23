@@ -715,6 +715,15 @@ label.fl {
 .revise-box textarea { min-height: 72px; font-size: var(--fs-sm); }
 .revise-box .chips { margin: 6px 0; }
 .revise-actions { display: flex; gap: 6px; }
+.revise-chat-toggle { margin: 2px 0 6px; }
+.revise-chat-toggle .linkish-btn {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--brand); font-size: var(--fs-xs);
+}
+.revise-chat-toggle .linkish-btn:hover { text-decoration: underline; }
+/* 嵌在重写框里的对话区:日志高度比整页架构研讨矮一些 */
+.revise-chat { margin-bottom: 8px; }
+.revise-chat .rd-log { max-height: 32vh; }
 .fact-check { display: flex; gap: var(--sp-2); }
 .fact-check input[type="checkbox"] { margin-top: 4px; flex-shrink: 0; }
 .fact-title { flex: 1; min-width: 0; }

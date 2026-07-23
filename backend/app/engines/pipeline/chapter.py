@@ -29,10 +29,13 @@ from app.engines.editorial import (
 from app.engines.memory import ChapterMemory
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import render_style_block
+from app.llm.base import LLMMessage
 from app.llm.router import Task, get_adapter_for
 from app.prompts.chapter import (
     CHAPTER_DRAFT_PROMPT,
     CHAPTER_FINALIZE_PROMPT,
+    REVISE_CHAT_SYSTEM_PROMPT,
+    REVISE_DISTILL_PROMPT,
     ROLLING_SUMMARY_PROMPT,
 )
 from app.engines.pipeline.word_guard import GuardResult, word_count_guard
@@ -462,3 +465,89 @@ async def generate_chapter(
 
     logger.info("第 %d 章完成,共 %d 字。", chapter_number, chapter.word_count)
     return chapter, issues, extraction_stats, guard_result, review_result
+
+
+# =============== 重写研讨(对话式:聊清不满意 → 蒸馏成重写要求)===============
+# 与架构研讨(discuss_architecture)同构的「续聊 + 独立蒸馏」两段式,只是上下文
+# 从整本书架构换成单章蓝图+正文。蒸馏出的 directive 回填进重写文本框,作为
+# generate_chapter 的 revision 参数走既有 _revision_block 注入草稿,管线零改动。
+_MAX_REVISE_CHAT_TURNS = 40
+_MAX_REVISE_MSG_LEN = 2000
+_MAX_REVISE_CHAPTER_CHARS = 3000  # 当前正文注入 system 时截断,防 token 膨胀
+
+
+async def _revise_complete(adapter, messages: list[LLMMessage]) -> str:
+    """多轮 complete 的薄封装:空回复重试 + 用量记账(对齐 ask 的兜底)。"""
+    original_max = adapter.max_tokens
+    try:
+        for _ in range(3):
+            resp = await adapter.complete(messages)
+            adapter._record_usage(resp)
+            content = (resp.content or "").strip()
+            if content:
+                return content
+            adapter.max_tokens = min(adapter.max_tokens * 2, 32768)
+        raise RuntimeError("模型连续 3 次返回空回复")
+    finally:
+        adapter.max_tokens = original_max
+
+
+def _format_revise_transcript(turns: list[dict], latest_reply: str) -> str:
+    lines = [
+        f"{'作者' if m['role'] == 'user' else '编辑'}:{(m['content'] or '').strip()}"
+        for m in turns
+    ]
+    lines.append(f"编辑:{latest_reply}")
+    return "\n".join(lines)
+
+
+async def discuss_revision(
+    messages: list[dict],
+    *,
+    blueprint_block: str,
+    chapter_block: str,
+) -> dict:
+    """就某一章的重写与作者多轮研讨:聊清"到底哪里不满意",蒸馏出重写要求。
+
+    - messages:对话历史 [{role, content}, ...],最后一条应为作者(user)发言。
+    - blueprint_block/chapter_block:本章蓝图与当前正文节选,供编辑理解上下文。
+
+    返回 {reply, directive};directive 为蒸馏出的修改意见(可为空串),前端回填进
+    重写文本框,确认后作为 revision 参数去重写本章。
+    """
+    turns = [
+        m for m in messages
+        if m.get("role") in ("user", "assistant") and (m.get("content") or "").strip()
+    ][-_MAX_REVISE_CHAT_TURNS:]
+    if not turns:
+        raise ValueError("请先说点什么")
+    if turns[-1]["role"] != "user":
+        raise ValueError("最后一条应为你的发言")
+
+    adapter = get_adapter_for(Task.DRAFT)
+
+    # ① 续聊:system(带蓝图+正文上下文)+ 对话历史
+    system = REVISE_CHAT_SYSTEM_PROMPT.format(
+        blueprint_block=blueprint_block,
+        chapter_block=chapter_block[:_MAX_REVISE_CHAPTER_CHARS] or "(本章还没有正文)",
+    )
+    chat_messages = [LLMMessage(role="system", content=system)] + [
+        LLMMessage(role=m["role"], content=(m["content"] or "").strip()[:_MAX_REVISE_MSG_LEN])
+        for m in turns
+    ]
+    reply = (await _revise_complete(adapter, chat_messages)).strip()
+    if not reply:
+        raise ValueError("模型没有回应,请重试")
+
+    # ② 蒸馏:把含最新回复的完整对话提炼成「修改意见」(独立调用,不污染对话)
+    transcript = _format_revise_transcript(turns, reply)
+    directive = ""
+    try:
+        raw = (await adapter.ask(REVISE_DISTILL_PROMPT.format(transcript=transcript))).strip()
+        # 蒸馏出"尚无明确意见"时约定回一个短横线,归一化成空串
+        if raw and raw != "-":
+            directive = raw
+    except Exception:  # noqa: BLE001 — 蒸馏失败不阻塞对话
+        logger.warning("重写研讨蒸馏失败,directive 置空", exc_info=True)
+
+    return {"reply": reply, "directive": directive}

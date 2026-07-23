@@ -449,6 +449,9 @@ export const api = {
     req<GenerateChapterResponse>("POST", `/api/projects/${pid}/chapters/${n}/generate`, { tendency }, LLM_TIMEOUT),
   generateChapterAsync: (pid: number, n: number, tendency: Tendency, revision = "") =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/chapters/${n}/generate-async`, { tendency, revision }),
+  // 重写研讨:多轮对话聊清"这章哪里不满意" → 蒸馏出修改意见 directive,回填重写文本框
+  discussRevision: (pid: number, n: number, messages: { role: string; content: string }[]) =>
+    req<{ reply: string; directive: string }>("POST", `/api/projects/${pid}/chapters/${n}/revise-discuss`, { messages }, LLM_TIMEOUT),
   editChapterContent: (pid: number, n: number, final_content: string) =>
     req<ChapterDetail>("PUT", `/api/projects/${pid}/chapters/${n}/content`, { final_content }),
   reExtractAsync: (pid: number, n: number) =>

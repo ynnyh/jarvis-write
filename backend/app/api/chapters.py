@@ -20,7 +20,7 @@ from app.auth import get_current_user
 from app.chapter_versions import snapshot_chapter
 from app.db.models import Chapter, ChapterVersion, Outline, Project
 from app.db.session import SessionLocal, get_db
-from app.engines.pipeline.chapter import generate_chapter
+from app.engines.pipeline.chapter import discuss_revision, generate_chapter
 from app.engines.polish import ai_flavor_report
 from app.jobs import create_job, fail_job, finish_job, list_running, update_stage
 from app.schemas.tendency import Tendency
@@ -173,6 +173,62 @@ async def generate_async(
 
     asyncio.create_task(runner())
     return {"job_id": job_id}
+
+
+class ReviseDiscussRequest(BaseModel):
+    messages: list[dict] = Field(default_factory=list)
+
+
+class ReviseDiscussResponse(BaseModel):
+    reply: str
+    directive: str = ""
+
+
+def _blueprint_block(outline: Outline | None, n: int) -> str:
+    """把本章蓝图渲染成研讨对话的上下文;无蓝图时给提示。"""
+    if outline is None:
+        return f"(第 {n} 章还没有大纲蓝图)"
+    return (
+        f"第{n}章《{outline.title}》\n"
+        f"- 核心作用:{outline.chapter_purpose}\n"
+        f"- 伏笔操作:{outline.foreshadowing}\n"
+        f"- 本章简述:{outline.summary}"
+    )
+
+
+@router.post("/{chapter_number}/revise-discuss", response_model=ReviseDiscussResponse)
+async def revise_discuss(
+    project_id: int,
+    chapter_number: int,
+    req: ReviseDiscussRequest,
+    db: Session = Depends(get_db),
+):
+    """就某一章的重写与作者多轮研讨:聊清"到底哪里不满意" → 蒸馏出修改意见。
+
+    前端拿返回的 directive 回填重写文本框,确认后作为 revision 去 generate-async 重写。
+    """
+    get_project_or_404(db, project_id)
+    ch = (
+        db.query(Chapter)
+        .filter(Chapter.project_id == project_id, Chapter.chapter_number == chapter_number)
+        .first()
+    )
+    if ch is None or not ch.final_content.strip():
+        raise HTTPException(status_code=404, detail=f"第 {chapter_number} 章尚无定稿正文,先生成再重写")
+    outline = (
+        db.query(Outline)
+        .filter(Outline.project_id == project_id, Outline.chapter_number == chapter_number)
+        .first()
+    )
+    try:
+        result = await discuss_revision(
+            req.messages,
+            blueprint_block=_blueprint_block(outline, chapter_number),
+            chapter_block=ch.final_content,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ReviseDiscussResponse(**result)
 
 
 class GenerateQueueRequest(BaseModel):
