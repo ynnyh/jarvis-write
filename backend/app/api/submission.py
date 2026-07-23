@@ -53,7 +53,12 @@ def _outline_block(db: Session, project_id: int, limit: int = 12) -> str:
     return "【章节蓝图(前%d章)】\n" % len(rows) + "\n".join(lines) + "\n" if lines else ""
 
 
-def _build_prompt(db: Session, project: Project) -> str:
+def _build_context_blocks(db: Session, project: Project) -> dict:
+    """把项目素材拼成一组提示词占位符(title/genre/topic + 概念/种子/梗概/大纲块)。
+
+    供投稿包、封面、主题曲等多个「素材 → 提示词」功能共用,保证注入的上下文一致。
+    返回的 key 与 SUBMISSION_PROMPT / COVER_PROMPT / ANTHEM_PROMPT 的占位符对齐。
+    """
     core_seed = (
         f"【核心种子】{project.architecture.core_seed}\n"
         if project.architecture and project.architecture.core_seed.strip()
@@ -64,15 +69,19 @@ def _build_prompt(db: Session, project: Project) -> str:
         if project.synopsis and project.synopsis.strip()
         else ""
     )
-    return SUBMISSION_PROMPT.format(
-        title=project.title,
-        genre=project.genre.strip() or "不限",
-        topic=project.topic.strip() or "(未定)",
-        concept_block=_concept_block(project),
-        core_seed=core_seed,
-        synopsis_block=synopsis_block,
-        outline_block=_outline_block(db, project.id),
-    )
+    return {
+        "title": project.title,
+        "genre": project.genre.strip() or "不限",
+        "topic": project.topic.strip() or "(未定)",
+        "concept_block": _concept_block(project),
+        "core_seed": core_seed,
+        "synopsis_block": synopsis_block,
+        "outline_block": _outline_block(db, project.id),
+    }
+
+
+def _build_prompt(db: Session, project: Project) -> str:
+    return SUBMISSION_PROMPT.format(**_build_context_blocks(db, project))
 
 
 def _normalize(data: dict) -> dict:

@@ -272,6 +272,23 @@ export interface SubmissionPackage {
   summaries: { short: string; medium: string; long: string };
   cover_prompts: string[];
 }
+
+// 封面提示词:一套方案含中文/英文提示词 + 负面词,拿去即梦/MJ 生成
+export interface CoverPrompt {
+  style: string;
+  prompt_cn: string;
+  prompt_en: string;
+  negative: string;
+}
+export interface CoverPackage { covers: CoverPrompt[]; }
+
+// 主题曲提示词(Suno):英文风格标签 + 结构化中文歌词
+export interface AnthemPackage {
+  song_title: string;
+  style_tags: string;
+  lyrics: string;
+  vibe: string;
+}
 export interface AdminUser {
   id: number; username: string; is_admin: boolean; is_active: boolean;
   created_at: string; project_count: number;
@@ -353,6 +370,10 @@ export const api = {
     req<{ job_id: string }>("POST", `/api/projects/${pid}/synopsis-async`, {}),
   generateSubmissionAsync: (pid: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/submission/generate`, {}),
+  generateCoverAsync: (pid: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/cover/generate`, {}),
+  generateAnthemAsync: (pid: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/anthem/generate`, {}),
 
   inspire: (spark: string, tendency: Tendency, count = 4) =>
     req<{ ideas: Concept[] }>("POST", "/api/inspire", { spark, tendency, count }, LLM_TIMEOUT),

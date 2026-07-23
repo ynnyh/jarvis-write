@@ -1800,6 +1800,11 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .sub-summary { padding: 10px 0; border-top: 1px dashed var(--line); }
 .sub-summary:first-of-type { border-top: none; padding-top: 0; }
 .sub-summary textarea { width: 100%; }
+/* 封面/主题曲卡:每个字段(提示词/歌词等)一块,顶部标签+复制,下方文本框 */
+.media-field { padding: 10px 0; border-top: 1px dashed var(--line); }
+.media-field:first-of-type { border-top: none; padding-top: 0; }
+.media-field textarea,
+.media-field input { width: 100%; }
 
 /* ---------- 写作页:正文头部 + 字数守卫开关 ---------- */
 .content-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }

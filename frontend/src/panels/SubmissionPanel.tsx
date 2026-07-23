@@ -2,7 +2,7 @@
 // 各项可挑选、微调、一键复制;并提供全书多格式导出,方便去平台发表。
 // 生成结果与手动修改都缓存到 localStorage,刷新不丢。
 import { useEffect, useState } from "react";
-import { api, downloadFile, Project, SubmissionPackage } from "../api";
+import { AnthemPackage, api, CoverPackage, downloadFile, Project, SubmissionPackage } from "../api";
 import { useJob } from "../ui/useJob";
 import { toast } from "../ui/Toaster";
 
@@ -21,6 +21,14 @@ function loadCache(pid: number): SubState | null {
     if (s && s.pkg) return s as SubState;
   } catch { /* 缓存损坏就当没有 */ }
   return null;
+}
+
+// 泛型缓存读取(封面/主题曲卡各自用不同 key):解析失败返回 null
+function loadJSON<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch { return null; }
 }
 
 // 复制:优先 Clipboard API,不可用时降级到 textarea + execCommand
@@ -144,7 +152,7 @@ export default function SubmissionPanel({ pid, project }: Props) {
           </button>
         </div>
         <p className="card-desc">
-          依据本书的概念、架构与大纲,一次产出标题、频道时空、标签、金句、简介与封面提示词;挑好微调后逐项复制到投稿表单。
+          依据本书的概念、架构与大纲,一次产出标题、频道时空、标签、金句与简介;挑好微调后逐项复制到投稿表单。封面与主题曲提示词在下方单独生成。
         </p>
         {busy && (
           <div className="gen-banner">
@@ -270,21 +278,146 @@ export default function SubmissionPanel({ pid, project }: Props) {
             })}
           </div>
 
-          {/* 封面提示词 */}
-          <div className="card">
-            <div className="card-head"><h3 className="grow">封面提示词</h3></div>
-            <p className="card-desc">封面图你自己生成/上传;下面是给绘图模型用的提示词,复制即可。</p>
-            {pkg.cover_prompts.map((c, i) => (
-              <div key={i} className="sub-summary">
-                <div className="card-head mb-2">
-                  <b>方案 {i + 1}</b>
-                  <CopyBtn text={c} />
-                </div>
-                <textarea rows={4} value={c}
-                  onChange={(e) => patchPkg({ cover_prompts: pkg.cover_prompts.map((x, j) => j === i ? e.target.value : x) })} />
-              </div>
-            ))}
+        </>
+      )}
+
+      {/* 封面提示词(独立生成)与主题曲提示词(独立生成) */}
+      <CoverCard pid={pid} />
+      <AnthemCard pid={pid} />
+    </div>
+  );
+}
+
+// ================= 封面提示词卡(独立生成/缓存) =================
+function CoverCard({ pid }: { pid: number }) {
+  const { run: runJob } = useJob();
+  const [pkg, setPkg] = useState<CoverPackage | null>(() => loadJSON(`cover-${pid}`));
+  const [busy, setBusy] = useState(false);
+  const [stage, setStage] = useState("");
+  const [err, setErr] = useState("");
+
+  useEffect(() => { setPkg(loadJSON(`cover-${pid}`)); }, [pid]);
+
+  function commit(next: CoverPackage) {
+    setPkg(next);
+    try { localStorage.setItem(`cover-${pid}`, JSON.stringify(next)); } catch { /* 配额满就放弃缓存 */ }
+  }
+  function patch(i: number, field: keyof CoverPackage["covers"][number], value: string) {
+    if (!pkg) return;
+    commit({ covers: pkg.covers.map((c, j) => (j === i ? { ...c, [field]: value } : c)) });
+  }
+
+  async function generate() {
+    setBusy(true); setErr(""); setStage("");
+    try {
+      const r = await runJob<CoverPackage>(
+        () => api.generateCoverAsync(pid),
+        { kind: `cover-${pid}`, onStage: setStage },
+      );
+      if (r) { commit(r); toast.ok("封面提示词已生成", "复制到即梦 / Midjourney 生成封面即可"); }
+    } catch (e) { setErr(String(e)); } finally { setBusy(false); setStage(""); }
+  }
+
+  return (
+    <div className="card">
+      <div className="card-head">
+        <h3 className="grow">封面提示词</h3>
+        <button className="primary" disabled={busy} onClick={generate}>
+          {pkg ? "重新生成" : "AI 生成封面提示词"}
+        </button>
+      </div>
+      <p className="card-desc">
+        依据本书素材出 3 套风格各异的封面画面提示词(中文版给即梦、英文版给 Midjourney,附负面词);复制拿去自己生成封面图。
+      </p>
+      {busy && (
+        <div className="gen-banner"><span className="spin" /><span className="gen-banner-text">{stage || "AI 正在设计封面…"}</span></div>
+      )}
+      {err && <div className="msg-err">{err}</div>}
+      {!pkg && !busy && <p className="hint">还没生成。点上方按钮,约半分钟出 3 套方案。</p>}
+      {pkg?.covers.map((c, i) => (
+        <div key={i} className="sub-summary">
+          <div className="card-head mb-2">
+            <b>方案 {i + 1}{c.style ? `· ${c.style}` : ""}</b>
           </div>
+          <div className="media-field">
+            <div className="card-head mb-2"><span className="muted">中文提示词(即梦等)</span><CopyBtn text={c.prompt_cn} /></div>
+            <textarea rows={4} value={c.prompt_cn} onChange={(e) => patch(i, "prompt_cn", e.target.value)} />
+          </div>
+          <div className="media-field">
+            <div className="card-head mb-2"><span className="muted">英文提示词(Midjourney)</span><CopyBtn text={c.prompt_en} /></div>
+            <textarea rows={3} value={c.prompt_en} onChange={(e) => patch(i, "prompt_en", e.target.value)} />
+          </div>
+          <div className="media-field">
+            <div className="card-head mb-2"><span className="muted">负面提示词</span><CopyBtn text={c.negative} /></div>
+            <textarea rows={2} value={c.negative} onChange={(e) => patch(i, "negative", e.target.value)} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ================= 主题曲提示词卡(Suno,独立生成/缓存) =================
+function AnthemCard({ pid }: { pid: number }) {
+  const { run: runJob } = useJob();
+  const [pkg, setPkg] = useState<AnthemPackage | null>(() => loadJSON(`anthem-${pid}`));
+  const [busy, setBusy] = useState(false);
+  const [stage, setStage] = useState("");
+  const [err, setErr] = useState("");
+
+  useEffect(() => { setPkg(loadJSON(`anthem-${pid}`)); }, [pid]);
+
+  function commit(next: AnthemPackage) {
+    setPkg(next);
+    try { localStorage.setItem(`anthem-${pid}`, JSON.stringify(next)); } catch { /* 配额满就放弃缓存 */ }
+  }
+  function patch(field: keyof AnthemPackage, value: string) {
+    if (!pkg) return;
+    commit({ ...pkg, [field]: value });
+  }
+
+  async function generate() {
+    setBusy(true); setErr(""); setStage("");
+    try {
+      const r = await runJob<AnthemPackage>(
+        () => api.generateAnthemAsync(pid),
+        { kind: `anthem-${pid}`, onStage: setStage },
+      );
+      if (r) { commit(r); toast.ok("主题曲已生成", "把风格标签和歌词分别粘进 Suno 即可"); }
+    } catch (e) { setErr(String(e)); } finally { setBusy(false); setStage(""); }
+  }
+
+  return (
+    <div className="card">
+      <div className="card-head">
+        <h3 className="grow">主题曲提示词(Suno)</h3>
+        <button className="primary" disabled={busy} onClick={generate}>
+          {pkg ? "重新生成" : "AI 生成主题曲"}
+        </button>
+      </div>
+      <p className="card-desc">
+        为本书量身写一首主题曲:英文风格标签 + 结构化中文歌词。到 Suno 把「风格标签」填 Style、「歌词」填 Lyrics 即可生成。
+      </p>
+      {busy && (
+        <div className="gen-banner"><span className="spin" /><span className="gen-banner-text">{stage || "AI 正在作词谱曲…"}</span></div>
+      )}
+      {err && <div className="msg-err">{err}</div>}
+      {!pkg && !busy && <p className="hint">还没生成。点上方按钮,约半分钟出一首。</p>}
+      {pkg && (
+        <>
+          <div className="media-field">
+            <div className="card-head mb-2"><span className="muted">歌名</span><CopyBtn text={pkg.song_title} /></div>
+            <input type="text" value={pkg.song_title} onChange={(e) => patch("song_title", e.target.value)} />
+          </div>
+          <div className="media-field">
+            <div className="card-head mb-2"><span className="muted">风格标签(填进 Suno 的 Style of Music)</span><CopyBtn text={pkg.style_tags} /></div>
+            <textarea rows={2} value={pkg.style_tags} onChange={(e) => patch("style_tags", e.target.value)} />
+          </div>
+          <div className="media-field">
+            <div className="card-head mb-2"><span className="muted">歌词(填进 Suno 的 Lyrics)</span><CopyBtn text={pkg.lyrics} /></div>
+            <textarea rows={12} value={pkg.lyrics} onChange={(e) => patch("lyrics", e.target.value)} />
+          </div>
+          {pkg.vibe && <p className="hint">{pkg.vibe}</p>}
         </>
       )}
     </div>

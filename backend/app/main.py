@@ -35,6 +35,7 @@ from app.api.consistency import router as consistency_router
 from app.api.edit_directive import router as edit_directive_router
 from app.api.editorial import router as editorial_router
 from app.api.inspire import router as inspire_router
+from app.api.media import router as media_router
 from app.api.misc import router as misc_router
 from app.api.outline import router as outline_router
 from app.api.overview import router as overview_router
@@ -131,6 +132,7 @@ def create_app() -> FastAPI:
     app.include_router(polish_router)
     app.include_router(inspire_router)
     app.include_router(submission_router)
+    app.include_router(media_router)
     app.include_router(misc_router)
 
     _static_dir = Path(__file__).resolve().parent / "static"
