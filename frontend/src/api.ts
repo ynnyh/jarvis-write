@@ -391,8 +391,11 @@ export const api = {
     req<Architecture>("POST", `/api/projects/${id}/architecture`, { tendency }, LLM_TIMEOUT),
   generateBlueprint: (id: number, tendency: Tendency) =>
     req<{ outlines: Outline[]; warnings: string[] }>("POST", `/api/projects/${id}/blueprint`, { tendency }, LLM_TIMEOUT),
-  generateArchitectureAsync: (id: number, tendency: Tendency) =>
-    req<{ job_id: string }>("POST", `/api/projects/${id}/architecture-async`, { tendency }),
+  generateArchitectureAsync: (id: number, tendency: Tendency, directive = "") =>
+    req<{ job_id: string }>("POST", `/api/projects/${id}/architecture-async`, { tendency, directive }),
+  // 架构研讨:多轮对话聊清不满意在哪 → 蒸馏出「额外要求」directive,拿去重新生成
+  discussArchitecture: (id: number, messages: { role: string; content: string }[]) =>
+    req<{ reply: string; directive: string }>("POST", `/api/projects/${id}/architecture/discuss`, { messages }, LLM_TIMEOUT),
   generateBlueprintAsync: (id: number, tendency: Tendency) =>
     req<{ job_id: string }>("POST", `/api/projects/${id}/blueprint-async`, { tendency }),
   // 滚动规划:展开下一卷蓝图(按卷纲+已成文状态)

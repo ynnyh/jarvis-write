@@ -60,9 +60,13 @@ class ArchitectureOut(BaseModel):
 
 
 class GenerateArchitectureRequest(BaseModel):
-    """生成顶层架构。倾向为单次临时值,与项目全局倾向合并。"""
+    """生成顶层架构。倾向为单次临时值,与项目全局倾向合并。
+
+    directive: 「架构研讨」对话蒸馏出的额外要求(可空),高优先级注入四步生成。
+    """
 
     tendency: Tendency = Field(default_factory=dict)
+    directive: str = Field(default="", max_length=2000)
 
 
 class OutlineOut(BaseModel):

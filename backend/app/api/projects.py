@@ -16,14 +16,18 @@ import asyncio
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import delete_project_cascade
 from app.auth import assert_project_owner, current_user_id, get_current_user
 from app.db.models import Outline, Project
 from app.db.session import SessionLocal, get_db
-from app.engines.pipeline.architecture import generate_architecture, save_architecture
+from app.engines.pipeline.architecture import (
+    discuss_architecture,
+    generate_architecture,
+    save_architecture,
+)
 from app.engines.pipeline.blueprint import generate_blueprint, save_blueprint
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import render_style_block
@@ -387,6 +391,7 @@ async def generate_project_architecture(
         concept=project.concept,
         tendency=req.tendency,
         global_tendency=project.global_tendency,
+        directive=req.directive,
     )
     arch = save_architecture(db, project, result)
     db.commit()
@@ -420,6 +425,7 @@ async def generate_project_architecture_async(
                 concept=project.concept,
                 tendency=req.tendency,
                 global_tendency=project.global_tendency,
+                directive=req.directive,
                 progress=lambda s: update_stage(job_id, s),
             )
             update_stage(job_id, "落库中")
@@ -445,6 +451,38 @@ async def get_project_architecture(
     if project.architecture is None:
         raise HTTPException(status_code=404, detail="尚未生成架构")
     return project.architecture
+
+
+class ArchDiscussRequest(BaseModel):
+    messages: list[dict] = Field(default_factory=list)
+
+
+class ArchDiscussResponse(BaseModel):
+    reply: str
+    directive: str = ""
+
+
+@router.post("/{project_id}/architecture/discuss", response_model=ArchDiscussResponse)
+async def discuss_project_architecture(
+    project_id: int,
+    req: ArchDiscussRequest,
+    db: Session = Depends(get_db),
+):
+    """就当前架构与作者多轮研讨:聊清不满意在哪 → 蒸馏出「额外要求」。
+
+    前端拿返回的 directive 去调 architecture-async(directive 字段)重新生成。
+    """
+    project = _get_project_or_404(db, project_id)
+    try:
+        result = await discuss_architecture(
+            req.messages,
+            topic=project.topic,
+            concept=project.concept,
+            arch=project.architecture,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ArchDiscussResponse(**result)
 
 
 @router.post("/{project_id}/blueprint", response_model=GenerateBlueprintResponse)
