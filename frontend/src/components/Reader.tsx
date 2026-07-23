@@ -138,8 +138,13 @@ export default function Reader({
   const [direction, setDirection] = useState("");
   const [polishing, setPolishing] = useState(false);
   const [polished, setPolished] = useState<string | null>(null);
-  const [applyStage, setApplyStage] = useState(""); // 替换/同步进行中(空=空闲)
+  const [applying, setApplying] = useState(false); // 替换存盘中(快;不含同步)
   const [polishErr, setPolishErr] = useState("");
+  // 手改后「是否同步一致性引擎」询问(章号;null=无);同步本身非阻塞。
+  const [pendingSyncNum, setPendingSyncNum] = useState<number | null>(null);
+  // 阅读器内正在跑的一致性同步:非阻塞角标(章号 + 阶段),不挡阅读/翻章。
+  const [syncNum, setSyncNum] = useState<number | null>(null);
+  const [syncStage, setSyncStage] = useState("");
 
   const closePolish = () => {
     setPolishOpen(false);
@@ -181,6 +186,9 @@ export default function Reader({
     setPolishOpen(false);
     setPolished(null);
     setPolishErr("");
+    setEditOpen(false);
+    setPendingSyncNum(null); // 换章丢弃未决的同步询问,避免「第 N 章已保存」串到别章头上
+    // 注:syncNum(正在跑的后台同步角标)不清 —— 非阻塞,允许换章后继续显示直到完成
     const target = !restoreAppliedRef.current && restoreScroll != null ? restoreScroll : 0;
     restoreAppliedRef.current = true;
     contentRef.current?.scrollTo(0, target);
@@ -234,8 +242,12 @@ export default function Reader({
     } finally { setPolishing(false); }
   }
 
-  // 把选中段替换为 replacement 并落库+同步一致性引擎(AI 润色应用与手动修改共用)
-  async function applyReplacement(replacement: string) {
+  // 把选中段替换为 replacement 并落库(AI 润色应用与手动改共用)。
+  // 只做「快速存盘」——绝不在此阻塞同步一致性引擎。是否同步由 askSync 决定,
+  // 且同步永远走非阻塞角标(startReaderSync),不挡阅读/翻章:
+  //  - 润色:只改文笔不动情节 → askSync=false,从不同步。
+  //  - 手改:可能动情节 → askSync=true,存完弹一句问,用户要才后台同步。
+  async function applyReplacement(replacement: string, askSync: boolean) {
     if (!polishCtx || !chapter || selText == null) return;
     const source = chapter.final_content;
     // exact match 替换第一次出现;找不到(正文已被别处改过)则报错提示
@@ -245,31 +257,42 @@ export default function Reader({
       return;
     }
     const newContent = source.slice(0, at) + replacement + source.slice(at + selText.length);
-    const ctrl = new AbortController();
-    applyAbortRef.current = ctrl;
-    setApplyStage("保存正文…"); setPolishErr("");
+    setApplying(true); setPolishErr("");
     try {
       const updated = await api.editChapterContent(polishCtx.pid, polishCtx.chapterNumber, newContent);
       polishCtx.onApplied(updated);
-      // 与写作页手动保存一致:替换后重抽取 + 重建下游摘要 + 向量库
-      setApplyStage("同步一致性引擎…");
-      const { job_id } = await api.reExtractAsync(polishCtx.pid, polishCtx.chapterNumber);
-      await pollJob(job_id, {
-        signal: ctrl.signal,
-        onStage: (s) => setApplyStage(s || "同步一致性引擎…"),
-      });
-      if (ctrl.signal.aborted) return;
       closePolish();
       setEditOpen(false);
       setSelPara(null);
+      if (askSync) setPendingSyncNum(polishCtx.chapterNumber);
     } catch (e) {
-      if (!ctrl.signal.aborted) setPolishErr(e instanceof Error ? e.message : String(e));
-    } finally { if (!ctrl.signal.aborted) setApplyStage(""); }
+      setPolishErr(e instanceof Error ? e.message : String(e));
+    } finally { setApplying(false); }
   }
 
   async function applyPolish() {
     if (polished == null) return;
-    await applyReplacement(polished);
+    await applyReplacement(polished, false);
+  }
+
+  // 阅读器内的一致性同步:非阻塞角标,不挡阅读/翻章(手改后用户选「同步」时触发)。
+  async function startReaderSync(num: number) {
+    if (!polishCtx) return;
+    setPendingSyncNum(null);
+    const ctrl = new AbortController();
+    applyAbortRef.current = ctrl;
+    setSyncNum(num); setSyncStage("启动同步…");
+    try {
+      const { job_id } = await api.reExtractAsync(polishCtx.pid, num);
+      await pollJob(job_id, {
+        signal: ctrl.signal,
+        onStage: (s) => setSyncStage(s || "同步中…"),
+      });
+    } catch {
+      // 非阻塞:失败静默(任务可能仍在后台跑),不打断阅读
+    } finally {
+      if (!ctrl.signal.aborted) { setSyncNum(null); setSyncStage(""); }
+    }
   }
 
   return (
@@ -359,6 +382,29 @@ export default function Reader({
               {/* 窄屏强制换行点:仅 ≤640px 显示,把头部切成两行(见 styles.css) */}
               <div className="reader-head-br" />
             </div>
+            {(pendingSyncNum !== null || syncNum !== null) && (
+              <div className="reader-sync-bar">
+                {pendingSyncNum !== null && (
+                  <div className="sync-ask">
+                    <span className="sync-ask-text">
+                      第 {pendingSyncNum} 章已保存。改动了情节吗?要同步一致性引擎吗?
+                      <b className="hint">同步会更新人物状态、伏笔与后续章节的前情摘要;只改了文字/措辞可以跳过。</b>
+                    </span>
+                    <span className="sync-ask-actions">
+                      <button className="primary btn-sm" disabled={syncNum !== null}
+                        onClick={() => startReaderSync(pendingSyncNum)}>同步</button>
+                      <button className="btn-sm" onClick={() => setPendingSyncNum(null)}>跳过</button>
+                    </span>
+                  </div>
+                )}
+                {syncNum !== null && (
+                  <div className="sync-badge">
+                    <span className="spin spin-sm" />
+                    <span>第 {syncNum} 章同步一致性引擎中({syncStage})· 不影响继续阅读</span>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="reader-body">
               {toc && (
                 <div className={"reader-toc" + (tocOpen ? " open" : "")}>
@@ -425,7 +471,7 @@ export default function Reader({
               </button>
             </div>
             {polishOpen && selText != null && (
-              <div className="reader-polish" onClick={() => { if (!polishing && !applyStage) closePolish(); }}>
+              <div className="reader-polish" onClick={() => { if (!polishing && !applying) closePolish(); }}>
                 <div className="reader-polish-panel" onClick={(e) => e.stopPropagation()}>
                   {polished == null ? (
                     <>
@@ -470,15 +516,15 @@ export default function Reader({
                         </div>
                       </div>
                       <div className="rp-actions">
-                        <button className="primary" disabled={!!applyStage} onClick={applyPolish}>
-                          {applyStage && <span className="spin" />}
-                          {applyStage || "替换原文"}
+                        <button className="primary" disabled={applying} onClick={applyPolish}>
+                          {applying && <span className="spin" />}
+                          {applying ? "替换中…" : "替换原文"}
                         </button>
                         <button
-                          disabled={!!applyStage}
+                          disabled={applying}
                           onClick={() => { setPolished(null); setPolishErr(""); }}
                         >重新润色</button>
-                        <button disabled={!!applyStage} onClick={closePolish}>取消</button>
+                        <button disabled={applying} onClick={closePolish}>取消</button>
                       </div>
                     </>
                   )}
@@ -487,9 +533,9 @@ export default function Reader({
               </div>
             )}
             {editOpen && selText != null && (
-              <div className="reader-polish" onClick={() => { if (!applyStage) setEditOpen(false); }}>
+              <div className="reader-polish" onClick={() => { if (!applying) setEditOpen(false); }}>
                 <div className="reader-polish-panel" onClick={(e) => e.stopPropagation()}>
-                  <div className="rp-label">手动修改此段(只动这一段,保存后自动同步一致性引擎)</div>
+                  <div className="rp-label">手动修改此段(只动这一段;保存后可选同步一致性引擎)</div>
                   <textarea
                     rows={Math.min(12, Math.max(4, Math.ceil(editText.length / 40)))}
                     value={editText}
@@ -498,12 +544,12 @@ export default function Reader({
                   />
                   <div className="rp-actions">
                     <button className="primary"
-                      disabled={!!applyStage || !editText.trim() || editText === selText}
-                      onClick={() => applyReplacement(editText.trim())}>
-                      {applyStage && <span className="spin" />}
-                      {applyStage || "保存修改"}
+                      disabled={applying || !editText.trim() || editText === selText}
+                      onClick={() => applyReplacement(editText.trim(), true)}>
+                      {applying && <span className="spin" />}
+                      {applying ? "保存中…" : "保存修改"}
                     </button>
-                    <button disabled={!!applyStage} onClick={() => setEditOpen(false)}>取消</button>
+                    <button disabled={applying} onClick={() => setEditOpen(false)}>取消</button>
                   </div>
                   {polishErr && <div className="msg-err rp-err">{polishErr}</div>}
                 </div>
