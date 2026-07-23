@@ -96,7 +96,7 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
     } catch (e) { setErr(String(e)); } finally { setBusy(""); }
   }
 
-  function useIdea(c: Concept) {
+  function pickIdea(c: Concept) {
     setConcept({ ...EMPTY_CONCEPT, ...c });
     setIdeas([]); setEditing(false); setRefinePreview(null);
     flash("已载入该方案为当前概念,可继续用「让 AI 改一处」或手动编辑打磨,满意后「定为本书概念」。");
@@ -239,7 +239,7 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
               <div key={i} className="idea-card">
                 <div className="idea-head">
                   <h3 className="grow">{idea.logline || "（无标题）"}</h3>
-                  <button className="primary btn-sm" disabled={!!busy} onClick={() => useIdea(idea)}>
+                  <button className="primary btn-sm" disabled={!!busy} onClick={() => pickIdea(idea)}>
                     用这个
                   </button>
                 </div>
