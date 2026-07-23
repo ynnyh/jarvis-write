@@ -9,6 +9,7 @@ GET  /api/projects/{id}/chapters/{n}            单章详情(含正文)
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -23,6 +24,15 @@ from app.engines.pipeline.chapter import generate_chapter
 from app.engines.polish import ai_flavor_report
 from app.jobs import create_job, fail_job, finish_job, list_running, update_stage
 from app.schemas.tendency import Tendency
+
+logger = logging.getLogger("jarvis-write.chapters")
+
+
+def _db_locked(exc: BaseException) -> bool:
+    """是否 SQLite 写锁冲突(含 WAL 下旧快照升级写锁、不走 busy_timeout 的那种)。"""
+    msg = str(exc).lower()
+    return "database is locked" in msg or "database table is locked" in msg
+
 
 router = APIRouter(
     prefix="/api/projects/{project_id}/chapters",
@@ -280,37 +290,56 @@ async def re_extract_async(
         from app.engines.memory import ChapterMemory
         from app.engines.pipeline.chapter import rebuild_summaries_after
 
-        session = SessionLocal()
-        try:
-            project = session.get(Project, project_id)
-            ch = (
-                session.query(Chapter)
-                .filter(
-                    Chapter.project_id == project_id,
-                    Chapter.chapter_number == chapter_number,
+        # 同步要跨多轮 LLM 调用,期间用量记账等在别的连接提交,会让本连接的读快照过期,
+        # 升级写锁时撞 SQLITE_BUSY(WAL 下不走 busy_timeout)。三步都幂等(抽取先清旧账 /
+        # 摘要覆盖写 / 向量库删后插),故除尽量缩短事务外,再遇锁整体回滚重试兜底。
+        max_attempts = 5
+        for attempt in range(1, max_attempts + 1):
+            session = SessionLocal()
+            try:
+                project = session.get(Project, project_id)
+                ch = (
+                    session.query(Chapter)
+                    .filter(
+                        Chapter.project_id == project_id,
+                        Chapter.chapter_number == chapter_number,
+                    )
+                    .first()
                 )
-                .first()
-            )
-            update_stage(job_id, "1/3 重新抽取状态(清旧账)")
-            stats = await extract_and_apply(
-                session, project_id, chapter_number, ch.final_content
-            )
-            update_stage(job_id, "2/3 重建下游前情摘要")
-            rebuilt = await rebuild_summaries_after(
-                session, project, chapter_number,
-                progress=lambda s: update_stage(job_id, f"2/3 {s}"),
-            )
-            update_stage(job_id, "3/3 更新向量库")
-            await ChapterMemory(project_id).add_chapter(
-                chapter_number, ch.final_content
-            )
-            session.commit()
-            finish_job(job_id, {"extraction_stats": stats, "summaries_rebuilt": rebuilt})
-        except Exception as exc:  # noqa: BLE001
-            session.rollback()
-            fail_job(job_id, str(exc)[:500])
-        finally:
-            session.close()
+                content = ch.final_content
+                # 先结束读事务:别让初始读取的快照跨过下面的 LLM 调用
+                session.commit()
+                update_stage(job_id, "1/3 重新抽取状态(清旧账)")
+                stats = await extract_and_apply(
+                    session, project_id, chapter_number, content
+                )
+                # 抽取写入立刻提交:别拿着写锁跨下游摘要的多轮 LLM 调用
+                session.commit()
+                update_stage(job_id, "2/3 重建下游前情摘要")
+                rebuilt = await rebuild_summaries_after(
+                    session, project, chapter_number,
+                    progress=lambda s: update_stage(job_id, f"2/3 {s}"),
+                )
+                update_stage(job_id, "3/3 更新向量库")
+                await ChapterMemory(project_id).add_chapter(chapter_number, content)
+                session.commit()
+                finish_job(job_id, {"extraction_stats": stats, "summaries_rebuilt": rebuilt})
+                return
+            except Exception as exc:  # noqa: BLE001
+                session.rollback()
+                if _db_locked(exc) and attempt < max_attempts:
+                    wait = min(2 ** attempt, 15)
+                    logger.warning(
+                        "re-extract(%s-%s)第 %d 次遇数据库锁,%ss 后重试: %s",
+                        project_id, chapter_number, attempt, wait, exc,
+                    )
+                    update_stage(job_id, f"数据库忙,{wait}s 后重试({attempt}/{max_attempts})")
+                    await asyncio.sleep(wait)
+                    continue
+                fail_job(job_id, str(exc)[:500])
+                return
+            finally:
+                session.close()
 
     asyncio.create_task(runner())
     return {"job_id": job_id}

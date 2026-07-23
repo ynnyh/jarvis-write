@@ -138,12 +138,17 @@ async def rebuild_summaries_after(
                 pass
         prev = _rolling_summary(db, project.id, ch.chapter_number)
         outline = get_outline(db, project.id, ch.chapter_number)
+        title = outline.title if outline else ""
+        text = ch.final_content
+        # 读完即提交,释放读快照:LLM 调用期间用量记账会在别的连接提交,让旧快照过期,
+        # 之后 UPDATE 升级写锁会撞 SQLITE_BUSY(WAL 下该错误不走 busy_timeout,直接失败)。
+        db.commit()
         new_summary = await get_adapter_for(Task.SUMMARY).ask(
             ROLLING_SUMMARY_PROMPT.format(
                 previous_summary=prev,
                 chapter_number=ch.chapter_number,
-                chapter_title=outline.title if outline else "",
-                chapter_text=ch.final_content,
+                chapter_title=title,
+                chapter_text=text,
             )
         )
         row = (
