@@ -850,6 +850,118 @@ def test_polish_fragment_not_owner_404(client):
     assert r.status_code == 404
 
 
+# ---------- 阅读中段落对话(discuss) ----------
+
+
+class _DiscussAdapter:
+    """假适配器:按需返回固定文本;记录最后一次 complete 收到的 messages。
+
+    discuss 走多轮 complete(不是 ask),需带 max_tokens / _record_usage /
+    complete 三样,对齐 base.LLMAdapter 的真实调用面。
+    """
+
+    def __init__(self, reply: str):
+        self._reply = reply
+        self.max_tokens = 8192
+        self.captured: list = []
+
+    def _record_usage(self, resp):  # noqa: ANN001 — 记账在测试里是 no-op
+        pass
+
+    async def complete(self, messages):
+        self.captured = messages
+        return type("R", (), {
+            "content": self._reply, "model": "fake",
+            "prompt_tokens": 1, "completion_tokens": 1,
+        })()
+
+
+def test_discuss_explains_without_suggestion(client):
+    """纯提问:AI 只解释,无【改写建议】→ suggestion 为 null;上下文注入 system。"""
+    from unittest.mock import patch
+
+    headers = _auth(_register(client, "disc_ask")["token"])
+    p = _create_chapter_with_content(client, headers, "对话书")
+
+    adapter = _DiscussAdapter("这段是说主角终于抵达了城门口,情绪是忐忑的。")
+    with patch("app.engines.polish.polisher.get_adapter_for", return_value=adapter):
+        r = client.post(
+            f"/api/projects/{p['id']}/chapters/1/discuss",
+            headers=headers,
+            json={
+                "messages": [{"role": "user", "content": "这段是什么意思?"}],
+                "target": "他走进了城门。",
+            },
+        )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "主角" in body["reply"]
+    assert body["suggestion"] is None
+    # system 里注入了本章梗概与选中段落
+    system = adapter.captured[0].content
+    assert "主角进城" in system
+    assert "他走进了城门。" in system
+
+
+def test_discuss_returns_suggestion(client):
+    """要求改写:回复带【改写建议】标记 → 拆出 suggestion,reply 留说明部分。"""
+    from unittest.mock import patch
+
+    headers = _auth(_register(client, "disc_fix")["token"])
+    p = _create_chapter_with_content(client, headers, "改写书")
+
+    reply = "我把它写得更紧张一些。\n【改写建议】\n他屏住呼吸,一步跨进了城门。"
+    adapter = _DiscussAdapter(reply)
+    with patch("app.engines.polish.polisher.get_adapter_for", return_value=adapter):
+        r = client.post(
+            f"/api/projects/{p['id']}/chapters/1/discuss",
+            headers=headers,
+            json={
+                "messages": [{"role": "user", "content": "帮我改得紧张点"}],
+                "target": "他走进了城门。",
+            },
+        )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["suggestion"] == "他屏住呼吸,一步跨进了城门。"
+    assert "更紧张" in body["reply"]
+    assert "【改写建议】" not in body["reply"]
+
+
+def test_discuss_empty_messages_400(client):
+    """空对话 → 400;章节不存在 → 404。"""
+    headers = _auth(_register(client, "disc_empty")["token"])
+    p = _create_chapter_with_content(client, headers, "空对话书")
+
+    r = client.post(
+        f"/api/projects/{p['id']}/chapters/1/discuss",
+        headers=headers,
+        json={"messages": [], "target": "他走进了城门。"},
+    )
+    assert r.status_code == 400
+
+    r = client.post(
+        f"/api/projects/{p['id']}/chapters/99/discuss",
+        headers=headers,
+        json={"messages": [{"role": "user", "content": "在?"}], "target": "x"},
+    )
+    assert r.status_code == 404
+
+
+def test_discuss_not_owner_404(client):
+    """非 owner 就他人项目段落对话 → 404(不泄露存在性)。"""
+    a = _auth(_register(client, "disc_a")["token"])
+    b = _auth(_register(client, "disc_b")["token"])
+    p = _create_chapter_with_content(client, a, "别人的对话书")
+
+    r = client.post(
+        f"/api/projects/{p['id']}/chapters/1/discuss",
+        headers=b,
+        json={"messages": [{"role": "user", "content": "这啥意思"}], "target": "他走进了城门。"},
+    )
+    assert r.status_code == 404
+
+
 # ---------- 书籍简介(synopsis) ----------
 
 

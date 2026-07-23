@@ -146,11 +146,29 @@ export default function Reader({
   const [syncNum, setSyncNum] = useState<number | null>(null);
   const [syncStage, setSyncStage] = useState("");
 
+  // ---- 段落对话状态(选中段 → 问 AI:可解释、可给改写建议) ----
+  const [discussOpen, setDiscussOpen] = useState(false);
+  const [discussMsgs, setDiscussMsgs] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
+  const [discussInput, setDiscussInput] = useState("");
+  const [discussing, setDiscussing] = useState(false);
+  const [discussErr, setDiscussErr] = useState("");
+  // 最近一条 AI 回复携带的改写建议(null=纯解释);采用即走 applyReplacement
+  const [suggestion, setSuggestion] = useState<string | null>(null);
+  const discussLogRef = useRef<HTMLDivElement>(null);
+
   const closePolish = () => {
     setPolishOpen(false);
     setPolished(null);
     setPolishErr("");
     setDirection("");
+  };
+
+  const closeDiscuss = () => {
+    setDiscussOpen(false);
+    setDiscussMsgs([]);
+    setDiscussInput("");
+    setDiscussErr("");
+    setSuggestion(null);
   };
 
   // 偏好变化即写入 localStorage(隐私模式等写失败时静默忽略)
@@ -187,6 +205,7 @@ export default function Reader({
     setPolished(null);
     setPolishErr("");
     setEditOpen(false);
+    closeDiscuss(); // 换章关掉段落对话,清空历史
     setPendingSyncNum(null); // 换章丢弃未决的同步询问,避免「第 N 章已保存」串到别章头上
     // 注:syncNum(正在跑的后台同步角标)不清 —— 非阻塞,允许换章后继续显示直到完成
     const target = !restoreAppliedRef.current && restoreScroll != null ? restoreScroll : 0;
@@ -194,10 +213,11 @@ export default function Reader({
     contentRef.current?.scrollTo(0, target);
   }, [chapter, restoreScroll]);
 
-  // Esc:先关润色弹层 → 再取消段落选择 → 最后才关阅读器
+  // Esc:先关对话/润色弹层 → 再取消段落选择 → 最后才关阅读器
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      if (discussOpen) { if (!discussing) closeDiscuss(); return; }
       if (polishOpen) { closePolish(); return; }
       if (editOpen) { setEditOpen(false); return; }
       if (selPara != null) { setSelPara(null); return; }
@@ -205,12 +225,17 @@ export default function Reader({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, polishOpen, editOpen, selPara]);
+  }, [onClose, discussOpen, discussing, polishOpen, editOpen, selPara]);
 
   // 卸载时清掉滚动防抖定时器
   useEffect(() => () => {
     if (scrollTimerRef.current) window.clearTimeout(scrollTimerRef.current);
   }, []);
+
+  // 对话有新消息时,聊天记录滚到底
+  useEffect(() => {
+    if (discussOpen) discussLogRef.current?.scrollTo(0, discussLogRef.current.scrollHeight);
+  }, [discussMsgs, discussing, discussOpen]);
 
   // 滚动 ~500ms 防抖后上报位置(全书模式父级持久化到 localStorage)
   const handleContentScroll = () => {
@@ -293,6 +318,35 @@ export default function Reader({
     } finally {
       if (!ctrl.signal.aborted) { setSyncNum(null); setSyncStage(""); }
     }
+  }
+
+  // 段落对话:发一句 → 追加到历史 → 请求 AI(带选段原文,后端自动补上下文)。
+  // AI 回复可能携带改写建议(suggestion),浮出「采用此改写」按钮。
+  async function sendDiscuss() {
+    if (!polishCtx || selText == null) return;
+    const text = discussInput.trim();
+    if (!text || discussing) return;
+    const next = [...discussMsgs, { role: "user" as const, content: text }];
+    setDiscussMsgs(next);
+    setDiscussInput("");
+    setDiscussing(true); setDiscussErr(""); setSuggestion(null);
+    try {
+      const r = await api.discussFragment(polishCtx.pid, polishCtx.chapterNumber, next, selText);
+      setDiscussMsgs((m) => [...m, { role: "assistant", content: r.reply || "(见下方改写建议)" }]);
+      setSuggestion(r.suggestion);
+    } catch (e) {
+      // 失败时回退刚发出的那条,方便用户重发
+      setDiscussMsgs((m) => m.slice(0, -1));
+      setDiscussInput(text);
+      setDiscussErr(e instanceof Error ? e.message : String(e));
+    } finally { setDiscussing(false); }
+  }
+
+  // 采用对话里的改写建议:走与润色相同的替换+同步链路(改了文字→不问同步)。
+  async function adoptSuggestion() {
+    if (suggestion == null) return;
+    await applyReplacement(suggestion, false);
+    closeDiscuss();
   }
 
   return (
@@ -450,9 +504,12 @@ export default function Reader({
                   onSelect={polishEnabled ? (i) => setSelPara(i) : undefined}
                 />
               </div>
-              {polishEnabled && selPara != null && !polishOpen && !editOpen && (
+              {polishEnabled && selPara != null && !polishOpen && !editOpen && !discussOpen && (
                 <div className="para-tools">
-                  <button className="btn-sm primary" onClick={() => setPolishOpen(true)}>
+                  <button className="btn-sm primary" onClick={() => setDiscussOpen(true)}>
+                    💬 问 AI
+                  </button>
+                  <button className="btn-sm" onClick={() => setPolishOpen(true)}>
                     ✨ 润色此段
                   </button>
                   <button className="btn-sm" onClick={() => { setEditText(selText ?? ""); setEditOpen(true); }}>
@@ -552,6 +609,66 @@ export default function Reader({
                     <button disabled={applying} onClick={() => setEditOpen(false)}>取消</button>
                   </div>
                   {polishErr && <div className="msg-err rp-err">{polishErr}</div>}
+                </div>
+              </div>
+            )}
+            {discussOpen && selText != null && (
+              <div className="reader-polish" onClick={() => { if (!discussing && !applying) closeDiscuss(); }}>
+                <div className="reader-polish-panel reader-discuss-panel" onClick={(e) => e.stopPropagation()}>
+                  <div className="rp-label">与 AI 聊这一段(可以问它什么意思,也可以让它帮你改)</div>
+                  <div className="rd-orig">{selText}</div>
+                  <div className="rd-log" ref={discussLogRef}>
+                    {discussMsgs.length === 0 && !discussing && (
+                      <div className="muted rd-empty">
+                        试试:「这段是什么意思?」「这里为什么这么写?」「帮我改得紧张一点」
+                      </div>
+                    )}
+                    {discussMsgs.map((m, i) => (
+                      <div key={i} className={"rd-msg rd-" + m.role}>
+                        <div className="rd-bubble">{m.content}</div>
+                      </div>
+                    ))}
+                    {discussing && (
+                      <div className="rd-msg rd-assistant">
+                        <div className="rd-bubble muted"><span className="spin spin-sm" />思考中…</div>
+                      </div>
+                    )}
+                  </div>
+                  {suggestion != null && (
+                    <div className="rd-suggestion">
+                      <div className="rp-label">AI 给出的改写(采用后替换这一段)</div>
+                      <div className="rp-text rp-new">{suggestion}</div>
+                      <div className="rp-actions">
+                        <button className="primary" disabled={applying} onClick={adoptSuggestion}>
+                          {applying && <span className="spin" />}
+                          {applying ? "替换中…" : "采用此改写"}
+                        </button>
+                        <button disabled={applying} onClick={() => setSuggestion(null)}>不用,继续聊</button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="rd-input">
+                    <textarea
+                      rows={2}
+                      value={discussInput}
+                      placeholder="问点什么,或说说想怎么改…(Enter 发送,Shift+Enter 换行)"
+                      disabled={discussing}
+                      onChange={(e) => setDiscussInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          sendDiscuss();
+                        }
+                      }}
+                    />
+                    <div className="rp-actions">
+                      <button className="primary" disabled={discussing || !discussInput.trim()} onClick={sendDiscuss}>
+                        {discussing && <span className="spin" />}发送
+                      </button>
+                      <button disabled={discussing} onClick={closeDiscuss}>关闭</button>
+                    </div>
+                  </div>
+                  {discussErr && <div className="msg-err rp-err">{discussErr}</div>}
                 </div>
               </div>
             )}

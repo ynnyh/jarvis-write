@@ -469,6 +469,10 @@ export const api = {
   polishFragment: (pid: number, n: number, fragment: string, direction: string) =>
     req<{ polished: string; notes: string | null }>(
       "POST", `/api/projects/${pid}/chapters/${n}/polish-fragment`, { fragment, direction }, LLM_TIMEOUT),
+  // 就选中段落与 AI 多轮对话:可解释、可给改写建议(suggestion 非空时可一键采用)
+  discussFragment: (pid: number, n: number, messages: { role: string; content: string }[], target: string) =>
+    req<{ reply: string; suggestion: string | null }>(
+      "POST", `/api/projects/${pid}/chapters/${n}/discuss`, { messages, target }, LLM_TIMEOUT),
   aiFlavor: (text: string) =>
     req<FlavorInfo & { hits?: Record<string, unknown>[]; total_chars?: number }>(
       "POST", "/api/polish/ai-flavor", { text }),

@@ -21,10 +21,13 @@ from app.engines.consistency.extractor import parse_llm_json
 from app.engines.polish.ai_flavor import FlavorReport, ai_flavor_report
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import render_style_block
+from app.llm.base import LLMAdapter, LLMMessage
 from app.llm.router import Task, get_adapter_for
 from app.prompts.polish import (
     _DEAI_RULES,
     _OUTPUT_CONTRACT,
+    DISCUSS_SUGGESTION_MARK,
+    DISCUSS_SYSTEM_PROMPT,
     FACT_LOCK_PROMPT,
     FACT_VERIFY_PROMPT,
     FRAGMENT_POLISH_PROMPT,
@@ -177,3 +180,89 @@ async def polish_text(
         "flavor_before": before.to_dict(),
         "flavor_after": after.to_dict(),
     }
+
+
+_MAX_DISCUSS_TURNS = 40
+_MAX_DISCUSS_MSG_LEN = 2000
+_MAX_DISCUSS_CONTEXT_CHARS = 1200  # 上/下文各截断,防 token 膨胀
+
+
+def _split_discuss_output(raw: str) -> tuple[str, str | None]:
+    """解析对话输出,返回 (回复正文, 改写建议或 None)。
+
+    模型想改写这段时,会在【改写建议】标记后给出完整段落(独占其后正文);
+    没有该标记就是纯解释/问答。回复正文永远保留标记之前的内容,让作者看到
+    模型「打算怎么改」的那一两句说明。
+    """
+    m = re.search(re.escape(DISCUSS_SUGGESTION_MARK), raw)
+    if not m:
+        return raw.strip(), None
+    reply = raw[: m.start()].strip()
+    suggestion = raw[m.end():].strip() or None
+    return reply, suggestion
+
+
+async def discuss_fragment(
+    messages: list[dict],
+    target: str,
+    *,
+    chapter_summary: str = "",
+    before: str = "",
+    after: str = "",
+) -> dict:
+    """就选中段落与作者多轮对话:可解释、可给改写建议。
+
+    - messages:对话历史 [{role, content}, ...],最后一条应为作者(user)发言。
+    - target:作者选中、正在讨论的段落原文。
+    - chapter_summary / before / after:上下文(本章梗概、选段上下文),仅供理解。
+
+    返回 {reply, suggestion};suggestion 非空时前端浮出「采用此改写」按钮,
+    复用与润色相同的替换+同步链路。单次调用,复用 inspire chat 的多轮范式。
+    """
+    target = target.strip()
+    if not target:
+        raise ValueError("选中的段落为空")
+
+    turns = [
+        m for m in messages
+        if m.get("role") in ("user", "assistant") and (m.get("content") or "").strip()
+    ][-_MAX_DISCUSS_TURNS:]
+    if not turns:
+        raise ValueError("请先说点什么")
+    if turns[-1]["role"] != "user":
+        raise ValueError("最后一条应为你的发言")
+
+    system = DISCUSS_SYSTEM_PROMPT.format(
+        chapter_summary=chapter_summary.strip() or "(无)",
+        before=before.strip()[-_MAX_DISCUSS_CONTEXT_CHARS:] or "(无)",
+        target=target,
+        after=after.strip()[:_MAX_DISCUSS_CONTEXT_CHARS] or "(无)",
+        mark=DISCUSS_SUGGESTION_MARK,
+    )
+    chat_messages = [LLMMessage(role="system", content=system)] + [
+        LLMMessage(role=m["role"], content=(m["content"] or "").strip()[:_MAX_DISCUSS_MSG_LEN])
+        for m in turns
+    ]
+
+    adapter = get_adapter_for(Task.POLISH)
+    reply_raw = await _discuss_complete(adapter, chat_messages)
+    reply, suggestion = _split_discuss_output(reply_raw)
+    if not reply and not suggestion:
+        raise ValueError("模型没有回应,请重试")
+    return {"reply": reply, "suggestion": suggestion}
+
+
+async def _discuss_complete(adapter: LLMAdapter, messages: list[LLMMessage]) -> str:
+    """多轮 complete 的薄封装:带空回复重试 + 用量记账(对齐 ask 的兜底)。"""
+    original_max = adapter.max_tokens
+    try:
+        for _ in range(3):
+            resp = await adapter.complete(messages)
+            adapter._record_usage(resp)
+            content = (resp.content or "").strip()
+            if content:
+                return content
+            adapter.max_tokens = min(adapter.max_tokens * 2, 32768)
+        raise RuntimeError("模型连续 3 次返回空回复")
+    finally:
+        adapter.max_tokens = original_max

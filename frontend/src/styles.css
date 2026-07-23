@@ -1174,6 +1174,52 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 }
 .rp-new { background: var(--ok-weak); }
 
+/* 段落对话面板:选中段原文 + 对话流 + 输入框;改写建议命中时浮出采用块 */
+.reader-discuss-panel { display: flex; flex-direction: column; }
+.rd-orig {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  background: var(--surface-2);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  line-height: 1.8;
+  max-height: 96px;
+  overflow-y: auto;
+  margin-bottom: 10px;
+}
+.rd-log {
+  flex: 1 1 auto;
+  min-height: 160px;
+  max-height: 42vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 2px;
+}
+.rd-empty { font-size: var(--fs-sm); line-height: 1.8; padding: 8px 2px; }
+.rd-msg { display: flex; }
+.rd-user { justify-content: flex-end; }
+.rd-assistant { justify-content: flex-start; }
+.rd-bubble {
+  max-width: 86%;
+  font-size: var(--fs-sm);
+  line-height: 1.8;
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.rd-user .rd-bubble { background: var(--brand-weak); }
+.rd-assistant .rd-bubble { background: var(--surface-2); }
+.rd-suggestion {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.rd-input { margin-top: 12px; }
+.rd-input textarea { width: 100%; resize: vertical; }
+
 /* ==========================================================================
    响应式:≤900px 折叠布局;≤640px 触摸优化
    ========================================================================== */

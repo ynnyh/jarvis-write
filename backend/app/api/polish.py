@@ -19,7 +19,12 @@ from app.auth import get_current_user
 from app.chapter_versions import snapshot_chapter
 from app.db.models import Chapter, Outline
 from app.db.session import get_db
-from app.engines.polish import ai_flavor_report, polish_fragment, polish_text
+from app.engines.polish import (
+    ai_flavor_report,
+    discuss_fragment,
+    polish_fragment,
+    polish_text,
+)
 from app.jobs import list_running, spawn_job
 from app.schemas.tendency import Tendency
 
@@ -205,6 +210,87 @@ async def polish_chapter_fragment(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return FragmentPolishResult(**result)
+
+
+# ---------- 阅读中就选段与 AI 对话(可解释 / 可给改写建议) ----------
+
+_MAX_DISCUSS_MESSAGES = 40
+
+
+class DiscussMessage(BaseModel):
+    role: str = Field(description="user / assistant")
+    content: str = Field(min_length=1)
+
+
+class DiscussRequest(BaseModel):
+    target: str = Field(min_length=1, description="选中、正在讨论的段落原文")
+    messages: list[DiscussMessage] = Field(default_factory=list)
+
+
+class DiscussResult(BaseModel):
+    reply: str
+    # 非空 = 模型给出的改写后完整段落;前端浮出「采用此改写」,走替换+同步链路
+    suggestion: str | None = None
+
+
+@router.post(
+    "/api/projects/{project_id}/chapters/{n}/discuss",
+    response_model=DiscussResult,
+)
+async def discuss_chapter_fragment(
+    project_id: int, n: int, req: DiscussRequest, db: Session = Depends(get_db)
+):
+    """就选中段落与 AI 多轮对话:读不懂可问、不对味可聊着改。
+
+    注入本章蓝图摘要 + 选段在定稿正文中的上下文(前后各一段),
+    模型给出改写建议时返回 suggestion,由前端确认后替换(复用润色链路)。
+    """
+    get_project_or_404(db, project_id)
+    ch = (
+        db.query(Chapter)
+        .filter(Chapter.project_id == project_id, Chapter.chapter_number == n)
+        .first()
+    )
+    if ch is None:
+        raise HTTPException(status_code=404, detail=f"第 {n} 章尚未生成")
+
+    target = req.target.strip()
+    if len(target) > _MAX_FRAGMENT_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"选段最长 {_MAX_FRAGMENT_CHARS} 字,当前 {len(target)} 字",
+        )
+    if len(req.messages) > _MAX_DISCUSS_MESSAGES:
+        raise HTTPException(
+            status_code=400, detail="对话过长,请开新的讨论"
+        )
+
+    # 定位选段在定稿正文中的上下文(前后各一段窗口,仅供模型理解)
+    before = after = ""
+    source = ch.final_content or ""
+    at = source.find(target)
+    if at >= 0:
+        before = source[:at]
+        after = source[at + len(target):]
+
+    outline = (
+        db.query(Outline)
+        .filter(Outline.project_id == project_id, Outline.chapter_number == n)
+        .first()
+    )
+    try:
+        result = await discuss_fragment(
+            [m.model_dump() for m in req.messages],
+            target,
+            chapter_summary=outline.summary if outline else "",
+            before=before,
+            after=after,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"对话失败: {exc}") from exc
+    return DiscussResult(**result)
 
 
 @router.post("/api/polish/ai-flavor")
