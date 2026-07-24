@@ -1,7 +1,7 @@
 // 编辑部:主编评分 / 校对 / 审核报告 / 润色工作台(四个角色一站式)
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, AuditReport, ChapterBrief, ChapterReview, ProofIssue, ReviewSuggestion } from "../api";
+import { api, AuditReport, ChapterBrief, ChapterReview, ProofIssue, ProofreadSnapshot, ReviewSuggestion } from "../api";
 import PolishPanel from "./PolishPanel";
 import { useJob } from "../ui/useJob";
 import { toast } from "../ui/Toaster";
@@ -37,6 +37,8 @@ export default function EditorialPanel({ pid }: Props) {
   // 校对
   const [issues, setIssues] = useState<ProofIssue[] | null>(null);
   const [picked, setPicked] = useState<Set<number>>(new Set());
+  // 校对回显:生成时自动修复的清单(只读展示)
+  const [proofEcho, setProofEcho] = useState<ProofreadSnapshot | null>(null);
   // 审核
   const [audit, setAudit] = useState<AuditReport | null>(null);
 
@@ -62,6 +64,22 @@ export default function EditorialPanel({ pid }: Props) {
     let cancelled = false;
     api.getReview(pid, chapterNum).then((r) => {
       if (!cancelled && r.review) setReview(r.review);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [tab, chapterNum, pid]);
+
+  // 校对回显:手动校对→填进 issues 走原有勾选修复 UI;生成时校对→只读清单
+  useEffect(() => {
+    if (tab !== "proofread" || chapterNum === null) return;
+    let cancelled = false;
+    api.getProofread(pid, chapterNum).then((r) => {
+      if (cancelled || !r.proofread) return;
+      if (r.proofread.source === "manual") {
+        setIssues(r.proofread.issues);
+        setPicked(new Set(r.proofread.issues.map((_, i) => i)));
+      } else {
+        setProofEcho(r.proofread);
+      }
     }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [tab, chapterNum, pid]);
@@ -94,7 +112,7 @@ export default function EditorialPanel({ pid }: Props) {
 
   async function runProofread() {
     if (chapterNum === null) return;
-    setBusy("校对逐句检查中(约 1-2 分钟)…"); setErr(""); setIssues(null); setPicked(new Set());
+    setBusy("校对逐句检查中(约 1-2 分钟)…"); setErr(""); setIssues(null); setPicked(new Set()); setProofEcho(null);
     try {
       const r = await runJob<{ issues: ProofIssue[] }>(
         () => api.proofreadAsync(pid, chapterNum),
@@ -125,7 +143,7 @@ export default function EditorialPanel({ pid }: Props) {
 
   const chapterPicker = (
     <select value={chapterNum ?? ""} onChange={(e) => {
-      setChapterNum(Number(e.target.value)); setReview(null); setIssues(null);
+      setChapterNum(Number(e.target.value)); setReview(null); setIssues(null); setProofEcho(null);
     }}>
       {chapters.map((c) => (
         <option key={c.chapter_number} value={c.chapter_number}>
@@ -226,6 +244,33 @@ export default function EditorialPanel({ pid }: Props) {
           </div>
           {!chapters.length && <div className="muted mt-2">还没有已生成的章节。</div>}
           {busy && <div className="muted mt-2">{busy}</div>}
+          {proofEcho?.source === "generation" && (
+            <div className="mt-3">
+              <div className="review-meta">
+                <span className="badge">生成时校对</span>
+                {proofEcho.proofread_at && (
+                  <span className="hint">{new Date(proofEcho.proofread_at).toLocaleString("zh-CN", {
+                    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+                  })}</span>
+                )}
+                <span className="hint">已自动修复 {proofEcho.fixed} 处硬伤</span>
+              </div>
+              {proofEcho.issues.length === 0 ? (
+                <div className="msg-ok">生成时未发现硬伤。</div>
+              ) : (
+                proofEcho.issues.map((it, i) => (
+                  <div key={i} className="proof-item">
+                    <span className="badge">{ISSUE_TYPE[it.type] ?? it.type}</span>
+                    <div className="proof-body">
+                      <div className="diff-old">{it.original}</div>
+                      <div className="diff-new">{it.suggestion}</div>
+                      {it.reason && <div className="hint">{it.reason}</div>}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
           {issues !== null && (
             issues.length === 0 ? (
               <div className="msg-ok mt-3">没发现硬伤,这章很干净。</div>

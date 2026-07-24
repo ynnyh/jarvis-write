@@ -27,9 +27,11 @@ from app.db.session import SessionLocal, get_db
 from app.engines.editorial import (
     apply_proofread_fixes,
     judge_passed,
+    load_proofread_snapshot,
     load_review_snapshot,
     proofread_chapter,
     review_chapter,
+    store_proofread_snapshot,
     store_review_snapshot,
 )
 from app.jobs import list_running, spawn_job
@@ -155,9 +157,53 @@ async def proofread_async(project_id: int, n: int, db: Session = Depends(get_db)
         progress(f"校对正在逐句检查第 {n} 章")
         result = await proofread_chapter(content)
         result["chapter_number"] = n
+        # 待修清单落库:编辑部下次打开直接回显,正文没变就不必再跑一次校对
+        _persist_proofread_snapshot(project_id, n, result["issues"], content)
         return result
 
     return {"job_id": spawn_job(f"proofread-{project_id}-{n}", work)}
+
+
+def _persist_proofread_snapshot(
+    project_id: int, n: int, issues: list[dict], content: str
+) -> None:
+    """手动校对完成后把待修清单存进章节快照(独立会话;后台任务里请求会话已关闭)。
+
+    content 是本次校对所依据的正文,作为指纹——用户应用修复后正文变动、指纹失配,
+    过期清单自动不再回显。落库失败不影响校对结果正常返回给用户。
+    """
+    session = SessionLocal()
+    try:
+        ch = (
+            session.query(Chapter)
+            .filter(Chapter.project_id == project_id, Chapter.chapter_number == n)
+            .first()
+        )
+        if ch is not None:
+            store_proofread_snapshot(ch, issues, "manual", content, fixed=0)
+            session.commit()
+    except Exception:  # noqa: BLE001 — 快照落库失败不阻塞校对结果
+        session.rollback()
+    finally:
+        session.close()
+
+
+@router.get("/api/projects/{project_id}/chapters/{n}/proofread")
+async def get_proofread(project_id: int, n: int, db: Session = Depends(get_db)):
+    """回显最近一次校对结果(生成时自动修复的 / 手动待修的),前端进编辑部直接展示。
+
+    正文被编辑/润色/重写/回滚后指纹对不上 → proofread 为 null(不显示过期清单),
+    用户可点「开始校对」重新跑。
+    """
+    get_project_or_404(db, project_id)
+    ch = (
+        db.query(Chapter)
+        .filter(Chapter.project_id == project_id, Chapter.chapter_number == n)
+        .first()
+    )
+    if ch is None:
+        raise HTTPException(status_code=404, detail=f"第 {n} 章不存在")
+    return {"proofread": load_proofread_snapshot(ch)}
 
 
 class ProofreadApplyRequest(BaseModel):

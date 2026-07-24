@@ -219,6 +219,22 @@ def _add_chapter_review_snapshot_column() -> None:
             logger.info("迁移:chapters 补 review_snapshot 列")
 
 
+def _add_chapter_proofread_snapshot_column() -> None:
+    """给 chapters 表补校对结果快照列(幂等)。存量章节为空字符串=无快照。"""
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "chapters" not in insp.get_table_names():
+            return
+        if not _column_exists("chapters", "proofread_snapshot"):
+            conn.execute(
+                text(
+                    "ALTER TABLE chapters ADD COLUMN proofread_snapshot "
+                    "TEXT NOT NULL DEFAULT ''"
+                )
+            )
+            logger.info("迁移:chapters 补 proofread_snapshot 列")
+
+
 def _disable_word_guard_default() -> None:
     """一次性把存量项目的字数守卫关掉(此前无 UI,全是默认开启,无人主动开过)。
 
@@ -317,6 +333,7 @@ def run_migrations() -> None:
     _add_word_guard_columns()
     _add_review_columns()
     _add_chapter_review_snapshot_column()
+    _add_chapter_proofread_snapshot_column()
     _disable_word_guard_default()
     _encrypt_existing_keys()
     with session_scope() as db:

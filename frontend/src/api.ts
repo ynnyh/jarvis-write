@@ -335,6 +335,14 @@ export interface ChapterReview {
   proofread_fixed?: number;
 }
 export interface ProofIssue { type: string; original: string; suggestion: string; reason: string; }
+// 校对快照回显:issues=问题清单;source=generation(生成时已自动修复,只读)/
+// manual(手动待修);fixed=已修复数;proofread_at=时间。正文改动后后端返回 null。
+export interface ProofreadSnapshot {
+  issues: ProofIssue[];
+  fixed: number;
+  source: "generation" | "manual";
+  proofread_at?: string;
+}
 export interface AuditReport {
   written_chapters: number;
   target_chapters: number;
@@ -507,6 +515,9 @@ export const api = {
   proofreadApply: (pid: number, n: number, fixes: { original: string; suggestion: string }[]) =>
     req<{ applied: { original: string; suggestion: string }[]; failed: { original: string; reason: string }[]; word_count: number; final_content: string }>(
       "POST", `/api/projects/${pid}/chapters/${n}/proofread-apply`, { fixes }),
+  // 回显:最近一次校对结果(生成时自动修复 / 手动待修);正文改动后为 null
+  getProofread: (pid: number, n: number) =>
+    req<{ proofread: ProofreadSnapshot | null }>("GET", `/api/projects/${pid}/chapters/${n}/proofread`),
   auditReport: (pid: number) =>
     req<AuditReport>("GET", `/api/projects/${pid}/audit-report`),
   // 指令改异步解析(应用仍走同步 apply,纯 DB 快)

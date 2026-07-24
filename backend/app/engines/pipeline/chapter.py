@@ -24,6 +24,7 @@ from app.engines.editorial import (
     judge_passed,
     proofread_chapter,
     review_chapter,
+    store_proofread_snapshot,
     store_review_snapshot,
 )
 from app.engines.memory import ChapterMemory
@@ -326,6 +327,7 @@ async def generate_chapter(
     review_result: dict = {}
     revision_rounds = 0
     proofread_fixed = 0  # 校对累计自动修复的硬伤数(回显给用户看"校对跑过了")
+    last_fixed_issues: list[dict] = []  # 末轮校对自动修复的清单(对应最终正文,回显用)
     while True:
         _report(
             "3/6 审校把关"
@@ -334,9 +336,14 @@ async def generate_chapter(
         )
         # 校对硬伤:错字/语病/标点/重复,精确替换自修(幻觉片段已在引擎里过滤)
         proof = await proofread_chapter(final)
+        round_fixed: list[dict] = []
         if proof["issues"]:
             final, _applied, _failed = apply_proofread_fixes(final, proof["issues"])
             proofread_fixed += len(_applied)
+            # 留下真正修掉的那几条(带类型/理由),供编辑部「校对」tab 回显
+            applied_originals = {a["original"] for a in _applied}
+            round_fixed = [it for it in proof["issues"] if it["original"] in applied_originals]
+        last_fixed_issues = round_fixed
         # 主审打分 + 按项目阈值硬判达标
         review_result = await review_chapter(final, outline_block)
         if judge_passed(review_result["scores"], threshold):
@@ -407,6 +414,8 @@ async def generate_chapter(
     chapter.status = "finalized"
     # 审校快照落库:编辑部打开时回显本次主审结果,免去用户再点一次「请主编审读」
     store_review_snapshot(chapter, review_result, "generation", reviewed_text)
+    # 校对快照落库:回显生成时自动修复了哪些硬伤(指纹与主审一致,正文改动同步失效)
+    store_proofread_snapshot(chapter, last_fixed_issues, "generation", reviewed_text)
     db.flush()
     # 正文立刻提交:后面一致性/抽取/摘要还有数分钟 LLM 调用,
     # 不能拿着写锁跨这些 await(会把并发写卡到超时),失败也不该丢正文。

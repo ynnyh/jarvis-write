@@ -163,3 +163,38 @@ def load_review_snapshot(chapter) -> dict | None:
     if snapshot.get("content_hash") != content_hash(chapter.final_content or ""):
         return None
     return snapshot
+
+
+def store_proofread_snapshot(
+    chapter, issues: list[dict], source: str, content: str, fixed: int | None = None
+) -> None:
+    """把校对结果写进章节快照字段(不 commit,由调用方随事务提交)。
+
+    issues:问题清单([{type, original, suggestion, reason}, ...])。
+    source:"generation"(生成时校对,已自动修复,只读回显)/ "manual"(手动校对,待修)。
+    fixed:已修复数;缺省取 issues 长度(生成时即自动修复数),手动待修时传 0。
+    content:本次校对所对应的正文——回显时指纹与当前正文一致才显示,正文被
+    编辑/润色/重写/回滚后自动失效,不会给用户看过期的校对清单。
+    """
+    snapshot = {
+        "issues": issues,
+        "fixed": len(issues) if fixed is None else fixed,
+        "source": source,
+        "proofread_at": datetime.now(timezone.utc).isoformat(),
+        "content_hash": content_hash(content),
+    }
+    chapter.proofread_snapshot = json.dumps(snapshot, ensure_ascii=False)
+
+
+def load_proofread_snapshot(chapter) -> dict | None:
+    """读取章节校对快照;无快照、损坏或正文已改动(指纹不符)时返回 None。"""
+    raw = getattr(chapter, "proofread_snapshot", "") or ""
+    if not raw.strip():
+        return None
+    try:
+        snapshot = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    if snapshot.get("content_hash") != content_hash(chapter.final_content or ""):
+        return None
+    return snapshot

@@ -38,6 +38,10 @@ class Chapter(Base, TimestampMixin):
     # 正文指纹(content_hash)。编辑部打开时指纹一致才回显,正文改动自动失效,
     # 避免用户对着已改过的正文重复点「请主编审读」。
     review_snapshot: Mapped[str] = mapped_column(Text, default="")
+    # 最近一次校对结果快照(JSON):问题清单/已修数/来源/时间 + 正文指纹。
+    # 生成时校对(自动修复,只读回显)与手动校对(待修清单)都落库,编辑部打开
+    # 「校对」时指纹一致即回显,正文改动自动失效,避免重复点「开始校对」。
+    proofread_snapshot: Mapped[str] = mapped_column(Text, default="")
 
 
 class ChapterVersion(Base):
