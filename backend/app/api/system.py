@@ -15,7 +15,6 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.auth import get_current_user
-from app.llm.embeddings import check_embedding
 from app.llm.factory import (
     available_providers,
     create_llm_adapter,
@@ -45,7 +44,7 @@ async def health() -> HealthResponse:
     dependencies=[Depends(get_current_user)],
 )
 async def ping_llm(req: PingLLMRequest) -> PingLLMResponse:
-    """给模型发一个 prompt，拿回复,并顺带探测 embedding 可用性。"""
+    """给模型发一个 prompt，拿回复。"""
     provider = (req.provider or resolve_default_provider()).lower()
 
     if not resolve_provider_config(provider)["api_key"]:
@@ -60,17 +59,12 @@ async def ping_llm(req: PingLLMRequest) -> PingLLMResponse:
     except Exception as exc:  # noqa: BLE001 — 冒烟接口,直接把错误暴露给调用方
         raise HTTPException(status_code=502, detail=f"调用模型失败: {exc}") from exc
 
-    # 顺带探测 embedding 可用性(最多 ~10s,失败不影响 ping 结果)
-    emb_ok, emb_err = await check_embedding(provider)
-
     return PingLLMResponse(
         provider=provider,
         model=resp.model,
         reply=resp.content,
         prompt_tokens=resp.prompt_tokens,
         completion_tokens=resp.completion_tokens,
-        embedding_ok=emb_ok,
-        embedding_error=emb_err,
     )
 
 

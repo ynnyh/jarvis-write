@@ -238,20 +238,12 @@
 
 ---
 
-## 七、向量库（Chroma，与关系库并行）
+## 七、长程记忆（无向量库）
 
-不进 SQL，独立存于 Chroma，**6 个 collection 对应 6 桶**（借鉴 NovelClaw）：
-
-| collection | 存什么 | 基础权重 |
-|---|---|---|
-| texts | 章节正文分段 | 0.58 |
-| outlines | 大纲/滚动摘要 | 0.88 |
-| characters | 角色相关描写 | 0.82 |
-| world_settings | 世界观设定 | 0.80 |
-| plot_points | 情节点 | 0.76 |
-| fact_cards | 事实卡（timeline/foreshadowing/relationship） | 0.78 |
-
-每条记录 metadata 带 `chapter_number`，检索时可按章节窗口过滤 + 权重加权排序。
+> 早期设计规划过 Chroma 向量库 + 6 桶加权记忆，但因 embedding 来源始终不稳（中转站
+> `/embeddings` 返 403），且现代模型上下文窗口已足够长，该方案已整体移除。长程一致性
+> 现由**时序故事圣经**（结构化事实，见第三节）+**滚动摘要**（`chapter_summaries`）+
+> **最近章节正文尾部**三者承担，全部落在 SQL 里，不再有独立向量存储。
 
 ---
 
@@ -261,12 +253,12 @@
 生成一章正文的数据流：
   outline(本章) + architecture
       + 故事圣经查询（相关 entity 在"当前章"的 facts）
-      + 分桶记忆检索（characters/world/plot 桶，按角色/场景召回）
+      + 最近章节结尾 + 滚动前情摘要（直接上下文）
       + 伏笔调度（该回收的 foreshadowings）
       + 倾向拼装（global_tendency + 本次临时标签）
    → 拼装 Prompt → LLM 草稿 → 定稿
    → 存 chapters.final_content
-   → 抽取器 extractor 从正文抽新 facts / 更新伏笔状态 / 写回向量库
+   → 抽取器 extractor 从正文抽新 facts / 更新伏笔状态（写回故事圣经）
 
 改一章大纲的数据流（级联引擎）：
   编辑 outline → 存 outline_version（diff 出 change_type）

@@ -170,23 +170,6 @@ def test_delete_project_not_owner_404(client):
     assert client.get(f"/api/projects/{p['id']}", headers=a).status_code == 200
 
 
-# ---------- embedding 可用性探测 ----------
-
-class _FakeResp:
-    model = "deepseek-chat"
-    content = "连接成功"
-    prompt_tokens = 5
-    completion_tokens = 3
-
-
-class _FakeAdapter:
-    def to_messages(self, prompt):
-        return []
-
-    async def complete(self, messages):
-        return _FakeResp()
-
-
 def _setup_user_with_key(client, username: str) -> dict:
     """注册并给 deepseek 存一个假 key(走数据库,不碰 .env)。"""
     user = _register(client, username)
@@ -203,67 +186,6 @@ def _setup_user_with_key(client, username: str) -> dict:
     )
     assert r.status_code == 200, r.text
     return headers
-
-
-def test_provider_test_reports_embedding_ok(client):
-    """embed 成功 → 测试连接返回 embedding_ok=true。"""
-    from unittest.mock import AsyncMock, patch
-
-    headers = _setup_user_with_key(client, "emb_ok_user")
-    with (
-        patch("app.api.settings.create_llm_adapter", return_value=_FakeAdapter()),
-        patch(
-            "app.llm.embeddings.EmbeddingClient.embed",
-            new=AsyncMock(return_value=[[0.1, 0.2, 0.3]]),
-        ),
-    ):
-        r = client.post("/api/settings/providers/deepseek/test", headers=headers)
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["ok"] is True
-    assert body["embedding_ok"] is True
-    assert body["embedding_error"] == ""
-
-
-def test_provider_test_reports_embedding_failure(client):
-    """embed 失败 → embedding_ok=false 且带原因,聊天测试不受影响。"""
-    from unittest.mock import AsyncMock, patch
-
-    headers = _setup_user_with_key(client, "emb_fail_user")
-    with (
-        patch("app.api.settings.create_llm_adapter", return_value=_FakeAdapter()),
-        patch(
-            "app.llm.embeddings.EmbeddingClient.embed",
-            new=AsyncMock(side_effect=RuntimeError("404: no embeddings endpoint")),
-        ),
-    ):
-        r = client.post("/api/settings/providers/deepseek/test", headers=headers)
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["ok"] is True  # 聊天模型仍通
-    assert body["embedding_ok"] is False
-    assert "404" in body["embedding_error"]
-
-
-def test_ping_llm_reports_embedding(client):
-    """ping-llm 同样携带 embedding_ok 字段。"""
-    from unittest.mock import AsyncMock, patch
-
-    headers = _setup_user_with_key(client, "emb_ping_user")
-    with (
-        patch("app.api.system.create_llm_adapter", return_value=_FakeAdapter()),
-        patch(
-            "app.llm.embeddings.EmbeddingClient.embed",
-            new=AsyncMock(return_value=[[0.1]]),
-        ),
-    ):
-        r = client.post(
-            "/api/ping-llm",
-            headers=headers,
-            json={"prompt": "hi", "provider": "deepseek"},
-        )
-    assert r.status_code == 200, r.text
-    assert r.json()["embedding_ok"] is True
 
 
 # ---------- AI 起名 ----------

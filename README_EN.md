@@ -43,7 +43,7 @@ cd jarvis-write
 docker compose up --build
 ```
 
-Open `http://localhost:8000` (override the host port with the `PORT` variable). SQLite and Chroma data are persisted in the named volume `jarvis_write_data`.
+Open `http://localhost:8000` (override the host port with the `PORT` variable). SQLite data is persisted in the named volume `jarvis_write_data`.
 
 ### Option 2: Local development
 
@@ -66,7 +66,6 @@ Full setup, smoke tests, and directory layout: [backend/README.md](backend/READM
 | `ADMIN_PASSWORD` | Initial admin password, **required** (no default under Docker; the in-code default is for local development only) |
 | `INVITE_CODE` | Invite code for registration; **leave empty to disable registration entirely** |
 | LLM API keys | DeepSeek / OpenAI / Gemini supported. Each account configures its own key on the **settings page** (stored in the database, recommended); `.env` values act as a fallback |
-| Embedding | Optional, powers semantic memory retrieval. If the provider doesn't support `/embeddings`, the system degrades gracefully to "recent chapters + rolling summary" and generation is unaffected |
 
 Full list of options: [backend/.env.example](backend/.env.example).
 
@@ -86,18 +85,17 @@ The design docs are written in Chinese:
 
 ## Tech Stack
 
-- **Backend**: Python 3.12 + FastAPI (REST + SSE), SQLAlchemy 2.x + SQLite (Postgres-ready), Chroma vector store, Pydantic v2
+- **Backend**: Python 3.12 + FastAPI (REST + SSE), SQLAlchemy 2.x + SQLite (Postgres-ready), Pydantic v2
 - **LLM layer**: self-built adapter layer (DeepSeek / OpenAI / Gemini, no LangChain), task-level model routing (strong vs. fast tiers)
 - **Frontend**: React + TypeScript + Vite
 - **Deployment**: single-container Docker (multi-stage build; frontend assets served by FastAPI at `/app`)
 
 ## Status & Roadmap
 
-Phases 0–8 are complete: the generation pipeline and tendency assembler, chapter generation with basic memory, the long-range consistency engine, the outline cascade engine, the polish engine, the web workbench, token stats and txt/epub export, Docker deployment, and multi-user support with mobile adaptation. Per-phase acceptance results and implementation deviations are recorded in [docs/05-roadmap.md](docs/05-roadmap.md).
+Phases 0–8 are complete: the generation pipeline and tendency assembler, chapter generation, the long-range consistency engine, the outline cascade engine, the polish engine, the web workbench, token stats and txt/epub export, Docker deployment, and multi-user support with mobile adaptation. Per-phase acceptance results and implementation deviations are recorded in [docs/05-roadmap.md](docs/05-roadmap.md).
 
 Known remaining items:
 
-- **6-bucket weighted memory**: deferred because the embedding source is unresolved (the user's relay returns 403 on `/embeddings`); currently a single-bucket vector memory, interfaces reserved
 - **True token-level SSE streaming**: replaced by "async job + five-stage progress polling," which delivers a comparable experience
 - **Finer model routing** (separate providers for quality/fast tiers): to be exposed on the settings page when a second provider is integrated
 
@@ -130,7 +128,7 @@ Questions, an **invite code to try the hosted instance**, feature requests, or j
 This project stands on the shoulders of several excellent open-source projects — the following capabilities draw on their ideas, with thanks (a full, source-read comparison lives in [docs/00-overview.md](docs/00-overview.md), in Chinese):
 
 - **Snowflake-Method prompt system** ← [AI_NovelGenerator](https://github.com/YILING0013/AI_NovelGenerator)
-- **Four-state foreshadowing tracking · bucketed weighted memory** ← [NovelClaw](https://github.com/iLearn-Lab/NovelClaw)
+- **Four-state foreshadowing tracking** ← [NovelClaw](https://github.com/iLearn-Lab/NovelClaw)
 - **Temporal truth store (facts bound to chapter ranges)** ← [knowrite](https://github.com/knoai/knowrite)
 - **Reader-known vs. character-known separation · reveal scheduling · repeated-phrase detection** ← [KazKozDev/NovelGenerator](https://github.com/KazKozDev/NovelGenerator)
 - **Knowledge-graph-style story bible** ← [graphify-novel](https://github.com/Anshler/graphify-novel)

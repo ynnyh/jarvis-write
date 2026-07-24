@@ -4,7 +4,7 @@
 
 上下文组装(见 docs/02-data-model.md 数据流):
   本章蓝图 + 下章蓝图(承上启下)+ 最近章节正文尾部 + 滚动摘要
-  + 语义检索的历史片段 + {style_directives} 倾向块
+  + {style_directives} 倾向块
 """
 
 # =============== 滚动摘要:压缩"更早"的剧情 ===============
@@ -39,9 +39,6 @@ CHAPTER_DRAFT_PROMPT = """\
 
 【最近章节结尾(直接上文,衔接必须自然)】
 {recent_tail}
-
-【历史相关片段(供呼应伏笔/保持一致,不可照抄)】
-{retrieved_context}
 
 【人物当前状态(硬约束,必须遵守,不得违反)】
 {hard_constraints}

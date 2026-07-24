@@ -1,10 +1,10 @@
 # app/engines/pipeline/chapter.py
 # -*- coding: utf-8 -*-
-"""逐章生成:上下文组装 → 草稿 → 定稿 → 滚动摘要 → 入向量库。
+"""逐章生成:上下文组装 → 草稿 → 定稿 → 滚动摘要。
 
 上下文来源(见 docs/02-data-model.md 数据流):
   本章蓝图 + 下章蓝图 + 最近 2 章正文尾部(直接衔接)
-  + 滚动前情摘要 + 语义检索历史片段(排除最近 2 章)+ 倾向块
+  + 滚动前情摘要 + 倾向块
 """
 from __future__ import annotations
 
@@ -27,7 +27,6 @@ from app.engines.editorial import (
     store_proofread_snapshot,
     store_review_snapshot,
 )
-from app.engines.memory import ChapterMemory
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import render_style_block
 from app.llm.base import LLMMessage
@@ -226,14 +225,6 @@ async def generate_chapter(
     rolling = _rolling_summary(db, project.id, chapter_number)
     recent = _recent_tail(db, project.id, chapter_number)
 
-    # 语义检索:排除直接上文窗口内的章
-    memory = ChapterMemory(project.id)
-    query = f"{outline.title} {outline.summary} {' '.join(map(str, outline.characters_involved))}"
-    retrieved = await memory.retrieve(
-        query, exclude_after=chapter_number - _RECENT_WINDOW
-    )
-    retrieved_text = "\n---\n".join(retrieved) or "(暂无)"
-
     # ---- 一致性引擎:硬约束 + 伏笔提醒 + 重复检测 ----
     bible = BibleService(db, project.id)
     hard_constraints = bible.hard_constraints_block(
@@ -278,7 +269,6 @@ async def generate_chapter(
             architecture_brief=chapter_architecture_brief(project),
             rolling_summary=rolling,
             recent_tail=recent,
-            retrieved_context=retrieved_text,
             hard_constraints=hard_constraints,
             foreshadow_reminders=foreshadow_reminders,
             avoid_repetition=avoid_repetition,
@@ -466,9 +456,6 @@ async def generate_chapter(
     srow.rolling_summary = new_summary.strip()
     db.flush()
     db.commit()
-
-    # ---- 入向量库(失败自动降级,不阻塞) ----
-    await memory.add_chapter(chapter_number, final)
 
     # ---- 重写场景:下游章节的滚动摘要基于旧文,重建 ----
     rebuilt = await rebuild_summaries_after(db, project, chapter_number, progress)

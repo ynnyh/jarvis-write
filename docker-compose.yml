@@ -10,10 +10,9 @@ services:
       # 宿主机端口可用 PORT 覆盖(服务器上 8000 被占用时用 8080)
       - "${PORT:-8000}:8000"
     environment:
-      # 数据(SQLite + Chroma)统一落在 /srv/data,用 named volume 持久化,
+      # 数据(SQLite)落在 /srv/data,用 named volume 持久化,
       # 不再整目录挂载 —— 更新镜像代码后不会被旧 volume 覆盖。
       - DATABASE_URL=sqlite:////srv/data/jarvis_write.db
-      - CHROMA_PERSIST_DIR=/srv/data/chroma_data
       # ===== 多用户认证 =====
       # 运行环境:prod → 启动自检拒绝弱默认 JWT 密钥(见 app/main.py、docs/06)
       - APP_ENV=prod

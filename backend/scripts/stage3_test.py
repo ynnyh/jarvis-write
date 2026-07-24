@@ -199,8 +199,6 @@ async def test_integration() -> None:
 
     adapter = MockAdapter()
 
-    async def no_add(self, n, t): return 0
-    async def no_ret(self, q, **k): return []
     async def no_check(*a, **k): return []
     async def no_extract(*a, **k): return {"bible": {"facts": 1}}
     async def no_proofread(*a, **k): return {"issues": []}
@@ -209,8 +207,6 @@ async def test_integration() -> None:
                 "comment": "", "suggestions": []}
 
     with patch.object(ch_mod, "get_adapter_for", return_value=adapter), \
-         patch.object(ch_mod.ChapterMemory, "add_chapter", no_add), \
-         patch.object(ch_mod.ChapterMemory, "retrieve", no_ret), \
          patch.object(ch_mod, "check_chapter", no_check), \
          patch.object(ch_mod, "extract_and_apply", no_extract), \
          patch.object(ch_mod, "proofread_chapter", no_proofread), \

@@ -337,7 +337,7 @@ async def edit_content(
 async def re_extract_async(
     project_id: int, chapter_number: int, db: Session = Depends(get_db)
 ):
-    """手改正文后:重抽取(幂等,先清旧账)→ 重建下游摘要 → 更新向量库。"""
+    """手改正文后:重抽取(幂等,先清旧账)→ 重建下游摘要。"""
     get_project_or_404(db, project_id)
     # 同章同步任务已在跑 → 复用,不重复起
     for jid, job in list_running(f"re-extract-{project_id}-"):
@@ -347,12 +347,11 @@ async def re_extract_async(
 
     async def runner() -> None:
         from app.engines.consistency.extractor import extract_and_apply
-        from app.engines.memory import ChapterMemory
         from app.engines.pipeline.chapter import rebuild_summaries_after
 
         # 同步要跨多轮 LLM 调用,期间用量记账等在别的连接提交,会让本连接的读快照过期,
-        # 升级写锁时撞 SQLITE_BUSY(WAL 下不走 busy_timeout)。三步都幂等(抽取先清旧账 /
-        # 摘要覆盖写 / 向量库删后插),故除尽量缩短事务外,再遇锁整体回滚重试兜底。
+        # 升级写锁时撞 SQLITE_BUSY(WAL 下不走 busy_timeout)。两步都幂等(抽取先清旧账 /
+        # 摘要覆盖写),故除尽量缩短事务外,再遇锁整体回滚重试兜底。
         max_attempts = 5
         for attempt in range(1, max_attempts + 1):
             session = SessionLocal()
@@ -369,19 +368,17 @@ async def re_extract_async(
                 content = ch.final_content
                 # 先结束读事务:别让初始读取的快照跨过下面的 LLM 调用
                 session.commit()
-                update_stage(job_id, "1/3 重新抽取状态(清旧账)")
+                update_stage(job_id, "1/2 重新抽取状态(清旧账)")
                 stats = await extract_and_apply(
                     session, project_id, chapter_number, content
                 )
                 # 抽取写入立刻提交:别拿着写锁跨下游摘要的多轮 LLM 调用
                 session.commit()
-                update_stage(job_id, "2/3 重建下游前情摘要")
+                update_stage(job_id, "2/2 重建下游前情摘要")
                 rebuilt = await rebuild_summaries_after(
                     session, project, chapter_number,
-                    progress=lambda s: update_stage(job_id, f"2/3 {s}"),
+                    progress=lambda s: update_stage(job_id, f"2/2 {s}"),
                 )
-                update_stage(job_id, "3/3 更新向量库")
-                await ChapterMemory(project_id).add_chapter(chapter_number, content)
                 session.commit()
                 finish_job(job_id, {"extraction_stats": stats, "summaries_rebuilt": rebuilt})
                 return

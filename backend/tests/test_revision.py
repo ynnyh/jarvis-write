@@ -51,19 +51,6 @@ def _make_db(with_previous: bool):
     return db, project
 
 
-class _FakeMemory:
-    """不碰向量库的假 ChapterMemory。"""
-
-    def __init__(self, *args, **kwargs):
-        pass
-
-    async def retrieve(self, *args, **kwargs):
-        return []
-
-    async def add_chapter(self, *args, **kwargs):
-        return None
-
-
 async def _fake_check(*args, **kwargs):
     return []
 
@@ -98,7 +85,6 @@ def _run_generate(db, project, revision: str | None) -> MockAdapter:
         patch.object(ch_mod, "extract_and_apply", new=_fake_extract),
         patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
         patch.object(ch_mod, "review_chapter", new=_fake_review),
-        patch.object(ch_mod, "ChapterMemory", _FakeMemory),
     ):
         asyncio.run(ch_mod.generate_chapter(db, project, 1, revision=revision))
     return adapter

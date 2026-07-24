@@ -16,5 +16,3 @@ os.environ["INVITE_CODE"] = "test-invite"
 # 关掉全局限流:共享 app 单例会被整个用例集的大量注册/登录打爆(限流单独在
 # test_ratelimit.py 用独立 app 验证)。
 os.environ["RATE_LIMIT_ENABLED"] = "false"
-# 删除项目时会清 Chroma 向量集合,同样指向临时目录
-os.environ["CHROMA_PERSIST_DIR"] = f"{_TMPDIR}/chroma"

@@ -3,13 +3,10 @@
 """接口层公共工具:取项目并校验归属;项目级联删除(用户删除时复用)。"""
 from __future__ import annotations
 
-import logging
-
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.auth import assert_project_owner
-from app.config import get_settings
 from app.db.models import (
     Architecture,
     Chapter,
@@ -24,8 +21,6 @@ from app.db.models import (
     Relationship,
 )
 
-logger = logging.getLogger("jarvis-write.deps")
-
 
 def get_project_or_404(db: Session, project_id: int) -> Project:
     """取项目:不存在 → 404;不属于当前用户 → 404(不泄露存在性)。"""
@@ -34,21 +29,6 @@ def get_project_or_404(db: Session, project_id: int) -> Project:
         raise HTTPException(status_code=404, detail=f"项目 {project_id} 不存在")
     assert_project_owner(p)
     return p
-
-
-def _delete_chroma_collection(project_id: int) -> None:
-    """删除项目对应的 Chroma 向量集合;集合/库不存在时静默跳过。"""
-    try:
-        import chromadb
-        from chromadb.config import Settings as ChromaSettings
-
-        client = chromadb.PersistentClient(
-            path=get_settings().chroma_persist_dir,
-            settings=ChromaSettings(anonymized_telemetry=False),
-        )
-        client.delete_collection(f"chapters_{project_id}")
-    except Exception as exc:  # noqa: BLE001 — 记忆库清理失败不阻塞删除
-        logger.warning("删除向量集合 chapters_%d 失败(可忽略): %s", project_id, exc)
 
 
 def delete_project_cascade(db: Session, project: Project) -> int:
@@ -89,5 +69,4 @@ def delete_project_cascade(db: Session, project: Project) -> int:
     db.delete(project)
     db.commit()
 
-    _delete_chroma_collection(project_id)
     return deleted_chapters

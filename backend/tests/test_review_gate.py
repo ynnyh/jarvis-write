@@ -166,12 +166,6 @@ def _make_db(threshold=7, auto_revise=True, max_revisions=3):
     return db, project
 
 
-class _FakeMemory:
-    def __init__(self, *a, **k): pass
-    async def retrieve(self, *a, **k): return []
-    async def add_chapter(self, *a, **k): return None
-
-
 async def _fake_check(*a, **k):
     return []
 
@@ -218,7 +212,6 @@ def _run(db, project, review_fake) -> dict:
         patch.object(ch_mod, "get_adapter_for", return_value=adapter),
         patch.object(ch_mod, "check_chapter", new=_fake_check),
         patch.object(ch_mod, "extract_and_apply", new=_fake_extract),
-        patch.object(ch_mod, "ChapterMemory", _FakeMemory),
         patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
         patch.object(ch_mod, "review_chapter", new=review_fake),
     ):

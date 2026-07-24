@@ -32,5 +32,3 @@ class PingLLMResponse(BaseModel):
     reply: str
     prompt_tokens: int = 0
     completion_tokens: int = 0
-    embedding_ok: bool = False
-    embedding_error: str = ""

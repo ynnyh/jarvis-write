@@ -65,13 +65,3 @@ def test_save_provider_rejects_internal_base_url(client):
     )
     assert r.status_code == 400
     assert "内网" in r.json()["detail"]
-
-
-def test_save_embedding_rejects_internal_base_url(client):
-    headers = _auth_headers(client, "ssrf_emb_user")
-    r = client.put(
-        "/api/settings/providers/embedding",
-        headers=headers,
-        json={"api_key": "sk-x", "base_url": "http://192.168.0.10", "model": ""},
-    )
-    assert r.status_code == 400

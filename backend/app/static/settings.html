@@ -72,7 +72,7 @@
 <script>
 const NAMES = { deepseek: "DeepSeek", openai: "OpenAI (GPT)", gemini: "Google Gemini" };
 const DESCS = {
-  deepseek: "DeepSeek 官方 API。注意:官方没有 embedding 接口,语义记忆会降级。",
+  deepseek: "DeepSeek 官方 API。也可用中转站,改 Base URL 即可。",
   openai: "OpenAI 官方及兼容中转站——用中转站(如 token 站、API 超市)就选这张卡,填中转地址和中转里的模型名(如 deepseek-v4-pro)。",
   gemini: "仅 Google 官方原生 API。注意:中转站(包括卖 Gemini 模型的)一律走 OpenAI 卡,填中转地址。",
 };
@@ -100,97 +100,8 @@ async function load() {
   const root = document.getElementById("cards");
   root.innerHTML = "";
   for (const p of list) {
-    root.appendChild(p.provider === "embedding" ? embeddingCard(p) : card(p));
+    root.appendChild(card(p));
   }
-}
-
-// 当前生效来源徽标文案(与后端 source 字段对应)
-const EMB_SOURCE = {
-  user: "专用配置",
-  env: "环境变量",
-  default: "默认 provider",
-  none: "未配置",
-};
-
-function embeddingCard(p) {
-  const el = document.createElement("div");
-  el.className = "card optional";
-  el.innerHTML = `
-    <div class="card-head">
-      <h2>Embedding（语义记忆）</h2>
-      <span class="badge">可选 · 建议配置</span>
-      <span class="badge ${p.source === "none" ? "no" : "ok"}">当前生效：${EMB_SOURCE[p.source] || p.source}</span>
-    </div>
-    <div class="hint" style="margin-bottom:8px">
-      这是长篇记性的关键：写后续章节时，系统靠它检索前文的伏笔、人物与设定细节，注入 prompt 供模型参考。<br>
-      不配也能写，但模型只记得最近几章，写到中后期容易吃书（忘了伏笔、前后矛盾）。<br>
-      你的聊天渠道（DeepSeek 官方 / 部分中转站）没有 embedding 接口时，可在这里单独配一个便宜甚至免费的渠道：
-      推荐硅基流动 bge-m3（免费）、智谱 embedding-3、阿里 text-embedding-v3。
-    </div>
-    <div class="row">
-      <div class="field">
-        <label>API Key ${p.has_key ? "(已保存:" + p.api_key_masked + ",留空则不修改)" : ""}</label>
-        <input type="password" data-f="api_key" placeholder="${p.has_key ? "留空保持不变" : "sk-..."}">
-      </div>
-    </div>
-    <div class="row">
-      <div class="field">
-        <label>Base URL</label>
-        <input type="text" data-f="base_url" value="${p.base_url || ""}" placeholder="${p.default_base_url}">
-        <div class="hint">留空则回落到默认 provider 的接口（不支持时语义记忆降级）</div>
-      </div>
-      <div class="field">
-        <label>模型名</label>
-        <input type="text" data-f="model" value="${p.model || ""}" placeholder="${p.default_model}">
-      </div>
-    </div>
-    <div class="actions">
-      <button class="primary" data-a="save">保存</button>
-      <button data-a="test">测试</button>
-      ${p.has_key ? '<button class="danger" data-a="del">删除</button>' : ""}
-      <span class="msg" data-f="msg"></span>
-    </div>
-    <div class="test-line" data-f="emb"></div>`;
-
-  const $ = (sel) => el.querySelector(sel);
-  const msg = $('[data-f=msg]');
-
-  $('[data-a=save]').onclick = async () => {
-    msg.className = "msg"; msg.textContent = "保存中...";
-    const body = {
-      api_key: $('[data-f=api_key]').value || null,
-      base_url: $('[data-f=base_url]').value,
-      model: $('[data-f=model]').value,
-    };
-    const res = guard(await fetch("/api/settings/providers/embedding", {
-      method: "PUT", headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify(body),
-    }));
-    if (res.ok) { msg.className = "msg ok"; msg.textContent = "已保存 ✓"; setTimeout(load, 600); }
-    else { const e = await res.json(); msg.className = "msg err"; msg.textContent = "保存失败: " + (e.detail || res.status); }
-  };
-
-  $('[data-a=test]').onclick = async () => {
-    const emb = $('[data-f=emb]');
-    emb.className = "test-line"; emb.textContent = "";
-    msg.className = "msg"; msg.textContent = "测试中(最长 30 秒)...";
-    const res = guard(await fetch("/api/settings/providers/embedding/test", { method: "POST", headers: authHeaders() }));
-    const r = await res.json();
-    msg.className = "msg"; msg.textContent = "";
-    if (r.ok) {
-      emb.className = "test-line ok";
-      emb.textContent = `✓ embedding（语义记忆）可用（${r.model}，来源：${EMB_SOURCE[r.source] || r.source}）`;
-    } else {
-      emb.className = "test-line err";
-      emb.textContent = "✗ embedding（语义记忆）不可用：" + (r.error || "未知原因") +
-        "。语义记忆会降级为只靠最近章节，不影响生成。";
-    }
-  };
-
-  const delBtn = $('[data-a=del]');
-  if (delBtn) delBtn.onclick = () => delProvider("embedding", "Embedding（语义记忆）", msg);
-
-  return el;
 }
 
 function card(p) {
@@ -230,8 +141,7 @@ function card(p) {
       </label>
       <span class="msg" data-f="msg"></span>
     </div>
-    <div class="test-line" data-f="chat"></div>
-    <div class="test-line" data-f="emb"></div>`;
+    <div class="test-line" data-f="chat"></div>`;
 
   const $ = (sel) => el.querySelector(sel);
   const msg = $('[data-f=msg]');
@@ -254,30 +164,17 @@ function card(p) {
 
   $('[data-a=test]').onclick = async () => {
     const chat = $('[data-f=chat]');
-    const emb = $('[data-f=emb]');
-    // 两条独立状态行:聊天模型 / embedding,结果互不遮盖
     chat.className = "test-line"; chat.textContent = "";
-    emb.className = "test-line"; emb.textContent = "";
     msg.className = "msg"; msg.textContent = "测试中(最长 60 秒)...";
     const res = guard(await fetch(`/api/settings/providers/${p.provider}/test`, { method: "POST", headers: authHeaders() }));
     const r = await res.json();
     msg.className = "msg"; msg.textContent = "";
-    // 第一行:聊天模型连通性(核心结果,独立醒目)
     if (r.ok) {
       chat.className = "test-line ok";
       chat.textContent = `✓ 聊天模型连通(${r.model})：${r.reply}`;
     } else {
       chat.className = "test-line err";
       chat.textContent = "✗ 聊天模型连接失败：" + r.error;
-    }
-    // 第二行:embedding(语义记忆),失败不影响聊天结论
-    if (r.embedding_ok) {
-      emb.className = "test-line ok";
-      emb.textContent = "✓ embedding（语义记忆）可用";
-    } else {
-      emb.className = "test-line err";
-      emb.textContent = "✗ embedding（语义记忆）不可用：" + (r.embedding_error || "未知原因") +
-        "。DeepSeek 官方或中转站未开放 /embeddings 属正常现象，仅影响长期记忆（语义检索降级为只靠最近章节）。";
     }
   };
 

@@ -65,7 +65,7 @@ export default function PolishPanel({ pid }: Props) {
     } catch (e) { setErr(String(e)); } finally { setBusy(""); }
   }
 
-  // 手动编辑原文后保存:写回定稿 → 重抽取 + 重建下游摘要 + 向量库(同写作面板的 saveEdit 流程)
+  // 手动编辑原文后保存:写回定稿 → 重抽取 + 重建下游摘要(同写作面板的 saveEdit 流程)
   async function saveOriginalEdit() {
     if (chapterNum === null) return;
     const num = chapterNum;

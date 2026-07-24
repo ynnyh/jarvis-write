@@ -43,7 +43,7 @@ cd jarvis-write
 docker compose up --build
 ```
 
-访问 `http://localhost:8000`（端口可用 `PORT` 环境变量覆盖）。SQLite 与 Chroma 数据持久化在 named volume `jarvis_write_data`。
+访问 `http://localhost:8000`（端口可用 `PORT` 环境变量覆盖）。SQLite 数据持久化在 named volume `jarvis_write_data`。
 
 ### 方式二：本地开发
 
@@ -65,7 +65,6 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 | `ADMIN_PASSWORD` | 初始管理员密码，**必填**（Docker 下无默认值；代码默认值仅限本地开发） |
 | `INVITE_CODE` | 注册邀请码：填对才能注册；**留空则关闭注册** |
 | LLM API key | 支持 DeepSeek / OpenAI / Gemini。每个账号登录后在**设置页**配自己的 key（存数据库，推荐）；也可用 `.env` 做兜底 |
-| Embedding | 可选，用于语义记忆检索。中转站不支持 `/embeddings` 时自动降级为"最近章节 + 滚动摘要"，不影响生成 |
 
 完整配置项见 [backend/.env.example](backend/.env.example)。
 
@@ -83,18 +82,17 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 
 ## 技术栈
 
-- **后端**：Python 3.12 + FastAPI（REST + SSE），SQLAlchemy 2.x + SQLite（可切 Postgres），Chroma 向量库，Pydantic v2
+- **后端**：Python 3.12 + FastAPI（REST + SSE），SQLAlchemy 2.x + SQLite（可切 Postgres），Pydantic v2
 - **LLM 层**：自封适配层（DeepSeek / OpenAI / Gemini，不用 LangChain），任务级模型路由（强模型/快模型分档）
 - **前端**：React + TypeScript + Vite
 - **部署**：单容器 Docker（多阶段构建，前端产物由 FastAPI 托管在 `/app`）
 
 ## 项目状态与路线图
 
-阶段 0–8 已全部完成：生成流水线与倾向拼装器、逐章生成与基础记忆、长程一致性引擎、大纲级联更新引擎、润色引擎、Web 前端工作台、token 统计与 txt/epub 导出、Docker 部署、多用户与移动端适配。每阶段验收结果与实现偏差见 [docs/05-roadmap.md](docs/05-roadmap.md)。
+阶段 0–8 已全部完成：生成流水线与倾向拼装器、逐章生成、长程一致性引擎、大纲级联更新引擎、润色引擎、Web 前端工作台、token 统计与 txt/epub 导出、Docker 部署、多用户与移动端适配。每阶段验收结果与实现偏差见 [docs/05-roadmap.md](docs/05-roadmap.md)。
 
 已知遗留项：
 
-- **6 桶分桶加权记忆**：因 embedding 来源未解决（用户中转站 `/embeddings` 返回 403）暂缓，当前为单桶向量记忆，接口已预留
 - **SSE 逐 token 真流式**：已用"异步任务 + 五段进度轮询"替代，体验达标
 - **多模型路由细化**（quality/fast 分 provider）：待接入第二家模型时做成设置页配置
 
@@ -127,7 +125,7 @@ cd frontend && npm run lint && npm run build
 本项目站在许多优秀开源项目的肩上——下面这些能力借鉴了它们的思路，特此致谢（逐个读源码的完整对比见 [docs/00-overview.md](docs/00-overview.md)）：
 
 - **雪花写作法 Prompt 体系** ← [AI_NovelGenerator](https://github.com/YILING0013/AI_NovelGenerator)
-- **伏笔四态追踪 · 分桶加权记忆** ← [NovelClaw](https://github.com/iLearn-Lab/NovelClaw)
+- **伏笔四态追踪** ← [NovelClaw](https://github.com/iLearn-Lab/NovelClaw)
 - **事实绑章节区间的时序真相库** ← [knowrite](https://github.com/knoai/knowrite)
 - **读者/角色已知分离 · 揭示调度 · 重复用词检测** ← [KazKozDev/NovelGenerator](https://github.com/KazKozDev/NovelGenerator)
 - **知识图谱式 story bible 组织** ← [graphify-novel](https://github.com/Anshler/graphify-novel)
