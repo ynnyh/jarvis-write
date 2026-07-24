@@ -389,6 +389,8 @@ export const api = {
     req<StyleProfile>("PUT", `/api/projects/${id}/style-profile`, profile),
   absorbStyleProfile: (id: number, directive: string) =>
     req<StyleProfile>("POST", `/api/projects/${id}/style-profile/absorb`, { directive }, LLM_TIMEOUT),
+  extractStyleProfile: (id: number) =>
+    req<StyleProfile>("POST", `/api/projects/${id}/style-profile/extract`, undefined, LLM_TIMEOUT),
   renameProject: (id: number, title: string) =>
     req<Project>("PATCH", `/api/projects/${id}`, { title }),
   deleteProject: (id: number) =>

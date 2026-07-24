@@ -242,7 +242,7 @@ export default function ProjectPage() {
             <StepGuide step={step} next={nextHint?.label}
               onNext={nextHint ? () => setStep(nextHint.to) : undefined} />
           )}          {step === "inspire" && <InspirePanel project={project} onChanged={reload} onGotoStep={setStep} />}
-          {step === "arch" && <ArchPanel project={project} arch={arch ?? null} onChanged={reload} />}
+          {step === "arch" && <ArchPanel project={project} arch={arch ?? null} onChanged={reload} hasContent={!!arch || doneCount > 0} />}
           {step === "outline" && (
             <OutlinePanel pid={pid} project={project} outlines={outlines} hasArch={!!arch} onChanged={reload} onGotoStep={setStep} />
           )}

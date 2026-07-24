@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import delete_project_cascade
 from app.auth import assert_project_owner, current_user_id, get_current_user
-from app.db.models import Outline, Project
+from app.db.models import Chapter, Outline, Project
 from app.db.session import SessionLocal, get_db
 from app.engines.pipeline.architecture import (
     discuss_architecture,
@@ -40,7 +40,7 @@ from app.llm.factory import (
     resolve_provider_config,
 )
 from app.llm.router import Task, get_adapter_for
-from app.prompts.profile import PROFILE_ABSORB_PROMPT
+from app.prompts.profile import PROFILE_ABSORB_PROMPT, PROFILE_EXTRACT_PROMPT
 from app.schemas.concept import Concept
 from app.schemas.project import (
     ArchitectureOut,
@@ -601,6 +601,80 @@ async def absorb_style_profile(
         other = current["other"]
         current["other"] = f"{other};{directive}".strip("; ") if other else directive
         cleaned = _write_profile(project, current)
+    db.commit()
+    return StyleProfileOut(**cleaned)
+
+
+# 提炼语料的截断预算:控制 token,正文按章截断、整块封顶
+_EXTRACT_CHAPTER_CHARS = 2500
+_EXTRACT_MAX_CHAPTERS = 4
+_EXTRACT_CONTEXT_CAP = 14000
+
+
+def _build_extract_context(db: Session, project: Project) -> str:
+    """拼装这本书的现有内容,供反向提炼档案:概念 + 架构 + 简介 + 抽样正文。"""
+    parts: list[str] = []
+    if project.topic:
+        parts.append(f"【一句话故事】\n{project.topic.strip()}")
+    if project.synopsis:
+        parts.append(f"【书籍简介】\n{project.synopsis.strip()[:1500]}")
+    arch = project.architecture
+    if arch is not None:
+        arch_bits = [
+            f"核心种子:{arch.core_seed}",
+            f"角色动力学:{arch.character_dynamics}",
+            f"世界观:{arch.world_building}",
+            f"情节架构:{arch.plot_architecture}",
+        ]
+        parts.append("【顶层架构】\n" + "\n".join(b for b in arch_bits if b.split(":", 1)[-1].strip()))
+    # 抽样已成文的章节(首/中/尾附近),归纳文风主要靠正文
+    chapters = (
+        db.query(Chapter)
+        .filter(
+            Chapter.project_id == project.id,
+            Chapter.status.in_(["finalized", "stale"]),
+        )
+        .order_by(Chapter.chapter_number)
+        .all()
+    )
+    if chapters:
+        idxs = sorted({0, len(chapters) // 2, len(chapters) - 1})
+        if len(chapters) >= _EXTRACT_MAX_CHAPTERS:
+            step = len(chapters) / _EXTRACT_MAX_CHAPTERS
+            idxs = sorted(set(int(i * step) for i in range(_EXTRACT_MAX_CHAPTERS)) | {len(chapters) - 1})
+        samples = []
+        for i in idxs[:_EXTRACT_MAX_CHAPTERS]:
+            ch = chapters[i]
+            text = (ch.final_content or "").strip()
+            if text:
+                samples.append(f"第{ch.chapter_number}章(节选):\n{text[:_EXTRACT_CHAPTER_CHARS]}")
+        if samples:
+            parts.append("【正文节选(归纳文风用)】\n" + "\n\n".join(samples))
+    context = "\n\n".join(parts)
+    return context[:_EXTRACT_CONTEXT_CAP]
+
+
+@router.post("/{project_id}/style-profile/extract", response_model=StyleProfileOut)
+async def extract_style_profile(project_id: int, db: Session = Depends(get_db)):
+    """从这本书已有的内容反向提炼创作偏好档案,并直接落库启用(直接启用)。
+
+    用于已生成的书:不用作者手填,就有一份与正文相符的档案。提炼失败不保存。
+    """
+    project = _get_project_or_404(db, project_id)
+    context = _build_extract_context(db, project)
+    if len(context.strip()) < 20:
+        raise HTTPException(status_code=400, detail="这本书还没有内容,先写点再来提炼")
+    try:
+        adapter = get_adapter_for(Task.SUMMARY)
+        extracted = _parse_profile_json(
+            await adapter.ask(PROFILE_EXTRACT_PROMPT.format(context=context))
+        )
+    except HTTPException:
+        raise
+    except Exception:  # noqa: BLE001
+        logger.warning("档案提炼失败", exc_info=True)
+        raise HTTPException(status_code=502, detail="提炼失败,请稍后重试") from None
+    cleaned = _write_profile(project, extracted)
     db.commit()
     return StyleProfileOut(**cleaned)
 

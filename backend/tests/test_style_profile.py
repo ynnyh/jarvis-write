@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 import app.api.projects as proj_mod
 from app.api.projects import _parse_profile_json
 from app.auth import build_token
-from app.db.models import Project, User
+from app.db.models import Architecture, Chapter, Project, User
 from app.db.session import SessionLocal
 from app.engines.tendency.assembler import (
     assemble_tendency,
@@ -194,3 +194,72 @@ def test_absorb_degrades_on_llm_failure(client, seeded, monkeypatch):
                     headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
     assert "主角别降智" in r.json()["other"]  # 降级:原文并进其他主张
+
+
+# ---------- extract:从已有内容反向提炼(打桩适配器) ----------
+@pytest.fixture()
+def seeded_with_content():
+    """用户 + 项目 + 架构 + 一章定稿正文(用于提炼)。"""
+    db = SessionLocal()
+    try:
+        user = User(username=f"extr-{uuid.uuid4().hex[:8]}", password_hash="x", is_active=True)
+        db.add(user)
+        db.flush()
+        project = Project(title="提炼测试书", user_id=user.id, target_chapters=3,
+                          topic="一个复仇者追查真相的故事")
+        db.add(project)
+        db.flush()
+        db.add(Architecture(
+            project_id=project.id, core_seed="复仇与救赎",
+            character_dynamics="主角隐忍", world_building="冷峻都市", plot_architecture="三幕",
+        ))
+        db.add(Chapter(
+            project_id=project.id, chapter_number=1, status="finalized",
+            final_content="雨下了一整夜。他站在巷口,没有打伞。" * 20,
+        ))
+        db.commit()
+        token = build_token(user.id)
+        yield token, project.id
+    finally:
+        db.close()
+
+
+def test_extract_from_content(client, seeded_with_content, monkeypatch):
+    token, pid = seeded_with_content
+    reply = '{"style": "冷峻克制", "taboos": "", "audience": "成人悬疑读者", "other": "每章留钩子"}'
+    monkeypatch.setattr(proj_mod, "get_adapter_for", lambda task, **kw: _AbsorbAdapter(reply))
+    r = client.post(f"/api/projects/{pid}/style-profile/extract",
+                    headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["style"] == "冷峻克制"
+    assert body["audience"] == "成人悬疑读者"
+    # 已直接落库
+    db = SessionLocal()
+    p = db.query(Project).filter(Project.id == pid).first()
+    assert p.global_tendency["_profile"]["style"] == "冷峻克制"
+    db.close()
+
+
+def test_extract_empty_book_400(client, seeded, monkeypatch):
+    # seeded 项目无架构、无正文、无 topic → 没东西可提炼
+    token, pid = seeded
+    monkeypatch.setattr(proj_mod, "get_adapter_for",
+                        lambda task, **kw: _AbsorbAdapter('{"style": "x"}'))
+    r = client.post(f"/api/projects/{pid}/style-profile/extract",
+                    headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 400
+
+
+def test_extract_llm_failure_502(client, seeded_with_content, monkeypatch):
+    token, pid = seeded_with_content
+    monkeypatch.setattr(proj_mod, "get_adapter_for",
+                        lambda task, **kw: _AbsorbAdapter(RuntimeError("boom")))
+    r = client.post(f"/api/projects/{pid}/style-profile/extract",
+                    headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 502
+    # 失败不保存
+    db = SessionLocal()
+    p = db.query(Project).filter(Project.id == pid).first()
+    assert "_profile" not in (p.global_tendency or {})
+    db.close()

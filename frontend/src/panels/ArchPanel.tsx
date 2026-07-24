@@ -7,7 +7,7 @@ import TendencySelector from "../components/TendencySelector";
 import { confirmDialog } from "../ui/ConfirmDialog";
 import { toast } from "../ui/Toaster";
 
-interface Props { project: Project; arch: Architecture | null; onChanged: () => Promise<void>; }
+interface Props { project: Project; arch: Architecture | null; onChanged: () => Promise<void>; hasContent?: boolean; }
 
 const BLOCKS: { key: keyof Architecture; label: string; hint: string }[] = [
   { key: "core_seed", label: "核心种子", hint: "一句话故事本质:显性冲突 + 潜在危机" },
@@ -24,7 +24,7 @@ const PROFILE_FIELDS: { key: keyof StyleProfile; label: string; ph: string }[] =
   { key: "other", label: "其他创作主张", ph: "如:每章结尾留反转;对话推动剧情,少旁白" },
 ];
 
-export default function ArchPanel({ project, arch, onChanged }: Props) {
+export default function ArchPanel({ project, arch, onChanged, hasContent }: Props) {
   const [form, setForm] = useState<Record<string, string>>({});
   const [dirty, setDirty] = useState(false);
   const [tendency, setTendency] = useState<Tendency>({});
@@ -48,6 +48,9 @@ export default function ArchPanel({ project, arch, onChanged }: Props) {
   const [profile, setProfile] = useState<StyleProfile>({ style: "", taboos: "", audience: "", other: "" });
   const [profileDirty, setProfileDirty] = useState(false);
   const [profileBusy, setProfileBusy] = useState("");
+  const [extracting, setExtracting] = useState(false);
+  // 老书首次进本页:档案为空但有内容时自动提炼一次(只触发一次,避免反复跑)
+  const autoExtractRef = useRef(false);
 
   useEffect(() => {
     if (arch) {
@@ -59,12 +62,23 @@ export default function ArchPanel({ project, arch, onChanged }: Props) {
     }
   }, [arch]);
 
-  // 载入创作偏好档案(无则四字段皆空)
+  // 载入创作偏好档案;若为空且书里已有内容,自动提炼一次(直接启用,只触发一次)
   useEffect(() => {
+    let cancelled = false;
     api.getStyleProfile(project.id)
-      .then((p) => { setProfile(p); setProfileDirty(false); })
+      .then((p) => {
+        if (cancelled) return;
+        setProfile(p); setProfileDirty(false);
+        const empty = !p.style && !p.taboos && !p.audience && !p.other;
+        if (empty && hasContent && !autoExtractRef.current) {
+          autoExtractRef.current = true;
+          extractProfile(true);
+        }
+      })
       .catch(() => undefined);
-  }, [project.id]);
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id, hasContent]);
 
   // 对话流自动滚到底
   useEffect(() => {
@@ -153,6 +167,19 @@ export default function ArchPanel({ project, arch, onChanged }: Props) {
     } catch (e) { toast.err("吸收失败", String(e)); } finally { setProfileBusy(""); }
   }
 
+  // 从已有内容反向提炼档案(直接启用)。auto=true 为老书首次自动提炼,弹提示让作者知情
+  async function extractProfile(showToast: boolean) {
+    if (extracting) return;
+    setExtracting(true);
+    try {
+      const p = await api.extractStyleProfile(project.id);
+      setProfile(p); setProfileDirty(false);
+      if (showToast) toast.ok("已从你的内容提炼出创作偏好档案", "已自动启用,可在档案卡查看微调");
+    } catch (e) {
+      if (showToast) toast.err("提炼失败", String(e));
+    } finally { setExtracting(false); }
+  }
+
   return (
     <>
       <div className="card">
@@ -187,15 +214,22 @@ export default function ArchPanel({ project, arch, onChanged }: Props) {
       <div className="card">
         <div className="card-head">
           <h3 className="grow">创作偏好档案</h3>
+          {hasContent && (
+            <button disabled={extracting || !!profileBusy} onClick={() => extractProfile(true)}
+              title="从概念/架构/简介/正文反向提炼出档案,适合已写好的书">
+              {extracting && <span className="spin" />}从已有内容提炼
+            </button>
+          )}
           {profileDirty && (
-            <button className="primary" disabled={!!profileBusy} onClick={saveProfile}>
+            <button className="primary" disabled={!!profileBusy || extracting} onClick={saveProfile}>
               {profileBusy && <span className="spin" />}保存档案
             </button>
           )}
         </div>
         <div className="card-desc">
-          这本书贯穿全程的创作宪法——文风、禁忌、读者定位。填了之后,生成、重写、润色、大纲、架构每个环节都会高优先级遵循。和 AI 研讨时聊出的主张,也能一键吸收进来。
+          这本书贯穿全程的创作宪法——文风、禁忌、读者定位。填了之后,生成、重写、润色、大纲、架构每个环节都会高优先级遵循。已写好的书可点「从已有内容提炼」自动归纳;和 AI 研讨时聊出的主张,也能一键吸收进来。
         </div>
+        {extracting && <div className="muted mt-2"><span className="spin" />正在从你的内容提炼档案(约半分钟)…</div>}
         <div className="mt-3">
           {PROFILE_FIELDS.map((f) => (
             <div key={f.key} className="profile-field">
