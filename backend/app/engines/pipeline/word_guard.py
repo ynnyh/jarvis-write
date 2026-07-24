@@ -174,7 +174,7 @@ async def _split_chapter(
     new_chapter_number = chapter_number + 1
     _shift_tables_after(db, project.id, chapter_number)
 
-    # 5. 更新当前章(outline + chapter 内容)为 part_a
+    # 5. 更新当前章 outline 为 part_a 的元信息
     outline.title = split_info.get("chapter_a_title", outline.title)
     outline.summary = split_info.get("chapter_a_summary", outline.summary)
     # 伏笔操作归属
@@ -214,18 +214,45 @@ async def _split_chapter(
     )
     db.add(new_chapter)
 
-    # 8. 更新项目总章数
+    # 8. 把第 N 章正文原子性地改成 part_a —— 关键防损坏点。
+    #    拆章跑在 generate_chapter 落库之前,第 N 章此刻可能还没建行(首次生成)或
+    #    正文仍是拆前全文(重写)。若不在这里就把它落成 part_a,随后第 9 步
+    #    _resync_bible 内的 extract_and_apply 入口即 commit(并发纪律硬约束),会把
+    #    「第 N 章=全文 + 第 N+1 章=后半」的重复态刷上磁盘,并横跨随后数分钟的圣经/
+    #    摘要 LLM 调用 —— 中途崩溃/被杀则正文重复、章号错乱。故必须让结构改动与
+    #    「第 N 章=part_a」在同一事务先落地,提交点即自洽拆章态。
+    cur_chapter = (
+        db.query(Chapter)
+        .filter(Chapter.project_id == project.id, Chapter.chapter_number == chapter_number)
+        .first()
+    )
+    if cur_chapter is None:
+        cur_chapter = Chapter(
+            project_id=project.id,
+            outline_id=outline.id,
+            chapter_number=chapter_number,
+        )
+        db.add(cur_chapter)
+    cur_chapter.outline_id = outline.id
+    cur_chapter.draft_content = part_a
+    cur_chapter.final_content = part_a
+    cur_chapter.word_count = len(part_a)
+    cur_chapter.outline_version_used = outline.current_version
+    cur_chapter.is_stale = False
+    cur_chapter.status = "finalized"
+
+    # 9. 更新项目总章数
     project.target_chapters = (project.target_chapters or 0) + 1
 
-    db.flush()
+    # 结构 + 两章正文原子提交:此刻磁盘已是完整可用的拆章结果,
+    # 后续圣经/摘要即便崩在半途,留下的也只是缺一块可重建的辅助数据,而非损坏正文。
+    db.commit()
 
-    # 9. 圣经同步:purge 原章抽取 → 对两半分别重新抽取
+    # 10. 圣经同步:purge 原章抽取 → 对两半分别重新抽取(self-commit)
     await _resync_bible_after_split(db, project, chapter_number, new_chapter_number, part_a, part_b)
 
-    # 10. 为两章生成滚动摘要
+    # 11. 为两章生成滚动摘要(self-commit)
     await _rebuild_split_summaries(db, project, chapter_number, new_chapter_number, part_a, part_b)
-
-    db.commit()
 
     logger.info(
         "第 %d 章拆章完成:a=%d字, b=%d字 → 新第 %d 章",
@@ -466,7 +493,11 @@ async def _rebuild_split_summaries(
             db.add(row_b)
         row_b.rolling_summary = summary_b.strip()
         db.flush()
+        # 自管事务:不依赖调用方提交(_split_chapter 末尾已无总 commit)。与
+        # extract_and_apply 同一纪律——收尾函数自洽落地,崩在这之后也不丢已重建的摘要。
+        db.commit()
 
         logger.info("拆章摘要重建完成:第 %d、%d 章", chapter_a, chapter_b)
     except Exception:  # noqa: BLE001 — 摘要失败不阻塞
         logger.exception("拆章后摘要重建失败(不影响正文)")
+        db.rollback()  # 丢掉半截摘要,别把未提交的脏写带回调用方事务

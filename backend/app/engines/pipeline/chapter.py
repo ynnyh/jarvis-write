@@ -400,8 +400,11 @@ async def generate_chapter(
             chapter_number=chapter_number,
         )
         db.add(chapter)
-    else:
-        # 重写:覆盖前把当前正文存一版快照,供新旧对比与回滚
+    elif guard_result.action != "split":
+        # 重写:覆盖前把当前正文存一版快照,供新旧对比与回滚。
+        # 拆章分支例外:_split_chapter 已把第 N 章正文原子落成 part_a 并提交,
+        # 此刻 chapter.final_content 已是 part_a,再快照只会存一版 part_a→part_a
+        # 的无意义历史;且下面的赋值(final 也 = part_a)对拆章是幂等的。
         from app.chapter_versions import snapshot_chapter
 
         snapshot_chapter(db, chapter, source="generated")

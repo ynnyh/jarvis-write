@@ -17,6 +17,28 @@ export function splitParas(text: string): string[] {
   return text.split(/\n+/).map((s) => s.trim()).filter(Boolean);
 }
 
+/** 定位第 idx 个非空段落在原文中的字符区间(与 splitParas 同口径:按 \n 分行、trim、过滤空行)。
+ *  用段落序号而非全文 indexOf(selText),避免正文里有重复段落时替换改错位置。 */
+export function nthParaSpan(
+  source: string, idx: number,
+): { start: number; end: number; text: string } | null {
+  const re = /[^\n]+/g;
+  let count = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source)) !== null) {
+    const trimmed = m[0].trim();
+    if (!trimmed) continue; // 纯空白行不算段落,与 filter(Boolean) 对齐
+    if (count === idx) {
+      // 收窄到 trim 后的区间,使 text 与 splitParas 产出的段落逐字一致(替换只动正文、不吞行内缩进)
+      const lead = m[0].length - m[0].trimStart().length;
+      const start = m.index + lead;
+      return { start, end: start + trimmed.length, text: trimmed };
+    }
+    count++;
+  }
+  return null;
+}
+
 /** 正文按空行/换行分段渲染成 <p>,保证可读性;传 onSelect 时段落可点选(片段润色用) */
 export function Paragraphs({ text, selectedIdx, onSelect }: {
   text: string;
@@ -273,15 +295,16 @@ export default function Reader({
   //  - 润色:只改文笔不动情节 → askSync=false,从不同步。
   //  - 手改:可能动情节 → askSync=true,存完弹一句问,用户要才后台同步。
   async function applyReplacement(replacement: string, askSync: boolean) {
-    if (!polishCtx || !chapter || selText == null) return;
+    if (!polishCtx || !chapter || selText == null || selPara == null) return;
     const source = chapter.final_content;
-    // exact match 替换第一次出现;找不到(正文已被别处改过)则报错提示
-    const at = source.indexOf(selText);
-    if (at < 0) {
+    // 按段落序号(而非全文 indexOf)精确定位:正文里有重复段落时也不会改错位置。
+    // span.text 必须与当前选中段逐字一致,否则说明正文已被别处改动,选择已失效。
+    const span = nthParaSpan(source, selPara);
+    if (!span || span.text !== selText) {
       setPolishErr("在定稿正文中找不到该段落(可能已被修改),请关闭阅读器重试");
       return;
     }
-    const newContent = source.slice(0, at) + replacement + source.slice(at + selText.length);
+    const newContent = source.slice(0, span.start) + replacement + source.slice(span.end);
     setApplying(true); setPolishErr("");
     try {
       const updated = await api.editChapterContent(polishCtx.pid, polishCtx.chapterNumber, newContent);

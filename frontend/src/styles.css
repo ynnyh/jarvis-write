@@ -1570,6 +1570,12 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 .tc-item.done .tc-stage { color: var(--ok); }
 .tc-item.error .tc-stage { color: var(--err); }
 
+/* 移动端:角标在顶栏第二行最左,抽屉若沿用 right:0 会整体溢出到屏幕左外并盖住标题行。
+   改为左锚定 + 视口内限宽,保证始终落在屏幕内。 */
+@media (max-width: 640px) {
+  .tc-drawer { right: auto; left: 0; width: min(320px, calc(100vw - 24px)); }
+}
+
 /* ---------- 阶段二:创作起步流 / 进度地图 / 连写队列 ---------- */
 .onboard { display: flex; gap: 20px; align-items: flex-start; }
 .onboard-main { flex: 1; min-width: 0; }

@@ -8,15 +8,19 @@ POST /api/tendency/genre-infer      按故事概念/文本推断题材大类 + �
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from app.auth import get_current_user
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.tendency import get_catalog, get_node_catalog
 from app.llm.router import Task, get_adapter_for
 from app.schemas.tendency import NodeCatalogOut
 
-router = APIRouter(prefix="/api/tendency", tags=["tendency"])
+# genre-infer 调 LLM(匿名可刷会烧 token),catalog 也只在登录后用;整个 router 统一挂鉴权。
+router = APIRouter(
+    prefix="/api/tendency", tags=["tendency"], dependencies=[Depends(get_current_user)]
+)
 
 
 @router.get("/catalog")
