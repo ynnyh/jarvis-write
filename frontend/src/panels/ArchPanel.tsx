@@ -1,10 +1,11 @@
 // 架构工作区:雪花四步产出,四块均可手动编辑,也可整体重生成
 // 对生成的架构不满意时,开「架构研讨」和 AI 聊清楚想法 → 蒸馏成额外要求 → 按此重新生成
 import { useEffect, useRef, useState } from "react";
-import { api, Architecture, Project, Tendency } from "../api";
+import { api, Architecture, Project, StyleProfile, Tendency } from "../api";
 import { pollJob } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
 import { confirmDialog } from "../ui/ConfirmDialog";
+import { toast } from "../ui/Toaster";
 
 interface Props { project: Project; arch: Architecture | null; onChanged: () => Promise<void>; }
 
@@ -13,6 +14,14 @@ const BLOCKS: { key: keyof Architecture; label: string; hint: string }[] = [
   { key: "character_dynamics", label: "角色动力学", hint: "每个角色的创伤/追求/渴望/面具/阴影/蜕变" },
   { key: "world_building", label: "世界观", hint: "物理/社会/隐喻三维度" },
   { key: "plot_architecture", label: "情节架构", hint: "三幕式 + 主要伏笔 + 贯穿悬念" },
+];
+
+// 创作偏好档案四字段:这本书贯穿全程的创作宪法,注入生成/重写/润色所有环节
+const PROFILE_FIELDS: { key: keyof StyleProfile; label: string; ph: string }[] = [
+  { key: "style", label: "文风", ph: "如:冷峻克制,多用短句白描,少用形容词" },
+  { key: "taboos", label: "禁忌/避雷", ph: "如:不要后宫,不要血腥虐杀,不写主角降智" },
+  { key: "audience", label: "读者定位", ph: "如:面向初中生的网文,节奏要快" },
+  { key: "other", label: "其他创作主张", ph: "如:每章结尾留反转;对话推动剧情,少旁白" },
 ];
 
 export default function ArchPanel({ project, arch, onChanged }: Props) {
@@ -35,6 +44,11 @@ export default function ArchPanel({ project, arch, onChanged }: Props) {
   const [directive, setDirective] = useState(""); // AI 蒸馏出的额外要求
   const discussLogRef = useRef<HTMLDivElement>(null);
 
+  // ---- 创作偏好档案(贯穿全书,注入所有生成环节) ----
+  const [profile, setProfile] = useState<StyleProfile>({ style: "", taboos: "", audience: "", other: "" });
+  const [profileDirty, setProfileDirty] = useState(false);
+  const [profileBusy, setProfileBusy] = useState("");
+
   useEffect(() => {
     if (arch) {
       setForm({
@@ -44,6 +58,13 @@ export default function ArchPanel({ project, arch, onChanged }: Props) {
       setDirty(false);
     }
   }, [arch]);
+
+  // 载入创作偏好档案(无则四字段皆空)
+  useEffect(() => {
+    api.getStyleProfile(project.id)
+      .then((p) => { setProfile(p); setProfileDirty(false); })
+      .catch(() => undefined);
+  }, [project.id]);
 
   // 对话流自动滚到底
   useEffect(() => {
@@ -112,6 +133,26 @@ export default function ArchPanel({ project, arch, onChanged }: Props) {
     } catch (e) { setErr(String(e)); } finally { setBusy(""); }
   }
 
+  async function saveProfile() {
+    setProfileBusy("保存档案…");
+    try {
+      const p = await api.saveStyleProfile(project.id, profile);
+      setProfile(p); setProfileDirty(false);
+      toast.ok("创作偏好档案已保存", "后续生成/重写/润色都会遵循这份档案");
+    } catch (e) { toast.err("保存失败", String(e)); } finally { setProfileBusy(""); }
+  }
+
+  // 把研讨蒸馏出的主张吸收进档案(LLM 归类合并),成功后刷新本地档案
+  async function absorbDirective() {
+    if (!directive.trim()) return;
+    setProfileBusy("正在把主张整理进档案…");
+    try {
+      const p = await api.absorbStyleProfile(project.id, directive.trim());
+      setProfile(p); setProfileDirty(false);
+      toast.ok("已吸收进创作偏好档案", "可在下方档案卡查看/微调");
+    } catch (e) { toast.err("吸收失败", String(e)); } finally { setProfileBusy(""); }
+  }
+
   return (
     <>
       <div className="card">
@@ -141,6 +182,34 @@ export default function ArchPanel({ project, arch, onChanged }: Props) {
         {busy && <div className="muted mt-2">{busy}</div>}
         {msg && <div className="msg-ok mt-2">{msg}</div>}
         {err && <div className="msg-err mt-2">{err}</div>}
+      </div>
+
+      <div className="card">
+        <div className="card-head">
+          <h3 className="grow">创作偏好档案</h3>
+          {profileDirty && (
+            <button className="primary" disabled={!!profileBusy} onClick={saveProfile}>
+              {profileBusy && <span className="spin" />}保存档案
+            </button>
+          )}
+        </div>
+        <div className="card-desc">
+          这本书贯穿全程的创作宪法——文风、禁忌、读者定位。填了之后,生成、重写、润色、大纲、架构每个环节都会高优先级遵循。和 AI 研讨时聊出的主张,也能一键吸收进来。
+        </div>
+        <div className="mt-3">
+          {PROFILE_FIELDS.map((f) => (
+            <div key={f.key} className="profile-field">
+              <label className="fl">{f.label}</label>
+              <textarea
+                rows={2}
+                placeholder={f.ph}
+                value={profile[f.key]}
+                onChange={(e) => { setProfile({ ...profile, [f.key]: e.target.value }); setProfileDirty(true); }}
+              />
+            </div>
+          ))}
+        </div>
+        {profileBusy && <div className="muted mt-2">{profileBusy}</div>}
       </div>
 
       {arch && (
@@ -181,6 +250,10 @@ export default function ArchPanel({ project, arch, onChanged }: Props) {
                   <div className="rp-actions">
                     <button className="primary" disabled={!!busy} onClick={() => regenerate(directive)}>
                       {busy && <span className="spin" />}按这些要求重新生成架构
+                    </button>
+                    <button disabled={!!profileBusy} onClick={absorbDirective}
+                      title="把这些主张沉淀进创作偏好档案,后续所有章节都会遵循">
+                      {profileBusy && <span className="spin" />}存进偏好档案
                     </button>
                     <button disabled={!!busy} onClick={() => setDirective("")}>清空,继续聊</button>
                   </div>

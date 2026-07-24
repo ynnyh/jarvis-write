@@ -19,6 +19,16 @@ from app.schemas.tendency import AssembledTendency, Tendency
 from .catalog import _dimension_select, _directive_index
 
 _CUSTOM_KEY = "_custom"
+# 创作偏好档案:贯穿全书的创作宪法,存在 global_tendency[_PROFILE_KEY] 子字典里。
+# 与 _custom(按维度零散自定义)不同,它是结构化的整书主张,注入所有生成环节,
+# 优先级高于「本次写作倾向」。字段 -> 注入 prompt 时的中文标签(顺序即展示顺序)。
+_PROFILE_KEY = "_profile"
+_PROFILE_LABELS = [
+    ("style", "文风"),
+    ("taboos", "禁忌/避雷"),
+    ("audience", "读者定位"),
+    ("other", "其他创作主张"),
+]
 
 
 def merge_tendency(
@@ -33,7 +43,7 @@ def merge_tendency(
     override = override or {}
 
     for key, value in override.items():
-        if key == _CUSTOM_KEY:
+        if key in (_CUSTOM_KEY, _PROFILE_KEY):
             continue
         merged[key] = value
 
@@ -67,7 +77,7 @@ def assemble_tendency(
     applied: dict[str, Any] = {}
 
     for key, value in merged.items():
-        if key == _CUSTOM_KEY or value in (None, "", []):
+        if key in (_CUSTOM_KEY, _PROFILE_KEY) or value in (None, "", []):
             continue
 
         # 归一成列表处理;单选维度只取第一个
@@ -92,12 +102,32 @@ def assemble_tendency(
             applied.setdefault(_CUSTOM_KEY, {})
             applied[_CUSTOM_KEY][key] = custom_value
 
+    # 创作偏好档案:结构化的整书主张,单独成块(优先级高于本次写作倾向)
+    profile = merged.get(_PROFILE_KEY) or {}
+    profile_lines: list[str] = []
+    if isinstance(profile, dict):
+        for key, label in _PROFILE_LABELS:
+            val = str(profile.get(key) or "").strip()
+            if val:
+                profile_lines.append(f"- {label}:{val}")
+    profile_text = "\n".join(profile_lines)
+
     directives_text = "\n".join(lines)
-    return AssembledTendency(directives_text=directives_text, applied=applied)
+    return AssembledTendency(
+        directives_text=directives_text, applied=applied, profile_text=profile_text
+    )
 
 
 def render_style_block(assembled: AssembledTendency) -> str:
-    """渲染成注入 Prompt 的整块文本;无倾向时返回空串。"""
-    if not assembled.directives_text:
-        return ""
-    return f"【本次写作倾向】\n{assembled.directives_text}\n"
+    """渲染成注入 Prompt 的整块文本;档案与倾向皆无时返回空串。
+
+    创作偏好档案是贯穿全书的最高优先级约束,排在「本次写作倾向」之前。
+    """
+    blocks: list[str] = []
+    if assembled.profile_text:
+        blocks.append(
+            f"【创作偏好档案(贯穿全书的最高优先级约束,务必遵守)】\n{assembled.profile_text}\n"
+        )
+    if assembled.directives_text:
+        blocks.append(f"【本次写作倾向】\n{assembled.directives_text}\n")
+    return "\n".join(blocks)

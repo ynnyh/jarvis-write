@@ -54,3 +54,6 @@ class AssembledTendency(BaseModel):
     applied: dict[str, Any] = Field(
         default_factory=dict, description="最终生效的倾向(全局+临时合并后)"
     )
+    profile_text: str = Field(
+        default="", description="创作偏好档案渲染出的指令块(无档案时为空)"
+    )

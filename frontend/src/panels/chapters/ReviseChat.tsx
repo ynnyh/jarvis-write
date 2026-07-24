@@ -3,6 +3,7 @@
 // 与架构研讨(ArchPanel)同构,复用 rd-*/arch-directive/rp-* 样式。
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../api";
+import { toast } from "../../ui/Toaster";
 
 interface Props {
   pid: number;
@@ -17,6 +18,7 @@ export default function ReviseChat({ pid, n, onApply }: Props) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [directive, setDirective] = useState(""); // AI 蒸馏出的修改意见
+  const [absorbing, setAbsorbing] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
 
   // 对话流自动滚到底
@@ -41,6 +43,16 @@ export default function ReviseChat({ pid, n, onApply }: Props) {
       setInput(text);
       setErr(String(e));
     } finally { setBusy(false); }
+  }
+
+  // 把蒸馏出的修改主张吸收进创作偏好档案(全书贯穿),不只是这一次重写
+  async function absorb() {
+    if (!directive.trim() || absorbing) return;
+    setAbsorbing(true);
+    try {
+      await api.absorbStyleProfile(pid, directive.trim());
+      toast.ok("已吸收进创作偏好档案", "后续所有章节都会遵循,可在架构页查看/微调");
+    } catch (e) { toast.err("吸收失败", String(e)); } finally { setAbsorbing(false); }
   }
 
   return (
@@ -70,6 +82,10 @@ export default function ReviseChat({ pid, n, onApply }: Props) {
           <div className="rp-actions">
             <button className="primary btn-sm" onClick={() => onApply(directive)}>
               填入上方重写意见
+            </button>
+            <button className="btn-sm" disabled={absorbing} onClick={absorb}
+              title="把这些主张沉淀进创作偏好档案,后续所有章节都会遵循">
+              {absorbing && <span className="spin spin-sm" />}存进偏好档案
             </button>
             <button className="btn-sm" onClick={() => setDirective("")}>清空,继续聊</button>
           </div>

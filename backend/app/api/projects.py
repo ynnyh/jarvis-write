@@ -13,6 +13,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -38,6 +40,7 @@ from app.llm.factory import (
     resolve_provider_config,
 )
 from app.llm.router import Task, get_adapter_for
+from app.prompts.profile import PROFILE_ABSORB_PROMPT
 from app.schemas.concept import Concept
 from app.schemas.project import (
     ArchitectureOut,
@@ -487,6 +490,119 @@ async def discuss_project_architecture(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ArchDiscussResponse(**result)
+
+
+# ---------- 创作偏好档案(贯穿全书的创作宪法,注入所有生成环节) ----------
+# 档案存在 project.global_tendency["_profile"] 子字典里,复用现成的倾向拼装器
+# (assemble_tendency/render_style_block)注入到生成/重写/定稿/润色/大纲/架构所有
+# prompt,零新增注入点。读改写都在服务端合并,避免前端整段覆盖 global_tendency
+# 时把标签倾向冲掉。
+logger = logging.getLogger("jarvis-write.api")
+_PROFILE_FIELDS = ("style", "taboos", "audience", "other")
+
+
+def _read_profile(project: Project) -> dict:
+    profile = (project.global_tendency or {}).get("_profile") or {}
+    return {k: str(profile.get(k) or "") for k in _PROFILE_FIELDS}
+
+
+def _write_profile(project: Project, profile: dict) -> dict:
+    """合并写回 global_tendency._profile(保留其余倾向标签),返回规范化后的档案。"""
+    cleaned = {k: str(profile.get(k) or "").strip() for k in _PROFILE_FIELDS}
+    tendency = dict(project.global_tendency or {})
+    if any(cleaned.values()):
+        tendency["_profile"] = cleaned
+    else:
+        tendency.pop("_profile", None)  # 全空则去掉键,注入时该块整体省略
+    project.global_tendency = tendency
+    return cleaned
+
+
+def _parse_profile_json(raw: str) -> dict:
+    """从模型输出里抠出档案 JSON(容忍代码块包裹与前后多余文字)。"""
+    text = raw.strip()
+    fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if fence:
+        text = fence.group(1)
+    else:
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end > start:
+            text = text[start : end + 1]
+    obj = json.loads(text)
+    if not isinstance(obj, dict):
+        raise ValueError("档案不是 JSON 对象")
+    return {k: str(obj.get(k) or "") for k in _PROFILE_FIELDS}
+
+
+class StyleProfileOut(BaseModel):
+    style: str = ""
+    taboos: str = ""
+    audience: str = ""
+    other: str = ""
+
+
+@router.get("/{project_id}/style-profile", response_model=StyleProfileOut)
+async def get_style_profile(project_id: int, db: Session = Depends(get_db)):
+    """读取这本书的创作偏好档案(未设置时四字段皆空)。"""
+    project = _get_project_or_404(db, project_id)
+    return StyleProfileOut(**_read_profile(project))
+
+
+class StyleProfileUpdate(BaseModel):
+    style: str | None = None
+    taboos: str | None = None
+    audience: str | None = None
+    other: str | None = None
+
+
+@router.put("/{project_id}/style-profile", response_model=StyleProfileOut)
+async def update_style_profile(
+    project_id: int, req: StyleProfileUpdate, db: Session = Depends(get_db)
+):
+    """保存创作偏好档案:传了的字段(含空串)覆盖,未传的沿用现值。"""
+    project = _get_project_or_404(db, project_id)
+    current = _read_profile(project)
+    for k, v in req.model_dump().items():
+        if v is not None:
+            current[k] = v
+    cleaned = _write_profile(project, current)
+    db.commit()
+    return StyleProfileOut(**cleaned)
+
+
+class StyleProfileAbsorbRequest(BaseModel):
+    directive: str = Field(min_length=1, max_length=2000, description="对话蒸馏出的创作主张")
+
+
+@router.post("/{project_id}/style-profile/absorb", response_model=StyleProfileOut)
+async def absorb_style_profile(
+    project_id: int, req: StyleProfileAbsorbRequest, db: Session = Depends(get_db)
+):
+    """把对话里聊出的创作主张,用 LLM 归类合并进档案对应字段后保存。
+
+    吸收失败(模型/解析异常)时降级:把原文并进「其他创作主张」,不丢用户想法。
+    """
+    project = _get_project_or_404(db, project_id)
+    current = _read_profile(project)
+    directive = req.directive.strip()
+    try:
+        adapter = get_adapter_for(Task.SUMMARY)
+        prompt = PROFILE_ABSORB_PROMPT.format(
+            style=current["style"] or "(空)",
+            taboos=current["taboos"] or "(空)",
+            audience=current["audience"] or "(空)",
+            other=current["other"] or "(空)",
+            directive=directive,
+        )
+        merged = _parse_profile_json(await adapter.ask(prompt))
+        cleaned = _write_profile(project, merged)
+    except Exception:  # noqa: BLE001 — 降级:并进其他主张,不阻塞
+        logger.warning("档案吸收失败,降级并入其他主张", exc_info=True)
+        other = current["other"]
+        current["other"] = f"{other};{directive}".strip("; ") if other else directive
+        cleaned = _write_profile(project, current)
+    db.commit()
+    return StyleProfileOut(**cleaned)
 
 
 @router.post("/{project_id}/blueprint", response_model=GenerateBlueprintResponse)

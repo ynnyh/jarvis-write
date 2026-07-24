@@ -1256,6 +1256,11 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 }
 .arch-directive textarea { width: 100%; resize: vertical; margin-top: 6px; }
 
+/* 创作偏好档案编辑卡:四字段竖排,标签在上 */
+.profile-field { margin-bottom: 12px; }
+.profile-field .fl { margin-bottom: 4px; }
+.profile-field textarea { width: 100%; resize: vertical; }
+
 /* ==========================================================================
    响应式:≤900px 折叠布局;≤640px 触摸优化
    ========================================================================== */

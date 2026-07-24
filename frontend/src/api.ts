@@ -87,6 +87,14 @@ const LLM_TIMEOUT = 900_000;
 // ---------- 类型 ----------
 export type Tendency = Record<string, unknown>;
 
+// 创作偏好档案:贯穿全书的创作宪法,注入生成/重写/润色所有环节
+export interface StyleProfile {
+  style: string;    // 文风
+  taboos: string;   // 禁忌/避雷
+  audience: string; // 读者定位
+  other: string;    // 其他创作主张
+}
+
 export interface Project {
   id: number; title: string; topic: string; genre: string;
   target_chapters: number; target_words_per_chapter: number;
@@ -374,6 +382,13 @@ export const api = {
   getProject: (id: number) => req<Project>("GET", `/api/projects/${id}`),
   patchProject: (id: number, patch: Partial<Project>) =>
     req<Project>("PATCH", `/api/projects/${id}`, patch),
+  // 创作偏好档案(贯穿全书,注入所有生成环节)
+  getStyleProfile: (id: number) =>
+    req<StyleProfile>("GET", `/api/projects/${id}/style-profile`),
+  saveStyleProfile: (id: number, profile: Partial<StyleProfile>) =>
+    req<StyleProfile>("PUT", `/api/projects/${id}/style-profile`, profile),
+  absorbStyleProfile: (id: number, directive: string) =>
+    req<StyleProfile>("POST", `/api/projects/${id}/style-profile/absorb`, { directive }, LLM_TIMEOUT),
   renameProject: (id: number, title: string) =>
     req<Project>("PATCH", `/api/projects/${id}`, { title }),
   deleteProject: (id: number) =>
