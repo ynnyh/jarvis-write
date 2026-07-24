@@ -19,6 +19,12 @@ frontend/tsconfig.tsbuildinfo
 # 压测/运行产物
 backend/scripts/stress_report.jsonl
 
+# 桌面版构建产物(PyInstaller + Tauri,体积大,不入库)
+backend/build/
+backend/dist/
+src-tauri/target/
+src-tauri/gen/
+
 # IDE / OS
 .idea/
 .vscode/

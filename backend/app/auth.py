@@ -72,10 +72,29 @@ def _bearer_token(request: Request) -> str | None:
     return None
 
 
+def _local_user(db: Session) -> User:
+    """local(桌面单机)模式的唯一用户:取 id 最小的账号(迁移已保证 admin 存在)。
+
+    单机版没有登录,所有请求都归属这一个用户,其 per-user LLM key 存本机库。
+    """
+    user = db.query(User).order_by(User.id).first()
+    if user is None:
+        raise HTTPException(status_code=500, detail="本地用户尚未初始化,请重启应用")
+    return user
+
+
 async def get_current_user(
     request: Request, db: Session = Depends(get_db)
 ) -> User:
-    """FastAPI 依赖:校验 token → 取用户 → 存进 contextvar。"""
+    """FastAPI 依赖:校验 token → 取用户 → 存进 contextvar。
+
+    local 模式:跳过 token 校验,直接返回唯一的本地用户(桌面单机,免登录)。
+    """
+    if get_settings().is_local:
+        user = _local_user(db)
+        current_user_id.set(user.id)
+        return user
+
     token = _bearer_token(request)
     uid = _decode_token(token) if token else None
     if uid is None:

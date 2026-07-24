@@ -105,15 +105,30 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # local(桌面)模式:前端由 Tauri 壳内嵌或后端自托管,放行 tauri 与本机源;
+    # server 模式:只放行本地开发前端(生产同源,无需 CORS)。
+    _cors_origins = (
+        [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+            "tauri://localhost",
+            "https://tauri.localhost",
+        ]
+        if settings.is_local
+        else ["http://localhost:5173", "http://127.0.0.1:5173"]
+    )
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_origins=_cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    # 登录/注册按 IP 限流,挡撞库 / 批量刷号(单进程内存计数,见 ratelimit.py)
-    if settings.rate_limit_enabled:
+    # 登录/注册按 IP 限流,挡撞库 / 批量刷号(单进程内存计数,见 ratelimit.py)。
+    # local 模式免登录,无登录接口可刷,限流无意义,直接关。
+    if settings.rate_limit_enabled and not settings.is_local:
         from app.ratelimit import RateLimitMiddleware
         app.add_middleware(RateLimitMiddleware)
 
@@ -135,9 +150,14 @@ def create_app() -> FastAPI:
     app.include_router(media_router)
     app.include_router(misc_router)
 
-    _static_dir = Path(__file__).resolve().parent / "static"
+    # 资源定位统一走 resource_path:源码环境相对 backend/,冻结(桌面版)相对
+    # sys._MEIPASS。打包 spec 把 app/static 与 frontend/dist 放到对应相对路径,
+    # 两种环境同一套代码即可命中。
+    from app.paths import resource_path
+
+    _static_dir = resource_path("app/static")
     # 前端构建产物(frontend/dist)挂在 /app
-    _frontend_dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    _frontend_dist = resource_path("frontend/dist")
 
     @app.get("/settings", include_in_schema=False)
     async def settings_page() -> FileResponse:

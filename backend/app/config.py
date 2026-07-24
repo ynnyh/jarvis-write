@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     default_max_tokens: int = 8192
     default_timeout: int = 600
 
+    # ===== 运行模式(桌面版 local vs 服务器 server) =====
+    # server(默认):多用户 + JWT 登录 + 邀请码,线上部署用,行为与既有一致。
+    # local:桌面单机版——免登录,所有请求自动归属唯一的本地用户,数据落用户
+    #   本机目录。仅当后端只监听 127.0.0.1 时安全(桌面壳保证);绝不可在公网 local。
+    app_mode: str = "server"
+
     # ===== 多用户认证(阶段 8) =====
     # 运行环境:dev(默认,本地开发/测试放行弱默认密钥)/ prod(生产,弱默认即拒启动)。
     # 生产由 docker-compose 设 APP_ENV=prod;启动自检见 main.py。
@@ -86,6 +92,11 @@ class Settings(BaseSettings):
                 self.gemini_api_key, self.gemini_base_url, self.gemini_model
             )
         raise ValueError(f"未知的 provider: {name}")
+
+    @property
+    def is_local(self) -> bool:
+        """是否桌面单机模式(免登录 + 唯一本地用户 + 数据落本机)。"""
+        return self.app_mode.lower() == "local"
 
 
 @lru_cache

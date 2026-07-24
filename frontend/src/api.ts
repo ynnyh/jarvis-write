@@ -567,6 +567,8 @@ export const api = {
   login: (username: string, password: string) =>
     req<AuthResult>("POST", "/api/auth/login", { username, password }),
   me: () => req<Me>("GET", "/api/auth/me"),
+  // 运行模式:local(桌面单机,免登录)/ server(多用户)。前端据此跳过登录页。
+  mode: () => req<{ mode: string; is_local: boolean }>("GET", "/api/mode"),
 
   // ---------- 后台管理(仅管理员可用) ----------
   adminListUsers: () => req<AdminUser[]>("GET", "/api/admin/users"),

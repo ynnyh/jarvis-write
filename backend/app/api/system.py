@@ -36,6 +36,18 @@ async def health() -> HealthResponse:
     return HealthResponse(status="ok", providers=available_providers())
 
 
+@router.get("/mode", include_in_schema=False)
+async def mode() -> dict:
+    """运行模式:前端据此决定是否跳过登录页。
+
+    公开接口(登录前就要查)。local=桌面单机版免登录;server=多用户需登录。
+    """
+    from app.config import get_settings
+
+    local = get_settings().is_local
+    return {"mode": "local" if local else "server", "is_local": local}
+
+
 @router.post(
     "/ping-llm",
     response_model=PingLLMResponse,

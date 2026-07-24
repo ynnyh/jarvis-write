@@ -12,10 +12,12 @@ import UpdateBanner from "./ui/UpdateBanner";
 export default function App() {
   const [tokens, setTokens] = useState<string>("");
   const [me, setMe] = useState<Me | null>(null);
+  // 桌面单机(local)模式:免登录,不显示登录页/退出/邀请码等多用户 UI
+  const [isLocal, setIsLocal] = useState<boolean>(false);
   // 未配置模型引导:null=未探测,false=未配置(显示横幅)
   const [llmConfigured, setLlmConfigured] = useState<boolean | null>(null);
-  // 引导态:正在用已存 token 拉当前用户
-  const [booting, setBooting] = useState<boolean>(!!token.get());
+  // 引导态:正在用已存 token 拉当前用户,或正在探测运行模式
+  const [booting, setBooting] = useState<boolean>(true);
   const location = useLocation();
 
   // 401 统一处理:清 token、回登录页
@@ -23,13 +25,39 @@ export default function App() {
     setUnauthorizedHandler(() => { setMe(null); });
   }, []);
 
-  // 启动时若有 token,校验并取用户;失效则回登录
+  // 启动:先探运行模式。local → 免登录直接拉用户;server → 有 token 才校验。
   useEffect(() => {
-    if (!token.get()) { setBooting(false); return; }
-    api.me()
-      .then((u) => setMe(u))
-      .catch(() => { token.clear(); setMe(null); })
-      .finally(() => setBooting(false));
+    let cancelled = false;
+    (async () => {
+      let local = false;
+      try {
+        const m = await api.mode();
+        local = m.is_local;
+      } catch { /* 探测失败按 server 处理 */ }
+      if (cancelled) return;
+      setIsLocal(local);
+      if (local) {
+        // 桌面单机:后端免鉴权,直接取本地用户
+        try {
+          const u = await api.me();
+          if (!cancelled) setMe(u);
+        } catch { /* 忽略,极少发生 */ }
+        if (!cancelled) setBooting(false);
+        return;
+      }
+      // server 模式:沿用原有 token 引导
+      if (!token.get()) { if (!cancelled) setBooting(false); return; }
+      try {
+        const u = await api.me();
+        if (!cancelled) setMe(u);
+      } catch {
+        token.clear();
+        if (!cancelled) setMe(null);
+      } finally {
+        if (!cancelled) setBooting(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   // 模型配置探测:登录后拉一次,未配置则显示全局引导横幅
@@ -73,6 +101,10 @@ export default function App() {
         </div>
       );
     }
+    // local(桌面单机)模式免登录:此时 me 尚未就绪只是还在拉,显示 loading 而非登录页
+    if (isLocal) {
+      return <div className="auth-wrap"><span className="spin" /></div>;
+    }
     return <LoginPage onAuthed={setMe} />;
   }
 
@@ -84,13 +116,14 @@ export default function App() {
         <div className="grow" />
         <TaskCenterBadge />
         {tokens && <span className="muted" title="累计 LLM 用量">{tokens}</span>}
-        {me.is_admin && <Link to="/admin">管理</Link>}
+        {!isLocal && me.is_admin && <Link to="/admin">管理</Link>}
         <Link to="/help">指南</Link>
         <a href="/settings" target="_blank" rel="noreferrer">模型设置</a>
         <a href="/docs" target="_blank" rel="noreferrer">API</a>
         <a className="topbar-gh" href="https://github.com/ynnyh/jarvis-write" target="_blank" rel="noreferrer">GitHub</a>
-        <span className="muted" title={me.is_admin ? "管理员" : "用户"}>{me.username}</span>
-        <a className="linkbtn" onClick={logout}>退出</a>
+        {/* local 单机免登录:不显示账号名与退出 */}
+        {!isLocal && <span className="muted" title={me.is_admin ? "管理员" : "用户"}>{me.username}</span>}
+        {!isLocal && <a className="linkbtn" onClick={logout}>退出</a>}
       </div>
       <UpdateBanner />
       {llmConfigured === false && (
