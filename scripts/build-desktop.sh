@@ -17,6 +17,11 @@ echo "==> [1/4] 构建前端产物 frontend/dist"
 ( cd frontend && npm install && npm run build )
 
 echo "==> [2/4] 冻结后端为 onedir(PyInstaller)→ backend/dist/jarvis-write-backend"
+# 版本号从 tauri.conf.json 取,写进 backend/_version.txt 供 spec 打入、
+# 冻结后 desktop_main 读回设进 APP_VERSION(设置页「关于」显示)。
+APP_VER="$(python -c 'import json;print(json.load(open("src-tauri/tauri.conf.json"))["version"])')"
+echo "$APP_VER" > backend/_version.txt
+echo "    (写入 backend/_version.txt: $APP_VER)"
 ( cd backend && .venv/Scripts/python -m PyInstaller desktop.spec --noconfirm )
 
 echo "==> [3/4] 生成 Tauri 图标(从 src-tauri/icon-source.png → src-tauri/icons/)"

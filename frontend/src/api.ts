@@ -257,6 +257,24 @@ export interface PolishResult {
   flavor_before: FlavorInfo; flavor_after: FlavorInfo;
 }
 export interface ProviderState { deepseek: boolean; openai: boolean; gemini: boolean; }
+// 模型设置:单个 provider 的配置回显(key 打码)与各家默认值
+export interface ProviderSettingOut {
+  provider: string;
+  api_key_masked: string;
+  has_key: boolean;
+  base_url: string;
+  model: string;
+  is_default: boolean;
+  default_base_url: string;
+  default_model: string;
+}
+// 保存 provider:api_key 留空/不传 = 不改动已存 key
+export interface ProviderSettingIn {
+  api_key?: string | null;
+  base_url: string;
+  model: string;
+  is_default: boolean;
+}
 export interface AuthResult { token: string; username: string; is_admin: boolean; }
 export interface Me { id: number; username: string; is_admin: boolean; }
 /** 结构化故事概念(灵感工坊产出)。六字段全可空,渐进成形。 */
@@ -367,12 +385,24 @@ export const api = {
   health: () => req<{ status: string; providers: ProviderState }>("GET", "/api/health"),
   // 更新提醒:当前部署的 git commit + 最新一条更新日志(公开接口)
   getVersion: () =>
-    req<{ commit: string; changelog: { title: string; body: string } }>(
+    req<{ commit: string; app_version: string; changelog: { title: string; body: string } }>(
       "GET", "/api/version"),
   // 当前用户是否配置了至少一个可用模型(全局引导横幅用)
   providerStatus: () =>
     req<{ configured: boolean; providers: Record<string, boolean> }>(
       "GET", "/api/settings/providers/status"),
+  // ---- 模型设置(设置页「模型设置」分区,对齐 backend/app/api/settings.py)----
+  listProviders: () =>
+    req<ProviderSettingOut[]>("GET", "/api/settings/providers"),
+  saveProvider: (name: string, body: ProviderSettingIn) =>
+    req<ProviderSettingOut>("PUT", `/api/settings/providers/${name}`, body),
+  // 删除:不带 confirmed 先探连通性,连通则返回 needs_confirm 由前端二次确认
+  deleteProvider: (name: string, confirmed = false) =>
+    req<{ deleted: boolean; needs_confirm?: boolean; reason?: string }>(
+      "DELETE", `/api/settings/providers/${name}${confirmed ? "?confirmed=true" : ""}`),
+  testProvider: (name: string) =>
+    req<{ ok: boolean; provider: string; model?: string; reply?: string; error?: string }>(
+      "POST", `/api/settings/providers/${name}/test`, undefined, 60000),
   suggestTitle: (topic: string, genre: string, concept?: Concept | null) =>
     req<{ titles: string[] }>("POST", "/api/projects/title-suggestion",
       { topic, genre, concept: concept ?? null }, 60000),

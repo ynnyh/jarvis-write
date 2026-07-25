@@ -8,6 +8,7 @@ import ProjectPage from "./pages/ProjectPage";
 import OnboardingFlow from "./pages/OnboardingFlow";
 import AdminPage from "./pages/AdminPage";
 import HelpPage from "./pages/HelpPage";
+import SettingsPage from "./pages/SettingsPage";
 import "./styles.css";
 import "./tailwind.css";
 
@@ -31,6 +32,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="project/:id/:step?" element={<ProjectPage />} />
             <Route path="admin" element={<AdminPage />} />
             <Route path="help" element={<HelpPage />} />
+            <Route path="settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

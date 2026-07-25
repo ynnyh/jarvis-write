@@ -42,4 +42,6 @@ def test_version_endpoint_shape(client):
     assert r.status_code == 200
     data = r.json()
     assert isinstance(data["commit"], str) and data["commit"]
+    # app_version:桌面版打包时烤入,开发/测试态回落 "dev"
+    assert isinstance(data["app_version"], str) and data["app_version"]
     assert set(data["changelog"]) == {"title", "body"}

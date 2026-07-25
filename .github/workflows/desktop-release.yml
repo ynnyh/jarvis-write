@@ -77,6 +77,9 @@ jobs:
         shell: bash
         run: |
           cd backend
+          # 版本号写入 _version.txt,随冻结包打入;运行时 desktop_main 读回设 APP_VERSION,
+          # 供设置页「关于」显示当前版本(与安装包/更新清单版本对齐)。
+          echo -n "${{ steps.ver.outputs.version }}" > _version.txt
           pyinstaller desktop.spec --noconfirm
 
       - name: 安装 Tauri CLI

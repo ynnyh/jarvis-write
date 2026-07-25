@@ -37,6 +37,14 @@ datas += collect_data_files("pydantic")
 # 不显式收集会导致冻结后"导出 Word"报 FileNotFoundError。
 datas += collect_data_files("docx")
 
+# 应用版本号:CI/build 脚本在冻结前写入 backend/_version.txt(对齐发布标签),
+# desktop_main._load_app_version() 启动时读回设进 APP_VERSION,供设置页「关于」显示。
+# 条件收集:本地跑源码不写此文件,缺失时不打入(否则 PyInstaller 报文件不存在),
+# 版本回落 "dev",不影响功能。
+import os as _os
+if _os.path.exists("_version.txt"):
+    datas += [("_version.txt", ".")]
+
 a = Analysis(
     ["desktop_main.py"],
     pathex=[],

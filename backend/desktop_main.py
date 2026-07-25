@@ -32,6 +32,25 @@ def _pick_port(preferred: int = 8756) -> int:
         return s.getsockname()[1]
 
 
+def _load_app_version() -> None:
+    """把打包时写入的 _version.txt 读进 APP_VERSION 环境变量。
+
+    冻结后进程不继承 CI 的环境变量,所以版本号得随包带一个文件。资源经
+    resource_path 定位(冻结:_MEIPASS/_version.txt;源码:backend/_version.txt)。
+    文件缺失或读失败一律忽略,APP_VERSION 保持未设(下游回落 "dev")。
+    """
+    if os.environ.get("APP_VERSION"):
+        return
+    try:
+        from app.paths import resource_path
+
+        v = resource_path("_version.txt").read_text(encoding="utf-8").strip()
+        if v:
+            os.environ["APP_VERSION"] = v
+    except OSError:
+        pass
+
+
 def main() -> None:
     # ---- 冻结环境:强制单机 local 模式 ----
     os.environ.setdefault("APP_MODE", "local")
@@ -40,6 +59,11 @@ def main() -> None:
     # 桌面入口标记:app/main.py 的 _assert_local_safe 据此放行 local 模式。
     # 没有这个标记而 APP_MODE=local 会被拒绝启动,防止公网服务误开免鉴权。
     os.environ["JARVIS_LAUNCHER"] = "desktop"
+
+    # 应用版本:冻结环境变量不保留,故打包时把版本写进 _version.txt(spec 打入),
+    # 启动时读回设进 APP_VERSION,供 /api/version 返回给设置页「关于」显示。
+    # 未打入(旧包/开发)则维持 "dev",不影响启动。
+    _load_app_version()
 
     # ---- 数据目录:SQLite 落用户可写目录(打包目录只读)----
     # 延迟导入:app.paths 不依赖重模块,先把 DATABASE_URL 定好再导 app.*

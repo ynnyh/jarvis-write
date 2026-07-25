@@ -1867,3 +1867,50 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .guard-toggle .hint { font-weight: 400; }
 .review-config { display: flex; align-items: center; gap: var(--sp-3); font-size: var(--fs-sm); }
 .review-config select { margin-left: 2px; }
+
+/* ---------- 设置页(/#/settings:关于&更新 + 模型设置 + 偏好) ---------- */
+.settings-page { max-width: 720px; margin: 0 auto; }
+.settings-head { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-5); }
+.settings-head h1 { margin: 0; font-size: var(--fs-xl); }
+.settings-foot { text-align: center; margin-top: var(--sp-5); }
+.settings-foot a { color: var(--brand); font-size: var(--fs-sm); }
+
+/* 关于&更新:状态行 + 进度条 */
+.update-box { margin-top: var(--sp-3); }
+.update-line { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; padding: 10px 12px; border-radius: var(--r-sm); background: var(--surface-2); font-size: var(--fs-sm); }
+.update-line.ok { background: var(--ok-weak); color: var(--ok); border: 1px solid var(--ok-line); }
+.update-line.err { background: var(--err-weak); color: var(--err); border: 1px solid var(--err-line); }
+.update-avail { display: flex; flex-direction: column; gap: var(--sp-2); }
+.update-avail .update-line { background: var(--brand-weak); border: 1px solid var(--brand-line); }
+.update-notes { font-size: var(--fs-sm); color: var(--text-2); line-height: 1.7; padding: 10px 12px; background: var(--surface-2); border-radius: var(--r-sm); max-height: 220px; overflow-y: auto; }
+.update-progress { display: flex; flex-direction: column; gap: var(--sp-2); padding: 10px 12px; }
+.pbar { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.pbar-fill { height: 100%; background: var(--brand); border-radius: 999px; transition: width .3s ease; }
+
+/* 模型设置:每家一行 */
+.provider-list { display: flex; flex-direction: column; gap: var(--sp-4); margin-top: var(--sp-3); }
+.provider-row { padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-2); }
+.provider-row .card-head { margin-bottom: var(--sp-2); }
+.provider-row h3 { font-size: var(--fs-md); }
+.provider-desc { color: var(--text-2); font-size: var(--fs-sm); margin: 0 0 var(--sp-3); }
+.provider-row input[type="text"], .provider-row input[type="password"] { width: 100%; }
+.provider-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-3); flex-wrap: wrap; }
+.provider-actions .danger { color: var(--err); border-color: var(--err-line); }
+.provider-actions .danger:hover:not(:disabled) { background: var(--err-weak); }
+
+/* 字段行(Base URL / 模型名双列)与标签 */
+.fld-row { display: flex; gap: var(--sp-3); flex-wrap: wrap; margin-top: var(--sp-3); }
+.fld { flex: 1 1 220px; }
+.fld-label { display: block; font-size: var(--fs-sm); color: var(--text-2); margin: var(--sp-3) 0 var(--sp-1); }
+.provider-row .fld-label:first-of-type { margin-top: 0; }
+.fld-hint { font-size: var(--fs-xs); color: var(--text-3); margin-top: var(--sp-1); }
+.default-pick { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--text-2); margin-top: var(--sp-3); cursor: pointer; }
+
+/* 徽章配色变体:已配置(绿)/未配置(红);基础 .badge 复用全局定义(见上文) */
+.badge-ok { background: var(--ok-weak); color: var(--ok); }
+.badge-no { background: var(--err-weak); color: var(--err); }
+
+/* 测试连接结果行 */
+.test-line { margin-top: var(--sp-3); font-size: var(--fs-sm); padding: 8px 12px; border-radius: var(--r-sm); line-height: 1.6; }
+.test-line.ok { background: var(--ok-weak); color: var(--ok); }
+.test-line.err { background: var(--err-weak); color: var(--err); }

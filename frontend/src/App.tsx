@@ -121,19 +121,15 @@ export default function App() {
         <Link to="/">首页</Link>
         {!isLocal && me.is_admin && <Link to="/admin">管理</Link>}
         <Link to="/help">指南</Link>
+        {/* 设置改走 SPA 路由(同窗切换):既含模型设置,也含桌面版「关于&更新」。
+            桌面 WebView2 不处理 target=_blank,SPA 内路由天然规避新开窗问题。 */}
+        <Link to="/settings">设置</Link>
         {isLocal ? (
-          <>
-            {/* 桌面单机:WebView2 不处理 target=_blank。模型设置窗口内打开(自带返回链接);
-                GitHub 经后端 open-link 交系统浏览器。API 文档(/docs)仅开发用,不进顶栏。 */}
-            <a href="/settings">模型设置</a>
-            <a className="topbar-gh" href={GH_URL}
-              onClick={(e) => { e.preventDefault(); api.openLink(GH_URL).catch(() => {}); }}>GitHub</a>
-          </>
+          // 桌面单机:GitHub 经后端 open-link 交系统浏览器(WebView2 不开新标签页)。
+          <a className="topbar-gh" href={GH_URL}
+            onClick={(e) => { e.preventDefault(); api.openLink(GH_URL).catch(() => {}); }}>GitHub</a>
         ) : (
-          <>
-            <a href="/settings" target="_blank" rel="noreferrer">模型设置</a>
-            <a className="topbar-gh" href={GH_URL} target="_blank" rel="noreferrer">GitHub</a>
-          </>
+          <a className="topbar-gh" href={GH_URL} target="_blank" rel="noreferrer">GitHub</a>
         )}
         {/* local 单机免登录:不显示账号名与退出 */}
         {!isLocal && <span className="muted" title={me.is_admin ? "管理员" : "用户"}>{me.username}</span>}
@@ -143,9 +139,7 @@ export default function App() {
       {llmConfigured === false && (
         <div className="llm-banner">
           还没有配置模型——大部分功能需要模型才能工作。
-          {isLocal
-            ? <a href="/settings">去「模型设置」配置你的 key →</a>
-            : <a href="/settings" target="_blank" rel="noreferrer">去「模型设置」配置你的 key →</a>}
+          <Link to="/settings" className="llm-banner-link">去「设置」配置你的 key →</Link>
         </div>
       )}
       <div className="wrap">

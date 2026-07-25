@@ -1,7 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "默认权限",
+  "description": "默认权限。窗口加载的是本机后端页面(http://127.0.0.1:<随机端口>),对 Tauri 而言是『远程源』,默认拿不到任何 IPC——故必须用 remote.urls 把本机源列入白名单,否则前端调不到 updater/自定义命令(设置页的检查更新、版本号都依赖它)。端口随机,用通配。",
   "windows": ["main"],
+  "remote": {
+    "urls": ["http://localhost:*", "http://127.0.0.1:*"]
+  },
   "permissions": ["core:default", "opener:default", "updater:default", "dialog:default"]
 }

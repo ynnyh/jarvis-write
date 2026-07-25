@@ -130,12 +130,17 @@ def _latest_changelog(path: Path = _CHANGELOG_PATH) -> dict:
 
 @router.get("/version", include_in_schema=False)
 async def version() -> dict:
-    """前端更新提醒用:返回当前部署的 git commit 与最新一条更新日志。
+    """前端更新提醒用:返回当前部署的 git commit、应用版本号与最新一条更新日志。
 
-    commit 由构建时 --build-arg GIT_COMMIT 烤进环境变量 APP_COMMIT;本地开发
-    没烤则为 "dev",前端据此跳过提示。公开接口(不含敏感信息),登录前也能查。
+    - commit:构建时 --build-arg GIT_COMMIT 烤进环境变量 APP_COMMIT;本地开发
+      没烤则为 "dev",Web 端更新横幅据此跳过提示。
+    - app_version:桌面版打包时(CI/build 脚本)烤进环境变量 APP_VERSION,对齐
+      发布标签(如 0.2.1);拿不到则回落 "dev"。设置页「关于」用来显示当前版本,
+      即便前端调不到 Tauri IPC 也能拿到版本号。
+    公开接口(不含敏感信息),登录前也能查。
     """
     return {
         "commit": os.environ.get("APP_COMMIT", "dev"),
+        "app_version": os.environ.get("APP_VERSION", "dev"),
         "changelog": _latest_changelog(),
     }

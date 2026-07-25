@@ -27,6 +27,8 @@ backend/scripts/stress_report.jsonl
 # 桌面版构建产物(PyInstaller + Tauri,体积大,不入库)
 backend/build/
 backend/dist/
+# 打包时由 CI/build 脚本写入的版本文件(供冻结后读回设 APP_VERSION),非源码
+backend/_version.txt
 src-tauri/target/
 src-tauri/gen/
 # Tauri 图标由 `tauri icon` 从 icon-source.png 现场生成,不入库
