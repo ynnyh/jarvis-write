@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
-from pathlib import Path
 from typing import Iterator
 
-# backend/config/tag_presets.json
-_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "tag_presets.json"
+from app.paths import resource_path
+
+# backend/config/tag_presets.json(源码)或 _MEIPASS/config/tag_presets.json(冻结)。
+# 必须走 resource_path:冻结后 __file__ 指向解包临时目录,直接 parents[3] 会找不到。
+_CONFIG_PATH = resource_path("config/tag_presets.json")
 
 
 @lru_cache

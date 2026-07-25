@@ -26,9 +26,16 @@ for pkg in (
 datas = [
     ("app/static", "app/static"),
     ("../frontend/dist", "frontend/dist"),
+    # 运行时配置:题材库 tag_presets.json / 优化动作 editor_actions.json。
+    # 冻结后经 resource_path("config/...") 从 _MEIPASS/config 读取,漏打会导致
+    # 建书"选题材"墙与编辑部优化动作全空(catalog/editorial 加载即 500)。
+    ("config", "config"),
 ]
 # pydantic 等可能带数据文件
 datas += collect_data_files("pydantic")
+# python-docx 无 PyInstaller hook,模板(default.docx 等)按 __file__ 相对路径读取,
+# 不显式收集会导致冻结后"导出 Word"报 FileNotFoundError。
+datas += collect_data_files("docx")
 
 a = Analysis(
     ["desktop_main.py"],

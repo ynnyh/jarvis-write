@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from functools import lru_cache
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -35,10 +34,12 @@ from app.engines.editorial import (
     store_review_snapshot,
 )
 from app.jobs import list_running, spawn_job
+from app.paths import resource_path
 
 router = APIRouter(tags=["editorial"], dependencies=[Depends(get_current_user)])
 
-_ACTIONS_PATH = Path(__file__).resolve().parents[2] / "config" / "editor_actions.json"
+# backend/config/editor_actions.json(源码)或 _MEIPASS/config/(冻结),走 resource_path。
+_ACTIONS_PATH = resource_path("config/editor_actions.json")
 
 
 @lru_cache

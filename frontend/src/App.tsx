@@ -124,17 +124,14 @@ export default function App() {
         {isLocal ? (
           <>
             {/* 桌面单机:WebView2 不处理 target=_blank。模型设置窗口内打开(自带返回链接);
-                API/GitHub 经后端 open-link 交系统浏览器。 */}
+                GitHub 经后端 open-link 交系统浏览器。API 文档(/docs)仅开发用,不进顶栏。 */}
             <a href="/settings">模型设置</a>
-            <a href={`${window.location.origin}/docs`}
-              onClick={(e) => { e.preventDefault(); api.openLink(`${window.location.origin}/docs`).catch(() => {}); }}>API</a>
             <a className="topbar-gh" href={GH_URL}
               onClick={(e) => { e.preventDefault(); api.openLink(GH_URL).catch(() => {}); }}>GitHub</a>
           </>
         ) : (
           <>
             <a href="/settings" target="_blank" rel="noreferrer">模型设置</a>
-            <a href="/docs" target="_blank" rel="noreferrer">API</a>
             <a className="topbar-gh" href={GH_URL} target="_blank" rel="noreferrer">GitHub</a>
           </>
         )}
