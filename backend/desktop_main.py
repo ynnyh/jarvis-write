@@ -37,6 +37,9 @@ def main() -> None:
     os.environ.setdefault("APP_MODE", "local")
     os.environ.setdefault("APP_ENV", "dev")  # local 不用 JWT,放行弱默认
     os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
+    # 桌面入口标记:app/main.py 的 _assert_local_safe 据此放行 local 模式。
+    # 没有这个标记而 APP_MODE=local 会被拒绝启动,防止公网服务误开免鉴权。
+    os.environ["JARVIS_LAUNCHER"] = "desktop"
 
     # ---- 数据目录:SQLite 落用户可写目录(打包目录只读)----
     # 延迟导入:app.paths 不依赖重模块,先把 DATABASE_URL 定好再导 app.*

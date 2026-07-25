@@ -13,6 +13,10 @@ services:
       # 数据(SQLite)落在 /srv/data,用 named volume 持久化,
       # 不再整目录挂载 —— 更新镜像代码后不会被旧 volume 覆盖。
       - DATABASE_URL=sqlite:////srv/data/jarvis_write.db
+      # ===== 运行模式 =====
+      # 显式钉死 server(多用户 + JWT 鉴权)。防止 .env 里误带入 APP_MODE=local
+      # 把公网服务变成免鉴权裸奔态(compose 的环境变量优先于后端 .env)。
+      - APP_MODE=server
       # ===== 多用户认证 =====
       # 运行环境:prod → 启动自检拒绝弱默认 JWT 密钥(见 app/main.py、docs/06)
       - APP_ENV=prod

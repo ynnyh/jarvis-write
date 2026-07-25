@@ -60,6 +60,35 @@ logging.basicConfig(
 logger = logging.getLogger("jarvis-write")
 
 
+def _assert_local_safe() -> None:
+    """local(桌面单机)模式会完全关闭鉴权,绝不允许暴露在非本机接口上。
+
+    唯一合法进入 local 模式的途径是桌面入口 desktop_main.py:它设
+    JARVIS_LAUNCHER=desktop 并只绑定 127.0.0.1。若有人把 APP_MODE=local
+    误塞进服务器的 .env / 环境变量(而非走桌面入口),这里直接拒绝启动,
+    避免一个公网服务在无人察觉的情况下变成「无鉴权、限流也关」的裸奔态。
+    """
+    import os
+
+    from app.config import get_settings
+
+    settings = get_settings()
+    if not settings.is_local:
+        return
+    if os.environ.get("JARVIS_LAUNCHER") != "desktop":
+        raise RuntimeError(
+            "APP_MODE=local 会完全关闭鉴权,只能通过桌面入口 desktop_main.py 启动"
+            "(它会绑定 127.0.0.1 并设 JARVIS_LAUNCHER=desktop)。\n"
+            "若确需在本机以 local 模式调试,请改用 `python desktop_main.py`,\n"
+            "或显式设环境变量 JARVIS_LAUNCHER=desktop 且务必只监听 127.0.0.1。\n"
+            "服务器部署应保持 APP_MODE=server(默认值),不要设成 local。"
+        )
+    logger.warning(
+        "运行于 local(桌面单机)模式:鉴权已关闭,所有请求归属唯一本地用户。"
+        "此模式仅限本机可达(127.0.0.1),严禁暴露到任何外部网络接口。"
+    )
+
+
 def _assert_secure_config() -> None:
     """生产环境(APP_ENV=prod)拒绝以弱默认 JWT 密钥启动。
 
@@ -85,6 +114,7 @@ async def lifespan(app: FastAPI):
     建初始 admin、把存量无主数据归到 admin(全部幂等,每次启动都跑)。
     """
     _assert_secure_config()  # 生产弱密钥即拒启动(见函数注释)
+    _assert_local_safe()  # local 模式只许走桌面入口,否则拒启动(见函数注释)
     logger.info("建表中(SQLite)...")
     Base.metadata.create_all(bind=engine)
     logger.info("建表完成,运行多用户迁移...")
