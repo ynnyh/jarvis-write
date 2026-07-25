@@ -1,0 +1,65 @@
+# 文档站(官网)部署:把 docs/ 下的 VitePress 站点构建并发布到 GitHub Pages。
+# 推 main 即重建(文档更新自动上线),也可手动触发。
+#
+# 站点地址: https://ynnyh.github.io/jarvis-write/
+# 注意: 需在仓库 Settings → Pages 把 Source 设为 "GitHub Actions"(本工作流用
+#       actions/deploy-pages 直接部署,不走 gh-pages 分支)。
+name: Deploy Docs Site
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 只允许同时进行一次部署,跳过排队中的运行(不取消正在跑的,避免半截状态)。
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # lastUpdated 需要完整 git 历史
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: 配置 Pages
+        uses: actions/configure-pages@v5
+
+      - name: 安装依赖
+        working-directory: docs
+        run: npm ci
+
+      - name: 构建 VitePress 站点
+        working-directory: docs
+        run: npm run build
+
+      - name: 上传产物
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/.vitepress/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 部署到 GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

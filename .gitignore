@@ -16,6 +16,11 @@ frontend/node_modules/
 frontend/dist/
 frontend/tsconfig.tsbuildinfo
 
+# 文档站(VitePress)构建产物,不入库
+docs/node_modules/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+
 # 压测/运行产物
 backend/scripts/stress_report.jsonl
 

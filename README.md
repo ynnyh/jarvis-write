@@ -8,6 +8,10 @@
 
 <!-- 📸 截图/演示 GIF 待补:建议依次放 1) 写作工作台全景 2) 大纲级联改动的下游影响勾选 3) 故事圣经/伏笔看板。把图片放进 docs/assets/ 后，在此处用 <img src="docs/assets/xxx.png" width="820"> 引入即可。 -->
 
+> 🖥️ **下载桌面版（Windows 安装包，开箱即用）** → [GitHub Releases](https://github.com/ynnyh/jarvis-write/releases/latest)
+>
+> 🌐 **官网与在线文档** → [ynnyh.github.io/jarvis-write](https://ynnyh.github.io/jarvis-write/)
+>
 > 💬 **想直接试用、不想自己部署?** 扫码进 QQ 群领**邀请码**，开箱即用 → [见文末交流群](#community)
 
 ## ✨ 三个别人没有的杀手锏
@@ -26,14 +30,23 @@
 - **大纲级联更新**：随时改任意一章大纲，系统自动做改动分级（minor 零成本短路）→ 下游影响分析 → 用户勾选后级联重生成；已有正文自动标记失配，大纲全程版本化可回溯
 - **润色引擎**：整章或选段风格化润色，**锁定情节事实**（润色前抽事实清单、润色后逐条校验）；去 AI 味三层机制（常驻规则 + 倾向标签 + 量化检测前后对比）
 - **标签化倾向系统**：chips + 自定义输入 + 预设模板，贯穿大纲、正文、润色三个节点，风格/节奏/基调由用户说了算
-- **全书阅读器**：主题（纸张/牛皮纸/夜间）、字体、字号可调
+- **创作偏好档案**：文风 / 禁忌 / 读者定位 / 其他主张结构化沉淀为项目级档案，作为最高优先级约束贯穿所有生成环节；研讨中的主张可一键吸收沉淀，已生成的老书打开即自动从正文反向提炼启用
+- **字数守卫与自动拆章**：定稿超标自动压缩重写，严重超标自动拆章（LLM 选断点 + 全表编号顺移 + 圣经/摘要重建），结构改动与正文同事务原子落地，中途崩溃不损坏正文
+- **编辑部回显**：主审 / 校对结果留存，生成时的自动修复清单与手动待修清单打开即见，正文一旦改动自动失效，不留过期误导
+- **重写前先聊**：重写前与 AI 多轮对话蒸馏出精准修改意见，再据此重写，避免"AI 猜你想要什么"
+- **全书阅读器**：主题（纸张/牛皮纸/夜间）、字体、字号可调；段落级 AI 问答与润色，选中即问、采纳即替换
 - **多用户**：JWT 登录 + 邀请码注册 + 每用户独立配置 LLM key + 数据隔离；移动端已适配
 - **导出与统计**：整本导出 txt / epub；token 用量统一埋点、实时统计
 - **Docker 一键部署**：单容器，前端产物由 FastAPI 托管，数据卷持久化
+- **桌面版（Windows）**：安装包开箱即用，免登录单机运行、数据落本机；由 GitHub Actions 自动构建并发布到 Releases
 
 ## 快速开始
 
-### 方式一：Docker（推荐）
+### 方式一：桌面版安装包（最简单 · Windows）
+
+从 [GitHub Releases](https://github.com/ynnyh/jarvis-write/releases/latest) 下载最新的 `jarvis-write_<版本>_x64-setup.exe`，双击安装即可。免登录单机运行，作品数据存在本机（`%APPDATA%\jarvis-write`），无需部署、无需配置数据库。首次打开后在「模型设置」里填上你自己的 LLM API key 即可开始创作。
+
+### 方式二：Docker（自部署多用户服务）
 
 ```bash
 git clone https://github.com/ynnyh/jarvis-write.git
@@ -45,7 +58,7 @@ docker compose up --build
 
 访问 `http://localhost:8000`（端口可用 `PORT` 环境变量覆盖）。SQLite 数据持久化在 named volume `jarvis_write_data`。
 
-### 方式二：本地开发
+### 方式三：本地开发
 
 ```bash
 # 后端（首次需建 venv、pip install -r requirements.txt、cp .env.example .env 并配 key）
@@ -70,6 +83,8 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 
 ## 文档索引
 
+> 🌐 在线文档站（含全部设计文档 + 本地搜索）：[ynnyh.github.io/jarvis-write](https://ynnyh.github.io/jarvis-write/)
+
 | 文档 | 内容 |
 |---|---|
 | [docs/00-overview.md](docs/00-overview.md) | 项目愿景、设计思路，以及与同类项目的差异化对比 |
@@ -86,6 +101,7 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 - **LLM 层**：自封适配层（DeepSeek / OpenAI / Gemini，不用 LangChain），任务级模型路由（强模型/快模型分档）
 - **前端**：React + TypeScript + Vite
 - **部署**：单容器 Docker（多阶段构建，前端产物由 FastAPI 托管在 `/app`）
+- **桌面版**：Tauri 2 壳 + PyInstaller 冻结后端，GitHub Actions 自动构建 NSIS 安装包并发布到 Releases
 
 ## 项目状态与路线图
 

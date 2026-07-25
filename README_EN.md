@@ -8,6 +8,10 @@ The hard problem of AI-assisted novel writing isn't producing text — it's keep
 
 <!-- 📸 Screenshots / demo GIF TODO: suggested order — 1) writing workbench overview, 2) cascading-edit downstream-impact selection, 3) story bible / foreshadowing board. Drop images into docs/assets/ and embed here with <img src="docs/assets/xxx.png" width="820">. -->
 
+> 🖥️ **Download the desktop app (Windows installer, works out of the box)** → [GitHub Releases](https://github.com/ynnyh/jarvis-write/releases/latest)
+>
+> 🌐 **Website & online docs** → [ynnyh.github.io/jarvis-write](https://ynnyh.github.io/jarvis-write/)
+>
 > 💬 **Want to try it without self-hosting?** Scan the QR code to join the QQ group and grab an **invite code** → [see Community below](#community)
 
 ## ✨ Three things nobody else has
@@ -26,14 +30,23 @@ Most AI writing tools stop at "generation." The value of jarvis-write is what co
 - **Cascading outline updates**: edit any chapter of the outline at any time — the system grades the change (minor edits short-circuit with zero LLM cost), analyzes downstream impact, and regenerates affected chapters after user confirmation; existing prose is flagged as stale, and every outline version is kept for rollback
 - **Polish engine with locked facts**: full-chapter or selected-passage stylistic polishing while plot facts stay frozen (facts extracted before polishing, verified after); a three-layer "de-AI-flavor" mechanism (standing rules + tendency tag + quantitative before/after scoring)
 - **Tag-based tendency system**: chips + free-form input + savable presets, applied across outline, prose, and polishing — style, pacing, and tone are the user's choice, not hardcoded prompts
-- **Full-book reader**: adjustable themes (paper / kraft / night), fonts, and font sizes
+- **Creative preference profile**: style / taboos / target audience / other directives are distilled into a structured, project-level profile that acts as the highest-priority constraint across every generation step; claims made during a discussion can be absorbed with one click, and an existing book auto-extracts and enables a profile from its prose the first time it's opened
+- **Word-count guard with auto chapter-splitting**: an over-length final draft is automatically compressed and rewritten; a severely over-length one is auto-split (LLM picks the break point + all numbering shifts + bible/summary rebuilt), with structural changes and prose committed atomically in one transaction so a mid-way crash never corrupts the text
+- **Editorial echo**: lead-reviewer / proofreader results are retained — the auto-fix list and the manual to-fix list from generation are visible the moment you open them, and they auto-invalidate as soon as the prose changes, so no stale guidance lingers
+- **Discuss before you rewrite**: before a rewrite, multi-turn dialogue with the AI distills precise revision notes, which the rewrite then follows — no more "the AI guessing what you want"
+- **Full-book reader**: adjustable themes (paper / kraft / night), fonts, and font sizes; paragraph-level AI Q&A and polishing — select to ask, accept to replace
 - **Multi-user**: JWT auth + invite-code registration + per-user LLM API keys + data isolation; mobile-friendly UI
 - **Export & usage stats**: whole-book export to txt / epub; unified token usage metering with live totals
 - **One-command Docker deployment**: single container, frontend served by FastAPI, data persisted in a named volume
+- **Desktop app (Windows)**: an installer that works out of the box — no login, runs fully offline, data stays on your machine; built and published to Releases automatically by GitHub Actions
 
 ## Quick Start
 
-### Option 1: Docker (recommended)
+### Option 1: Desktop installer (easiest · Windows)
+
+Download the latest `jarvis-write_<version>_x64-setup.exe` from [GitHub Releases](https://github.com/ynnyh/jarvis-write/releases/latest) and double-click to install. It runs offline with no login required, and your work is stored locally (`%APPDATA%\jarvis-write`) — no deployment, no database setup. On first launch, enter your own LLM API key under "Model Settings" and you're ready to write.
+
+### Option 2: Docker (self-hosted multi-user service)
 
 ```bash
 git clone https://github.com/ynnyh/jarvis-write.git
@@ -45,7 +58,7 @@ docker compose up --build
 
 Open `http://localhost:8000` (override the host port with the `PORT` variable). SQLite data is persisted in the named volume `jarvis_write_data`.
 
-### Option 2: Local development
+### Option 3: Local development
 
 ```bash
 # Backend (first time: create a venv, pip install -r requirements.txt,
@@ -71,6 +84,8 @@ Full list of options: [backend/.env.example](backend/.env.example).
 
 ## Documentation
 
+> 🌐 Online docs site (all design docs + local search): [ynnyh.github.io/jarvis-write](https://ynnyh.github.io/jarvis-write/)
+
 The design docs are written in Chinese:
 
 | Document | Contents |
@@ -89,6 +104,7 @@ The design docs are written in Chinese:
 - **LLM layer**: self-built adapter layer (DeepSeek / OpenAI / Gemini, no LangChain), task-level model routing (strong vs. fast tiers)
 - **Frontend**: React + TypeScript + Vite
 - **Deployment**: single-container Docker (multi-stage build; frontend assets served by FastAPI at `/app`)
+- **Desktop**: Tauri 2 shell + PyInstaller-frozen backend, with GitHub Actions automatically building the NSIS installer and publishing it to Releases
 
 ## Status & Roadmap
 
