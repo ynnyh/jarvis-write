@@ -24,6 +24,8 @@ backend/build/
 backend/dist/
 src-tauri/target/
 src-tauri/gen/
+# Tauri 图标由 `tauri icon` 从 icon-source.png 现场生成,不入库
+src-tauri/icons/
 
 # IDE / OS
 .idea/

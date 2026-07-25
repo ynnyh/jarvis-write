@@ -1,0 +1,123 @@
+# 桌面版打包发版:推 vX.Y.Z 标签即构建 Windows NSIS 安装包并上传到 GitHub Releases。
+#
+# 构建链路(与 scripts/build-desktop.sh 一致):
+#   前端 vite build → 后端 PyInstaller onedir → 生成 Tauri 图标 → tauri build(NSIS)
+#
+# 说明:
+# - Tauri 配置在仓库根 src-tauri/,frontendDist=../frontend/dist,故 tauri build 在仓库根运行。
+# - 后端必须先冻结成 backend/dist/jarvis-write-backend,它作为 Tauri resource 打进安装包,
+#   运行时由桌面壳(src-tauri/src/lib.rs)拉起。
+# - 图标不入库,由 `tauri icon` 从 src-tauri/icon-source.png 现场生成。
+# - 安装包版本号与触发标签对齐(写入 tauri.conf.json 的 version)。
+name: Desktop Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "发布标签(如 v0.2.0);将据此创建 Release"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 解析版本号
+        id: ver
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="$GITHUB_REF_NAME"
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG version=$VERSION"
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 构建前端 (vite build)
+        shell: bash
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: 安装后端依赖 + PyInstaller
+        shell: bash
+        run: |
+          cd backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: 冻结后端 (PyInstaller onedir)
+        shell: bash
+        run: |
+          cd backend
+          pyinstaller desktop.spec --noconfirm
+
+      - name: 安装 Tauri CLI
+        shell: bash
+        run: npm install -g @tauri-apps/cli@^2
+
+      - name: 生成 Tauri 图标
+        shell: bash
+        run: tauri icon src-tauri/icon-source.png
+
+      - name: 安装包版本号对齐标签
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          p = pathlib.Path("src-tauri/tauri.conf.json")
+          cfg = json.loads(p.read_text(encoding="utf-8"))
+          cfg["version"] = "${{ steps.ver.outputs.version }}"
+          p.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+          print("tauri.conf.json version ->", cfg["version"])
+          PY
+
+      - name: 构建 Tauri (NSIS 安装包)
+        shell: bash
+        run: tauri build --bundles nsis --verbose
+
+      - name: 列出产物
+        shell: bash
+        run: |
+          echo "--- bundle 目录 ---"
+          ls -R src-tauri/target/release/bundle || true
+
+      - name: 发布到 GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: jarvis-write ${{ steps.ver.outputs.tag }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            src-tauri/target/release/bundle/nsis/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
