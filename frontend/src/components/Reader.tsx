@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ChapterDetail, EditorAction } from "../api";
 import { pollJob } from "../pollJob";
+import { isDark } from "../theme";
 
 export const STATUS_CN: Record<string, string> = {
   empty: "未生成", drafting: "生成中", drafted: "有草稿",
@@ -64,15 +65,19 @@ type ReaderFont = "song" | "hei" | "kai";
 type ReaderSize = "sm" | "md" | "lg";
 interface ReaderPrefs { theme: ReaderTheme; font: ReaderFont; size: ReaderSize; }
 const READER_PREFS_KEY = "reader-prefs";
-const DEFAULT_READER_PREFS: ReaderPrefs = { theme: "kraft", font: "song", size: "md" };
+
+/** 默认阅读器偏好:无已存偏好时,背景跟随全局外观(暗色 → 暗夜,否则牛皮纸) */
+function defaultReaderPrefs(): ReaderPrefs {
+  return { theme: isDark() ? "night" : "kraft", font: "song", size: "md" };
+}
 
 function loadReaderPrefs(): ReaderPrefs {
   try {
     const raw = localStorage.getItem(READER_PREFS_KEY);
-    if (!raw) return DEFAULT_READER_PREFS;
-    return { ...DEFAULT_READER_PREFS, ...JSON.parse(raw) };
+    if (!raw) return defaultReaderPrefs();
+    return { ...defaultReaderPrefs(), ...JSON.parse(raw) };
   } catch {
-    return DEFAULT_READER_PREFS;
+    return defaultReaderPrefs();
   }
 }
 
@@ -400,14 +405,16 @@ export default function Reader({
               </h2>
               {chapter.draft_content && chapter.draft_content !== chapter.final_content && (
                 <div className="reader-tabs">
-                  <span
+                  <button
+                    type="button"
                     className={"reader-tab" + (tab === "final" ? " on" : "")}
                     onClick={() => { setTab("final"); setSelPara(null); closePolish(); }}
-                  >定稿</span>
-                  <span
+                  >定稿</button>
+                  <button
+                    type="button"
                     className={"reader-tab" + (tab === "draft" ? " on" : "")}
                     onClick={() => { setTab("draft"); setSelPara(null); closePolish(); }}
-                  >草稿</span>
+                  >草稿</button>
                 </div>
               )}
               <div className="reader-settings" ref={settingsRef}>
@@ -417,38 +424,41 @@ export default function Reader({
                 {showSettings && (
                   <div className="reader-settings-pop">
                     <div className="rs-group">
-                      <div className="rs-label">背景</div>
+                      <div className="fl">背景</div>
                       <div className="chips">
                         {THEME_OPTIONS.map((o) => (
-                          <span
+                          <button
                             key={o.v}
+                            type="button"
                             className={"chip" + (prefs.theme === o.v ? " on" : "")}
                             onClick={() => setPrefs((p) => ({ ...p, theme: o.v }))}
-                          >{o.label}</span>
+                          >{o.label}</button>
                         ))}
                       </div>
                     </div>
                     <div className="rs-group">
-                      <div className="rs-label">字体</div>
+                      <div className="fl">字体</div>
                       <div className="chips">
                         {FONT_OPTIONS.map((o) => (
-                          <span
+                          <button
                             key={o.v}
+                            type="button"
                             className={"chip " + o.cls + (prefs.font === o.v ? " on" : "")}
                             onClick={() => setPrefs((p) => ({ ...p, font: o.v }))}
-                          >{o.label}</span>
+                          >{o.label}</button>
                         ))}
                       </div>
                     </div>
                     <div className="rs-group">
-                      <div className="rs-label">字号</div>
+                      <div className="fl">字号</div>
                       <div className="chips">
                         {SIZE_OPTIONS.map((o) => (
-                          <span
+                          <button
                             key={o.v}
+                            type="button"
                             className={"chip" + (prefs.size === o.v ? " on" : "")}
                             onClick={() => setPrefs((p) => ({ ...p, size: o.v }))}
-                          >{o.label}</span>
+                          >{o.label}</button>
                         ))}
                       </div>
                     </div>
@@ -496,8 +506,9 @@ export default function Reader({
                     </div>
                   )}
                   {toc.items.map((it) => (
-                    <div
+                    <button
                       key={it.num}
+                      type="button"
                       className={"reader-toc-item"
                         + (it.num === toc.current ? " on" : "")
                         + (it.disabled ? " off" : "")}
@@ -508,7 +519,7 @@ export default function Reader({
                       }}
                     >
                       <b>第{it.num}章</b> {it.label}
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}
@@ -569,11 +580,12 @@ export default function Reader({
                           ? proseActions.map((a) => ({ label: a.label, value: a.directive }))
                           : DIRECTION_CHIPS.map((c) => ({ label: c, value: c }))
                         ).map((c) => (
-                          <span
+                          <button
                             key={c.label}
+                            type="button"
                             className={"chip" + (direction === c.value ? " on" : "")}
                             onClick={() => setDirection(c.value)}
-                          >{c.label}</span>
+                          >{c.label}</button>
                         ))}
                       </div>
                       <div className="rp-actions">

@@ -265,11 +265,11 @@ export default function OnboardingFlow() {
       <div className="onboard-main">
         <div className="wiz-steps">
           {STEP_ORDER.map((s, i) => (
-            <div key={s}
+            <button key={s} type="button"
               className={"wiz-step" + (s === step ? " on" : "") + (i < stepIdx ? " done" : "")}
               onClick={() => i < stepIdx && nav(`/new/${pid}/${s}`)}>
               <span className="no">{i < stepIdx ? "✓" : i + 1}</span>{STEP_LABEL[s]}
-            </div>
+            </button>
           ))}
           <div className="grow" />
           <button className="btn-sm" onClick={abandon}>放弃创建</button>
@@ -281,18 +281,18 @@ export default function OnboardingFlow() {
             <h2>这本书写什么?</h2>
             {!entry && !hasConcept && (
               <div className="entry-cards">
-                <div className="entry-card" onClick={() => setEntry("spark")}>
+                <button type="button" className="entry-card" onClick={() => setEntry("spark")}>
                   <h3>💡 我有个想法</h3>
                   <p>一句话、一个画面、一个设定,AI 帮你扩成完整故事概念。</p>
-                </div>
-                <div className="entry-card" onClick={() => setEntry("genre")}>
+                </button>
+                <button type="button" className="entry-card" onClick={() => setEntry("genre")}>
                   <h3>📚 我知道想写什么类型</h3>
                   <p>赘婿流、无限流、克苏鲁…选个流派,AI 按套路出方案。</p>
-                </div>
-                <div className="entry-card" onClick={() => setEntry("chat")}>
+                </button>
+                <button type="button" className="entry-card" onClick={() => setEntry("chat")}>
                   <h3>💬 和 AI 聊聊</h3>
                   <p>完全没头绪?边聊边捏,概念会随对话慢慢成形。</p>
-                </div>
+                </button>
               </div>
             )}
 
@@ -320,12 +320,12 @@ export default function OnboardingFlow() {
                       <div className="genre-cat">{cat.label}</div>
                       <div className="genre-cards">
                         {chips.map((c) => (
-                          <div key={c.label}
+                          <button key={c.label} type="button"
                             className={"genre-card" + (pickedGenreCard?.label === c.label ? " on" : "")}
                             onClick={() => setPickedGenreCard(c)}>
                             <b>{c.label}</b>
                             {c.desc && <span>{c.desc}</span>}
-                          </div>
+                          </button>
                         ))}
                       </div>
                     </div>
@@ -485,13 +485,13 @@ export default function OnboardingFlow() {
             <div className="card-desc">先选个预设,数字之后随时能改。</div>
             <div className="scale-cards mt-2">
               {SCALE_PRESETS.map((p) => (
-                <div key={p.key}
+                <button key={p.key} type="button"
                   className={"scale-card" + (Number(chapters) === p.chapters ? " on" : "")}
                   onClick={() => pickScale(p)}>
                   <b>{p.label}</b>
                   <div className="scale-num">{p.chapters} 章 × {p.words} 字</div>
                   <div className="hint">{p.desc}</div>
-                </div>
+                </button>
               ))}
             </div>
             <div className="row mt-3">

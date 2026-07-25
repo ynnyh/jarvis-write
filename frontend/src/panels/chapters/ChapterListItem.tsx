@@ -49,16 +49,28 @@ export default function ChapterListItem({
             title={ch && !ch.is_stale ? "已写好的章不用排队" : undefined}
             onChange={(e) => onToggleQueue(e.target.checked)} />
         )}
-        <span className={"fact-title" + (ch ? " linkish" : "")} onClick={() => ch && onOpen()}>
-          <b>第{o.chapter_number}章</b> {o.title}
-          <span className={"badge " + (ch?.is_stale ? "err" : st === "finalized" ? "ok" : "")}>
-            {ch?.is_stale ? "大纲已变" : STATUS_CN[st] ?? st}
+        {ch ? (
+          <button type="button" className="fact-title linkish" onClick={onOpen}>
+            <b>第{o.chapter_number}章</b> {o.title}
+            <span className={"badge " + (ch.is_stale ? "err" : st === "finalized" ? "ok" : "")}>
+              {ch.is_stale ? "大纲已变" : STATUS_CN[st] ?? st}
+            </span>
+            <span className="muted"> {ch.word_count}字</span>
+            {generating && (
+              <span className="gen-stage"><span className="spin" />{genStage}</span>
+            )}
+          </button>
+        ) : (
+          <span className="fact-title">
+            <b>第{o.chapter_number}章</b> {o.title}
+            <span className={"badge " + (st === "finalized" ? "ok" : "")}>
+              {STATUS_CN[st] ?? st}
+            </span>
+            {generating && (
+              <span className="gen-stage"><span className="spin" />{genStage}</span>
+            )}
           </span>
-          {ch && <span className="muted"> {ch.word_count}字</span>}
-          {generating && (
-            <span className="gen-stage"><span className="spin" />{genStage}</span>
-          )}
-        </span>
+        )}
         {ch && (
           <button className="btn-sm" onClick={onOpenReader}>阅读</button>
         )}
@@ -81,10 +93,10 @@ export default function ChapterListItem({
           />
           <div className="chips">
             {proseActions.map((a) => (
-              <span key={a.key} className="chip" title={a.directive}
+              <button key={a.key} type="button" className="chip" title={a.directive}
                 onClick={() => onReviseTextChange(((reviseText ? reviseText.trimEnd() + ";" : "") + a.directive).slice(0, 500))}>
                 {a.label}
-              </span>
+              </button>
             ))}
           </div>
           <div className="revise-chat-toggle">

@@ -32,13 +32,14 @@ export default function OutlineItem({
   const open = editing || expanded;
   return (
     <div className="outline-item">
-      <div className="head" onClick={editing ? undefined : onToggleExpand}>
+      <button type="button" className="head" disabled={editing}
+        onClick={editing ? undefined : onToggleExpand}>
         <span className="num">第{o.chapter_number}章</span>
         <b className="outline-title">{o.title}</b>
         <span className="badge">{o.chapter_role || "—"}</span>
         <span className="badge">v{o.current_version}</span>
         {!editing && <span className="caret">{open ? "▾" : "▸"}</span>}
-      </div>
+      </button>
 
       {open && !editing && (
         <div className="outline-detail">
@@ -52,10 +53,10 @@ export default function OutlineItem({
               <span className="chips">
                 <span className="hint">让 AI:</span>
                 {outlineActions.map((a) => (
-                  <span key={a.key} className="chip" title={a.directive}
+                  <button key={a.key} type="button" className="chip" title={a.directive}
                     onClick={() => onDirectiveChip(`第${o.chapter_number}章:${a.directive}`)}>
                     {a.label}
-                  </span>
+                  </button>
                 ))}
               </span>
             )}

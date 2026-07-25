@@ -164,13 +164,13 @@ export default function AdminPage() {
           列表为空时回落旧版单一邀请码(app_settings / 环境变量),创建第一个码后旧码自动失效。
         </p>
         {legacy && (
-          <div className="notice notice-warn" style={{ marginTop: 0 }}>
+          <div className="notice notice-warn mt-0">
             当前使用旧版单一邀请码(来自{legacy.source === "db" ? "数据库" : "环境变量"}):
             {legacy.code ? `「${legacy.code}」` : "(空,已关闭注册)"}。
             创建第一个邀请码后,旧码自动失效。
           </div>
         )}
-        <div className="input-row" style={{ marginTop: 10 }}>
+        <div className="input-row mt-2">
           <input
             type="text"
             value={newCode}
@@ -182,7 +182,7 @@ export default function AdminPage() {
             随机生成
           </button>
         </div>
-        <div className="input-row" style={{ marginTop: 8 }}>
+        <div className="input-row mt-2">
           <input
             type="text"
             value={newNote}
@@ -193,7 +193,7 @@ export default function AdminPage() {
           <input
             type="number"
             min={1}
-            style={{ maxWidth: 160, flex: "none" }}
+            className="input-md"
             value={newMax}
             placeholder="次数限制(留空=不限)"
             onChange={(e) => setNewMax(e.target.value)}
@@ -330,7 +330,7 @@ function InviteCodeRow(props: {
       {props.deleting && (
         <tr>
           <td colSpan={5}>
-            <div className="notice notice-err" style={{ marginTop: 0 }}>
+            <div className="notice notice-err mt-0">
               <div>
                 删除邀请码 {c.code} 后,持有该码的人将无法再注册(不影响已注册用户)。确认删除?
               </div>
@@ -443,7 +443,7 @@ function UserRow(props: {
       {props.deleting && (
         <tr>
           <td colSpan={6}>
-            <div className="notice notice-err" style={{ marginTop: 0 }}>
+            <div className="notice notice-err mt-0">
               <div>
                 将删除用户 {u.username} 及其名下全部 {u.project_count} 个项目
                 (大纲/正文/事实库等),不可恢复。确认删除?

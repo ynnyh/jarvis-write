@@ -187,8 +187,8 @@ export default function SubmissionPanel({ pid, project }: Props) {
             {pkg.titles.length > 0 && (
               <div className="chips mt-2">
                 {pkg.titles.map((t) => (
-                  <span key={t} className={"chip" + (t === title ? " on" : "")}
-                    onClick={() => state && commit({ ...state, title: t })}>{t}</span>
+                  <button key={t} type="button" className={"chip" + (t === title ? " on" : "")}
+                    onClick={() => state && commit({ ...state, title: t })}>{t}</button>
                 ))}
               </div>
             )}
@@ -249,8 +249,8 @@ export default function SubmissionPanel({ pid, project }: Props) {
             {pkg.hooks.length > 0 && (
               <div className="chips mt-2">
                 {pkg.hooks.map((h) => (
-                  <span key={h} className={"chip" + (h === hook ? " on" : "")}
-                    onClick={() => state && commit({ ...state, hook: h })}>{h}</span>
+                  <button key={h} type="button" className={"chip" + (h === hook ? " on" : "")}
+                    onClick={() => state && commit({ ...state, hook: h })}>{h}</button>
                 ))}
               </div>
             )}

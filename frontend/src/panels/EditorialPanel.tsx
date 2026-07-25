@@ -157,11 +157,11 @@ export default function EditorialPanel({ pid }: Props) {
     <>
       <div className="ed-tabs">
         {TABS.map((t) => (
-          <div key={t.key} className={"ed-tab" + (tab === t.key ? " on" : "")}
+          <button key={t.key} type="button" className={"ed-tab" + (tab === t.key ? " on" : "")}
             onClick={() => setTab(t.key)}>
             <b>{t.label}</b>
             <span>{t.who}</span>
-          </div>
+          </button>
         ))}
       </div>
 

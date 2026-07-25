@@ -22,9 +22,9 @@ export default function BoardPanel({ pid, outlines, onGotoChapter }: Props) {
       <div className="chips board-tabs">
         {([["overview", "概览"], ["characters", "人物"], ["bible", "故事圣经"], ["foreshadow", "伏笔"]] as [Tab, string][]).map(
           ([key, label]) => (
-            <span key={key} className={"chip" + (tab === key ? " on" : "")} onClick={() => setTab(key)}>
+            <button key={key} type="button" className={"chip" + (tab === key ? " on" : "")} onClick={() => setTab(key)}>
               {label}
-            </span>
+            </button>
           ),
         )}
       </div>
@@ -503,10 +503,10 @@ function ForeshadowBoard({ pid, outlines }: Props) {
                       disabled={!Number(expectVal) || Number(expectVal) < f.chapter_planted}>✓</button>
                   </span>
                 ) : (
-                  <span className="linkish" title="点击修改预期回收章"
+                  <button type="button" className="linkish" title="点击修改预期回收章"
                     onClick={() => { setEditExpect(f.id); setExpectVal(String(f.expected_payoff_chapter ?? f.chapter_planted + 3)); }}>
                     {f.expected_payoff_chapter ? `第${f.expected_payoff_chapter}章` : "设定"}
-                  </span>
+                  </button>
                 )}
               </td>
               <td>{f.payoff_chapter ? `第${f.payoff_chapter}章` : "—"}</td>

@@ -52,22 +52,24 @@ export default function TendencySelector({ node, value, onChange, compact }: Pro
     <div>
       {dims.map((dim) => (
         <div key={dim.key} className={compact ? "dim compact" : "dim"}>
-          <div className="dim-label">
+          <div className="fl">
             {dim.label}
             {dim.select === "multi" && <span className="badge">可多选</span>}
           </div>
           <div className="chips">
             {dim.chips.map((c) => (
-              <span
+              <button
                 key={c.label}
+                type="button"
                 className={"chip" + (isOn(dim, c.label) ? " on" : "")}
                 title={c.directive}
                 onClick={() => toggle(dim, c.label)}
               >
                 {c.label}
-              </span>
+              </button>
             ))}
-            <span
+            <button
+              type="button"
               className={"chip custom" + (customs[dim.key] ? " on" : "")}
               onClick={() => {
                 setCustomFor(customFor === dim.key ? null : dim.key);
@@ -75,7 +77,7 @@ export default function TendencySelector({ node, value, onChange, compact }: Pro
               }}
             >
               {customs[dim.key] ? `✎ ${customs[dim.key]}` : "+ 我要输入"}
-            </span>
+            </button>
           </div>
           {customFor === dim.key && (
             <div className="input-row mt-2">

@@ -36,18 +36,18 @@ export default function VersionCompare({
           </div>
           <div className="chips mb-2">
             {versions.map((v) => (
-              <span key={v.id}
+              <button key={v.id} type="button"
                 className={"chip" + (compareVer?.id === v.id ? " on" : "")}
                 onClick={() => onSelectVersion(v)}>
                 v{v.version} · {VERSION_SOURCE_CN[v.source] ?? v.source} · {v.word_count}字
-              </span>
+              </button>
             ))}
           </div>
           {compareVer && current && (
             <>
               <div className="split mt-2">
                 <div>
-                  <div className="pane-title">
+                  <div className="fl">
                     旧版 v{compareVer.version}
                     ({VERSION_SOURCE_CN[compareVer.source] ?? compareVer.source} · {compareVer.word_count}字)
                   </div>
@@ -56,7 +56,7 @@ export default function VersionCompare({
                   </div>
                 </div>
                 <div>
-                  <div className="pane-title">当前版({current.word_count}字)</div>
+                  <div className="fl">当前版({current.word_count}字)</div>
                   <div className="pane pane-prose prose">
                     <Paragraphs text={current.final_content || current.draft_content} />
                   </div>

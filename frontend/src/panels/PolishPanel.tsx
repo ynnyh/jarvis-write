@@ -119,12 +119,12 @@ export default function PolishPanel({ pid }: Props) {
           只改文笔不改剧情:润色前自动抽取情节事实锁定,润色后逐条校验;默认开启「去AI味」。
         </div>
         <div className="chips mb-3">
-          <span className={"chip" + (mode === "chapter" ? " on" : "")} onClick={() => { setMode("chapter"); setResult(null); }}>
+          <button type="button" className={"chip" + (mode === "chapter" ? " on" : "")} onClick={() => { setMode("chapter"); setResult(null); }}>
             润色整章
-          </span>
-          <span className={"chip" + (mode === "segment" ? " on" : "")} onClick={() => { setMode("segment"); setResult(null); }}>
+          </button>
+          <button type="button" className={"chip" + (mode === "segment" ? " on" : "")} onClick={() => { setMode("segment"); setResult(null); }}>
             润色一段文本
-          </span>
+          </button>
         </div>
 
         {mode === "chapter" ? (
@@ -138,7 +138,7 @@ export default function PolishPanel({ pid }: Props) {
                 ))}
               </select>
               <div className="card-head mb-2 mt-3">
-                <span className="pane-title grow">原文({original.length}字)</span>
+                <span className="fl grow">原文({original.length}字)</span>
                 {!editingOriginal ? (
                   <button className="btn-sm" disabled={!!busy}
                     onClick={() => { setEditText(original); setEditingOriginal(true); }}>
@@ -198,13 +198,13 @@ export default function PolishPanel({ pid }: Props) {
           ))}
           <div className="split mt-3">
             <div>
-              <div className="pane-title">原文({(mode === "chapter" ? original : segment).length}字)</div>
+              <div className="fl">原文({(mode === "chapter" ? original : segment).length}字)</div>
               <div className="pane pane-prose prose">
                 {mode === "chapter" ? original : segment}
               </div>
             </div>
             <div>
-              <div className="pane-title">润色稿({polishedDraft.length}字 · 应用前可手动微调)</div>
+              <div className="fl">润色稿({polishedDraft.length}字 · 应用前可手动微调)</div>
               <textarea
                 className="editor-area"
                 value={polishedDraft}

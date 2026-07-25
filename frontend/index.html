@@ -4,6 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>jarvis-write · AI 长篇小说工作台</title>
+    <script>
+      // 首屏防闪烁:在 React/样式加载前解析外观偏好并写 data-theme。
+      // 逻辑与 src/theme.ts 保持一致(改一边记得改另一边)。
+      (function () {
+        try {
+          var pref = localStorage.getItem("jarvis_theme") || "auto";
+          var dark =
+            pref === "dark" ||
+            (pref !== "light" &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.dataset.theme = dark ? "dark" : "light";
+        } catch (e) {
+          /* 读失败按亮色渲染,不影响启动 */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

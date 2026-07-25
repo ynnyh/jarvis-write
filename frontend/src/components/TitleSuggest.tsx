@@ -56,13 +56,14 @@ export default function TitleSuggest({ topic, genre, concept, onPick }: Props) {
       {open && titles.length > 0 && (
         <div className="ts-list">
           {titles.map((t) => (
-            <div
+            <button
               key={t}
+              type="button"
               className="ts-item"
               onClick={() => { onPick(t); setOpen(false); }}
             >
               {t}
-            </div>
+            </button>
           ))}
         </div>
       )}

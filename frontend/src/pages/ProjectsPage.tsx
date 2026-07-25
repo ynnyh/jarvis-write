@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, Project } from "../api";
 import TitleSuggest from "../components/TitleSuggest";
 import { confirmDialog } from "../ui/ConfirmDialog";
+import EmptyState from "../ui/EmptyState";
 import { toast } from "../ui/Toaster";
 
 export default function ProjectsPage() {
@@ -134,9 +135,9 @@ export default function ProjectsPage() {
         ))}
       </div>
       {!projects.length && (
-        <div className="card muted">
+        <EmptyState>
           还没有项目。点右上角「新建小说」开始;第一次用可先看 <Link to="/help">「使用指南」</Link>。
-        </div>
+        </EmptyState>
       )}
       {err && <div className="msg-err">{err}</div>}
     </>

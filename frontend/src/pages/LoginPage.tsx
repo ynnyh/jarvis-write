@@ -36,8 +36,8 @@ export default function LoginPage({ onAuthed }: Props) {
         <div className="auth-sub">AI 长篇小说工作台 · 从一句灵感到一部成书</div>
 
         <div className="tabs auth-tabs">
-          <div className={"tab" + (mode === "login" ? " on" : "")} onClick={() => { setMode("login"); setErr(""); }}>登录</div>
-          <div className={"tab" + (mode === "register" ? " on" : "")} onClick={() => { setMode("register"); setErr(""); }}>注册</div>
+          <button type="button" className={"tab" + (mode === "login" ? " on" : "")} onClick={() => { setMode("login"); setErr(""); }}>登录</button>
+          <button type="button" className={"tab" + (mode === "register" ? " on" : "")} onClick={() => { setMode("register"); setErr(""); }}>注册</button>
         </div>
 
         <form onSubmit={submit}>

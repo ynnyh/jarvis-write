@@ -13,6 +13,7 @@ import EditorialPanel from "../panels/EditorialPanel";
 import BoardPanel from "../panels/BoardPanel";
 import SubmissionPanel from "../panels/SubmissionPanel";
 import BookReader from "../components/BookReader";
+import EmptyState from "../ui/EmptyState";
 
 export type Step = "inspire" | "arch" | "outline" | "write" | "polish" | "board" | "publish";
 
@@ -71,9 +72,9 @@ function StepGuide({ step, next, onNext }: { step: Step; next?: string; onNext?:
   const [hidden, setHidden] = useState(() => localStorage.getItem("guide-hidden") === "1");
   if (hidden) {
     return (
-      <div className="guide-mini muted" onClick={() => { localStorage.removeItem("guide-hidden"); setHidden(false); }}>
+      <button type="button" className="guide-mini muted" onClick={() => { localStorage.removeItem("guide-hidden"); setHidden(false); }}>
         ⓘ 本步说明
-      </div>
+      </button>
     );
   }
   return (
@@ -216,7 +217,7 @@ export default function ProjectPage() {
       <div className="workbench">
         <div className="flow-nav">
           {STEPS.map((s) => (
-            <div key={s.key}
+            <button key={s.key} type="button"
               className={"flow-step" + (step === s.key ? " on" : "") + (stepDone[s.key] ? " step-done" : "")}
               onClick={() => setStep(s.key)}>
               <span className="no">{stepDone[s.key] ? "✓" : s.no}</span>
@@ -225,7 +226,7 @@ export default function ProjectPage() {
                 {stepSub[s.key] && <span className="flow-sub">{stepSub[s.key]}</span>}
               </span>
               {s.key === "write" && staleCount > 0 && <span className="dot" title="有章节与新大纲不符" />}
-            </div>
+            </button>
           ))}
         </div>
 
@@ -250,14 +251,14 @@ export default function ProjectPage() {
             outlines.length
               ? <ChaptersPanel pid={pid} project={project} outlines={outlines}
                   focusChapter={focusChapter} onFocusConsumed={() => setFocusChapter(null)} />
-              : <div className="card muted">先在「大纲」生成章节蓝图,才能开始写作。</div>
+              : <EmptyState>先在「大纲」生成章节蓝图,才能开始写作。</EmptyState>
           )}
           {step === "polish" && <EditorialPanel pid={pid} />}
           {step === "board" && (
             outlines.length
               ? <BoardPanel pid={pid} outlines={outlines}
                   onGotoChapter={(n) => { setStep("write"); setFocusChapter(n); }} />
-              : <div className="card muted">生成章节后,这里会展示故事圣经与伏笔追踪。</div>
+              : <EmptyState>生成章节后,这里会展示故事圣经与伏笔追踪。</EmptyState>
           )}
           {step === "publish" && <SubmissionPanel pid={pid} project={project} />}
         </div>

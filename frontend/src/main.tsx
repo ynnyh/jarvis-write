@@ -10,7 +10,10 @@ import AdminPage from "./pages/AdminPage";
 import HelpPage from "./pages/HelpPage";
 import SettingsPage from "./pages/SettingsPage";
 import "./styles.css";
-import "./tailwind.css";
+import { initTheme } from "./theme";
+
+// 外观:应用 light/dark/auto 偏好,auto 下挂系统主题监听(首屏脚本见 index.html)
+initTheme();
 
 // 数据层:窗口聚焦不自动重拉(LLM 数据不易变),错误只重试一次
 const queryClient = new QueryClient({

@@ -1,7 +1,7 @@
 // 设置页(桌面/网页统一,SPA 内路由 /#/settings):
 //   · 关于 & 更新:显示版本;桌面版可检查更新 → 静默下载 → 提示重启生效
 //   · 模型设置:三家 provider 增删改测(取代旧的独立 settings.html)
-//   · 偏好:启动时自动检查更新开关(仅桌面,存 localStorage)
+//   · 偏好:外观(跟随系统/浅色/深色,全端生效)+ 启动时自动检查更新开关(仅桌面)
 // 桌面能力经 desktop.ts 优雅降级:非桌面(网页)隐藏更新相关 UI。
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -14,6 +14,7 @@ import {
   onUpdateProgress,
   UpdateInfo,
 } from "../desktop";
+import { getThemePref, setThemePref, ThemePref } from "../theme";
 import { toast } from "../ui/Toaster";
 import { confirmDialog } from "../ui/ConfirmDialog";
 
@@ -44,7 +45,7 @@ export default function SettingsPage() {
       </div>
       <AboutUpdateCard />
       <ProvidersCard />
-      {isDesktop() && <PreferencesCard />}
+      <PreferencesCard />
       <div className="settings-foot">
         <a
           href="/docs"
@@ -306,14 +307,14 @@ function ProviderRow({ p, onChanged }: { p: ProviderSettingOut; onChanged: () =>
     <div className="provider-row">
       <div className="card-head">
         <h3>{PROVIDER_NAMES[p.provider] || p.provider}</h3>
-        <span className={`badge ${p.has_key ? "badge-ok" : "badge-no"}`}>
+        <span className={`badge ${p.has_key ? "ok" : "err"}`}>
           {p.has_key ? "已配置" : "未配置"}
         </span>
         {p.is_default && <span className="badge">默认模型</span>}
       </div>
       <p className="provider-desc">{PROVIDER_DESCS[p.provider] || ""}</p>
 
-      <label className="fld-label">
+      <label className="fl">
         API Key{p.has_key ? `(已保存:${p.api_key_masked},留空则不修改)` : ""}
       </label>
       <input
@@ -325,7 +326,7 @@ function ProviderRow({ p, onChanged }: { p: ProviderSettingOut; onChanged: () =>
 
       <div className="fld-row">
         <div className="fld">
-          <label className="fld-label">Base URL</label>
+          <label className="fl">Base URL</label>
           <input
             type="text"
             value={baseUrl}
@@ -335,7 +336,7 @@ function ProviderRow({ p, onChanged }: { p: ProviderSettingOut; onChanged: () =>
           <div className="fld-hint">用中转站就填中转地址,如 https://xxx.com/v1</div>
         </div>
         <div className="fld">
-          <label className="fld-label">模型名</label>
+          <label className="fl">模型名</label>
           <input
             type="text"
             value={model}
@@ -369,9 +370,23 @@ function ProviderRow({ p, onChanged }: { p: ProviderSettingOut; onChanged: () =>
   );
 }
 
-// ============ 偏好(仅桌面)============
+// ============ 偏好 ============
+// 外观选择全端生效(写 localStorage 并即改 <html data-theme>);
+// 自动更新开关仅桌面有意义(网页随访问自动最新),非桌面不渲染。
+const THEME_OPTIONS: { v: ThemePref; label: string }[] = [
+  { v: "auto", label: "跟随系统" },
+  { v: "light", label: "浅色" },
+  { v: "dark", label: "深色" },
+];
+
 function PreferencesCard() {
+  const [theme, setTheme] = useState<ThemePref>(getThemePref);
   const [autoCheck, setAutoCheck] = useState(getAutoCheck());
+
+  function pickTheme(v: ThemePref) {
+    setThemePref(v);
+    setTheme(v);
+  }
 
   function toggle(v: boolean) {
     setAutoCheck(v);
@@ -381,10 +396,24 @@ function PreferencesCard() {
   return (
     <div className="card">
       <div className="card-head"><h2>偏好</h2></div>
-      <label className="default-pick">
-        <input type="checkbox" checked={autoCheck} onChange={(e) => toggle(e.target.checked)} />
-        启动时自动检查更新
-      </label>
+      <div className="appearance-row">
+        <span className="fl">外观</span>
+        <div className="chips">
+          {THEME_OPTIONS.map((o) => (
+            <button key={o.v} type="button"
+              className={"chip" + (theme === o.v ? " on" : "")}
+              onClick={() => pickTheme(o.v)}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {isDesktop() && (
+        <label className="default-pick">
+          <input type="checkbox" checked={autoCheck} onChange={(e) => toggle(e.target.checked)} />
+          启动时自动检查更新
+        </label>
+      )}
     </div>
   );
 }
