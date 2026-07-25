@@ -9,6 +9,8 @@ import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { TaskCenterBadge, TaskCenterProvider } from "./ui/TaskCenter";
 import UpdateBanner from "./ui/UpdateBanner";
 
+const GH_URL = "https://github.com/ynnyh/jarvis-write";
+
 export default function App() {
   const [tokens, setTokens] = useState<string>("");
   const [me, setMe] = useState<Me | null>(null);
@@ -116,11 +118,26 @@ export default function App() {
         <div className="grow" />
         <TaskCenterBadge />
         {tokens && <span className="muted" title="累计 LLM 用量">{tokens}</span>}
+        <Link to="/">首页</Link>
         {!isLocal && me.is_admin && <Link to="/admin">管理</Link>}
         <Link to="/help">指南</Link>
-        <a href="/settings" target="_blank" rel="noreferrer">模型设置</a>
-        <a href="/docs" target="_blank" rel="noreferrer">API</a>
-        <a className="topbar-gh" href="https://github.com/ynnyh/jarvis-write" target="_blank" rel="noreferrer">GitHub</a>
+        {isLocal ? (
+          <>
+            {/* 桌面单机:WebView2 不处理 target=_blank。模型设置窗口内打开(自带返回链接);
+                API/GitHub 经后端 open-link 交系统浏览器。 */}
+            <a href="/settings">模型设置</a>
+            <a href={`${window.location.origin}/docs`}
+              onClick={(e) => { e.preventDefault(); api.openLink(`${window.location.origin}/docs`).catch(() => {}); }}>API</a>
+            <a className="topbar-gh" href={GH_URL}
+              onClick={(e) => { e.preventDefault(); api.openLink(GH_URL).catch(() => {}); }}>GitHub</a>
+          </>
+        ) : (
+          <>
+            <a href="/settings" target="_blank" rel="noreferrer">模型设置</a>
+            <a href="/docs" target="_blank" rel="noreferrer">API</a>
+            <a className="topbar-gh" href={GH_URL} target="_blank" rel="noreferrer">GitHub</a>
+          </>
+        )}
         {/* local 单机免登录:不显示账号名与退出 */}
         {!isLocal && <span className="muted" title={me.is_admin ? "管理员" : "用户"}>{me.username}</span>}
         {!isLocal && <a className="linkbtn" onClick={logout}>退出</a>}
@@ -129,7 +146,9 @@ export default function App() {
       {llmConfigured === false && (
         <div className="llm-banner">
           还没有配置模型——大部分功能需要模型才能工作。
-          <a href="/settings" target="_blank" rel="noreferrer">去「模型设置」配置你的 key →</a>
+          {isLocal
+            ? <a href="/settings">去「模型设置」配置你的 key →</a>
+            : <a href="/settings" target="_blank" rel="noreferrer">去「模型设置」配置你的 key →</a>}
         </div>
       )}
       <div className="wrap">

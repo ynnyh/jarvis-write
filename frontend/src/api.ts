@@ -569,6 +569,8 @@ export const api = {
   me: () => req<Me>("GET", "/api/auth/me"),
   // 运行模式:local(桌面单机,免登录)/ server(多用户)。前端据此跳过登录页。
   mode: () => req<{ mode: string; is_local: boolean }>("GET", "/api/mode"),
+  // 桌面单机模式:把外链交给系统默认浏览器(WebView2 不处理 target=_blank 新窗口)
+  openLink: (url: string) => req<{ ok: boolean }>("POST", "/api/system/open-link", { url }),
 
   // ---------- 后台管理(仅管理员可用) ----------
   adminListUsers: () => req<AdminUser[]>("GET", "/api/admin/users"),

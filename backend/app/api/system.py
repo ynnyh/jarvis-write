@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import os
 import re
+import webbrowser
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from app.auth import get_current_user
 from app.llm.factory import (
@@ -46,6 +49,30 @@ async def mode() -> dict:
 
     local = get_settings().is_local
     return {"mode": "local" if local else "server", "is_local": local}
+
+
+class OpenLinkRequest(BaseModel):
+    url: str
+
+
+@router.post("/system/open-link", include_in_schema=False)
+async def open_link(req: OpenLinkRequest) -> dict:
+    """用系统默认浏览器打开一个链接——仅 local(桌面单机)模式可用。
+
+    桌面版的 WebView2 窗口不处理 target=_blank 新窗口请求,前端点外链会没反应;
+    改由本机后端调 webbrowser.open 兜底。公网 server 模式拒绝(不该替用户开任意链接)。
+    """
+    from app.config import get_settings
+
+    if not get_settings().is_local:
+        raise HTTPException(status_code=403, detail="open-link 仅桌面单机模式可用")
+
+    scheme = urlparse(req.url).scheme
+    if scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="仅支持 http/https 链接")
+
+    webbrowser.open(req.url)
+    return {"ok": True}
 
 
 @router.post(
