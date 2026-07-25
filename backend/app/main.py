@@ -83,6 +83,16 @@ def _assert_local_safe() -> None:
             "或显式设环境变量 JARVIS_LAUNCHER=desktop 且务必只监听 127.0.0.1。\n"
             "服务器部署应保持 APP_MODE=server(默认值),不要设成 local。"
         )
+    # 只查标记不够:有人显式设了 JARVIS_LAUNCHER 却又拿 --host 0.0.0.0 起服务,
+    # 就是一个无鉴权、限流也关的公网裸奔态。绑定地址强制必须是本机回环
+    # (desktop_main.py 会显式设 JARVIS_BIND_HOST=127.0.0.1)。
+    bind_host = os.environ.get("JARVIS_BIND_HOST", "127.0.0.1")
+    if bind_host not in ("127.0.0.1", "localhost", "::1"):
+        raise RuntimeError(
+            f"local(桌面单机)模式只允许绑定本机回环地址,当前 "
+            f"JARVIS_BIND_HOST={bind_host!r}。免鉴权服务暴露到非回环接口"
+            "等于把全部数据公开,拒绝启动。"
+        )
     logger.warning(
         "运行于 local(桌面单机)模式:鉴权已关闭,所有请求归属唯一本地用户。"
         "此模式仅限本机可达(127.0.0.1),严禁暴露到任何外部网络接口。"
@@ -156,6 +166,21 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # local 模式防 DNS rebinding:免鉴权只靠绑 127.0.0.1,但恶意网页可以把
+    # 域名重绑定到 127.0.0.1 后发"同源"请求(Host 头是攻击者域名),CORS 白名单
+    # 挡不住。校验 Host 必须是本机回环,否则 403——rebinding 请求进不来。
+    if settings.is_local:
+        from fastapi import Request
+        from fastapi.responses import PlainTextResponse
+
+        @app.middleware("http")
+        async def _local_host_guard(request: Request, call_next):  # noqa: ANN001, ANN202
+            host = request.headers.get("host", "")
+            name = host.rsplit(":", 1)[0] if ":" in host else host
+            if name not in ("127.0.0.1", "localhost", "[::1]"):
+                return PlainTextResponse("Forbidden", status_code=403)
+            return await call_next(request)
     # 登录/注册按 IP 限流,挡撞库 / 批量刷号(单进程内存计数,见 ratelimit.py)。
     # local 模式免登录,无登录接口可刷,限流无意义,直接关。
     if settings.rate_limit_enabled and not settings.is_local:
