@@ -56,6 +56,8 @@ fn spawn_backend(exe: std::path::PathBuf) -> Result<(Child, String), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .manage(Backend(Mutex::new(None)))
         .setup(|app| {
             // 定位打包进 resources 的后端 onedir。
@@ -80,6 +82,9 @@ pub fn run() {
                 .build()
                 .map_err(|e| format!("创建窗口失败: {e}"))?;
 
+            // 窗口已创建,后台检查软件更新(仅发行版真正检查)
+            spawn_update_check(app.handle().clone());
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -94,4 +99,62 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+// 启动后后台检查软件更新。仅发行版生效;开发/调试构建直接跳过,
+// 避免本地反复弹更新框。延迟几秒让窗口先显示,再异步检查,不拖慢启动。
+fn spawn_update_check(handle: tauri::AppHandle) {
+    if cfg!(debug_assertions) {
+        return;
+    }
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(3));
+        tauri::async_runtime::spawn(async move {
+            check_for_update(handle).await;
+        });
+    });
+}
+
+// 检查 → 询问 → 下载安装 → 重启。任何一步失败或无更新都静默返回,不打扰用户。
+async fn check_for_update(handle: tauri::AppHandle) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+    use tauri_plugin_updater::UpdaterExt;
+
+    let updater = match handle.updater_builder().build() {
+        Ok(u) => u,
+        Err(_) => return,
+    };
+    let update = match updater.check().await {
+        Ok(Some(u)) => u,
+        _ => return, // 无更新 / 离线 / 检查失败,静默
+    };
+
+    let version = update.version.clone();
+    let notes = update.body.clone().unwrap_or_default();
+    let msg = if notes.trim().is_empty() {
+        format!("发现新版本 v{version}，是否立即更新？")
+    } else {
+        format!("发现新版本 v{version}\n\n{notes}\n\n是否立即更新？")
+    };
+
+    let dialog_handle = handle.clone();
+    handle
+        .dialog()
+        .message(msg)
+        .title("jarvis-write 软件更新")
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "立即更新".into(),
+            "稍后".into(),
+        ))
+        .show(move |confirmed| {
+            if !confirmed {
+                return;
+            }
+            let h = dialog_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                // 下载并安装更新(进度回调略),完成后重启应用
+                let _ = update.download_and_install(|_chunk, _total| {}, || {}).await;
+                h.restart();
+            });
+        });
 }

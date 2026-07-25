@@ -23,8 +23,22 @@ echo "==> [3/4] 生成 Tauri 图标(从 src-tauri/icon-source.png → src-tauri/
 npx --yes @tauri-apps/cli@^2 icon src-tauri/icon-source.png
 
 echo "==> [4/4] 构建 Tauri 桌面壳 + 打包 NSIS 安装包"
+# 开启了 createUpdaterArtifacts,本地构建也必须签名,否则 tauri build 会失败。
+# 优先用环境变量 TAURI_SIGNING_PRIVATE_KEY;否则读本地密钥文件 src-tauri/updater.key(已 gitignore)。
+if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+  if [ -f "src-tauri/updater.key" ]; then
+    export TAURI_SIGNING_PRIVATE_KEY="$(cat src-tauri/updater.key)"
+    echo "    (已从 src-tauri/updater.key 载入更新签名密钥)"
+  else
+    echo "错误:缺少更新签名密钥。" >&2
+    echo "  请把更新签名私钥放到 src-tauri/updater.key,或设置环境变量 TAURI_SIGNING_PRIVATE_KEY。" >&2
+    echo "  (私钥备份在第一次生成时给过你;丢失后将无法再发布可自动更新的版本。)" >&2
+    exit 1
+  fi
+fi
 npx --yes @tauri-apps/cli@^2 build --bundles nsis
 
 echo
 echo "完成。产物在 src-tauri/target/release/bundle/nsis/ ——"
-echo "  · jarvis-write_<版本>_x64-setup.exe → Windows 安装包(分发用)"
+echo "  · jarvis-write_<版本>_x64-setup.exe        → Windows 安装包(分发用)"
+echo "  · jarvis-write_<版本>_x64-setup.nsis.zip   → 自动更新包(配 .sig 签名,CI 发版用)"

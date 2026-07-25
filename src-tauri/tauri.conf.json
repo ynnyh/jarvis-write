@@ -16,6 +16,7 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -25,6 +26,17 @@
     ],
     "resources": {
       "../backend/dist/jarvis-write-backend": "jarvis-write-backend"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/ynnyh/jarvis-write/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY1Mjc0Qzc1NTk4MDhBRQpSV1N1Q0poVngzUlNENVhEV2RybklTdFlHdGx1VG9JeWZ0UG12YjNWSk4vbTF5N3NKK3lGRGVZcQo=",
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

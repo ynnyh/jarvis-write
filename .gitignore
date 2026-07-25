@@ -31,6 +31,8 @@ src-tauri/target/
 src-tauri/gen/
 # Tauri 图标由 `tauri icon` 从 icon-source.png 现场生成,不入库
 src-tauri/icons/
+# 更新签名私钥(本地构建用,严禁入库!)
+src-tauri/updater.key
 
 # IDE / OS
 .idea/
