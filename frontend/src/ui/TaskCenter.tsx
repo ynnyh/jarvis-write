@@ -128,17 +128,25 @@ export function TaskCenterBadge() {
         <span>{running.length ? `${running.length} 个任务` : "任务"}</span>
       </button>
       {open && (
-        <div className="tc-drawer" onMouseLeave={() => setOpen(false)}>
-          {recent.map((j) => (
-            <div key={j.job_id} className={"tc-item " + j.status}>
-              <span className="tc-label">{jobLabel(j.kind)}</span>
-              <span className="tc-stage">
-                {j.status === "running" && <span className="spin" />}
-                {j.status === "error" ? (j.error || "失败") : j.stage}
-              </span>
-            </div>
-          ))}
-        </div>
+        <>
+          {/* 点空白处关闭:移动端没有 mouseleave,触屏只能靠它收起抽屉 */}
+          <div className="tc-backdrop" onClick={() => setOpen(false)} />
+          <div className="tc-drawer" onMouseLeave={() => setOpen(false)}>
+            {recent.map((j) => {
+              const stageText = j.status === "error" ? (j.error || "失败") : j.stage;
+              return (
+                <div key={j.job_id} className={"tc-item " + j.status}>
+                  <span className="tc-label">{jobLabel(j.kind)}</span>
+                  {/* 桌面单行省略,完整文本悬浮可见;移动端 CSS 放行折行 */}
+                  <span className="tc-stage" title={stageText}>
+                    {j.status === "running" && <span className="spin" />}
+                    {stageText}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </>
       )}
     </div>
   );

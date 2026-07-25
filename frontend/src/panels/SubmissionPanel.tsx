@@ -327,7 +327,10 @@ function CoverCard({ pid }: { pid: number }) {
         </button>
       </div>
       <p className="card-desc">
-        依据本书素材出 3 套风格各异的封面画面提示词(中文版给即梦、英文版给 Midjourney,附负面词);复制拿去自己生成封面图。
+        依据本书素材出 3 套风格差异明显的封面方案,每套含:中文提示词(即梦等中文绘图工具)、
+        英文提示词(Midjourney)、负面提示词(不希望出现的元素,工具支持就一并粘贴)。
+        提示词按「人物 → 场景 → 氛围 → 光影 → 构图 → 画风」六层写全细节,复制即可生成;
+        画面差点意思就直接在框里改字微调,或点「重新生成」换一批。
       </p>
       {busy && (
         <div className="gen-banner"><span className="spin" /><span className="gen-banner-text">{stage || "AI 正在设计封面…"}</span></div>
@@ -396,7 +399,9 @@ function AnthemCard({ pid }: { pid: number }) {
         </button>
       </div>
       <p className="card-desc">
-        为本书量身写一首主题曲:英文风格标签 + 结构化中文歌词。到 Suno 把「风格标签」填 Style、「歌词」填 Lyrics 即可生成。
+        为本书量身写一首主题曲:英文风格标签(附逐条中文对照)+ 结构化中文歌词。
+        到 Suno 把「风格标签」填 Style、「歌词」填 Lyrics 即可生成;用妙音、Mureka 等其它软件时,
+        照着「风格中文对照」选相近曲风就行。
       </p>
       {busy && (
         <div className="gen-banner"><span className="spin" /><span className="gen-banner-text">{stage || "AI 正在作词谱曲…"}</span></div>
@@ -412,6 +417,10 @@ function AnthemCard({ pid }: { pid: number }) {
           <div className="media-field">
             <div className="card-head mb-2"><span className="muted">风格标签(填进 Suno 的 Style of Music)</span><CopyBtn text={pkg.style_tags} /></div>
             <textarea rows={2} value={pkg.style_tags} onChange={(e) => patch("style_tags", e.target.value)} />
+          </div>
+          <div className="media-field">
+            <div className="card-head mb-2"><span className="muted">风格中文对照(在其它软件照着选曲风)</span><CopyBtn text={pkg.style_cn ?? ""} /></div>
+            <textarea rows={2} value={pkg.style_cn ?? ""} onChange={(e) => patch("style_cn", e.target.value)} />
           </div>
           <div className="media-field">
             <div className="card-head mb-2"><span className="muted">歌词(填进 Suno 的 Lyrics)</span><CopyBtn text={pkg.lyrics} /></div>

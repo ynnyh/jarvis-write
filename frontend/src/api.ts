@@ -321,10 +321,11 @@ export interface CoverPrompt {
 }
 export interface CoverPackage { covers: CoverPrompt[]; }
 
-// 主题曲提示词(Suno):英文风格标签 + 结构化中文歌词
+// 主题曲提示词(Suno):英文风格标签 + 中文对照 + 结构化中文歌词
 export interface AnthemPackage {
   song_title: string;
   style_tags: string;
+  style_cn: string;
   lyrics: string;
   vibe: string;
 }

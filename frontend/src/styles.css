@@ -1687,10 +1687,16 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 .tc-item.done .tc-stage { color: var(--ok); }
 .tc-item.error .tc-stage { color: var(--err); }
 
+/* 点击空白收起的透明背板(触屏没有 mouseleave,靠它关抽屉) */
+.tc-backdrop { position: fixed; inset: 0; z-index: 400; background: transparent; }
+
 /* 移动端:角标在顶栏第二行最左,抽屉若沿用 right:0 会整体溢出到屏幕左外并盖住标题行。
    改为左锚定 + 视口内限宽,保证始终落在屏幕内。 */
 @media (max-width: 640px) {
-  .tc-drawer { right: auto; left: 0; width: min(320px, calc(100vw - 24px)); }
+  .tc-drawer { right: auto; left: 0; width: min(340px, calc(100vw - 16px)); max-height: 65vh; }
+  /* 「看不全」的根因:阶段/错误文本单行省略。移动端放行折行,内容完整可读 */
+  .tc-item { align-items: flex-start; }
+  .tc-item .tc-stage { white-space: normal; text-align: right; }
 }
 
 /* ---------- 阶段二:创作起步流 / 进度地图 / 连写队列 ---------- */

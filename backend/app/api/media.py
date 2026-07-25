@@ -66,7 +66,8 @@ async def generate_cover(project_id: int, db: Session = Depends(get_db)):
             return {"job_id": jid}
 
     prompt = COVER_PROMPT.format(**_build_context_blocks(db, project))
-    adapter = create_llm_adapter(resolve_default_provider(), max_tokens=2500, timeout=180)
+    # 提示词要求写细(中文六层 150-250 字 × 3 套 + 英文版),给足输出额度
+    adapter = create_llm_adapter(resolve_default_provider(), max_tokens=4000, timeout=180)
 
     async def work(progress):
         progress("AI 正在设计封面提示词(3 套风格)")
@@ -82,6 +83,7 @@ def _normalize_anthem(data: dict) -> dict:
     return {
         "song_title": _clip(data.get("song_title"), 40),
         "style_tags": _clip(data.get("style_tags"), 400),
+        "style_cn": _clip(data.get("style_cn"), 400),
         "lyrics": _clip(data.get("lyrics"), 3000),
         "vibe": _clip(data.get("vibe"), 300),
     }
@@ -98,7 +100,8 @@ async def generate_anthem(project_id: int, db: Session = Depends(get_db)):
             return {"job_id": jid}
 
     prompt = ANTHEM_PROMPT.format(**_build_context_blocks(db, project))
-    adapter = create_llm_adapter(resolve_default_provider(), max_tokens=2500, timeout=180)
+    # 歌词 + 逐条中文对照,输出额度比默认略宽
+    adapter = create_llm_adapter(resolve_default_provider(), max_tokens=3000, timeout=180)
 
     async def work(progress):
         progress("AI 正在创作主题曲(Suno 风格标签 + 中文歌词)")
