@@ -661,6 +661,11 @@ select { cursor: pointer; }
 }
 .flow-step:hover { background: var(--surface-2); color: var(--text); }
 .flow-step.on { background: var(--brand); color: var(--on-brand); font-weight: 600; }
+/* 选中态不被全局 button:hover 灰底覆盖:触屏点按后 :hover 会滞留,不处理选中项就一直是灰的 */
+.chip.on:hover, .title-chip.on:hover, .genre-card.on:hover,
+.scale-card.on:hover, .ed-tab.on:hover { background: var(--brand-weak); }
+.flow-step.on:hover { background: var(--brand); }
+.reader-tab.on:hover { background: var(--surface); }
 .flow-step .no {
   width: 22px; height: 22px;
   border-radius: 50%;
