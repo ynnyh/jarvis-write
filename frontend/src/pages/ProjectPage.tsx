@@ -11,11 +11,12 @@ import OutlinePanel from "../panels/OutlinePanel";
 import ChaptersPanel from "../panels/ChaptersPanel";
 import EditorialPanel from "../panels/EditorialPanel";
 import BoardPanel from "../panels/BoardPanel";
+import RefreshPanel from "../panels/RefreshPanel";
 import SubmissionPanel from "../panels/SubmissionPanel";
 import BookReader from "../components/BookReader";
 import EmptyState from "../ui/EmptyState";
 
-export type Step = "inspire" | "arch" | "outline" | "write" | "polish" | "board" | "publish";
+export type Step = "inspire" | "arch" | "outline" | "write" | "polish" | "refresh" | "board" | "publish";
 
 const STEPS: { key: Step; no: number; label: string }[] = [
   { key: "inspire", no: 1, label: "概念" },
@@ -23,8 +24,9 @@ const STEPS: { key: Step; no: number; label: string }[] = [
   { key: "outline", no: 3, label: "大纲" },
   { key: "write", no: 4, label: "写作" },
   { key: "polish", no: 5, label: "编辑部" },
-  { key: "board", no: 6, label: "看板" },
-  { key: "publish", no: 7, label: "投稿" },
+  { key: "refresh", no: 6, label: "翻新" },
+  { key: "board", no: 7, label: "看板" },
+  { key: "publish", no: 8, label: "投稿" },
 ];
 
 // 各步引导:这一步干什么 / AI 会做什么 / 做完标准是什么

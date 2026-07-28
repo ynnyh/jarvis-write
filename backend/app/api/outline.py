@@ -48,6 +48,7 @@ class OutlineUpdate(BaseModel):
     characters_involved: list[Any] | None = None
     key_items: list[Any] | None = None
     scene_location: str | None = None
+    beats: list[str] | None = None
 
 
 class EditResult(BaseModel):

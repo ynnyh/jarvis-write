@@ -127,6 +127,7 @@ export interface Outline {
   chapter_purpose: string; suspense_level: string; foreshadowing: string;
   plot_twist_level: string; summary: string; characters_involved: string[] | null;
   key_items: unknown[]; scene_location: string; current_version: number;
+  beats?: string[] | null;
 }
 export interface ChapterBrief {
   chapter_number: number; status: string; word_count: number; is_stale: boolean;
@@ -241,6 +242,8 @@ export interface OverviewChapter {
   status: string; word_count: number; is_stale: boolean;
   outline_version_used: number | null; outline_current_version: number;
   characters_involved: string[];
+  review_scores?: Record<string, number>;
+  ai_flavor_score?: number | null;
 }
 export interface OverviewForeshadow {
   content: string; status: string;
@@ -618,4 +621,14 @@ export const api = {
     req<InviteCodeItem>("PATCH", `/api/admin/invite-codes/${id}`, { is_active }),
   adminDeleteInviteCode: (id: number) =>
     req<{ ok: boolean }>("DELETE", `/api/admin/invite-codes/${id}`),
+
+  // ---- 重构翻新(已有书按新逻辑翻新):都返回 job_id,配合 pollJob ----
+  refreshBackfillBeats: (pid: number, chapter_numbers: number[] = []) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/refresh/backfill-beats`, { chapter_numbers }),
+  refreshSeedStyleMemo: (pid: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/refresh/seed-style-memo`),
+  refreshLight: (pid: number, chapter_numbers: number[] = []) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/refresh/light`, { chapter_numbers }),
+  refreshHeavy: (pid: number, chapter_numbers: number[] = []) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/refresh/heavy`, { chapter_numbers }),
 };

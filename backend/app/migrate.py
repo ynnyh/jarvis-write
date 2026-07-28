@@ -203,6 +203,36 @@ def _add_review_columns() -> None:
             logger.info("迁移:projects 补 review_max_revisions 列")
 
 
+def _add_outline_beats_column() -> None:
+    """给 outlines 表补 beats 列(章内节拍 JSON list,幂等)。
+
+    存量章节该列为 NULL/空;draft prompt 在 beats 为空时回落到只用 summary
+    (向后兼容);已有书可通过「重构翻新」补齐节拍。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "outlines" not in insp.get_table_names():
+            return  # create_all 会新建,无需补列
+        if not _column_exists("outlines", "beats"):
+            conn.execute(text("ALTER TABLE outlines ADD COLUMN beats JSON"))
+            logger.info("迁移:outlines 补 beats 列")
+
+
+def _add_project_style_memo_column() -> None:
+    """给 projects 表补 style_memo 列(文风备忘,随书累积,幂等)。
+
+    存量项目该列为 NULL=尚未累积;逐章生成时增量更新并注入后续草稿,
+    防长篇后段人物声音漂移、调性变淡。见 prompts/chapter.py。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "projects" not in insp.get_table_names():
+            return  # create_all 会新建,无需补列
+        if not _column_exists("projects", "style_memo"):
+            conn.execute(text("ALTER TABLE projects ADD COLUMN style_memo TEXT"))
+            logger.info("迁移:projects 补 style_memo 列")
+
+
 def _add_chapter_review_snapshot_column() -> None:
     """给 chapters 表补主审结果快照列(幂等)。存量章节为空字符串=无快照。"""
     with engine.begin() as conn:
@@ -332,6 +362,8 @@ def run_migrations() -> None:
     _add_retired_column()
     _add_word_guard_columns()
     _add_review_columns()
+    _add_outline_beats_column()
+    _add_project_style_memo_column()
     _add_chapter_review_snapshot_column()
     _add_chapter_proofread_snapshot_column()
     _disable_word_guard_default()

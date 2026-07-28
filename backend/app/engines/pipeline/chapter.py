@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from sqlalchemy.orm import Session
 
@@ -37,6 +38,7 @@ from app.prompts.chapter import (
     REVISE_CHAT_SYSTEM_PROMPT,
     REVISE_DISTILL_PROMPT,
     ROLLING_SUMMARY_PROMPT,
+    STYLE_MEMO_UPDATE_PROMPT,
 )
 from app.engines.pipeline.word_guard import GuardResult, word_count_guard
 from app.schemas.tendency import Tendency
@@ -49,16 +51,43 @@ _REVISION_EXCERPT_CHARS = 1500  # 重写时上一版正文注入草稿 prompt �
 
 
 def _strip_meta(text: str) -> str:
-    """清理模型输出的元信息:开头的 markdown 标题/章节名行。"""
+    """清理模型输出的元信息:开头的 markdown 标题行 / 章节标题行。
+
+    只删真正的「标题行」,不误伤正文首句。此前用
+    `startswith("第") and "章" in [:12] and len<30` 会误删以「第」开头的正常
+    短句(如「第二天,他没来。」)。改为精确匹配章节标题结构:
+      - markdown 标题(# 开头)
+      - 「第X章」「第X章 标题」「第X章:标题」这类整行标题,X 是数字或中文数字,
+        且全行简短(<25 字)——正文叙述句几乎不会长这样。
+    """
+    # 「第」+数字/中文数字+「章」,后接空/标点/短标题,直到行尾
+    chap_title = re.compile(
+        r"^第[0-9零一二三四五六七八九十百千两]+章"
+        r"([\s:：、·.。\-—《（(]*.{0,20})?$"
+    )
     lines = text.strip().splitlines()
-    while lines and (
-        lines[0].strip().startswith("#")
-        or lines[0].strip().startswith("第")
-        and "章" in lines[0][:12]
-        and len(lines[0].strip()) < 30
-    ):
-        lines.pop(0)
+    while lines:
+        head = lines[0].strip()
+        if head.startswith("#") or (len(head) < 25 and chap_title.match(head)):
+            lines.pop(0)
+            continue
+        break
     return "\n".join(lines).strip()
+
+
+def _beats_block(outline: Outline) -> str:
+    """把本章场景节拍渲染成草稿的施工清单;无节拍时提示模型自行拆分。
+
+    治"一句 100 字简述撑几千字"的结构松散:有节拍就按节拍逐个铺场景。
+    """
+    beats = [str(b).strip() for b in (outline.beats or []) if str(b).strip()]
+    if not beats:
+        return "(本章未预设节拍,请自行把剧情拆成若干有起伏的场景,不要平铺直叙)"
+    lines = "\n".join(f"  {i}. {b}" for i, b in enumerate(beats, 1))
+    return (
+        "按以下场景节拍逐个推进(每个节拍写成一个有画面、有张力的场景,"
+        "顺序可微调,但都要落实):\n" + lines
+    )
 
 
 def _next_chapter_brief(nxt: Outline | None) -> str:
@@ -115,6 +144,35 @@ def _rolling_summary(db: Session, project_id: int, current: int) -> str:
         .first()
     )
     return row.rolling_summary if row else "(无,本章为开篇)"
+
+
+async def update_style_memo(
+    db: Session, project: Project, chapter_number: int, chapter_text: str
+) -> str | None:
+    """写完一章后增量更新文风备忘(快模型档,失败不阻塞主流程)。
+
+    与滚动摘要互补:摘要记"发生了什么",备忘记"这本书怎么写"(调性/人物声音/意象)。
+    随书累积,注入后续章草稿,防长篇后段人物声音漂移、调性变淡。返回更新后的备忘。
+    """
+    prev = (project.style_memo or "").strip() or "(尚无,这是第一次积累)"
+    try:
+        memo = await get_adapter_for(Task.SUMMARY).ask(
+            STYLE_MEMO_UPDATE_PROMPT.format(
+                previous_memo=prev,
+                chapter_number=chapter_number,
+                chapter_text=chapter_text[:8000],
+            )
+        )
+    except Exception:  # noqa: BLE001 — 备忘更新失败不影响正文与主流程
+        logger.warning("文风备忘更新失败(第 %d 章),跳过", chapter_number, exc_info=True)
+        return None
+    memo = (memo or "").strip()
+    if not memo:
+        return None
+    project.style_memo = memo
+    db.flush()
+    db.commit()
+    return memo
 
 
 async def rebuild_summaries_after(
@@ -221,6 +279,15 @@ async def generate_chapter(
 
     assembled = assemble_tendency("chapter", tendency, project.global_tendency)
     style_block = render_style_block(assembled)
+    # 文风备忘(随书累积):拼进本次写作风格约束,后续章保持统一调性与人物声音。
+    # 走 style_block 而非新占位符 —— draft/finalize 都吃 {style_directives},一处注入两处生效,
+    # 且不必改模板占位符(避免模板与 format 两处只改一处导致 KeyError)。
+    if (project.style_memo or "").strip():
+        style_block += (
+            "\n【本书文风备忘(随书累积,务必保持与前文一致的调性和人物声音)】\n"
+            + project.style_memo.strip()
+            + "\n"
+        )
 
     rolling = _rolling_summary(db, project.id, chapter_number)
     recent = _recent_tail(db, project.id, chapter_number)
@@ -281,6 +348,7 @@ async def generate_chapter(
             key_items="、".join(map(str, outline.key_items)) or "无",
             scene_location=outline.scene_location,
             chapter_summary=outline.summary,
+            chapter_beats=_beats_block(outline),
             next_chapter_brief=_next_chapter_brief(next_outline),
             word_number=project.target_words_per_chapter,
             scene_count=max(2, project.target_words_per_chapter // 1000),
@@ -458,6 +526,10 @@ async def generate_chapter(
     db.commit()
 
     # ---- 重写场景:下游章节的滚动摘要基于旧文,重建 ----
+    # 文风备忘:随书累积"这本书怎么写"(与摘要互补),注入后续章草稿
+    _report("文风备忘更新")
+    await update_style_memo(db, project, chapter_number, final)
+
     rebuilt = await rebuild_summaries_after(db, project, chapter_number, progress)
     if rebuilt:
         logger.info("第 %d 章重写,已重建下游摘要: %s", chapter_number, rebuilt)

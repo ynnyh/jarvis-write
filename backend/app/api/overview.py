@@ -21,6 +21,8 @@ from app.api.deps import get_project_or_404
 from app.auth import get_current_user
 from app.db.models import Chapter, Entity, Fact, Foreshadowing, Outline
 from app.db.session import get_db
+from app.engines.editorial import load_review_snapshot
+from app.engines.polish.ai_flavor import ai_flavor_report
 
 router = APIRouter(
     prefix="/api/projects/{project_id}",
@@ -41,6 +43,9 @@ class OverviewChapter(BaseModel):
     outline_version_used: int | None
     outline_current_version: int
     characters_involved: list[str]
+    # D1 质感仪表盘:主审四维分(无快照/正文已改则为空 dict)+ AI味指数(/千字)
+    review_scores: dict = {}
+    ai_flavor_score: float | None = None
 
 
 class OverviewForeshadow(BaseModel):
@@ -61,6 +66,21 @@ class OverviewOut(BaseModel):
     chapters: list[OverviewChapter]
     foreshadowings: list[OverviewForeshadow]
     characters: list[OverviewCharacter]
+
+
+def _review_scores(ch) -> dict:
+    """章の主審四维分:快照が現正文に対応する時だけ返す(指纹不一致は空)。"""
+    if ch is None:
+        return {}
+    snap = load_review_snapshot(ch)
+    return (snap or {}).get("scores") or {}
+
+
+def _flavor_score(ch):
+    """章正文の AI 味指数(/千字)。正文なしは None。純規則計算、LLM 不要。"""
+    if ch is None or not (ch.final_content or "").strip():
+        return None
+    return ai_flavor_report(ch.final_content).score
 
 
 @router.get("/overview", response_model=OverviewOut)
@@ -108,6 +128,8 @@ async def overview(project_id: int, db: Session = Depends(get_db)):
                 outline_version_used=(ch.outline_version_used if ch else None),
                 outline_current_version=o.current_version,
                 characters_involved=list(o.characters_involved or []),
+                review_scores=_review_scores(ch),
+                ai_flavor_score=_flavor_score(ch),
             )
             for o in outlines
             for ch in [ch_by_num.get(o.chapter_number)]

@@ -86,6 +86,7 @@ class OutlineOut(BaseModel):
     characters_involved: list[Any]
     key_items: list[Any]
     scene_location: str
+    beats: list[Any] = []
     current_version: int
 
     model_config = {"from_attributes": True}

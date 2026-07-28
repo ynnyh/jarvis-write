@@ -53,6 +53,10 @@ class Project(Base, TimestampMixin):
     # 卷纲(滚动规划的"指南针"):[{start, end, goal}, ...]。长书蓝图只铺当前卷,
     # 写到卷尾再按卷纲+已成文状态展开下一卷;短书(≤阈值)为 NULL,一次铺完。
     macro_plan: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
+    # 文风备忘(随书累积):一段紧凑的"本书调性 + 各主角说话特点 + 复现意象"备忘,
+    # 每写完一章由快模型增量更新,注入后续章节草稿,防长篇后段人物声音漂移、调性变淡。
+    # 空/NULL = 尚未累积(开篇几章)。见 prompts/chapter.py STYLE_MEMO_UPDATE_PROMPT。
+    style_memo: Mapped[str | None] = mapped_column(Text, nullable=True)
     # draft / outlining / writing / done
     status: Mapped[str] = mapped_column(String(20), default="draft")
 

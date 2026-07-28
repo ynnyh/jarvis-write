@@ -31,6 +31,9 @@ class Outline(Base, TimestampMixin):
     foreshadowing: Mapped[str] = mapped_column(Text, default="")
     plot_twist_level: Mapped[str] = mapped_column(String(50), default="")
     summary: Mapped[str] = mapped_column(Text, default="")
+    # 章内节拍:3-5 个场景 beat(list[str]),让正文有骨架、不靠模型即兴铺场景。
+    # 存量章节为空 list;为空时 draft prompt 回落到只用 summary(向后兼容)。
+    beats: Mapped[list[Any]] = mapped_column(JSON, default=list)
     characters_involved: Mapped[list[Any]] = mapped_column(JSON, default=list)
     key_items: Mapped[list[Any]] = mapped_column(JSON, default=list)
     scene_location: Mapped[str] = mapped_column(String(200), default="")

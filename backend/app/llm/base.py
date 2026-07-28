@@ -19,9 +19,10 @@ import httpx
 def check_upstream(resp: httpx.Response, *, hint: str = "") -> dict:
     """校验上游响应并返回 JSON;异常时抛出用户可读的错误。
 
-    - HTTP 错误:带上状态码和上游错误消息(若有);
-    - 非 JSON(常见于 Base URL 填错/协议不匹配,上游回了 HTML 错误页):
-      说明原因并附 hint(如"中转站请用 OpenAI 卡")。
+    - HTTP 错误(>=400):带上状态码和上游错误消息(若有);
+    - HTTP 200 但 body 夹 error 字段(中转站软错误,如"无可用渠道"):也抛出,
+      不再被当成正常响应放行、退化成下游"空回复";
+    - 非 JSON(Base URL 填错/协议不匹配,上游回了 HTML 错误页):说明原因并附 hint。
     """
     if resp.status_code >= 400:
         msg = f"上游返回 HTTP {resp.status_code}"
@@ -38,7 +39,7 @@ def check_upstream(resp: httpx.Response, *, hint: str = "") -> dict:
             msg += f"。{hint}"
         raise RuntimeError(msg)
     try:
-        return resp.json()
+        data = resp.json()
     except json.JSONDecodeError:
         snippet = resp.text[:80].strip()
         msg = (
@@ -48,7 +49,11 @@ def check_upstream(resp: httpx.Response, *, hint: str = "") -> dict:
         if hint:
             msg += f"。{hint}"
         raise RuntimeError(msg) from None
-
+    if isinstance(data, dict) and data.get("error"):
+        err = data["error"]
+        detail = err.get("message") if isinstance(err, dict) else str(err)
+        raise RuntimeError(f"上游返回错误(HTTP {resp.status_code}): {detail or err}")
+    return data
 Role = Literal["system", "user", "assistant"]
 
 

@@ -26,10 +26,14 @@ _FIELD_MAP = {
     "关键道具": "key_items",
     "场景地点": "scene_location",
     "本章简述": "summary",
+    "本章节拍": "beats",
 }
 
 # 需要拆成列表的字段
-_LIST_FIELDS = {"characters_involved", "key_items"}
+_LIST_FIELDS = {"characters_involved", "key_items", "beats"}
+
+# 只按 | 分隔的字段(beats 每个节拍是一句话,含逗号顿号,不能用通用分隔)
+_PIPE_LIST_FIELDS = {"beats"}
 
 _NONE_VALUES = {"无", "暂无", "none", "None", "N/A", "n/a", ""}
 
@@ -47,6 +51,13 @@ def _split_list(value: str) -> list[str]:
         return []
     parts = re.split(r"[,，、;；/]", value)
     return [p for p in (_clean(x) for x in parts) if p and p not in _NONE_VALUES]
+
+
+def _split_beats(value: str) -> list[str]:
+    """节拍只按 | 分隔:每个节拍是一句话,内部含逗号/顿号,不能用通用分隔符拆。"""
+    if _clean(value) in _NONE_VALUES:
+        return []
+    return [b for b in (_clean(x) for x in value.split("|")) if b and b not in _NONE_VALUES]
 
 
 def parse_blueprint(text: str) -> list[dict[str, Any]]:
@@ -85,7 +96,9 @@ def parse_blueprint(text: str) -> list[dict[str, Any]]:
         if field is None:
             continue
 
-        if field in _LIST_FIELDS:
+        if field in _PIPE_LIST_FIELDS:
+            current[field] = _split_beats(value)
+        elif field in _LIST_FIELDS:
             current[field] = _split_list(value)
         else:
             current[field] = _clean(value)

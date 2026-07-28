@@ -41,6 +41,7 @@ from app.api.outline import router as outline_router
 from app.api.overview import router as overview_router
 from app.api.polish import router as polish_router
 from app.api.projects import router as projects_router
+from app.api.refresh import router as refresh_router
 from app.api.settings import router as settings_router
 from app.api.submission import router as submission_router
 from app.api.system import router as system_router
@@ -200,6 +201,7 @@ def create_app() -> FastAPI:
     app.include_router(edit_directive_router)
     app.include_router(editorial_router)
     app.include_router(polish_router)
+    app.include_router(refresh_router)
     app.include_router(inspire_router)
     app.include_router(submission_router)
     app.include_router(media_router)

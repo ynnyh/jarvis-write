@@ -55,6 +55,7 @@ def _outline_content_hash(data: dict[str, Any]) -> str:
             "foreshadowing",
             "plot_twist_level",
             "summary",
+            "beats",
             "characters_involved",
             "key_items",
             "scene_location",
@@ -190,6 +191,7 @@ def save_blueprint(
         outline.foreshadowing = ch.get("foreshadowing", "")
         outline.plot_twist_level = ch.get("plot_twist_level", "")
         outline.summary = ch.get("summary", "")
+        outline.beats = ch.get("beats", [])
         outline.characters_involved = ch.get("characters_involved", [])
         outline.key_items = ch.get("key_items", [])
         outline.scene_location = ch.get("scene_location", "")
