@@ -146,7 +146,8 @@ async def light_refresh_async(
             session = SessionLocal()
             try:
                 progress(f"[{i}/{total}] 第 {n} 章:重润")
-                await light_refresh_chapter(session, project_id, n)
+                project = session.get(Project, project_id)
+                await light_refresh_chapter(session, project, n)
                 session.commit()
                 done.append(n)
             except Exception as exc:  # noqa: BLE001 — 单章失败不中断整批

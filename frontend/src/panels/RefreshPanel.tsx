@@ -102,7 +102,7 @@ export default function RefreshPanel({ pid }: Props) {
             onClick={() => doJob<{ filled: number[]; skipped: number[] }>(
               "回填节拍",
               () => api.refreshBackfillBeats(pid, nums()),
-              (r) => toast(`回填完成:${r.filled.length} 章,跳过 ${r.skipped.length} 章`),
+              (r) => toast.ok(`回填完成:${r.filled.length} 章,跳过 ${r.skipped.length} 章`),
             )}>
             回填节拍
           </button>
@@ -115,7 +115,7 @@ export default function RefreshPanel({ pid }: Props) {
             onClick={() => doJob<{ style_memo: string; seeded: boolean }>(
               "初始化文风备忘",
               () => api.refreshSeedStyleMemo(pid),
-              (r) => { setMemo(r.style_memo || ""); toast(r.seeded ? "文风备忘已生成" : "已有文风备忘,未覆盖"); },
+              (r) => { setMemo(r.style_memo || ""); toast.ok(r.seeded ? "文风备忘已生成" : "已有文风备忘,未覆盖"); },
             )}>
             生成文风备忘
           </button>
@@ -134,7 +134,7 @@ export default function RefreshPanel({ pid }: Props) {
             onClick={() => doJob<{ refreshed: number[]; failed: unknown[]; total: number }>(
               "轻度重润",
               () => api.refreshLight(pid, nums()),
-              (r) => toast(`重润完成:${r.refreshed.length}/${r.total} 章`),
+              (r) => toast.ok(`重润完成:${r.refreshed.length}/${r.total} 章`),
             )}>
             轻度重润{picked.size ? `(${picked.size} 章)` : "(全书)"}
           </button>
@@ -152,7 +152,7 @@ export default function RefreshPanel({ pid }: Props) {
               doJob<{ rewritten: number[]; total: number }>(
                 "重度重写",
                 () => api.refreshHeavy(pid, nums()),
-                (r) => toast(`重写完成:${r.rewritten.length}/${r.total} 章`),
+                (r) => toast.ok(`重写完成:${r.rewritten.length}/${r.total} 章`),
               );
             }}>
             重度重写{picked.size ? `(${picked.size} 章)` : "(全书)"}

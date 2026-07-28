@@ -56,6 +56,11 @@ const GUIDES: Record<Step, { what: string; ai: string; done: string }> = {
     ai: "主编按情节/文笔/节奏/人物打分并给出最该改的三件事;校对的修复逐条勾选才生效。",
     done: "可选步骤,建议每写完几章来过一遍。",
   },
+  refresh: {
+    what: "把已有书按新生成逻辑翻新:回填章节节拍、生成文风备忘、轻度重润或重度重写。",
+    ai: "轻度重润锁情节去AI味、不改剧情;重度重写带节拍/文风备忘整章重跑并自动重抽圣经。",
+    done: "可选步骤,适合翻新早期用旧逻辑写的章节。",
+  },
   board: {
     what: "全书仪表盘:章节地图、人物卡、伏笔时间线、故事圣经。",
     ai: "数据由一致性引擎自动维护,发现伏笔悬空或章节失配会在这里亮出来。",
@@ -256,6 +261,7 @@ export default function ProjectPage() {
               : <EmptyState>先在「大纲」生成章节蓝图,才能开始写作。</EmptyState>
           )}
           {step === "polish" && <EditorialPanel pid={pid} />}
+          {step === "refresh" && <RefreshPanel pid={pid} />}
           {step === "board" && (
             outlines.length
               ? <BoardPanel pid={pid} outlines={outlines}

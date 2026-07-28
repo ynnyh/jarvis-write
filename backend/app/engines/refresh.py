@@ -21,7 +21,7 @@ from app.chapter_versions import snapshot_chapter
 from app.db.models import Chapter, Outline, Project
 from app.engines.common import get_outline
 from app.engines.pipeline.chapter import update_style_memo
-from app.engines.polish.polisher import polish_chapter_text
+from app.engines.polish.polisher import polish_text
 from app.llm.router import Task, get_adapter_for
 from app.prompts.refresh import BEATS_BACKFILL_PROMPT
 
@@ -87,6 +87,28 @@ async def backfill_beats_one(
     return beats
 
 
+async def backfill_beats(
+    db: Session, project: Project, chapter_numbers: list[int], progress=None
+) -> dict:
+    """批量回填节拍:逐章调用 backfill_beats_one。
+
+    返回 {filled, skipped}:无大纲/无内容可依据的章进 skipped。
+    单章 LLM 异常直接上抛(由 job 层标记失败),不伪装成 skipped。
+    """
+    filled: list[int] = []
+    skipped: list[int] = []
+    total = len(chapter_numbers)
+    for i, n in enumerate(chapter_numbers, 1):
+        if progress:
+            try:
+                progress(f"[{i}/{total}] 第 {n} 章:回填节拍")
+            except Exception:  # noqa: BLE001
+                pass
+        beats = await backfill_beats_one(db, project, n)
+        (filled if beats else skipped).append(n)
+    return {"filled": filled, "skipped": skipped}
+
+
 async def seed_style_memo(
     db: Session, project: Project, sample_chapters: int = 6, progress=None
 ) -> str | None:
@@ -123,7 +145,7 @@ async def light_refresh_chapter(
 ) -> dict:
     """轻度翻新:锁情节重润(去AI味+当前文风约束),留快照后覆盖正文。
 
-    复用 polish_chapter(抽事实→检测AI腔→润色→校验事实),不改情节,故不必重抽圣经。
+    复用 polish_text(抽事实→检测AI腔→润色→校验事实),不改情节,故不必重抽圣经。
     返回 {chapter_number, applied, violations, flavor_before, flavor_after, word_count}。
     """
     ch = (
@@ -133,11 +155,11 @@ async def light_refresh_chapter(
     )
     if ch is None or not (ch.final_content or "").strip():
         raise ValueError(f"第 {chapter_number} 章还没有正文,无法重润")
-    result = await polish_chapter_text(ch.final_content)
-    after = (result.get("after") or "").strip()
+    result = await polish_text(ch.final_content, None, project.global_tendency)
+    after = (result.get("polished") or "").strip()
     applied = False
     if after and after != ch.final_content.strip():
-        snapshot_chapter(db, ch, source="polish")
+        snapshot_chapter(db, ch, source="polished")
         ch.final_content = after
         ch.word_count = len(after)
         db.commit()

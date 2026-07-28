@@ -88,6 +88,7 @@ CHAPTER_DRAFT_PROMPT = """\
 - 关键道具:{key_items}
 - 场景地点:{scene_location}
 - 本章简述:{chapter_summary}
+- 本章节拍:{chapter_beats}
 
 【下一章蓝图(为其留好铺垫,不要写进本章)】
 {next_chapter_brief}

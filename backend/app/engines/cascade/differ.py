@@ -33,6 +33,7 @@ OUTLINE_EDITABLE_FIELDS = (
     "foreshadowing",
     "plot_twist_level",
     "summary",
+    "beats",
     "characters_involved",
     "key_items",
     "scene_location",

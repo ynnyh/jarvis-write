@@ -69,7 +69,7 @@ class OverviewOut(BaseModel):
 
 
 def _review_scores(ch) -> dict:
-    """章の主審四维分:快照が現正文に対応する時だけ返す(指纹不一致は空)。"""
+    """章的主审四维分:只有快照对应现正文时才返回(指纹不一致返回空 dict)。"""
     if ch is None:
         return {}
     snap = load_review_snapshot(ch)
@@ -77,7 +77,7 @@ def _review_scores(ch) -> dict:
 
 
 def _flavor_score(ch):
-    """章正文の AI 味指数(/千字)。正文なしは None。純規則計算、LLM 不要。"""
+    """章正文的 AI 味指数(/千字)。无正文返回 None。纯规则计算,不调 LLM。"""
     if ch is None or not (ch.final_content or "").strip():
         return None
     return ai_flavor_report(ch.final_content).score
