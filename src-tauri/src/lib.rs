@@ -96,6 +96,26 @@ struct UpdateInfo {
     current: String,
 }
 
+// updater.check() 的重试封装:国内直连 GitHub 不稳定,瞬时失败大多是网络抖动,
+// 失败后等 2s/4s 再试,最多 3 次。download 沿用 check 出来的 Update,不受影响。
+async fn check_with_retry(
+    updater: &tauri_plugin_updater::Updater,
+) -> Result<Option<tauri_plugin_updater::Update>, tauri_plugin_updater::Error> {
+    let mut last_err = None;
+    for attempt in 0..3 {
+        match updater.check().await {
+            Ok(update) => return Ok(update),
+            Err(err) => {
+                if attempt < 2 {
+                    tokio::time::sleep(std::time::Duration::from_secs(2 << attempt)).await;
+                }
+                last_err = Some(err);
+            }
+        }
+    }
+    Err(last_err.unwrap())
+}
+
 // 前端设置页调用:检查是否有新版本。同时把 FrontendActive 置真,
 // 让启动兜底检查(原生框)让位给前端的自定义 UI,避免双重弹窗。
 // 不做下载,只返回结果供前端渲染「关于&更新」。
@@ -116,7 +136,7 @@ async fn check_update(handle: tauri::AppHandle) -> Result<UpdateInfo, String> {
         .build()
         .map_err(|e| format!("更新器构建失败:{e}"))?;
 
-    match updater.check().await {
+    match check_with_retry(&updater).await {
         Ok(Some(u)) => {
             ulog(&handle, &format!("前端检查:发现新版本 v{}", u.version));
             Ok(UpdateInfo {
@@ -155,8 +175,7 @@ async fn download_and_install_update(handle: tauri::AppHandle) -> Result<(), Str
         .updater_builder()
         .build()
         .map_err(|e| format!("更新器构建失败:{e}"))?;
-    let update = updater
-        .check()
+    let update = check_with_retry(&updater)
         .await
         .map_err(|e| format!("检查更新失败:{e}"))?
         .ok_or_else(|| "已是最新版,无需更新".to_string())?;
