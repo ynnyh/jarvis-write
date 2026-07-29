@@ -25,6 +25,14 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "installer/header.bmp",
+        "sidebarImage": "installer/sidebar.bmp",
+        "languages": ["SimpChinese"]
+      }
+    },
     "resources": {
       "../backend/dist/jarvis-write-backend": "jarvis-write-backend"
     }
