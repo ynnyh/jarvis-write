@@ -112,9 +112,15 @@ async def seed_style_memo_async(
         session = SessionLocal()
         try:
             project = session.get(Project, project_id)
+            had_memo = bool((project.style_memo or "").strip())
             memo = await seed_style_memo(session, project, progress=progress)
             session.commit()
-            return {"style_memo": memo or "", "seeded": bool(memo)}
+            # existed=已有未覆盖;seeded=本次新生成;皆否=无正文可扫或生成失败
+            return {
+                "style_memo": memo or "",
+                "seeded": bool(memo) and not had_memo,
+                "existed": had_memo,
+            }
         finally:
             session.close()
 
@@ -170,6 +176,8 @@ async def heavy_refresh_async(
     """重度重写:带 beats/concept/文风备忘重跑 generate_chapter(自带重抽+重建摘要)。
 
     与逐章生成/连写队列互斥。按章号顺序串行(摘要链依赖顺序)。
+    单章失败即停,但已完成的章各自提交、进度不丢;结果带 remaining(剩余章),
+    前端可据此"续跑"而不必从头再来。
     """
     get_project_or_404(db, project_id)
     nums = sorted(set(req.chapter_numbers or _all_written_numbers(db, project_id)))
@@ -205,13 +213,24 @@ async def heavy_refresh_async(
                 done.append(n)
             except Exception as exc:  # noqa: BLE001 — 断链即停(后续章依赖本章摘要)
                 session.rollback()
-                dones = "、".join(map(str, done)) or "无"
-                raise RuntimeError(
-                    f"第 {n} 章重写失败:{str(exc)[:300]}(已完成:{dones};已停止)"
-                ) from exc
+                # 已完成的章都已各自提交,进度不丢;返回剩余章供前端"续跑"
+                logger.warning("重度重写中断于第 %d 章: %s", n, exc, exc_info=True)
+                return {
+                    "rewritten": done,
+                    "total": total,
+                    "stopped_at": n,
+                    "remaining": nums[i - 1:],
+                    "error": f"第 {n} 章重写失败:{str(exc)[:300]}",
+                }
             finally:
                 session.close()
-        return {"rewritten": done, "total": total}
+        return {
+            "rewritten": done,
+            "total": total,
+            "stopped_at": None,
+            "remaining": [],
+            "error": None,
+        }
 
     _spawn(job_id, work)
     return {"job_id": job_id}

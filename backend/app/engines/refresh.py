@@ -90,13 +90,14 @@ async def backfill_beats_one(
 async def backfill_beats(
     db: Session, project: Project, chapter_numbers: list[int], progress=None
 ) -> dict:
-    """批量回填节拍:逐章调用 backfill_beats_one。
+    """批量回填节拍:逐章调用 backfill_beats_one,单章失败不中断整批。
 
-    返回 {filled, skipped}:无大纲/无内容可依据的章进 skipped。
-    单章 LLM 异常直接上抛(由 job 层标记失败),不伪装成 skipped。
+    返回 {filled, skipped, failed}:无大纲/无内容可依据的章进 skipped,
+    LLM 异常等失败的章进 failed(已完成的不受影响,可单独重试)。
     """
     filled: list[int] = []
     skipped: list[int] = []
+    failed: list[dict] = []
     total = len(chapter_numbers)
     for i, n in enumerate(chapter_numbers, 1):
         if progress:
@@ -104,9 +105,15 @@ async def backfill_beats(
                 progress(f"[{i}/{total}] 第 {n} 章:回填节拍")
             except Exception:  # noqa: BLE001
                 pass
-        beats = await backfill_beats_one(db, project, n)
+        try:
+            beats = await backfill_beats_one(db, project, n)
+        except Exception as exc:  # noqa: BLE001 — 单章失败不中断整批
+            db.rollback()
+            logger.warning("回填节拍失败(第%d章): %s", n, exc)
+            failed.append({"chapter": n, "error": str(exc)[:200]})
+            continue
         (filled if beats else skipped).append(n)
-    return {"filled": filled, "skipped": skipped}
+    return {"filled": filled, "skipped": skipped, "failed": failed}
 
 
 async def seed_style_memo(

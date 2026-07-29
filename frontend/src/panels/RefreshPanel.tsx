@@ -7,6 +7,12 @@ import { toast } from "../ui/Toaster";
 
 interface Props { pid: number; }
 
+interface ChapterFailure { chapter: number; error?: string; }
+interface HeavyResult {
+  rewritten: number[]; total: number; stopped_at: number | null;
+  remaining: number[]; error: string | null;
+}
+
 export default function RefreshPanel({ pid }: Props) {
   const { run: runJob } = useJob();
   const [chapters, setChapters] = useState<ChapterBrief[]>([]);
@@ -15,12 +21,16 @@ export default function RefreshPanel({ pid }: Props) {
   const [stage, setStage] = useState("");
   const [err, setErr] = useState("");
   const [memo, setMemo] = useState<string>("");
+  // 失败后的一键补救:轻度重润/回填的失败章、重度重写的剩余章(进度后端已按章保存)
+  const [lightFailed, setLightFailed] = useState<number[]>([]);
+  const [heavyRemaining, setHeavyRemaining] = useState<number[]>([]);
 
-  useEffect(() => {
+  function loadChapters() {
     api.listChapters(pid)
       .then((list) => setChapters(list.filter((c) => c.status !== "empty")))
       .catch((e) => setErr(String(e)));
-  }, [pid]);
+  }
+  useEffect(() => { loadChapters(); }, [pid]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const written = chapters.map((c) => c.chapter_number);
   const allPicked = written.length > 0 && written.every((n) => picked.has(n));
@@ -45,7 +55,8 @@ export default function RefreshPanel({ pid }: Props) {
     setErr(""); setBusy(label); setStage("");
     try {
       const r = await runJob<T>(start, { kind: label, onStage: setStage });
-      if (r) done(r);
+      // 完成后刷新章节列表(状态/字数/失配标记可能已变)
+      if (r) { done(r); loadChapters(); }
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -54,6 +65,62 @@ export default function RefreshPanel({ pid }: Props) {
   }
 
   const nums = () => (picked.size ? selected() : []); // 空 = 全书(后端展开)
+
+  const runBackfill = (list: number[]) =>
+    doJob<{ filled: number[]; skipped: number[]; failed: ChapterFailure[] }>(
+      "回填节拍",
+      () => api.refreshBackfillBeats(pid, list),
+      (r) => {
+        const failedNums = (r.failed || []).map((f) => f.chapter);
+        if (failedNums.length)
+          toast.err(`回填完成 ${r.filled.length} 章`, `失败:第 ${failedNums.join("、")} 章,可重新回填`);
+        else
+          toast.ok(`回填完成:${r.filled.length} 章,跳过 ${r.skipped.length} 章`);
+      },
+    );
+
+  const runSeedMemo = () =>
+    doJob<{ style_memo: string; seeded: boolean; existed: boolean }>(
+      "初始化文风备忘",
+      () => api.refreshSeedStyleMemo(pid),
+      (r) => {
+        setMemo(r.style_memo || "");
+        if (r.seeded) toast.ok("文风备忘已生成");
+        else if (r.existed) toast.info("已有文风备忘,未覆盖");
+        else toast.err("文风备忘生成失败", "没有可扫描的正文,或上游调用失败,请稍后重试");
+      },
+    );
+
+  const runLight = (list: number[]) =>
+    doJob<{ refreshed: number[]; failed: ChapterFailure[]; total: number }>(
+      "轻度重润",
+      () => api.refreshLight(pid, list),
+      (r) => {
+        const failedNums = (r.failed || []).map((f) => f.chapter);
+        setLightFailed(failedNums);
+        if (failedNums.length)
+          toast.err(`重润完成 ${r.refreshed.length}/${r.total} 章`,
+            `失败:第 ${failedNums.join("、")} 章,可点下方按钮重试`);
+        else
+          toast.ok(`重润完成:${r.refreshed.length}/${r.total} 章`);
+      },
+    );
+
+  const runHeavy = (list: number[]) => {
+    if (!confirm("重度重写会覆盖选中章节的正文(有快照可回滚),确定继续?")) return;
+    doJob<HeavyResult>(
+      "重度重写",
+      () => api.refreshHeavy(pid, list),
+      (r) => {
+        setHeavyRemaining(r.remaining || []);
+        if (r.error)
+          toast.err(r.error,
+            `已完成 ${r.rewritten.length}/${r.total} 章,进度已保存,可续跑剩余 ${r.remaining.length} 章`);
+        else
+          toast.ok(`重写完成:${r.rewritten.length}/${r.total} 章`);
+      },
+    );
+  };
 
   return (
     <div className="refresh-panel">
@@ -99,11 +166,7 @@ export default function RefreshPanel({ pid }: Props) {
           <b>① 回填场景节拍</b>
           <div className="card-desc">为大纲补出每章 3-5 个场景节拍(重度重写按此铺场景)。只改大纲,不动正文。</div>
           <button className="btn-sm" disabled={!!busy}
-            onClick={() => doJob<{ filled: number[]; skipped: number[] }>(
-              "回填节拍",
-              () => api.refreshBackfillBeats(pid, nums()),
-              (r) => toast.ok(`回填完成:${r.filled.length} 章,跳过 ${r.skipped.length} 章`),
-            )}>
+            onClick={() => runBackfill(nums())}>
             回填节拍
           </button>
         </div>
@@ -111,12 +174,7 @@ export default function RefreshPanel({ pid }: Props) {
         <div className="card action-card">
           <b>② 初始化文风备忘</b>
           <div className="card-desc">扫前几章正文,生成"这本书怎么写"的文风基准,注入后续生成。已有则不覆盖。</div>
-          <button className="btn-sm" disabled={!!busy}
-            onClick={() => doJob<{ style_memo: string; seeded: boolean }>(
-              "初始化文风备忘",
-              () => api.refreshSeedStyleMemo(pid),
-              (r) => { setMemo(r.style_memo || ""); toast.ok(r.seeded ? "文风备忘已生成" : "已有文风备忘,未覆盖"); },
-            )}>
+          <button className="btn-sm" disabled={!!busy} onClick={runSeedMemo}>
             生成文风备忘
           </button>
           {memo && (
@@ -131,32 +189,33 @@ export default function RefreshPanel({ pid }: Props) {
           <b>③ 轻度重润</b>
           <div className="card-desc">锁情节 + 去 AI 味,只改文字不改剧情。安全、快,不重抽圣经。会留版本快照可回滚。</div>
           <button className="btn-sm" disabled={!!busy}
-            onClick={() => doJob<{ refreshed: number[]; failed: unknown[]; total: number }>(
-              "轻度重润",
-              () => api.refreshLight(pid, nums()),
-              (r) => toast.ok(`重润完成:${r.refreshed.length}/${r.total} 章`),
-            )}>
+            onClick={() => { setLightFailed([]); runLight(nums()); }}>
             轻度重润{picked.size ? `(${picked.size} 章)` : "(全书)"}
           </button>
+          {lightFailed.length > 0 && !busy && (
+            <button className="btn-sm mt-2"
+              onClick={() => runLight(lightFailed)}>
+              重试失败的 {lightFailed.length} 章(第 {lightFailed.join("、")} 章)
+            </button>
+          )}
         </div>
 
         <div className="card action-card warn-card">
           <b>④ 重度重写</b>
           <div className="card-desc">
             带节拍/概念/文风备忘<b>整章重跑生成</b>,正文会被覆盖(留快照可回滚),并自动重抽圣经、重建下游摘要。
-            与逐章生成互斥,按章号顺序串行。
+            与逐章生成互斥,按章号顺序串行。中途失败时已完成的章会保留,可续跑剩余章节。
           </div>
           <button className="btn-sm danger" disabled={!!busy}
-            onClick={() => {
-              if (!confirm("重度重写会覆盖选中章节的正文(有快照可回滚),确定继续?")) return;
-              doJob<{ rewritten: number[]; total: number }>(
-                "重度重写",
-                () => api.refreshHeavy(pid, nums()),
-                (r) => toast.ok(`重写完成:${r.rewritten.length}/${r.total} 章`),
-              );
-            }}>
+            onClick={() => { setHeavyRemaining([]); runHeavy(nums()); }}>
             重度重写{picked.size ? `(${picked.size} 章)` : "(全书)"}
           </button>
+          {heavyRemaining.length > 0 && !busy && (
+            <button className="btn-sm danger mt-2"
+              onClick={() => runHeavy(heavyRemaining)}>
+              续跑剩余 {heavyRemaining.length} 章(第 {heavyRemaining.join("、")} 章)
+            </button>
+          )}
         </div>
       </div>
     </div>
