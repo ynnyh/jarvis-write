@@ -22,6 +22,7 @@
 | target_chapters | int | 目标章节数 |
 | target_words_per_chapter | int | 每章目标字数 |
 | global_tendency | JSON | 全局倾向（见 04 文档，标签组合） |
+| style_memo | text \| NULL | 文风备忘（随书累积）：本书调性 + 人物声音 + 复现意象，每章定稿后由快模型增量更新，注入后续章草稿，防长篇后段人物声音漂移；NULL=尚未累积 |
 | status | enum | draft / outlining / writing / done |
 | created_at / updated_at | datetime | |
 
@@ -49,6 +50,7 @@
 | foreshadowing | text | 本章伏笔操作（自然语言描述） |
 | plot_twist_level | str | 认知颠覆程度 |
 | summary | text | 本章简述 |
+| beats | JSON | 章内场景节拍（3-5 个一句话 beat，蓝图生成时产出；空 list=未预设，草稿 prompt 回落自行拆场景；存量书可用「翻新 → 回填节拍」补齐） |
 | characters_involved | JSON | 涉及角色 id 列表 |
 | key_items | JSON | 关键道具 |
 | scene_location | str | 场景地点 |
