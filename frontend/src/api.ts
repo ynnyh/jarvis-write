@@ -601,8 +601,23 @@ export const api = {
   login: (username: string, password: string) =>
     req<AuthResult>("POST", "/api/auth/login", { username, password }),
   me: () => req<Me>("GET", "/api/auth/me"),
+  // 修改自己的密码(须验旧密码;桌面单机免登录模式后端会拒绝,前端也不显示入口)
+  changePassword: (old_password: string, new_password: string) =>
+    req<{ ok: boolean }>("POST", "/api/auth/change-password", { old_password, new_password }),
+  // ---- 应用锁(仅桌面单机 local 模式;server 模式后端 404,前端不渲染入口) ----
+  // 休闲锁:只校验,不发凭证;解锁状态由前端 sessionStorage 记。
+  appLockSet: (new_password: string, old_password?: string) =>
+    req<{ ok: boolean }>("POST", "/api/app-lock", { old_password: old_password ?? null, new_password }),
+  appLockUnlock: (password: string) =>
+    req<{ ok: boolean }>("POST", "/api/app-lock/unlock", { password }),
+  appLockRemove: (password: string) =>
+    req<{ ok: boolean }>("POST", "/api/app-lock/remove", { password }),
+  // 忘记密码的重置口子:无需旧密码,须传 confirm="重置" 防误触
+  appLockReset: (confirm: string) =>
+    req<{ ok: boolean }>("POST", "/api/app-lock/reset", { confirm }),
   // 运行模式:local(桌面单机,免登录)/ server(多用户)。前端据此跳过登录页。
-  mode: () => req<{ mode: string; is_local: boolean }>("GET", "/api/mode"),
+  // has_lock 仅 local 有意义:设了应用锁,启动时先出锁屏。
+  mode: () => req<{ mode: string; is_local: boolean; has_lock: boolean }>("GET", "/api/mode"),
   // 桌面单机模式:把外链交给系统默认浏览器(WebView2 不处理 target=_blank 新窗口)
   openLink: (url: string) => req<{ ok: boolean }>("POST", "/api/system/open-link", { url }),
 

@@ -16,8 +16,10 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
+from app.db.session import get_db
 from app.llm.factory import (
     available_providers,
     create_llm_adapter,
@@ -40,15 +42,21 @@ async def health() -> HealthResponse:
 
 
 @router.get("/mode", include_in_schema=False)
-async def mode() -> dict:
-    """运行模式:前端据此决定是否跳过登录页。
+async def mode(db: Session = Depends(get_db)) -> dict:
+    """运行模式:前端据此决定是否跳过登录页、是否出应用锁屏。
 
     公开接口(登录前就要查)。local=桌面单机版免登录;server=多用户需登录。
+    has_lock 仅 local 模式有意义:本地设了应用锁,前端启动时先出锁屏。
     """
+    from app.api.app_lock import has_lock
     from app.config import get_settings
 
     local = get_settings().is_local
-    return {"mode": "local" if local else "server", "is_local": local}
+    return {
+        "mode": "local" if local else "server",
+        "is_local": local,
+        "has_lock": has_lock(db) if local else False,
+    }
 
 
 class OpenLinkRequest(BaseModel):

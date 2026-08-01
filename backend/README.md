@@ -112,3 +112,10 @@ python -m scripts.stress20       # 20 章真实压测(需真实 key,报告写 sc
 ```
 
 详见 `docs/05-roadmap.md`。
+
+忘记/输不出旧密码时脱机重置(需要宿主机或容器 shell,无需旧密码):
+
+```bash
+python -m scripts.reset_password --user admin          # 交互输入新密码(不回显)
+docker exec -it <容器名> python -m scripts.reset_password --user admin   # Docker 部署
+```

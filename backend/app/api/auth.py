@@ -1,12 +1,13 @@
 # app/api/auth.py
 # -*- coding: utf-8 -*-
-"""鉴权接口:注册(带邀请码)/ 登录 / 当前用户。
+"""鉴权接口:注册(带邀请码)/ 登录 / 当前用户 / 修改密码。
 
 - 注册需填邀请码:invite_codes 表有记录时按表校验(存在 + 启用 + 未超
   次数,注册成功 used_count +1);表为空时回落旧的单码逻辑
   (app_settings 优先,无记录回落 .env,空串 = 关闭注册),见 admin 接口。
 - 登录返回 JWT,前端存起来随请求带上。
 - 每个账号的 LLM key 独立(见 settings 接口),互不共用。
+- 修改密码须验旧密码;JWT 无版本号/黑名单机制,改密后旧 token 到期前仍有效。
 """
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ from app.auth import (
     verify_password,
 )
 from app.api.admin import get_effective_invite_code
+from app.config import get_settings
 from app.db.models import InviteCode, User
 from app.db.session import get_db
 
@@ -36,6 +38,12 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str = Field(min_length=1, max_length=128)
+    # 新密码强度规则与注册/管理员重置一致(6-128 位,另有 72 字节上限)
+    new_password: str = Field(min_length=6, max_length=128)
 
 
 class TokenOut(BaseModel):
@@ -118,3 +126,31 @@ async def login(req: LoginRequest, db: Session = Depends(get_db)):
 @router.get("/me", response_model=UserOut)
 async def me(user: User = Depends(get_current_user)):
     return user
+
+
+@router.post("/change-password")
+async def change_password(
+    req: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """修改自己的密码:须验旧密码,新密码规则与注册一致。
+
+    local(桌面单机)模式免登录,密码不参与鉴权,明确拒绝;
+    JWT 无版本号/黑名单,改密后旧 token 在到期前仍有效(与禁用账号不同)。
+    """
+    if get_settings().is_local:
+        raise HTTPException(status_code=400, detail="桌面单机版免登录,无需修改密码")
+    if not verify_password(req.old_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="旧密码不正确")
+    if req.new_password == req.old_password:
+        raise HTTPException(status_code=400, detail="新密码不能与旧密码相同")
+    # bcrypt 只取密码前 72 字节,超长会直接抛 ValueError;提前拦截给明确提示
+    if len(req.new_password.encode("utf-8")) > 72:
+        raise HTTPException(
+            status_code=400,
+            detail="密码过长:按 UTF-8 字节计不能超过 72 字节(中文约占 3 字节/字)",
+        )
+    user.password_hash = hash_password(req.new_password)
+    db.commit()
+    return {"ok": True}

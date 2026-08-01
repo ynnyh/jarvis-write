@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { api, token, setUnauthorizedHandler, Me } from "./api";
 import LoginPage from "./pages/LoginPage";
+import LockScreen from "./pages/LockScreen";
 import HelpPage from "./pages/HelpPage";
 import { Toaster } from "./ui/Toaster";
 import { ConfirmHost } from "./ui/ConfirmDialog";
@@ -11,11 +12,17 @@ import UpdateBanner from "./ui/UpdateBanner";
 
 const GH_URL = "https://github.com/ynnyh/jarvis-write";
 
+// 应用锁(仅桌面单机模式):解锁标记存 sessionStorage——刷新同标签页不重输,
+// 关掉重开要重输。锁屏时不渲染主界面(见下方 locked 分支)。
+const UNLOCK_KEY = "jarvis_app_unlocked";
+
 export default function App() {
   const [tokens, setTokens] = useState<string>("");
   const [me, setMe] = useState<Me | null>(null);
   // 桌面单机(local)模式:免登录,不显示登录页/退出/邀请码等多用户 UI
   const [isLocal, setIsLocal] = useState<boolean>(false);
+  // 应用锁:local 模式且已设锁且本次会话未解锁 → 全屏锁屏页
+  const [locked, setLocked] = useState<boolean>(false);
   // 未配置模型引导:null=未探测,false=未配置(显示横幅)
   const [llmConfigured, setLlmConfigured] = useState<boolean | null>(null);
   // 引导态:正在用已存 token 拉当前用户,或正在探测运行模式
@@ -32,14 +39,22 @@ export default function App() {
     let cancelled = false;
     (async () => {
       let local = false;
+      let hasLock = false;
       try {
         const m = await api.mode();
         local = m.is_local;
+        hasLock = m.has_lock;
       } catch { /* 探测失败按 server 处理 */ }
       if (cancelled) return;
       setIsLocal(local);
       if (local) {
         // 桌面单机:后端免鉴权,直接取本地用户
+        // 但设了应用锁且本次会话未解锁:先出锁屏,解锁后才拉用户进主界面
+        if (hasLock && sessionStorage.getItem(UNLOCK_KEY) !== "1") {
+          setLocked(true);
+          setBooting(false);
+          return;
+        }
         try {
           const u = await api.me();
           if (!cancelled) setMe(u);
@@ -92,6 +107,20 @@ export default function App() {
 
   if (booting) {
     return <div className="auth-wrap"><span className="spin" /></div>;
+  }
+
+  if (locked) {
+    // 应用锁屏:解锁成功标记本会话已解锁,再拉本地用户进主界面
+    return (
+      <LockScreen
+        onUnlocked={() => {
+          sessionStorage.setItem(UNLOCK_KEY, "1");
+          api.me()
+            .then((u) => { setMe(u); setLocked(false); })
+            .catch(() => { /* 忽略,极少发生 */ });
+        }}
+      />
+    );
   }
 
   if (!me) {
