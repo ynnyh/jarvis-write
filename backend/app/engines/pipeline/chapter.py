@@ -121,12 +121,27 @@ def _recent_tail(db: Session, project_id: int, current: int) -> str:
     return "\n\n".join(parts) or "(本章是第一章,无上文)"
 
 
-def _revision_block(revision: str | None, previous_text: str) -> str:
-    """重写意见注入块:仅当上一版正文存在且用户给了修改意见时生成。
+def _revision_block(
+    revision: str | None, previous_text: str, *, outline_changed: bool = False
+) -> str:
+    """重写意见注入块。
 
-    上一版正文截断为前 _REVISION_EXCERPT_CHARS 字,作反面参照,避免 token 爆炸。
+    - outline_changed=True(大纲改过后正文失配):不再注入旧正文节选——旧文基于
+      旧大纲,注入会把模型锚回旧情节。改为明确指令"按新蓝图重新构思",用户补充
+      意见(有则)一并带上。即使没有意见也生成该块:失配章的重写本质是重新生成。
+    - 常规重写(大纲未变):上一版正文截断为前 _REVISION_EXCERPT_CHARS 字作反面
+      参照,避免 token 爆炸;无意见则不生成。
     """
     revision = (revision or "").strip()
+    if outline_changed:
+        block = (
+            "【按新大纲重写】本章大纲已更新,上一版正文基于旧大纲,与当前蓝图失配。\n"
+            "请完全以上方最新蓝图为准重新构思本章情节,不要延续、不要修补旧版正文"
+            "的情节安排;旧版正文中与旧大纲绑定的桥段应直接舍弃。\n"
+        )
+        if revision:
+            block += f"用户补充意见(在满足新蓝图的前提下采纳):\n{revision}\n"
+        return block
     if not revision or not previous_text.strip():
         return ""
     excerpt = previous_text[:_REVISION_EXCERPT_CHARS]
@@ -422,7 +437,8 @@ async def generate_chapter(
     ]
     avoid_repetition = avoid_block(recent_full)
 
-    # 重写场景:用户给了修改意见 → 连同上一版正文(截断)注入草稿 prompt
+    # 重写场景:失配章(大纲已更新)→ 按新蓝图重新构思,不注入旧正文;
+    # 常规重写 → 用户修改意见连同上一版正文(截断)注入草稿 prompt
     existing = (
         db.query(Chapter)
         .filter(
@@ -432,7 +448,9 @@ async def generate_chapter(
         .first()
     )
     revision_block = _revision_block(
-        revision, existing.final_content if existing else ""
+        revision,
+        existing.final_content if existing else "",
+        outline_changed=bool(existing and existing.is_stale),
     )
 
     # ---- 草稿 + 定稿(封装成 _compose,审校回炉时复用) ----

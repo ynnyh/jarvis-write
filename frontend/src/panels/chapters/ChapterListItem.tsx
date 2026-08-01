@@ -97,10 +97,17 @@ export default function ChapterListItem({
       {reviseOpen && (
         <div className="fact-line revise-box">
           <div className="hint">重写会覆盖当前正文;旧版自动存快照,可随时在「历史版本」对比回退。</div>
+          {ch?.is_stale && (
+            <div className="hint" style={{ color: "var(--warn, #b45309)" }}>
+              本章大纲已更新:这次重写会完全按新大纲重新构思,不再参照旧正文;补充意见可留空。
+            </div>
+          )}
           <textarea
             rows={3}
             maxLength={500}
-            placeholder="哪里不满意?比如:节奏太拖 / 对话不像这个角色 / 结尾太仓促;想要什么方向?比如:加强冲突、多些心理描写(可留空,直接重写)"
+            placeholder={ch?.is_stale
+              ? "对新大纲的补充要求(可留空):比如侧重点、节奏、视角;情节走向以新大纲为准"
+              : "哪里不满意?比如:节奏太拖 / 对话不像这个角色 / 结尾太仓促;想要什么方向?比如:加强冲突、多些心理描写(可留空,直接重写)"}
             value={reviseText}
             onChange={(e) => onReviseTextChange(e.target.value)}
           />

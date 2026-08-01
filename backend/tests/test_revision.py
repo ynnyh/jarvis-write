@@ -7,6 +7,8 @@
 - 上一版超长 → 截断为前 1500 字 + "……(后略)",不完整注入
 - 首次生成(无正文)即使传 revision 也不注入重写块
 - 已有正文但 revision 为空 → 不注入重写块
+- 失配章(is_stale,大纲已更新)→ 注入「按新大纲重写」指令,不再注入旧正文节选;
+  意见可留空也注入;有补充意见则一并带上
 """
 from __future__ import annotations
 
@@ -19,8 +21,8 @@ from tests.test_pipeline import MockAdapter
 PREVIOUS_TEXT = "旧版正文,节奏拖沓。" * 200
 
 
-def _make_db(with_previous: bool):
-    """独立内存库:一个项目 + 第 1 章大纲,可选已生成的上一版正文。"""
+def _make_db(with_previous: bool, stale: bool = False):
+    """独立内存库:一个项目 + 第 1 章大纲,可选已生成的上一版正文(可选失配标记)。"""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
@@ -45,7 +47,8 @@ def _make_db(with_previous: bool):
         db.add(Chapter(
             project_id=project.id, outline_id=outline.id, chapter_number=1,
             draft_content=PREVIOUS_TEXT, final_content=PREVIOUS_TEXT,
-            word_count=len(PREVIOUS_TEXT), status="approved",
+            word_count=len(PREVIOUS_TEXT),
+            status="stale" if stale else "approved", is_stale=stale,
         ))
     db.commit()
     return db, project
@@ -121,3 +124,38 @@ def test_rewrite_without_revision_injects_nothing():
     draft_prompt = adapter.calls[0]
     assert "【重写要求】" not in draft_prompt
     assert "【上一版正文" not in draft_prompt
+
+
+def test_stale_rewrite_uses_new_outline_no_old_excerpt():
+    """失配章(大纲已更新)重写:注入「按新大纲重写」指令,旧正文节选不再注入。"""
+    db, project = _make_db(with_previous=True, stale=True)
+    adapter = _run_generate(db, project, "")
+
+    draft_prompt = adapter.calls[0]
+    assert "【按新大纲重写】" in draft_prompt
+    assert "不要延续" in draft_prompt
+    # 旧正文不再作反面参照注入(避免把模型锚回旧情节)
+    assert "【上一版正文" not in draft_prompt
+    assert PREVIOUS_TEXT[:1500] not in draft_prompt
+
+
+def test_stale_rewrite_with_revision_carries_supplement():
+    """失配章 + 用户补充意见:指令块带上意见,但仍不注入旧正文。"""
+    db, project = _make_db(with_previous=True, stale=True)
+    adapter = _run_generate(db, project, "节奏再快一点")
+
+    draft_prompt = adapter.calls[0]
+    assert "【按新大纲重写】" in draft_prompt
+    assert "节奏再快一点" in draft_prompt
+    assert "【上一版正文" not in draft_prompt
+
+
+def test_non_stale_rewrite_keeps_old_behavior():
+    """未失配的章重写:仍是旧的"意见 + 旧文反面参照"模式(回归保护)。"""
+    db, project = _make_db(with_previous=True, stale=False)
+    adapter = _run_generate(db, project, "节奏太拖")
+
+    draft_prompt = adapter.calls[0]
+    assert "【按新大纲重写】" not in draft_prompt
+    assert "【重写要求】" in draft_prompt
+    assert "【上一版正文" in draft_prompt
