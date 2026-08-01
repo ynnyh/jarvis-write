@@ -15,6 +15,7 @@
     "@radix-ui/react-dialog": "^1.1.20",
     "@radix-ui/react-toast": "^1.2.20",
     "@tanstack/react-query": "^5.101.4",
+    "motion": "^12.43.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.28.0"

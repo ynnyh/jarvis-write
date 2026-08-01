@@ -2060,3 +2060,138 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .test-line { margin-top: var(--sp-3); font-size: var(--fs-sm); padding: 8px 12px; border-radius: var(--r-sm); line-height: 1.6; }
 .test-line.ok { background: var(--ok-weak); color: var(--ok); }
 .test-line.err { background: var(--err-weak); color: var(--err); }
+
+/* ---------- 创作起步流升级:进度条 / 候选卡 / 确认墙 / 流水线 ---------- */
+
+/* 顶部进度条:已确认项缩略卡 + 流光进度条 */
+.wiz-step-label { white-space: nowrap; }
+.wiz-thumb {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  color: var(--ok);
+  background: var(--ok-weak);
+  border: 1px solid var(--ok-line);
+  border-radius: var(--r-full);
+  padding: 2px 8px;
+}
+.wiz-progress {
+  height: 3px;
+  background: var(--surface-2);
+  border-radius: var(--r-full);
+  margin: calc(-1 * var(--sp-2)) 0 var(--sp-4);
+  overflow: hidden;
+}
+.wiz-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--brand), var(--brand-2));
+  border-radius: var(--r-full);
+}
+
+/* AI 候选卡组:内容逐张落定,skeleton 期间 shimmer 占位 */
+.wiz-cands { display: grid; gap: var(--sp-3); margin-top: var(--sp-3); }
+.wiz-cand {
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  padding: var(--sp-4);
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.wiz-cand:hover { border-color: var(--brand); box-shadow: var(--shadow-sm); }
+.wiz-cand.picked { border-color: var(--brand); background: var(--brand-weak); }
+.wiz-cand-title { margin: 0 0 var(--sp-2); font-size: var(--fs-lg); }
+.wiz-cand-body { min-width: 0; }
+.wiz-cand-foot { display: flex; justify-content: flex-end; margin-top: var(--sp-3); }
+.wiz-cand-ops { display: flex; gap: var(--sp-2); margin-top: var(--sp-3); flex-wrap: wrap; }
+
+.wiz-cand-skeleton { pointer-events: none; }
+.wiz-sk-line {
+  height: 12px;
+  border-radius: var(--r-sm);
+  margin-bottom: var(--sp-2);
+  background: linear-gradient(90deg,
+    var(--surface-2) 25%, var(--line) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%;
+  animation: wiz-shimmer 1.4s infinite;
+}
+.wiz-sk-line.w60 { width: 60%; }
+.wiz-sk-line.w40 { width: 40%; }
+@keyframes wiz-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wiz-sk-line { animation: none; }
+}
+
+/* "AI 构思中"轮换微文案 */
+.wiz-thinking { display: inline-block; }
+
+/* 概念屏手写表单 */
+.wiz-custom textarea { width: 100%; }
+
+/* 确认墙 */
+.wiz-wall { display: grid; gap: var(--sp-3); }
+.wiz-wall-card {
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  padding: var(--sp-3) var(--sp-4);
+}
+.wiz-wall-head { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.wiz-wall-label { font-weight: 600; font-size: var(--fs-md); }
+.wiz-wall-text { color: var(--text-2); font-size: var(--fs-md); }
+.wiz-flag {
+  font-size: var(--fs-xs);
+  color: var(--warn);
+  background: var(--warn-weak);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-full);
+  padding: 2px 8px;
+}
+
+/* 点火流水线:步骤卡四态(等待/生成中/完成/失败) */
+.wiz-pipe { display: grid; gap: var(--sp-3); }
+.wiz-pipe-card {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: flex-start;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  padding: var(--sp-4);
+  transition: border-color 0.2s, background 0.2s;
+}
+.wiz-pipe-card.run { border-color: var(--brand-line); background: var(--brand-weak); }
+.wiz-pipe-card.done { border-color: var(--ok-line); background: var(--ok-weak); }
+.wiz-pipe-card.err { border-color: var(--err-line); background: var(--err-weak); }
+.wiz-pipe-icon {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--fs-sm); font-weight: 700;
+  flex-shrink: 0;
+}
+.wiz-pipe-card.run .wiz-pipe-icon { border-color: var(--brand); }
+.wiz-pipe-card.done .wiz-pipe-icon { color: var(--ok); border-color: var(--ok); }
+.wiz-pipe-card.err .wiz-pipe-icon { color: var(--err); border-color: var(--err); }
+.wiz-pipe-label { font-weight: 600; font-size: var(--fs-md); }
+
+/* 全部完成庆祝 */
+.wiz-celebrate {
+  margin-top: var(--sp-4);
+  padding: var(--sp-4);
+  border-radius: var(--r-lg);
+  background: var(--ok-weak);
+  border: 1px solid var(--ok-line);
+  color: var(--ok);
+  font-weight: 600;
+  text-align: center;
+  font-size: var(--fs-lg);
+}
+
+.ml-2 { margin-left: var(--sp-2); }
