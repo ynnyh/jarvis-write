@@ -101,6 +101,14 @@ export default function OnboardingFlow() {
   const [project, setProject] = useState<Project | null>(null);
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
+  const stepsRef = useRef<HTMLDivElement | null>(null);
+
+  // 窄屏步骤条横滚时,当前步可能滚出视野,换步后拉回可见区
+  useEffect(() => {
+    stepsRef.current
+      ?.querySelector(".wiz-step.on")
+      ?.scrollIntoView({ inline: "nearest", block: "nearest", behavior: "smooth" });
+  }, [step]);
 
   // 想法屏
   const [entry, setEntry] = useState<"more" | "genre" | "chat" | null>(null);
@@ -549,7 +557,7 @@ export default function OnboardingFlow() {
         <div className="onboard">
           {/* ===== 左:主流程 ===== */}
           <div className="onboard-main">
-            <div className="wiz-steps">
+            <div className="wiz-steps" ref={stepsRef}>
               {STEP_ORDER.map((s, i) => {
                 const done = i < stepIdx;
                 const thumb = (done && thumbOf[s]) || (fly?.step === s ? fly.text : "");

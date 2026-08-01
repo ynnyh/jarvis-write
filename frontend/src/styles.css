@@ -1911,6 +1911,14 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 .wiz-steps { overflow-x: auto; scrollbar-width: none; }
 .wiz-steps::-webkit-scrollbar { display: none; }
 
+/* 半宽窗口(≤1100px):藏缩略卡+收紧间距,让 8 步+放弃按钮尽量一排放下;
+   更窄时退回横滚,由 JS 把当前步 scrollIntoView */
+@media (max-width: 1100px) {
+  .wiz-steps { gap: 4px; }
+  .wiz-step { padding: 6px 8px; gap: 6px; }
+  .wiz-step .wiz-thumb { display: none; }
+}
+
 /* 全局防横滚:根容器约束 + 易超宽元素收敛 */
 html, body { max-width: 100%; overflow-x: hidden; }
 .wrap { max-width: 100%; box-sizing: border-box; }
