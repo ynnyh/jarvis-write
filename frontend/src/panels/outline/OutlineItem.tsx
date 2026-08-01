@@ -1,4 +1,5 @@
 // 单章大纲卡片:展开/收起、详情、内联编辑、大改影响分析、级联重生成
+import type { ReactNode } from "react";
 import { EditorAction, EditResult, ImpactReport, Outline } from "../../api";
 
 type Form = Partial<Outline>;
@@ -13,6 +14,10 @@ interface Props {
   impact: ImpactReport | null;
   picked: Set<number>;
   outlineActions: EditorAction[];
+  // AI 研讨:展开状态与面板节点(由父级管理,研讨面板渲染在详情区底部)
+  discussOpen: boolean;
+  discussNode?: ReactNode;
+  onToggleDiscuss: () => void;
   onToggleExpand: () => void;
   onStartEdit: () => void;
   onFormChange: (form: Form) => void;
@@ -26,8 +31,8 @@ interface Props {
 
 export default function OutlineItem({
   outline: o, editing, expanded, form, busy, editResult, impact, picked,
-  outlineActions, onToggleExpand, onStartEdit, onFormChange, onSave,
-  onCancelEdit, onRunImpact, onTogglePick, onRunCascade, onDirectiveChip,
+  outlineActions, discussOpen, discussNode, onToggleDiscuss, onToggleExpand, onStartEdit,
+  onFormChange, onSave, onCancelEdit, onRunImpact, onTogglePick, onRunCascade, onDirectiveChip,
 }: Props) {
   const open = editing || expanded;
   return (
@@ -49,6 +54,11 @@ export default function OutlineItem({
           </div>
           <div className="actions mt-2">
             <button className="btn-sm" onClick={onStartEdit}>编辑本章</button>
+            <button className={"btn-sm" + (discussOpen ? " primary" : "")}
+              title="和 AI 边聊边改这章大纲:聊清哪里不对,AI 给出新标题/新简述提案,确认后落库"
+              onClick={onToggleDiscuss}>
+              {discussOpen ? "收起研讨" : "AI 研讨"}
+            </button>
             {outlineActions.length > 0 && (
               <span className="chips">
                 <span className="hint">让 AI:</span>
@@ -61,6 +71,7 @@ export default function OutlineItem({
               </span>
             )}
           </div>
+          {discussOpen && discussNode}
         </div>
       )}
 

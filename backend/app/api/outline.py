@@ -6,6 +6,7 @@ PUT  /api/projects/{id}/outlines/{n}          编辑大纲 → diff 分级 → �
 POST /api/projects/{id}/outlines/{n}/impact   下游影响分析(只分析不执行)
 POST /api/projects/{id}/outlines/cascade      用户确认后级联重生成勾选的章节
 GET  /api/projects/{id}/outlines/{n}/versions 版本历史
+POST /api/projects/{id}/outlines/{n}/discuss  单章大纲 AI 研讨(多轮对话 → 改写提案)
 """
 from __future__ import annotations
 
@@ -17,13 +18,15 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_project_or_404
 from app.auth import get_current_user
-from app.db.models import Outline, OutlineVersion, Project
+from app.db.models import Chapter, Outline, OutlineVersion, Project
 from app.db.session import SessionLocal, get_db
 from app.engines.cascade import (
     analyze_impact,
     apply_outline_edit,
     cascade_regenerate,
 )
+from app.engines.common import chapter_architecture_brief
+from app.engines.outline_discuss import discuss_outline
 from app.jobs import list_running, spawn_job
 from app.schemas.project import OutlineOut
 from app.schemas.tendency import Tendency
@@ -124,6 +127,99 @@ async def edit_outline(
     return EditResult(
         **result, outline=OutlineOut.model_validate(outline, from_attributes=True)
     )
+
+
+# ---------- 单章大纲 AI 研讨 ----------
+
+
+class OutlineDiscussRequest(BaseModel):
+    messages: list[dict] = Field(default_factory=list)
+
+
+class OutlineDiscussProposal(BaseModel):
+    """蒸馏出的改写提案:与修改指令的 DirectiveItem 同构,前端走同一 apply 链路。"""
+
+    new_title: str | None = None
+    new_summary: str
+    change_reason: str = ""
+
+
+class OutlineDiscussResponse(BaseModel):
+    reply: str
+    proposal: OutlineDiscussProposal | None = None
+
+
+def _outline_block(o: Outline) -> str:
+    """本章大纲渲染成研讨上下文。"""
+    lines = [
+        f"标题:{o.title}",
+        f"本章定位:{o.chapter_role}",
+        f"核心作用:{o.chapter_purpose}",
+        f"本章简述:{o.summary}",
+        f"伏笔操作:{o.foreshadowing or '无'}",
+        f"出场人物:{'、'.join(map(str, o.characters_involved or [])) or '—'}",
+        f"场景地点:{o.scene_location or '—'}",
+    ]
+    beats = [str(b).strip() for b in (o.beats or []) if str(b).strip()]
+    if beats:
+        lines.append("场景节拍:" + ";".join(beats[:8]))
+    return "\n".join(lines)
+
+
+@router.post("/{chapter_number}/discuss", response_model=OutlineDiscussResponse)
+async def discuss(
+    project_id: int,
+    chapter_number: int,
+    req: OutlineDiscussRequest,
+    db: Session = Depends(get_db),
+):
+    """就某一章的大纲与作者多轮研讨:聊清"哪里不对" → 蒸馏出改写提案。
+
+    提案不落库:前端确认后调 edit-directive/apply(版本化落库 + 正文标失配)。
+    """
+    project = get_project_or_404(db, project_id)
+    outline = _outline(db, project_id, chapter_number)
+
+    neighbors = (
+        db.query(Outline)
+        .filter(
+            Outline.project_id == project_id,
+            Outline.chapter_number.in_([chapter_number - 1, chapter_number + 1]),
+        )
+        .order_by(Outline.chapter_number)
+        .all()
+    )
+    neighbor_block = "\n".join(
+        f"第{o.chapter_number}章《{o.title}》:{(o.summary or '')[:120]}" for o in neighbors
+    ) or "(无相邻章节)"
+
+    written = (
+        db.query(Chapter)
+        .filter(
+            Chapter.project_id == project_id,
+            Chapter.chapter_number == chapter_number,
+            Chapter.final_content != "",
+        )
+        .first()
+    )
+    written_note = (
+        f"第 {chapter_number} 章已有正文(改写大纲会把它标记为失配,需要重写)"
+        if written else f"第 {chapter_number} 章尚未成文(改大纲代价低,可放开调)"
+    )
+
+    try:
+        result = await discuss_outline(
+            req.messages,
+            chapter_number=chapter_number,
+            architecture_brief=chapter_architecture_brief(project),
+            outline_block=_outline_block(outline),
+            neighbor_block=neighbor_block,
+            written_note=written_note,
+            current_summary=outline.summary or "",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return OutlineDiscussResponse(**result)
 
 
 @router.post("/{chapter_number}/impact", response_model=ImpactReport)

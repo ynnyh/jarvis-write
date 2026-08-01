@@ -543,6 +543,10 @@ export const api = {
     req<DirectivePreview>("POST", `/api/projects/${pid}/edit-directive`, { directive }, LLM_TIMEOUT),
   applyEditDirective: (pid: number, items: { chapter_number: number; new_title?: string | null; new_summary: string }[]) =>
     req<DirectiveApplyResult>("POST", `/api/projects/${pid}/edit-directive/apply`, { items }),
+  // 单章大纲研讨:多轮对话聊清"这章大纲哪里不对" → 蒸馏出改写提案(确认后走 applyEditDirective 落库)
+  discussOutline: (pid: number, n: number, messages: { role: string; content: string }[]) =>
+    req<{ reply: string; proposal: { new_title: string | null; new_summary: string; change_reason: string } | null }>(
+      "POST", `/api/projects/${pid}/outlines/${n}/discuss`, { messages }, LLM_TIMEOUT),
 
   listChapters: (pid: number) => req<ChapterBrief[]>("GET", `/api/projects/${pid}/chapters`),
   getChapter: (pid: number, n: number) => req<ChapterDetail>("GET", `/api/projects/${pid}/chapters/${n}`),

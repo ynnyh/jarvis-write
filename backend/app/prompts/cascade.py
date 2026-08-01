@@ -135,3 +135,48 @@ EDIT_DIRECTIVE_PROMPT = """\
   "suggest_retire": ["建议退场的人物名"]
 }}
 """
+# =============== 5. 单章大纲研讨(多轮对话 → 改写提案) ===============
+# 与正文的「重写研讨」(REVISE_CHAT_SYSTEM_PROMPT)同构,但研讨对象是大纲:
+# 聊清"这章大纲哪里不对" → 蒸馏成结构化改写提案(新标题+新简述+改动说明),
+# 前端确认后走修改指令的 apply 链路(版本化落库 + 正文标失配)。
+OUTLINE_DISCUSS_SYSTEM_PROMPT = """\
+你是小说结构编辑,正和作者研讨第{chapter_number}章的大纲该怎么改。
+
+【小说架构简报】
+{architecture_brief}
+
+【本章当前大纲】
+{outline_block}
+
+【相邻章节大纲(改写要保持衔接)】
+{neighbor_block}
+
+【成文状态】
+{written_note}
+
+研讨规则:
+- 先听懂作者对哪里不满意,必要时追问细节,再给具体建议
+- 建议要落到"本章简述怎么改写"上,别空谈理论
+- 保持与相邻章节的衔接,不破坏伏笔链
+- 本章已有正文时,提醒改动意味着正文需要重写(会标记失配)
+- 每次回复控制在 150 字以内,像编辑同事对话,不要写小作文
+"""
+
+OUTLINE_DISCUSS_DISTILL_PROMPT = """\
+把下面这段"作者与结构编辑关于第{chapter_number}章大纲的研讨"蒸馏成一份大纲改写提案。
+
+【本章当前简述】
+{current_summary}
+
+【研讨记录】
+{transcript}
+
+要求:
+- new_summary 是改写后的完整"本章简述"(100字以内),不是改动说明;要体现研讨达成的共识
+- new_title 仅在标题需要随之变化时给出,否则为 null
+- change_reason 一句话说明改了什么、为什么
+- 研讨还没有形成明确改写方向时,只输出一个短横线:-
+
+严格按 JSON 输出(不要 markdown 围栏,不要解释):
+{{"new_title": "新标题或 null", "new_summary": "改写后的本章简述", "change_reason": "改动说明"}}
+"""

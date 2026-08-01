@@ -7,6 +7,7 @@ import { confirmDialog } from "../ui/ConfirmDialog";
 import { useJob } from "../ui/useJob";
 import type { Step } from "../pages/ProjectPage";
 import DirectivePanel from "./outline/DirectivePanel";
+import OutlineDiscussChat from "./outline/OutlineDiscussChat";
 import OutlineItem from "./outline/OutlineItem";
 
 interface Props {
@@ -38,6 +39,8 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
   // 修改指令:输入 → LLM 预览(可再编辑/勾选) → 应用
   const [showDirective, setShowDirective] = useState(false);
   const [directiveText, setDirectiveText] = useState("");
+  // 单章 AI 研讨:当前展开研讨面板的章号(null=收起)
+  const [discussFor, setDiscussFor] = useState<number | null>(null);
   // 编辑部预设优化动作(大纲级 chips:深化冲突/增加伏笔…,点了走指令改预览链路)
   const [outlineActions, setOutlineActions] = useState<EditorAction[]>([]);
   useEffect(() => {
@@ -227,6 +230,17 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
     } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
   }
 
+  // 研讨提案应用:复用修改指令的 apply 链路(版本化落库 + 正文标失配),成功后收起研讨面板
+  async function applyOutlineProposal(n: number, p: { new_title: string | null; new_summary: string }) {
+    const r = await api.applyEditDirective(pid, [
+      { chapter_number: n, new_title: p.new_title, new_summary: p.new_summary },
+    ]);
+    setFlash(`第 ${n} 章大纲已按研讨改写` +
+      (r.stale_chapters.length ? ";本章正文已标记失配,去「写作」重写" : ""));
+    setDiscussFor(null);
+    await onChanged();
+  }
+
   const oldOf = (n: number) => outlines.find((o) => o.chapter_number === n);
 
   // 滚动规划:已规划边界与"下一卷"区间(有卷纲按卷纲,没有按 30 章一卷)
@@ -389,6 +403,17 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
             setDirectiveText(directive);
             window.scrollTo({ top: 0, behavior: "smooth" });
           }}
+          discussOpen={discussFor === o.chapter_number}
+          onToggleDiscuss={() => setDiscussFor(discussFor === o.chapter_number ? null : o.chapter_number)}
+          discussNode={discussFor === o.chapter_number ? (
+            <OutlineDiscussChat
+              pid={pid}
+              n={o.chapter_number}
+              title={o.title}
+              summary={o.summary}
+              onApply={(p) => applyOutlineProposal(o.chapter_number, p)}
+            />
+          ) : null}
         />
       ))}
     </>
