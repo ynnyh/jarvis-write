@@ -7,6 +7,9 @@ GET /api/projects/{id}/overview
 - foreshadowings: 四态 + 埋设/预期/回收章(伏笔时间线)
 - characters: 每个人物的出场章号列表(人物出场时间线)
 
+GET /api/projects/{id}/timeline
+- items: 全书剧情时间线(各章章末契约聚合,零 LLM,docs/08 §7 P2-⑨ 轻量落地)
+
 只读聚合:数据全部来自现有表(outlines/chapters/foreshadowings/entities/facts),
 不加新表,不改任何写路径。
 """
@@ -23,6 +26,7 @@ from app.db.models import Chapter, Entity, Fact, Foreshadowing, Outline
 from app.db.session import get_db
 from app.engines.editorial import load_review_snapshot
 from app.engines.polish.ai_flavor import ai_flavor_report
+from app.engines.timeline import book_timeline
 
 router = APIRouter(
     prefix="/api/projects/{project_id}",
@@ -157,3 +161,20 @@ async def overview(project_id: int, db: Session = Depends(get_db)):
             for e in entities
         ],
     )
+
+
+class TimelineItem(BaseModel):
+    """一格剧情时间线:该章章末的剧情时间/地点/下章跳跃提示(契约聚合)。"""
+
+    chapter: int
+    in_story_time: str | None
+    location: str | None
+    scene_continues: bool
+    time_jump_hint: str
+
+
+@router.get("/timeline")
+async def timeline(project_id: int, db: Session = Depends(get_db)):
+    """全书剧情时间线:从各章有效章末契约聚合(零 LLM);无契约的章自然断档。"""
+    get_project_or_404(db, project_id)
+    return {"items": book_timeline(db, project_id)}

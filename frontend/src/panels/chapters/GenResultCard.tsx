@@ -29,9 +29,12 @@ interface Props {
   onChanged: () => void;
   // 「重写」引导:展开本章的行内重写框
   onRewrite: () => void;
+  // 历史模式:从章节列表「审核报告」打开(非刚生成完)。标题换为「审核报告」,
+  // 无当次一致性检查数据时不显示"检查通过"徽标;拦截状态按章节 status 推导
+  historical?: boolean;
 }
 
-export default function GenResultCard({ pid, result, onChanged, onRewrite }: Props) {
+export default function GenResultCard({ pid, result, onChanged, onRewrite, historical }: Props) {
   const { run } = useJob();
   const n = result.chapter_number;
   // 问题清单:挂载后按章拉取(与生成响应里的 consistency_issues 互补,这份可操作)
@@ -40,6 +43,8 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite }: Pro
   // 单条问题操作进行中(禁用该条按钮);门禁放行进行中
   const [busyIssue, setBusyIssue] = useState<number | null>(null);
   const [gateBusy, setGateBusy] = useState(false);
+  // 契约重提进行中(docs/08 §8:契约错了会导致门禁误报/下章衔接错位)
+  const [contractBusy, setContractBusy] = useState(false);
 
   const reloadIssues = useCallback(async () => {
     try {
@@ -100,7 +105,7 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite }: Pro
     const blockers = result.gate?.blockers?.length ?? 0;
     const ok = await confirmDialog({
       title: `放行第 ${n} 章?`,
-      body: `将忽略全部 ${blockers} 个致命矛盾,并补走圣经抽取/滚动摘要等被跳过的同步。矛盾仍留在正文里,后续章节可能继续触发提醒。`,
+      body: `将忽略全部${blockers ? ` ${blockers} 个` : ""}致命矛盾,并补走圣经抽取/滚动摘要等被跳过的同步。矛盾仍留在正文里,后续章节可能继续触发提醒。`,
       confirmText: "放行(忽略全部)",
       danger: true,
     });
@@ -120,15 +125,49 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite }: Pro
     }
   }
 
+  // 契约重提:按当前正文重提上一章+本章契约,并重检本章门禁(gate 清单重建)。
+  // quarantined 章重检干净后状态不变,仍需放行(后端语义,结果里只报数字)。
+  async function reextractContract() {
+    setContractBusy(true);
+    try {
+      const res = await run<{
+        contract_status: string; contract_error?: string;
+        issues: number; blockers: number;
+      }>(
+        () => api.reextractContract(pid, n),
+        { kind: `contract-${pid}-${n}` },
+      );
+      if (res) {
+        if (res.contract_status !== "ok") {
+          toast.err("本章契约提取失败", res.contract_error || "已留痕,可稍后重试");
+        } else if (res.blockers > 0) {
+          toast.info("契约已重提,门禁重检仍有硬矛盾",
+            `共 ${res.issues} 个问题(${res.blockers} 个致命),见下方清单`);
+        } else {
+          toast.ok("契约已重提,门禁重检通过",
+            res.issues ? `仍有 ${res.issues} 个非致命问题` : "未发现一致性问题");
+        }
+        await reloadIssues();
+        onChanged();
+      }
+    } catch (e) {
+      toast.err("契约重提失败", errMsg(e));
+    } finally {
+      setContractBusy(false);
+    }
+  }
+
   const gate = result.gate;
-  const quarantined = gate?.status === "quarantined";
+  // 历史模式无当次 gate 数据:按章节 status 推导拦截态(blocker 明细在下方问题清单里)
+  const quarantined = gate?.status === "quarantined" || result.status === "quarantined";
+  const blockerCount = gate?.blockers?.length ?? 0;
   const warnings = result.preflight?.warnings ?? [];
   const openIssues = (issues ?? []).filter((i) => i.status === "open");
   const doneIssues = (issues ?? []).filter((i) => i.status !== "open");
 
   return (
     <div className={"card " + (quarantined ? "card-warn" : "card-ok")}>
-      <b>生成完成</b> {result.word_count} 字
+      <b>{historical ? "审核报告" : "生成完成"}</b> {result.word_count} 字
       {result.ai_flavor && (
         <span className="badge" title={flavorTitle(result.ai_flavor)}>
           AI味 {result.ai_flavor.score} /千字
@@ -140,7 +179,7 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite }: Pro
 
       {quarantined && (
         <div className="notice notice-err gate-banner mt-2">
-          <b>门禁拦截:{gate?.blockers?.length ?? 0} 个致命矛盾,本章未进圣经/摘要</b>
+          <b>门禁拦截:{blockerCount ? `${blockerCount} 个` : "存在"}致命矛盾,本章未进圣经/摘要</b>
           <div className="mt-1">
             正文已保存,状态为「被拦截」。建议先按下方问题清单修订或重写;
             确认矛盾可接受时可放行(忽略全部),放行后进入「待审」。
@@ -179,10 +218,17 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite }: Pro
               </div>
             ))}
           </div>
-        : <span className="badge ok">一致性检查通过</span>}
+        // 历史模式没有当次一致性检查数据,不显示"检查通过"(避免误导)
+        : (!historical && <span className="badge ok">一致性检查通过</span>)}
 
       <div className="mt-2">
         <b>问题清单</b>
+        {" "}
+        <button className="btn-sm" disabled={contractBusy}
+          title="契约提取错了会导致本章门禁误报(对照上章契约)或下章衔接错位(注入本章契约)。点此按当前正文重提两章契约并重检本章门禁"
+          onClick={reextractContract}>
+          {contractBusy && <span className="spin spin-sm" />}重新提取契约
+        </button>
         {issues === null && !issuesErr && (
           <span className="muted"> 加载中…</span>
         )}

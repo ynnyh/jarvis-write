@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   api, BibleSnapshot, CharacterCard, CharactersOut, FactOut, ForeshadowOut, Outline,
-  OverviewChapter, OverviewOut,
+  OverviewChapter, OverviewOut, TimelineItem,
 } from "../api";
 
 interface Props { pid: number; outlines: Outline[]; onGotoChapter?: (n: number) => void; }
@@ -48,6 +48,12 @@ function cellState(c: OverviewChapter): string {
 
 const CELL_CN: Record<string, string> = {
   empty: "未生成", drafting: "生成中", drafted: "草稿", finalized: "定稿", stale: "失配",
+  pending_review: "待审", approved: "已审", quarantined: "拦截",
+};
+
+// 契约的时间跳跃提示(英文枚举)→ 中文;未知值原样展示
+const JUMP_CN: Record<string, string> = {
+  next_morning: "次日清晨", hours_later: "数小时后", days_later: "数日后",
 };
 
 function chapterTip(c: OverviewChapter): string {
@@ -72,12 +78,17 @@ function chapterTip(c: OverviewChapter): string {
 function OverviewBoard({ pid, onGotoChapter }: { pid: number; onGotoChapter?: (n: number) => void }) {
   const [data, setData] = useState<OverviewOut | null>(null);
   const [err, setErr] = useState("");
+  // 剧情时间线(契约聚合,零 LLM):与 overview 独立拉取,失败互不影响
+  const [timeline, setTimeline] = useState<TimelineItem[] | null>(null);
 
   useEffect(() => {
     (async () => {
       setErr("");
       try { setData(await api.overview(pid)); } catch (e) { setErr(String(e)); }
     })();
+    api.timeline(pid)
+      .then((r) => setTimeline(r.items))
+      .catch(() => setTimeline([]));
   }, [pid]);
 
   const chapters = data?.chapters ?? [];
@@ -101,7 +112,9 @@ function OverviewBoard({ pid, onGotoChapter }: { pid: number; onGotoChapter?: (n
           <div className="grow" />
           <span className="badge">未生成</span>
           <span className="badge warn">草稿</span>
-          <span className="badge ok">定稿</span>
+          <span className="badge warn">待审</span>
+          <span className="badge ok">已审</span>
+          <span className="badge err">拦截</span>
           <span className="badge err">大纲已变</span>
         </div>
         <div className="ov-grid mt-2">
@@ -117,6 +130,31 @@ function OverviewBoard({ pid, onGotoChapter }: { pid: number; onGotoChapter?: (n
             );
           })}
           {!chapters.length && <div className="muted">暂无大纲。</div>}
+        </div>
+      </div>
+
+      {/* ---- 剧情时间线(章末契约聚合,零 LLM) ---- */}
+      <div className="card">
+        <div className="card-head">
+          <h2>剧情时间线</h2>
+          <span className="muted">各章章末的剧情时间/地点,从章末契约聚合;写前预审与门禁已用它抓跨章时间倒流</span>
+        </div>
+        <div className="mt-2">
+          {timeline === null && <div className="muted"><span className="spin" />加载中…</div>}
+          {timeline !== null && !timeline.length && (
+            <div className="muted">
+              暂无契约数据——老书可去「编辑部 → 审核报告」批量补提契约后生成。
+            </div>
+          )}
+          {(timeline ?? []).map((t) => (
+            <div key={t.chapter} className="fact-line">
+              <b>第{t.chapter}章末</b> {t.in_story_time || "时间未知"}
+              {t.location && <span className="muted"> @ {t.location}</span>}
+              {t.time_jump_hint && t.time_jump_hint !== "none" && (
+                <span className="badge"> 下章跳跃:{JUMP_CN[t.time_jump_hint] ?? t.time_jump_hint}</span>
+              )}
+            </div>
+          ))}
         </div>
       </div>
 

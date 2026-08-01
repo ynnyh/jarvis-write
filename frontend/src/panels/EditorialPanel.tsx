@@ -41,6 +41,13 @@ export default function EditorialPanel({ pid }: Props) {
   const [proofEcho, setProofEcho] = useState<ProofreadSnapshot | null>(null);
   // 审核
   const [audit, setAudit] = useState<AuditReport | null>(null);
+  // 全书体检 / 批量补契约结果(docs/08 §7 P2)
+  const [diagResult, setDiagResult] = useState<{
+    scanned: number; with_issues: number[]; total_issues: number; total_blockers: number;
+  } | null>(null);
+  const [backfillResult, setBackfillResult] = useState<{
+    extracted: number[]; skipped: number[]; failed: number[];
+  } | null>(null);
 
   useEffect(() => {
     api.listChapters(pid).then((list) => {
@@ -96,6 +103,28 @@ export default function EditorialPanel({ pid }: Props) {
     }));
     toast.ok("意见已带到写作页", `第 ${review.chapter_number} 章的重写框已填好,确认后开跑`);
     nav(`/project/${pid}/write`);
+  }
+
+  // 全书体检:LLM 逐章扫跨章矛盾,问题落各章审核报告;完成后刷新聚合报告
+  async function runDiag() {
+    setErr(""); setBusy("全书体检中(逐章扫描,较长)…"); setDiagResult(null);
+    try {
+      const r = await runJob<{
+        scanned: number; with_issues: number[]; total_issues: number; total_blockers: number;
+      }>(() => api.diagAsync(pid), { kind: `diag-${pid}` });
+      if (r) { setDiagResult(r); setAudit(null); }
+    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+  }
+
+  // 老书批量补契约:缺有效契约的章逐章重提;完成后刷新聚合报告(缺契约数变)
+  async function runBackfill() {
+    setErr(""); setBusy("批量补提契约中…"); setBackfillResult(null);
+    try {
+      const r = await runJob<{ extracted: number[]; skipped: number[]; failed: number[] }>(
+        () => api.contractsBackfillAsync(pid), { kind: `contract-backfill-${pid}` },
+      );
+      if (r) { setBackfillResult(r); setAudit(null); }
+    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
   }
 
   async function runReview() {
@@ -306,6 +335,49 @@ export default function EditorialPanel({ pid }: Props) {
       )}
 
       {tab === "audit" && (
+        <>
+        <div className="card mb-3">
+          <div className="card-head">
+            <h3 className="grow">全书体检与契约</h3>
+          </div>
+          <div className="card-desc mt-1">
+            体检:LLM 逐章对照圣经/上章契约/上章结尾,把跨章矛盾一次扫出来,按「诊断」来源落进
+            各章的审核报告(写作页 → 打开章节 → 审核报告,可逐条修订/忽略)。
+            契约是门禁和下章衔接的对照基准,老书缺契约时先批量补提,体检结果才完整。
+          </div>
+          <div className="actions mt-2">
+            <button className="primary btn-sm" disabled={!!busy} onClick={runDiag}>
+              {busy.startsWith("全书体检") && <span className="spin spin-sm" />}全书体检
+            </button>
+            <button className="btn-sm" disabled={!!busy} onClick={runBackfill}>
+              {busy.startsWith("批量补提") && <span className="spin spin-sm" />}
+              批量补提契约
+              {audit?.contracts_missing?.length
+                ? `(${audit.contracts_missing.length} 章缺)` : ""}
+            </button>
+          </div>
+          {diagResult && (
+            diagResult.total_issues ? (
+              <div className="notice notice-warn mt-2">
+                体检完成:扫 {diagResult.scanned} 章,第 {diagResult.with_issues.join("、")} 章
+                共 {diagResult.total_issues} 个问题({diagResult.total_blockers} 个致命),
+                去各章「审核报告」逐条处理。
+              </div>
+            ) : (
+              <div className="msg-ok mt-2">
+                体检完成:扫 {diagResult.scanned} 章,未发现跨章矛盾。
+              </div>
+            )
+          )}
+          {backfillResult && (
+            <div className="msg-ok mt-2">
+              补提完成:成功 {backfillResult.extracted.length} 章,
+              跳过 {backfillResult.skipped.length} 章(已有有效契约)
+              {backfillResult.failed.length > 0 &&
+                `,失败 ${backfillResult.failed.length} 章(第 ${backfillResult.failed.join("、")} 章,可重试)`}
+            </div>
+          )}
+        </div>
         <div className="card">
           <div className="card-head">
             <h3 className="grow">审核报告(一致性引擎聚合,随写作实时更新)</h3>
@@ -347,6 +419,7 @@ export default function EditorialPanel({ pid }: Props) {
             </div>
           )}
         </div>
+        </>
       )}
 
       {err && <div className="msg-err mt-2">{err}</div>}

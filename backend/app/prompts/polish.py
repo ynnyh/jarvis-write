@@ -48,7 +48,7 @@ POLISH_PROMPT = """\
 {text}
 
 {style_directives}
-{deai_rules}
+{user_directive}{deai_rules}
 润色铁律:
 1. 情节、人物行为、对话内容的实质、时间地点因果 —— 一律不得改变
 2. 不得新增原文没有的事件、人物、道具、设定

@@ -7,6 +7,8 @@ POST /api/projects/{id}/chapters/{n}/review-async    主编评分(四维+短评+
 POST /api/projects/{id}/chapters/{n}/proofread-async 校对(错别字/语病/标点/重复,问题清单)
 POST /api/projects/{id}/chapters/{n}/proofread-apply 应用勾选的校对修复(逐条精确替换)
 GET  /api/projects/{id}/audit-report                 审核报告(聚合失配章/伏笔/退场人物,零 LLM)
+POST /api/projects/{id}/diag-async                   全书体检(LLM 逐章扫矛盾,问题落各章清单)
+POST /api/projects/{id}/contracts/backfill-async     老书批量补提章末契约(缺契约章逐章重提)
 """
 from __future__ import annotations
 
@@ -32,6 +34,11 @@ from app.engines.editorial import (
     review_chapter,
     store_proofread_snapshot,
     store_review_snapshot,
+)
+from app.engines.diagnosis import (
+    backfill_contracts,
+    chapters_missing_contract,
+    diagnose_book,
 )
 from app.jobs import list_running, spawn_job
 from app.paths import resource_path
@@ -288,6 +295,8 @@ async def audit_report(project_id: int, db: Session = Depends(get_db)):
         "target_chapters": project.target_chapters,
         "stale_chapters": stale,
         "holes": holes,
+        # 缺有效契约的已成文章(老书):供前端引导「批量补提契约」
+        "contracts_missing": chapters_missing_contract(db, project_id),
         "foreshadow": {
             "total": len(fores),
             "open": open_count,
@@ -295,3 +304,52 @@ async def audit_report(project_id: int, db: Session = Depends(get_db)):
             "overdue": overdue,
         },
     }
+
+
+# ---------- 全书体检 / 批量补契约(docs/08 §7 P2) ----------
+
+
+def _book_job_busy(project_id: int) -> str:
+    """章节级任务互斥:生成/同步/放行/体检/补契约任一在跑,返回其阶段文案。"""
+    busy = (
+        list_running(f"chapter-{project_id}-")
+        + list_running(f"re-extract-{project_id}-")
+        + list_running(f"gate-release-{project_id}-")
+        + list_running(f"diag-{project_id}")
+        + list_running(f"contract-backfill-{project_id}")
+    )
+    return busy[0][1]["stage"] if busy else ""
+
+
+@router.post("/api/projects/{project_id}/diag-async")
+async def diag_async(project_id: int, db: Session = Depends(get_db)):
+    """全书体检:LLM 逐章扫描跨章矛盾,问题以「诊断」来源落各章问题清单(幂等重建)。"""
+    get_project_or_404(db, project_id)
+    if busy := _book_job_busy(project_id):
+        raise HTTPException(status_code=409, detail=f"已有章节任务在进行中({busy}),稍后再试。")
+
+    async def work(progress) -> dict:
+        session = SessionLocal()
+        try:
+            return await diagnose_book(session, project_id, progress=progress)
+        finally:
+            session.close()
+
+    return {"job_id": spawn_job(f"diag-{project_id}", work)}
+
+
+@router.post("/api/projects/{project_id}/contracts/backfill-async")
+async def contracts_backfill_async(project_id: int, db: Session = Depends(get_db)):
+    """老书批量补契约:缺有效契约的已成文章逐章重提(已有有效契约的跳过)。"""
+    get_project_or_404(db, project_id)
+    if busy := _book_job_busy(project_id):
+        raise HTTPException(status_code=409, detail=f"已有章节任务在进行中({busy}),稍后再试。")
+
+    async def work(progress) -> dict:
+        session = SessionLocal()
+        try:
+            return await backfill_contracts(session, project_id, progress=progress)
+        finally:
+            session.close()
+
+    return {"job_id": spawn_job(f"contract-backfill-{project_id}", work)}

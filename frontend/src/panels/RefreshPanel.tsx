@@ -23,6 +23,12 @@ export default function RefreshPanel({ pid }: Props) {
   const [stage, setStage] = useState("");
   const [err, setErr] = useState("");
   const [memo, setMemo] = useState<string>("");
+  // 文风备忘手动编辑:editing=编辑态,draft=编辑稿,saving=保存中
+  const [memoEditing, setMemoEditing] = useState(false);
+  const [memoDraft, setMemoDraft] = useState("");
+  const [memoSaving, setMemoSaving] = useState(false);
+  // 批量修改要求(可选):跨章的共性问题反馈,轻度重润注入润色 prompt、重度重写作为重写意见
+  const [directive, setDirective] = useState("");
   // 失败后的一键补救:轻度重润/回填的失败章、重度重写的剩余章(进度后端已按章保存)
   const [lightFailed, setLightFailed] = useState<number[]>([]);
   const [heavyRemaining, setHeavyRemaining] = useState<number[]>([]);
@@ -33,6 +39,30 @@ export default function RefreshPanel({ pid }: Props) {
       .catch((e) => setErr(errMsg(e)));
   }
   useEffect(() => { loadChapters(); }, [pid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 挂载时拉取现有文风备忘(项目详情),用于查看/编辑;生成文风备忘后也会刷新此值
+  useEffect(() => {
+    api.getProject(pid)
+      .then((p) => setMemo(p.style_memo || ""))
+      .catch(() => undefined);
+  }, [pid]);
+
+  // 手动保存文风备忘:整段覆盖;清空后生成时会从头自动累积
+  async function saveMemo() {
+    setMemoSaving(true);
+    try {
+      const text = memoDraft.trim();
+      await api.patchProject(pid, { style_memo: text });
+      setMemo(text);
+      setMemoEditing(false);
+      toast.ok("文风备忘已保存",
+        text ? "后续生成会在这份备忘的基础上继续累积" : "已清空,后续生成将重新自动累积");
+    } catch (e) {
+      toast.err("文风备忘保存失败", errMsg(e));
+    } finally {
+      setMemoSaving(false);
+    }
+  }
 
   const written = chapters.map((c) => c.chapter_number);
   const allPicked = written.length > 0 && written.every((n) => picked.has(n));
@@ -96,7 +126,7 @@ export default function RefreshPanel({ pid }: Props) {
   const runLight = (list: number[]) =>
     doJob<{ refreshed: number[]; failed: ChapterFailure[]; total: number }>(
       "轻度重润",
-      () => api.refreshLight(pid, list),
+      () => api.refreshLight(pid, list, directive.trim()),
       (r) => {
         const failedNums = (r.failed || []).map((f) => f.chapter);
         setLightFailed(failedNums);
@@ -120,7 +150,7 @@ export default function RefreshPanel({ pid }: Props) {
     if (!ok) return;
     doJob<HeavyResult>(
       "重度重写",
-      () => api.refreshHeavy(pid, list),
+      () => api.refreshHeavy(pid, list, directive.trim()),
       (r) => {
         setHeavyRemaining(r.remaining || []);
         if (r.error)
@@ -167,6 +197,19 @@ export default function RefreshPanel({ pid }: Props) {
         </div>
       </div>
 
+      {/* 批量修改要求:跨章共性问题(文字层)的反馈入口 */}
+      <div className="card mb-3">
+        <b>修改要求(可选)</b>
+        <div className="card-desc mt-1">
+          好几章都有的文字层问题写在这里,一次批量处理:比如"每章结尾都在总结点题""对话太书面化"。
+          轻度重润会把它注入每章润色 prompt(仍不改剧情);重度重写则作为重写意见。
+          单章问题去「写作」用行内重写;剧情/设定层的跨章调整去「大纲」用修改指令。
+        </div>
+        <textarea className="mt-2" rows={3} maxLength={500}
+          placeholder="留空 = 只做常规去AI味重润 / 按原大纲重写"
+          value={directive} onChange={(e) => setDirective(e.target.value)} />
+      </div>
+
       {err && <div className="msg-err mb-2">{err}</div>}
       {busy && <div className="msg-info mb-2"><span className="spin" />{busy}{stage ? ` · ${stage}` : ""}</div>}
 
@@ -182,16 +225,44 @@ export default function RefreshPanel({ pid }: Props) {
         </div>
 
         <div className="card action-card">
-          <b>② 初始化文风备忘</b>
-          <div className="card-desc">扫前几章正文,生成"这本书怎么写"的文风基准,注入后续生成。已有则不覆盖。</div>
+          <b>② 文风备忘</b>
+          <div className="card-desc">
+            "这本书怎么写"的文风基准,注入后续生成。可扫前几章自动生成,也可手动查看/修改;
+            手改后自动累积会在这份基础上继续。
+          </div>
           <button className="btn-sm" disabled={!!busy} onClick={runSeedMemo}>
             生成文风备忘
           </button>
-          {memo && (
-            <details className="mt-2">
-              <summary className="muted">查看文风备忘</summary>
-              <pre className="memo-pre">{memo}</pre>
-            </details>
+          {!memoEditing ? (
+            <>
+              {memo ? (
+                <details className="mt-2">
+                  <summary className="muted">查看文风备忘</summary>
+                  <pre className="memo-pre">{memo}</pre>
+                </details>
+              ) : (
+                <div className="hint mt-2">暂无备忘,可自动生成或直接手写。</div>
+              )}
+              <button className="btn-sm mt-2" disabled={!!busy}
+                onClick={() => { setMemoDraft(memo); setMemoEditing(true); }}>
+                {memo ? "编辑文风备忘" : "手写文风备忘"}
+              </button>
+            </>
+          ) : (
+            <div className="mt-2">
+              <textarea rows={8} value={memoDraft}
+                placeholder="例:短句为主,对话口语化;章尾不总结点题;比喻节制……"
+                onChange={(e) => setMemoDraft(e.target.value)} />
+              <div className="mt-2">
+                <button className="btn-sm primary" disabled={memoSaving} onClick={saveMemo}>
+                  {memoSaving && <span className="spin spin-sm" />}保存备忘
+                </button>
+                {" "}
+                <button className="btn-sm" disabled={memoSaving}
+                  onClick={() => setMemoEditing(false)}>取消</button>
+              </div>
+              <div className="hint mt-1">整段覆盖保存;清空保存 = 后续生成从头重新自动累积。</div>
+            </div>
           )}
         </div>
 

@@ -119,6 +119,8 @@ export interface Project {
   total_words?: number;
   // 卷纲(滚动规划指南针,长书才有)
   macro_plan?: { start: number; end: number; goal: string }[] | null;
+  // 文风备忘(随书累积的文风基线;翻新面板可手动编辑,后续生成以此为底继续累积)
+  style_memo?: string | null;
 }
 export interface Architecture {
   core_seed: string; character_dynamics: string;
@@ -165,7 +167,7 @@ export interface ChapterIssue {
 export interface GenerateChapterResponse extends ChapterDetail {
   consistency_issues: Record<string, string>[];
   extraction_stats: Record<string, unknown>;
-  ai_flavor: FlavorInfo;
+  ai_flavor: FlavorInfo | null;
   word_guard_action?: "none" | "compressed" | "split";
   split_info?: {
     original_chapter: number;
@@ -286,6 +288,11 @@ export interface OverviewOut {
   chapters: OverviewChapter[];
   foreshadowings: OverviewForeshadow[];
   characters: OverviewCharacter[];
+}
+/** 剧情时间线一格:该章章末契约聚合(零 LLM);无契约的章断档不显示 */
+export interface TimelineItem {
+  chapter: number; in_story_time: string | null; location: string | null;
+  scene_continues: boolean; time_jump_hint: string;
 }
 export interface PolishResult {
   polished: string; locked_facts: string[]; violations: Record<string, string>[];
@@ -411,6 +418,8 @@ export interface AuditReport {
   target_chapters: number;
   stale_chapters: number[];
   holes: number[];
+  // 缺有效契约的已成文章(老书):引导「批量补提契约」
+  contracts_missing?: number[];
   foreshadow: {
     total: number; open: number; resolved: number;
     overdue: { description: string; planted: number; expected: number | null; status: string }[];
@@ -552,6 +561,9 @@ export const api = {
   // 一致性问题清单(docs/08 §5.7):open/resolved/ignored 各状态,最新在前
   listChapterIssues: (pid: number, n: number) =>
     req<ChapterIssue[]>("GET", `/api/projects/${pid}/chapters/${n}/issues`),
+  // 契约有误一键重提:重提上一章+本章契约并重检本章门禁(gate 清单重建)
+  reextractContract: (pid: number, n: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/chapters/${n}/contract-reextract-async`),
   // 单条问题状态流转:open → resolved(已人工改完)/ ignored(确认忽略)
   patchChapterIssue: (pid: number, n: number, issueId: number, status: "resolved" | "ignored") =>
     req<ChapterIssue>("PATCH", `/api/projects/${pid}/chapters/${n}/issues/${issueId}`, { status }),
@@ -584,6 +596,9 @@ export const api = {
     req<CharactersOut>("GET", `/api/projects/${pid}/characters`),
   overview: (pid: number) =>
     req<OverviewOut>("GET", `/api/projects/${pid}/overview`),
+  // 全书剧情时间线(各章章末契约聚合,零 LLM)
+  timeline: (pid: number) =>
+    req<{ items: TimelineItem[] }>("GET", `/api/projects/${pid}/timeline`),
   createCharacter: (pid: number, payload: { name: string; aliases?: string[]; profile?: string }) =>
     req<CharacterCard>("POST", `/api/projects/${pid}/characters`, payload),
   setCharacterRetired: (pid: number, entityId: number, retired: boolean) =>
@@ -619,6 +634,11 @@ export const api = {
     req<{ proofread: ProofreadSnapshot | null }>("GET", `/api/projects/${pid}/chapters/${n}/proofread`),
   auditReport: (pid: number) =>
     req<AuditReport>("GET", `/api/projects/${pid}/audit-report`),
+  // 全书体检(LLM 逐章扫跨章矛盾,问题以「诊断」落各章审核报告)/ 老书批量补契约
+  diagAsync: (pid: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/diag-async`),
+  contractsBackfillAsync: (pid: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/contracts/backfill-async`),
   // 指令改异步解析(应用仍走同步 apply,纯 DB 快)
   parseEditDirectiveAsync: (pid: number, directive: string) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/outlines/edit-directive-async`, { directive }),
@@ -690,8 +710,8 @@ export const api = {
     req<{ job_id: string }>("POST", `/api/projects/${pid}/refresh/backfill-beats`, { chapter_numbers }),
   refreshSeedStyleMemo: (pid: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/refresh/seed-style-memo`),
-  refreshLight: (pid: number, chapter_numbers: number[] = []) =>
-    req<{ job_id: string }>("POST", `/api/projects/${pid}/refresh/light`, { chapter_numbers }),
-  refreshHeavy: (pid: number, chapter_numbers: number[] = []) =>
-    req<{ job_id: string }>("POST", `/api/projects/${pid}/refresh/heavy`, { chapter_numbers }),
+  refreshLight: (pid: number, chapter_numbers: number[] = [], directive = "") =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/refresh/light`, { chapter_numbers, directive }),
+  refreshHeavy: (pid: number, chapter_numbers: number[] = [], directive = "") =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/refresh/heavy`, { chapter_numbers, directive }),
 };

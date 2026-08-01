@@ -1,8 +1,8 @@
 // 写作面板:逐章生成 / 阅读;本章蓝图上下文置顶;润色移步「编辑部」
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  api, ChapterBrief, ChapterDetail, ChapterVersionBrief, ChapterVersionDetail,
-  EditorAction, GenerateChapterResponse, Outline, Project, Tendency,
+  api, ChapterBrief, ChapterDetail, ChapterReview, ChapterVersionBrief,
+  ChapterVersionDetail, EditorAction, GenerateChapterResponse, Outline, Project, Tendency,
 } from "../api";
 import { pollJob, errMsg } from "../pollJob";
 import { useChapters, useInvalidateProject } from "../hooks/queries";
@@ -40,6 +40,9 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
   const [genResult, setGenResult] = useState<GenerateChapterResponse | null>(null);
+  // 审核报告持久入口:随时查看当前章的门禁/问题清单/主审快照(生成结果卡切章即失,这里补常驻)
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewSnap, setReviewSnap] = useState<ChapterReview | null>(null);
   const [genTendency, setGenTendency] = useState<Tendency>({});
   const [showTendency, setShowTendency] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -178,6 +181,7 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
     if (focusChapter == null || !chapters.length) return;
     if (chapters.some((c) => c.chapter_number === focusChapter)) {
       setErr(""); setGenResult(null); setEditing(false);
+      setReviewOpen(false); setReviewSnap(null);
       setVersionsFor(null); setVersions(null); setCompareVer(null);
       api.getChapter(pid, focusChapter)
         .then(setCurrent)
@@ -255,6 +259,33 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
     ? outlines.find((o) => o.chapter_number === current.chapter_number)
     : null;
 
+  // 「审核报告」开关:展开时拉取主审快照(正文改过则后端返 null,自动隐藏过期评分)
+  async function toggleReviewReport() {
+    if (reviewOpen) { setReviewOpen(false); return; }
+    setReviewOpen(true);
+    if (!current) return;
+    try {
+      const r = await api.getReview(pid, current.chapter_number);
+      setReviewSnap(r.review);
+    } catch { setReviewSnap(null); }
+  }
+
+  // 历史模式合成生成响应:门禁态由 status 推导,问题清单由卡片内自取,主审分用快照
+  const reviewReportResult: GenerateChapterResponse | null = current ? {
+    ...current,
+    consistency_issues: [],
+    extraction_stats: {},
+    ai_flavor: null,
+    review: reviewSnap ? {
+      scores: reviewSnap.scores,
+      comment: reviewSnap.comment,
+      suggestions: reviewSnap.suggestions,
+      passed: reviewSnap.passed ?? false,
+      revision_rounds: reviewSnap.revision_rounds ?? 0,
+      threshold: reviewSnap.threshold ?? 7,
+    } : undefined,
+  } : null;
+
   // 编辑中的未保存修改:取消/切章前确认,防手滑丢稿
   const editDirty =
     editing && current !== null &&
@@ -272,6 +303,7 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
   async function open(n: number) {
     if (!(await confirmDiscardEdit())) return;
     setErr(""); setGenResult(null); setEditing(false); closeVersions();
+    setReviewOpen(false); setReviewSnap(null);
     try { setCurrent(await api.getChapter(pid, n)); } catch (e) { setErr(errMsg(e)); }
   }
 
@@ -606,6 +638,27 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
 
         {current ? (
           <>
+            {reviewOpen && reviewReportResult && (
+              <GenResultCard
+                pid={pid}
+                result={reviewReportResult}
+                historical
+                onChanged={() => {
+                  reload();
+                  // 修订/放行后同步刷新右侧打开的正文与主审快照
+                  api.getChapter(pid, reviewReportResult.chapter_number)
+                    .then(setCurrent)
+                    .catch(() => undefined);
+                  api.getReview(pid, reviewReportResult.chapter_number)
+                    .then((r) => setReviewSnap(r.review))
+                    .catch(() => undefined);
+                }}
+                onRewrite={() => {
+                  setReviseFor(reviewReportResult.chapter_number);
+                  setReviseText("");
+                }}
+              />
+            )}
             {currentOutline && (
               <div className="card card-info">
                 <b>本章蓝图</b> 第{currentOutline.chapter_number}章《{currentOutline.title}》
@@ -631,6 +684,10 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
                       }}>编辑正文</button>
                       <button className="btn-sm" disabled={!!genJob}
                         onClick={() => openVersions(current.chapter_number)}>历史版本</button>
+                      <button className={"btn-sm" + (reviewOpen ? " primary" : "")}
+                        onClick={toggleReviewReport}>
+                        {reviewOpen ? "收起审核" : "审核报告"}
+                      </button>
                     </>
                   ) : (
                     <>

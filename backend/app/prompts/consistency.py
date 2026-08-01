@@ -72,6 +72,9 @@ CONSISTENCY_CHECK_PROMPT = """\
 【前情摘要】
 {rolling_summary}
 
+【全书剧情时间线】
+{timeline_block}
+
 【第{chapter_number}章正文】
 {chapter_text}
 
@@ -80,7 +83,9 @@ CONSISTENCY_CHECK_PROMPT = """\
    (身体/情绪/正在做的事)是否冲突——典型如"睡着又发呆":上章末刚入睡、本章无时间跳跃
    交代却清醒活动。
 2. 人物关系与认知(knowledge):角色是否说出了他此刻不该知道的信息?关系是否无端反转?
-3. 时间线与空间(timeline):与契约的剧情时间/章末地点是否冲突?位置迁移是否合理?时间是否倒流?
+3. 时间线与空间(timeline):与契约的剧情时间/章末地点是否冲突?对照全书剧情时间线,
+   时间是否倒流?位置迁移是否合理?远距离跨章的时间矛盾也要报(如第 3 章还是深夜,
+   本章无跳跃交代却回到当天傍晚)。
 4. 世界观法则(worldrule):是否违反已确立的规则/代价/限制?
 
 严格按 JSON 输出(不要 markdown 代码块,不要解释):
@@ -116,6 +121,9 @@ PREFLIGHT_CHECK_PROMPT = """\
 
 【上一章章末交接契约(上一章结尾那一刻的结构化状态)】
 {prev_contract}
+
+【全书剧情时间线(各章章末的剧情时间/地点;判断蓝图的时间安排是否与全书走向冲突)】
+{timeline_block}
 
 【第{chapter_number}章蓝图(写作计划,尚未成文)】
 {blueprint}

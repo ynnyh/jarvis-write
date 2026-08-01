@@ -27,6 +27,7 @@ from app.engines.consistency.bible import BibleService
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.editorial import content_hash
 from app.engines.pipeline.handoff import _fresh_contract, format_contract_block
+from app.engines.timeline import timeline_block
 from app.llm.router import Task, get_adapter_for
 from app.prompts.consistency import CONSISTENCY_CHECK_PROMPT
 
@@ -110,6 +111,7 @@ async def check_chapter(
         prev_contract=prev_contract or "(无上一章契约——未提取或正文已改动失效)",
         prev_tail=prev_tail or "(无上一章结尾原文,本章可能是第一章)",
         rolling_summary=rolling_summary or "(无)",
+        timeline_block=timeline_block(db, project_id, chapter_number),
         chapter_number=chapter_number,
         chapter_text=chapter_text[:12000],
     )

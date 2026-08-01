@@ -148,11 +148,12 @@ async def seed_style_memo(
 
 
 async def light_refresh_chapter(
-    db: Session, project: Project, chapter_number: int
+    db: Session, project: Project, chapter_number: int, directive: str = ""
 ) -> dict:
     """轻度翻新:锁情节重润(去AI味+当前文风约束),留快照后覆盖正文。
 
     复用 polish_text(抽事实→检测AI腔→润色→校验事实),不改情节,故不必重抽圣经。
+    directive: 用户的批量修改要求,注入润色 prompt(仍受锁情节铁律约束)。
     返回 {chapter_number, applied, violations, flavor_before, flavor_after, word_count}。
     """
     ch = (
@@ -162,7 +163,7 @@ async def light_refresh_chapter(
     )
     if ch is None or not (ch.final_content or "").strip():
         raise ValueError(f"第 {chapter_number} 章还没有正文,无法重润")
-    result = await polish_text(ch.final_content, None, project.global_tendency)
+    result = await polish_text(ch.final_content, None, project.global_tendency, directive=directive)
     after = (result.get("polished") or "").strip()
     applied = False
     if after and after != ch.final_content.strip():

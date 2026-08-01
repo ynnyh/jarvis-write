@@ -488,6 +488,109 @@ async def re_extract_async(
     return {"job_id": job_id}
 
 
+@router.post("/{chapter_number}/contract-reextract-async")
+async def contract_reextract_async(
+    project_id: int, chapter_number: int, db: Session = Depends(get_db)
+):
+    """契约有误一键重提(docs/08 §8):重提上一章与本章的章末契约 + 本章门禁重检。
+
+    场景:契约提取错了会导致本章门禁误报(对照的是上一章契约)或下一章
+    衔接错位(注入的是本章契约)。重提两章契约后按当前正文重跑一致性检查,
+    gate 来源问题清单幂等重建。只更新清单,不改章节状态:quarantined 章
+    重检干净后仍需「放行」补走圣经/摘要链路(或重写)。
+    """
+    get_project_or_404(db, project_id)
+    ch = _get_chapter_or_404(db, project_id, chapter_number)
+    if not ch.final_content.strip():
+        raise HTTPException(status_code=400, detail="本章尚无定稿正文,无法提取契约")
+    busy = (
+        list_running(f"chapter-{project_id}-")
+        + list_running(f"re-extract-{project_id}-")
+        + list_running(f"gate-release-{project_id}-")
+    )
+    if busy:
+        raise HTTPException(
+            status_code=409,
+            detail=f"已有章节任务在进行中({busy[0][1]['stage']}),等它完成再重提。",
+        )
+    for jid, job in list_running(f"contract-{project_id}-"):
+        if job["kind"] == f"contract-{project_id}-{chapter_number}":
+            return {"job_id": jid}
+    job_id = create_job(f"contract-{project_id}-{chapter_number}")
+
+    async def runner() -> None:
+        from app.engines.consistency.checker import (
+            blockers_of,
+            check_chapter,
+            persist_issues,
+        )
+        from app.engines.pipeline.chapter import _rolling_summary
+        from app.engines.pipeline.handoff import (
+            extract_handoff_contract,
+            handoff_payload,
+        )
+        from app.llm.router import Task, get_adapter_for
+
+        session = SessionLocal()
+        try:
+            ch2 = (
+                session.query(Chapter)
+                .filter(
+                    Chapter.project_id == project_id,
+                    Chapter.chapter_number == chapter_number,
+                )
+                .first()
+            )
+            content = ch2.final_content
+            prev = (
+                session.query(Chapter)
+                .filter(
+                    Chapter.project_id == project_id,
+                    Chapter.chapter_number == chapter_number - 1,
+                )
+                .first()
+            )
+            has_prev = bool(prev and prev.final_content.strip())
+            total_steps = 3 if has_prev else 2
+            session.commit()  # 结束读事务,不拿快照跨 LLM 调用
+            adapter = get_adapter_for(Task.HANDOFF_EXTRACT)
+            step = 0
+            if has_prev:
+                step += 1
+                update_stage(job_id, f"{step}/{total_steps} 重提上一章(第 {chapter_number - 1} 章)契约")
+                await extract_handoff_contract(
+                    session, prev, chapter_number - 1, prev.final_content, adapter
+                )
+            step += 1
+            update_stage(job_id, f"{step}/{total_steps} 重提本章契约")
+            await extract_handoff_contract(
+                session, ch2, chapter_number, content, adapter
+            )
+            step += 1
+            update_stage(job_id, f"{step}/{total_steps} 一致性门禁重检")
+            issues = await check_chapter(
+                session, project_id, chapter_number, content,
+                rolling_summary=_rolling_summary(session, project_id, chapter_number),
+            )
+            persist_issues(session, ch2, issues, source="gate", text=content)
+            session.commit()
+            handoff = handoff_payload(session, ch2)
+            finish_job(job_id, {
+                "contract_status": handoff["status"],
+                "contract_error": handoff["error"],
+                "issues": len(issues),
+                "blockers": len(blockers_of(issues)),
+            })
+        except Exception as exc:  # noqa: BLE001 — 任务失败进 job 状态
+            session.rollback()
+            fail_job(job_id, str(exc)[:500])
+        finally:
+            session.close()
+
+    asyncio.create_task(runner())
+    return {"job_id": job_id}
+
+
 # ---------- 一致性门禁:问题清单与 quarantined 放行 ----------
 
 

@@ -101,9 +101,12 @@ async def polish_text(
     text: str,
     tendency: Tendency | None = None,
     global_tendency: Tendency | None = None,
+    directive: str = "",
 ) -> dict:
     """润色一段文本。
 
+    directive: 用户的自定义修改要求(批量重润时透传),注入 prompt,
+    优先级低于润色铁律(仍不改情节)。
     返回 {polished, locked_facts, violations, flavor_before, flavor_after}。
     """
     text = text.strip()
@@ -142,6 +145,10 @@ async def polish_text(
             style_directives=style_block,
             deai_rules=_DEAI_RULES,
             output_contract=_OUTPUT_CONTRACT,
+            user_directive=(
+                f"【用户修改要求(优先满足,但不得违反上述润色铁律)】\n{directive.strip()}\n"
+                if directive.strip() else ""
+            ),
         )
     )
     polished, diagnosis = _split_polish_output(raw)

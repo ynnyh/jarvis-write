@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Outline
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.pipeline.handoff import load_handoff_block
+from app.engines.timeline import timeline_block
 from app.llm.router import Task, get_adapter_for
 from app.prompts.consistency import PREFLIGHT_CHECK_PROMPT
 
@@ -77,6 +78,7 @@ async def preflight_chapter(
         chapter_number=chapter_number,
         blueprint=_blueprint_block(outline),
         prev_contract=prev_contract,
+        timeline_block=timeline_block(db, project_id, chapter_number),
     )
     try:
         raw = await get_adapter_for(Task.CONSISTENCY).ask(prompt)

@@ -47,6 +47,8 @@ class ProjectOut(BaseModel):
     chat_log: list[Any] | None = None
     # 卷纲(滚动规划指南针,长书才有):[{start, end, goal}]
     macro_plan: list[Any] | None = None
+    # 文风备忘(随书累积的文风基线;可在翻新面板手动查看/编辑)
+    style_memo: str | None = None
     status: str
     # 列表页进度(list 接口聚合填充;详情接口为 0)
     written_chapters: int = 0

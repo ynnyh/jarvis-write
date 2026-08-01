@@ -42,6 +42,8 @@ router = APIRouter(
 class ChapterSelection(BaseModel):
     # 空列表 = 全书(由后端展开为所有已有章节/大纲)
     chapter_numbers: list[int] = Field(default_factory=list)
+    # 用户的批量修改要求(可选):轻度重润注入润色 prompt,重度重写作为重写意见
+    directive: str = Field(default="", max_length=500)
 
 
 def _all_outline_numbers(db: Session, project_id: int) -> list[int]:
@@ -134,11 +136,16 @@ async def seed_style_memo_async(
 async def light_refresh_async(
     project_id: int, req: ChapterSelection, db: Session = Depends(get_db)
 ):
-    """轻度重润:锁情节去AI味,批量按章排队。不改剧情,不重抽圣经。"""
+    """轻度重润:锁情节去AI味,批量按章排队。不改剧情,不重抽圣经。
+
+    directive: 用户的批量修改要求(如"对话太书面化"),注入每章润色 prompt,
+    仍受锁情节铁律约束(只动文笔,不改剧情)。
+    """
     get_project_or_404(db, project_id)
     nums = req.chapter_numbers or _all_written_numbers(db, project_id)
     if not nums:
         raise HTTPException(status_code=400, detail="没有已成文的章节可重润。")
+    directive = req.directive.strip()
     busy = _chapter_job_busy(project_id)
     if busy:
         raise HTTPException(status_code=409, detail=f"已有章节任务在进行中({busy}),稍后再试。")
@@ -153,7 +160,7 @@ async def light_refresh_async(
             try:
                 progress(f"[{i}/{total}] 第 {n} 章:重润")
                 project = session.get(Project, project_id)
-                await light_refresh_chapter(session, project, n)
+                await light_refresh_chapter(session, project, n, directive=directive)
                 session.commit()
                 done.append(n)
             except Exception as exc:  # noqa: BLE001 — 单章失败不中断整批
@@ -178,9 +185,11 @@ async def heavy_refresh_async(
     与逐章生成/连写队列互斥。按章号顺序串行(摘要链依赖顺序)。
     单章失败即停,但已完成的章各自提交、进度不丢;结果带 remaining(剩余章),
     前端可据此"续跑"而不必从头再来。
+    directive: 用户的批量修改要求,作为重写意见传给每章生成。
     """
     get_project_or_404(db, project_id)
     nums = sorted(set(req.chapter_numbers or _all_written_numbers(db, project_id)))
+    directive = req.directive.strip()
     if not nums:
         raise HTTPException(status_code=400, detail="没有可重写的章节。")
     # 每章都得有大纲(generate_chapter 前置)
@@ -208,6 +217,7 @@ async def heavy_refresh_async(
                 await generate_chapter(
                     session, project, n,
                     progress=lambda s, _n=n, _i=i: progress(f"[{_i}/{total}] 第 {_n} 章:{s}"),
+                    revision=directive or None,
                 )
                 session.commit()
                 done.append(n)
