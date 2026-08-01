@@ -847,6 +847,18 @@ button.head { height: auto; margin-left: 0; padding: 0; border: 0; background: n
 }
 .cf-value { flex: 1; white-space: pre-wrap; word-break: break-word; }
 .idea-card .concept-grid { grid-template-columns: 1fr; gap: 4px; margin-top: 8px; }
+/* 档案栏窄(约250px):两列网格会让每个字段只剩40px宽,文字一字一行;
+   改单列纵向排+值最多3行省略,保持侧栏紧凑 */
+.dossier .concept-grid { grid-template-columns: 1fr; gap: 8px; }
+.dossier .concept-field { flex-direction: column; gap: 2px; }
+.dossier .cf-label { text-align: left; min-width: 0; }
+.dossier .cf-value {
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+/* 概念行不再 nowrap 硬截,最多两行省略 */
+.dossier-row .dr-v.wrap {
+  white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
 
 .concept-edit { margin-top: 10px; }
 .concept-edit-row { margin-bottom: 8px; }

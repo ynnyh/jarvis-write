@@ -1091,7 +1091,7 @@ export default function OnboardingFlow() {
               <div className="dossier-rows">
                 <div className={"dossier-row" + (hasConcept ? " ok" : "")}>
                   <span className="dr-k">概念</span>
-                  <span className="dr-v">{hasConcept ? (concept.logline || "已定") : "未定"}</span>
+                  <span className="dr-v wrap">{hasConcept ? (concept.logline || "已定") : "未定"}</span>
                 </div>
                 <div className={"dossier-row" + (tendency.genre ? " ok" : "")}>
                   <span className="dr-k">题材</span>
