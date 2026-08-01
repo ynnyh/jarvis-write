@@ -340,13 +340,19 @@ export default function OnboardingFlow() {
     flyTo("concept", customConcept.logline || "手写概念", "genre");
   }
 
-  // ---------- 第 3 屏:题材(AI 预填) ----------
+  // ---------- 第 3 屏:题材(AI 预填,推断成功自动跳过) ----------
   useEffect(() => {
     if (step !== "genre" || !conceptText.trim() || tendency.genre) return;
     setInferBusy(true);
     api.genreInfer(conceptText).then(async (r) => {
       setGenreSuggests(r.suggestions.map((s) => ({ directive: "", ...s })));
-      if (r.genre) await patch({ global_tendency: { ...tendency, genre: r.genre } });
+      if (r.genre) {
+        await patch({ global_tendency: { ...tendency, genre: r.genre } });
+        // 推断成功即落库并直接进倾向屏,题材屏不再停留(回退/确认墙仍可改)
+        toast.ok(`题材已定为「${r.genre}」`, "确认墙里还能改");
+        await goto("tone");
+      }
+      // 推断为空:维持停在题材屏,用户手选或自写
     }).catch(() => undefined).finally(() => setInferBusy(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
