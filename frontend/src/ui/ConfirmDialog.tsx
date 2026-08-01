@@ -47,10 +47,13 @@ export function ConfirmHost() {
             <Dialog.Description className="dlg-body">{pending.body}</Dialog.Description>
           )}
           <div className="dlg-actions">
-            <button onClick={() => settle(false)}>{pending.cancelText ?? "取消"}</button>
+            {/* 危险操作:默认焦点放「取消」,防回车/空格误触确认 */}
+            <button autoFocus={!!pending.danger} onClick={() => settle(false)}>
+              {pending.cancelText ?? "取消"}
+            </button>
             <button
               className={pending.danger ? "danger" : "primary"}
-              autoFocus
+              autoFocus={!pending.danger}
               onClick={() => settle(true)}
             >
               {pending.confirmText ?? "确认"}

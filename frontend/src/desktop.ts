@@ -95,3 +95,29 @@ export async function onUpdateProgress(
     cb(e.payload[0], e.payload[1]);
   });
 }
+
+// ===== 关闭守卫 / 托盘 =====
+// 配套 ui/CloseGuard.tsx:点窗口 X 被 Rust 侧拦下并发 close://requested 事件,
+// 前端按「后台任务 / 托盘偏好」决定去向,再回调下面三个命令之一。
+
+/** 开启 Rust 侧关闭拦截(CloseGuard 挂载后调用;未开启时点 X 照旧直接关)。 */
+export function enableCloseGuard(): Promise<void> {
+  return invoke<void>("enable_close_guard");
+}
+
+/** 前端决定「直接关闭」:放行 Rust 拦截并关窗,后端子进程随窗口销毁终止。 */
+export function closeApp(): Promise<void> {
+  return invoke<void>("close_app");
+}
+
+/** 前端决定「最小化到托盘」:只隐藏窗口,后端与后台任务继续运行。 */
+export function hideToTray(): Promise<void> {
+  return invoke<void>("hide_to_tray");
+}
+
+/** 订阅「点了窗口 X 被拦下」事件;返回取消订阅函数。 */
+export async function onCloseRequested(cb: () => void): Promise<() => void> {
+  const t = window.__TAURI__;
+  if (!t?.event) return () => {};
+  return t.event.listen<null>("close://requested", () => cb());
+}

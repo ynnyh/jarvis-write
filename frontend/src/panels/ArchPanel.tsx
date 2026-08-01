@@ -2,7 +2,7 @@
 // 对生成的架构不满意时,开「架构研讨」和 AI 聊清楚想法 → 蒸馏成额外要求 → 按此重新生成
 import { useEffect, useRef, useState } from "react";
 import { api, Architecture, Project, StyleProfile, Tendency } from "../api";
-import { pollJob } from "../pollJob";
+import { pollJob, errMsg } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
 import { confirmDialog } from "../ui/ConfirmDialog";
 import { toast } from "../ui/Toaster";
@@ -34,6 +34,32 @@ export default function ArchPanel({ project, arch, onChanged, hasContent }: Prop
   // 组件卸载时中止轮询,防止卸载后继续 setState
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  // 挂载时查有没有还在跑的架构生成(切走页面再回来的场景),有则接回轮询
+  // 显示进度,而不是装作没事(与 ChaptersPanel 的 runningJobs 重连同一模式)。
+  useEffect(() => {
+    let cancelled = false;
+    api.runningJobs(project.id).then(({ jobs }) => {
+      if (cancelled) return;
+      const gen = jobs.find((j) => j.kind === `architecture-${project.id}`);
+      if (!gen) return;
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
+      setBusy(`架构生成中:${gen.stage}`);
+      pollJob(gen.job_id, {
+        signal: ctrl.signal,
+        onStage: (stage) => setBusy(`架构生成中:${stage}`),
+      }).then(async () => {
+        if (ctrl.signal.aborted) return;
+        await onChanged();
+        setMsg("架构已生成。下一步:去「大纲」生成章节蓝图。");
+      }).catch((e) => {
+        if (!ctrl.signal.aborted) setErr(errMsg(e));
+      }).finally(() => { if (!ctrl.signal.aborted) setBusy(""); });
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id]);
 
   // ---- 架构研讨对话状态(聊清不满意在哪 → 蒸馏出额外要求 → 按此重新生成) ----
   const [discussOpen, setDiscussOpen] = useState(false);
@@ -113,7 +139,7 @@ export default function ArchPanel({ project, arch, onChanged, hasContent }: Prop
         : "架构已生成。下一步:去「大纲」生成章节蓝图。");
       if (withDirective) setDiscussOpen(false); // 采纳后收起研讨面板
     } catch (e) {
-      if (!ctrl.signal.aborted) setErr(String(e));
+      if (!ctrl.signal.aborted) setErr(errMsg(e));
     } finally { if (!ctrl.signal.aborted) setBusy(""); }
   }
 
@@ -133,7 +159,7 @@ export default function ArchPanel({ project, arch, onChanged, hasContent }: Prop
       // 失败回退刚发出的那条,方便重发
       setDiscussMsgs((m) => m.slice(0, -1));
       setDiscussInput(text);
-      setDiscussErr(String(e));
+      setDiscussErr(errMsg(e));
     } finally { setDiscussing(false); }
   }
 
@@ -144,7 +170,7 @@ export default function ArchPanel({ project, arch, onChanged, hasContent }: Prop
       await onChanged();
       setMsg("架构修改已保存(版本+1)。注意:已生成的大纲不会自动变,大幅改动后建议重新生成蓝图。");
       setDirty(false);
-    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
   }
 
   async function saveProfile() {
@@ -153,30 +179,43 @@ export default function ArchPanel({ project, arch, onChanged, hasContent }: Prop
       const p = await api.saveStyleProfile(project.id, profile);
       setProfile(p); setProfileDirty(false);
       toast.ok("创作偏好档案已保存", "后续生成/重写/润色都会遵循这份档案");
-    } catch (e) { toast.err("保存失败", String(e)); } finally { setProfileBusy(""); }
+    } catch (e) { toast.err("保存失败", errMsg(e)); } finally { setProfileBusy(""); }
+  }
+
+  // 档案有未保存手改时,覆盖前先确认(提炼/吸收都会整份替换档案)
+  async function confirmOverwriteProfile(): Promise<boolean> {
+    if (!profileDirty) return true;
+    return confirmDialog({
+      title: "偏好档案有未保存的修改",
+      body: "继续会整份替换档案,未保存的手动修改将丢失。",
+      confirmText: "继续替换",
+      danger: true,
+    });
   }
 
   // 把研讨蒸馏出的主张吸收进档案(LLM 归类合并),成功后刷新本地档案
   async function absorbDirective() {
     if (!directive.trim()) return;
+    if (!(await confirmOverwriteProfile())) return;
     setProfileBusy("正在把主张整理进档案…");
     try {
       const p = await api.absorbStyleProfile(project.id, directive.trim());
       setProfile(p); setProfileDirty(false);
       toast.ok("已吸收进创作偏好档案", "可在下方档案卡查看/微调");
-    } catch (e) { toast.err("吸收失败", String(e)); } finally { setProfileBusy(""); }
+    } catch (e) { toast.err("吸收失败", errMsg(e)); } finally { setProfileBusy(""); }
   }
 
   // 从已有内容反向提炼档案(直接启用)。auto=true 为老书首次自动提炼,弹提示让作者知情
   async function extractProfile(showToast: boolean) {
     if (extracting) return;
+    if (!(await confirmOverwriteProfile())) return;
     setExtracting(true);
     try {
       const p = await api.extractStyleProfile(project.id);
       setProfile(p); setProfileDirty(false);
       if (showToast) toast.ok("已从你的内容提炼出创作偏好档案", "已自动启用,可在档案卡查看微调");
     } catch (e) {
-      if (showToast) toast.err("提炼失败", String(e));
+      if (showToast) toast.err("提炼失败", errMsg(e));
     } finally { setExtracting(false); }
   }
 

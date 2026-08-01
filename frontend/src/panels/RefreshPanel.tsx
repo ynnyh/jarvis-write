@@ -2,8 +2,10 @@
 // 四件套:回填节拍 → 初始化文风备忘 → 轻度重润(锁情节) / 重度重写(重跑生成)
 import { useEffect, useState } from "react";
 import { api, ChapterBrief } from "../api";
+import { errMsg } from "../pollJob";
 import { useJob } from "../ui/useJob";
 import { toast } from "../ui/Toaster";
+import { confirmDialog } from "../ui/ConfirmDialog";
 
 interface Props { pid: number; }
 
@@ -28,7 +30,7 @@ export default function RefreshPanel({ pid }: Props) {
   function loadChapters() {
     api.listChapters(pid)
       .then((list) => setChapters(list.filter((c) => c.status !== "empty")))
-      .catch((e) => setErr(String(e)));
+      .catch((e) => setErr(errMsg(e)));
   }
   useEffect(() => { loadChapters(); }, [pid]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -58,7 +60,7 @@ export default function RefreshPanel({ pid }: Props) {
       // 完成后刷新章节列表(状态/字数/失配标记可能已变)
       if (r) { done(r); loadChapters(); }
     } catch (e) {
-      setErr(String(e));
+      setErr(errMsg(e));
     } finally {
       setBusy(""); setStage("");
     }
@@ -106,8 +108,16 @@ export default function RefreshPanel({ pid }: Props) {
       },
     );
 
-  const runHeavy = (list: number[]) => {
-    if (!confirm("重度重写会覆盖选中章节的正文(有快照可回滚),确定继续?")) return;
+  const runHeavy = async (list: number[]) => {
+    // 重度重写会覆盖正文:应用内确认框(替代原生 confirm),后果说清、快照兜底也写明
+    const scope = list.length ? `选中的 ${list.length} 章` : "全书已成文章节";
+    const ok = await confirmDialog({
+      title: "重度重写?",
+      body: `将整章重跑生成并覆盖${scope}的正文(旧版自动存快照,可回滚),并自动重抽圣经、重建下游摘要。`,
+      confirmText: "开始重写",
+      danger: true,
+    });
+    if (!ok) return;
     doJob<HeavyResult>(
       "重度重写",
       () => api.refreshHeavy(pid, list),

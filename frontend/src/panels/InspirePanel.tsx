@@ -7,6 +7,7 @@ import {
 } from "../api";
 import TendencySelector from "../components/TendencySelector";
 import { useJob } from "../ui/useJob";
+import { confirmDialog } from "../ui/ConfirmDialog";
 import type { Step } from "../pages/ProjectPage";
 
 interface Props { project: Project; onChanged: () => Promise<void>; onGotoStep?: (step: Step) => void; }
@@ -51,6 +52,13 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
   const { run: runJob } = useJob();
   // 当前正在打磨的概念草稿(三条路都往它上收敛)
   const [concept, setConcept] = useState<Concept>(() => conceptFromProject(project));
+  // 概念有手动编辑未「定为本书概念」:AI 对话返回新概念覆盖前先确认(与 ArchPanel dirty 同一思路)
+  const [conceptDirty, setConceptDirty] = useState(false);
+  // AI/方案/采纳路径统一从这里换概念(顺带清手改标记)
+  function applyConcept(c: Concept) {
+    setConcept(c);
+    setConceptDirty(false);
+  }
   const [editing, setEditing] = useState(false);
   const [tendency, setTendency] = useState<Tendency>(project.global_tendency ?? {});
   const [busy, setBusy] = useState("");
@@ -97,7 +105,7 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
   }
 
   function pickIdea(c: Concept) {
-    setConcept({ ...EMPTY_CONCEPT, ...c });
+    applyConcept({ ...EMPTY_CONCEPT, ...c });
     setIdeas([]); setEditing(false); setRefinePreview(null);
     flash("已载入该方案为当前概念,可继续用「让 AI 改一处」或手动编辑打磨,满意后「定为本书概念」。");
   }
@@ -117,7 +125,7 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
 
   function acceptRefine() {
     if (!refinePreview) return;
-    setConcept(refinePreview.concept);
+    applyConcept(refinePreview.concept);
     setRefinePreview(null); setDirective("");
     flash("已应用改动到当前概念。");
   }
@@ -133,7 +141,20 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
       const r = await api.chatConcept(nextLog, concept, tendency);
       const finalLog: ChatTurn[] = [...nextLog, { role: "assistant", content: r.reply }];
       setChatLog(finalLog);
-      if (!conceptIsEmpty(r.concept)) setConcept(r.concept);
+      if (!conceptIsEmpty(r.concept)) {
+        // AI 返回了新概念:有手动编辑未定时先确认,防手改被静默覆盖
+        if (conceptDirty) {
+          const ok = await confirmDialog({
+            title: "用 AI 的新概念覆盖当前编辑?",
+            body: "当前概念有手动修改,覆盖后将丢失(聊天记录保留)。",
+            confirmText: "覆盖",
+            danger: true,
+          });
+          if (ok) applyConcept(r.concept);
+        } else {
+          applyConcept(r.concept);
+        }
+      }
       // 对话记录落库(失败不打扰,下轮再存)
       api.patchProject(project.id, { chat_log: finalLog }).catch(() => undefined);
     } catch (e) {
@@ -153,6 +174,7 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
         global_tendency: tendency,
       });
       await onChanged();
+      setConceptDirty(false); // 已落库,手改不再算"未保存"
       flash("已定为本书概念,主题已同步。下一步:去「架构」按此概念生成顶层设计。");
     } catch (e) { setErr(String(e)); } finally { setBusy(""); }
   }
@@ -198,7 +220,7 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
         </div>
         {hasConcept || editing ? (
           editing
-            ? <ConceptEditor c={concept} onChange={setConcept} />
+            ? <ConceptEditor c={concept} onChange={(c) => { setConcept(c); setConceptDirty(true); }} />
             : <ConceptView c={concept} />
         ) : (
           <div className="muted mt-2">还没有概念。用下面三种方式之一开始。</div>

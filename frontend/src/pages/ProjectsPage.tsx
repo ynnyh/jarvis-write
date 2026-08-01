@@ -7,6 +7,9 @@ import { confirmDialog } from "../ui/ConfirmDialog";
 import EmptyState from "../ui/EmptyState";
 import { toast } from "../ui/Toaster";
 
+// 项目状态英文值 → 中文徽标(未知值原样兜底)
+const PROJECT_STATUS_CN: Record<string, string> = { draft: "草稿", writing: "连载中" };
+
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [busy, setBusy] = useState(false);
@@ -104,7 +107,7 @@ export default function ProjectsPage() {
             ) : (
               <Link to={`/project/${p.id}`} className="proj-main">
                 <h2 className="proj-title">{p.title}
-                  <span className="badge">{p.status}</span>
+                  <span className="badge">{PROJECT_STATUS_CN[p.status] ?? p.status}</span>
                   {p.genre && <span className="badge">{p.genre}</span>}
                 </h2>
                 <div className="proj-meta">

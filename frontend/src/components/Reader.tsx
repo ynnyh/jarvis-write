@@ -378,7 +378,15 @@ export default function Reader({
   }
 
   return (
-    <div className="reader-overlay" onClick={onClose}>
+    // 点遮罩与 Esc 同一分层顺序:先收内层弹层(对话/润色/编辑/段选),都收完才关阅读器——
+    // 防止误点遮罩直接把未决状态连同阅读器一起关掉
+    <div className="reader-overlay" onClick={() => {
+      if (discussOpen) { if (!discussing) closeDiscuss(); return; }
+      if (polishOpen) { closePolish(); return; }
+      if (editOpen) { setEditOpen(false); return; }
+      if (selPara != null) { setSelPara(null); return; }
+      onClose();
+    }}>
       <div
         className={"reader" + (toc ? " reader-book" : "")}
         data-theme={prefs.theme}

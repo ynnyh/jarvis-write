@@ -11,7 +11,7 @@ export default function GenResultCard({ result }: { result: GenerateChapterRespo
         </span>
       )}
       {result.ai_flavor && (
-        <span className="muted"> 偏高可去「润色」,选「去AI味」方向</span>
+        <span className="muted"> 偏高可去「编辑部」,选「去AI味」方向</span>
       )}
       {result.consistency_issues.length
         ? <div className="mt-2">

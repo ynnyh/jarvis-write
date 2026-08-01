@@ -15,8 +15,10 @@ import {
 import { useJob } from "../ui/useJob";
 import { pollJob } from "../pollJob";
 import { toast } from "../ui/Toaster";
+import { confirmDialog } from "../ui/ConfirmDialog";
 import { CandidateCards } from "../ui/CandidateCards";
 import { ThinkingText } from "../ui/ThinkingText";
+import { conceptSig, conceptStaleText, isStale, titleSig as calcTitleSig, titleStaleText } from "./wizSig";
 
 export type SetupStep =
   | "idea" | "concept" | "genre" | "tone" | "title" | "scale" | "confirm" | "launch";
@@ -54,7 +56,10 @@ const THINK_TITLE = [
 ];
 
 // ---- localStorage:候选内容缓存 + 回改影响标记 ----
-interface WizCache { spark: string; ideas: Concept[] | null; titleIdeas: string[] | null; }
+interface WizCache {
+  spark: string; ideas: Concept[] | null; titleIdeas: string[] | null;
+  ideaSig?: string | null; titleSig?: string | null;
+}
 interface Dirty { from: SetupStep; ok: SetupStep[]; }
 function loadJSON<T>(key: string): T | null {
   try { const s = localStorage.getItem(key); return s ? JSON.parse(s) as T : null; }
@@ -108,6 +113,7 @@ export default function OnboardingFlow() {
 
   // 概念屏
   const [ideas, setIdeas] = useState<Concept[] | null>(null);
+  const [ideaSig, setIdeaSig] = useState<string | null>(null); // 候选生成时的输入签名
   const [customOpen, setCustomOpen] = useState(false);
   const [customConcept, setCustomConcept] = useState<Concept>({ ...EMPTY_CONCEPT });
   const brainstormedFor = useRef("");
@@ -120,6 +126,7 @@ export default function OnboardingFlow() {
 
   // 书名屏
   const [titleIdeas, setTitleIdeas] = useState<string[] | null>(null);
+  const [titleSig, setTitleSig] = useState<string | null>(null); // 同上,书名候选签名
   const [titleBusy, setTitleBusy] = useState(false);
   const [titleInput, setTitleInput] = useState("");
   const titleInputRef = useRef<HTMLInputElement | null>(null);
@@ -160,7 +167,10 @@ export default function OnboardingFlow() {
         setChapters(String(p.target_chapters));
         setWords(String(p.target_words_per_chapter));
         const c = loadJSON<WizCache>(`wiz-cache:${pid}`);
-        if (c) { setSpark(c.spark); setIdeas(c.ideas); setTitleIdeas(c.titleIdeas); }
+        if (c) {
+          setSpark(c.spark); setIdeas(c.ideas); setTitleIdeas(c.titleIdeas);
+          setIdeaSig(c.ideaSig ?? null); setTitleSig(c.titleSig ?? null);
+        }
         setDirty(loadJSON<Dirty>(`wiz-dirty:${pid}`));
         // 直达续建:无 step 参数时按 setup_state 落到对应屏
         if (!stepParam) {
@@ -188,8 +198,8 @@ export default function OnboardingFlow() {
   // 候选内容写入 localStorage:刷新后回到当前屏接着选
   useEffect(() => {
     if (pid === null || !project) return;
-    saveJSON(`wiz-cache:${pid}`, { spark, ideas, titleIdeas } satisfies WizCache);
-  }, [pid, project, spark, ideas, titleIdeas]);
+    saveJSON(`wiz-cache:${pid}`, { spark, ideas, titleIdeas, ideaSig, titleSig } satisfies WizCache);
+  }, [pid, project, spark, ideas, titleIdeas, ideaSig, titleSig]);
 
   const patch = useCallback(async (updates: Partial<Project> & { setup_state?: string }) => {
     if (pid === null) return null;
@@ -276,6 +286,7 @@ export default function OnboardingFlow() {
     const base = sparkText;
     if (!base) return;
     brainstormedFor.current = base + "|" + feedback;
+    const sig = conceptSig(base, tendency); // 与实际生成入参一致
     setErr(""); setIdeas(null);
     try {
       const r = await runJob<{ ideas: Concept[] }>(
@@ -283,7 +294,7 @@ export default function OnboardingFlow() {
           feedback ? `${base}\n补充要求:${feedback}` : base, tendency, 4),
         { kind: "inspire" },
       );
-      if (r) setIdeas(r.ideas);
+      if (r) { setIdeas(r.ideas); setIdeaSig(sig); }
     } catch (e) { setErr(String(e)); setIdeas([]); }
   }
 
@@ -300,11 +311,12 @@ export default function OnboardingFlow() {
   // 带反馈重新生成:有灵感文本 → 追加要求重出 4 个;对话捏出的概念 → refine 精修
   async function regenWithFeedback(f: string) {
     if (!sparkText && !conceptIsEmpty(concept)) {
+      const sig = conceptSig(sparkText, tendency);
       setErr(""); setIdeas(null);
       try {
         const r = await runJob<RefineResult>(
           () => api.refineConceptAsync(concept, f, tendency), { kind: "inspire" });
-        if (r) setIdeas([r.concept]);
+        if (r) { setIdeas([r.concept]); setIdeaSig(sig); }
       } catch (e) { setErr(String(e)); setIdeas([]); }
     } else {
       await brainstorm(f);
@@ -359,6 +371,8 @@ export default function OnboardingFlow() {
   }, [step, project, titleIdeas]);
 
   async function fetchTitles(feedback = "") {
+    // 签名只取规范字段(不含一次性反馈词),与 suggestTitle 的语义入参一致
+    const sig = calcTitleSig(project?.topic ?? "", (tendency.genre as string) ?? "", concept);
     setTitleBusy(true); setErr(""); setTitleIdeas(null);
     try {
       const r = await api.suggestTitle(
@@ -367,6 +381,7 @@ export default function OnboardingFlow() {
         conceptIsEmpty(concept) ? null : concept,
       );
       setTitleIdeas(r.titles);
+      setTitleSig(sig);
     } catch (e) { setErr(String(e)); setTitleIdeas([]); } finally { setTitleBusy(false); }
   }
 
@@ -476,6 +491,18 @@ export default function OnboardingFlow() {
 
   async function abandon() {
     if (pid === null || !project) return;
+    // 已有实质产出(起步流已过「想法」步,或进了流水线):删除前确认;
+    // 刚进来还没填东西(setup_state 仍是 idea)时不打扰
+    const progressed = !!project.setup_state && project.setup_state !== "idea";
+    if (progressed) {
+      const ok = await confirmDialog({
+        title: "放弃创建并删除该项目?",
+        body: "将删除该项目及已生成内容(概念/架构/蓝图等),不可恢复。",
+        confirmText: "放弃并删除",
+        danger: true,
+      });
+      if (!ok) return;
+    }
     try {
       await api.deleteProject(pid);
       if (project) {
@@ -495,6 +522,12 @@ export default function OnboardingFlow() {
   const chatLog = project.chat_log ?? [];
   const allDone = arch.status === "done" && bp.status === "done";
   const conceptBusy = ideas === null && !!sparkText;
+
+  // 候选过期判定:回改上游(灵感/题材/概念…)后,手里的候选与当前输入签名不一致即过期
+  const curIdeaSig = conceptSig(sparkText, tendency);
+  const curTitleSig = calcTitleSig(project.topic ?? "", (tendency.genre as string) ?? "", concept);
+  const ideasStale = isStale(ideas, ideaSig, curIdeaSig);
+  const titlesStale = isStale(titleIdeas, titleSig, curTitleSig);
 
   // 顶部步骤条:已确认项的缩略文本(FLIP 落点)
   const thumbOf: Partial<Record<SetupStep, string>> = {
@@ -677,6 +710,14 @@ export default function OnboardingFlow() {
                             <span className="spin" /><ThinkingText phrases={THINK_CONCEPT} />
                           </div>
                         )}
+                        {ideasStale && (
+                          <div className="wiz-stale">
+                            <span>⚠ {conceptStaleText(ideaSig!, sparkText, tendency)}</span>
+                            <span className="grow" />
+                            <button className="btn-sm" onClick={() => brainstorm()}>重新生成</button>
+                            <button className="btn-sm" onClick={() => setIdeaSig(curIdeaSig)}>仍用这批</button>
+                          </div>
+                        )}
                         <CandidateCards
                           items={ideas} skeletonCount={4} keyOf={conceptKey}
                           layoutIdPrefix="concept" pickedKey={pickedKey}
@@ -694,9 +735,9 @@ export default function OnboardingFlow() {
                         />
                       </>
                     )}
-                    {!sparkText && hasConcept && ideas === null && (
+                    {!sparkText && hasConcept && (
                       <CandidateCards
-                        items={[concept]} skeletonCount={1} keyOf={conceptKey}
+                        items={ideas ?? [concept]} skeletonCount={1} keyOf={conceptKey}
                         layoutIdPrefix="concept" pickedKey={pickedKey}
                         busy={!!pickedKey}
                         renderCard={(c) => (
@@ -810,6 +851,14 @@ export default function OnboardingFlow() {
                     {titleIdeas === null && (
                       <div className="muted mt-2 mb-2">
                         <span className="spin" /><ThinkingText phrases={THINK_TITLE} />
+                      </div>
+                    )}
+                    {titlesStale && (
+                      <div className="wiz-stale">
+                        <span>⚠ {titleStaleText(titleSig!, project.topic ?? "", (tendency.genre as string) ?? "", concept)}</span>
+                        <span className="grow" />
+                        <button className="btn-sm" onClick={() => fetchTitles()}>重新生成</button>
+                        <button className="btn-sm" onClick={() => setTitleSig(curTitleSig)}>仍用这批</button>
                       </div>
                     )}
                     <CandidateCards

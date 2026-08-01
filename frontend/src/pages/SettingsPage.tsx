@@ -3,7 +3,8 @@
 //   · 账号:修改登录密码(仅 server 多用户模式)
 //   · 应用锁:启动密码设/改/移除(仅 local 桌面单机模式)
 //   · 模型设置:三家 provider 增删改测(取代旧的独立 settings.html)
-//   · 偏好:外观(跟随系统/浅色/深色,全端生效)+ 启动时自动检查更新开关(仅桌面)
+//   · 偏好:外观(跟随系统/浅色/深色,全端生效)+ 启动时自动检查更新开关、
+//     关闭窗口时最小化到托盘开关(后两者仅桌面)
 // 桌面能力经 desktop.ts 优雅降级:非桌面(网页)隐藏更新相关 UI。
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -19,6 +20,7 @@ import {
   UpdateInfo,
 } from "../desktop";
 import { getThemePref, setThemePref, ThemePref } from "../theme";
+import { getCloseToTrayPref, setCloseToTrayPref } from "../ui/CloseGuard";
 import { toast } from "../ui/Toaster";
 import { confirmDialog } from "../ui/ConfirmDialog";
 
@@ -548,15 +550,23 @@ function ProviderRow({ p, onChanged }: { p: ProviderSettingOut; onChanged: () =>
   async function remove() {
     setBusy(true); setTestMsg(null);
     try {
+      // 删除是一锤子买卖:无论后端是否要求二次确认,先统一确认一遍
+      const ok = await confirmDialog({
+        title: `删除 ${PROVIDER_NAMES[p.provider] || p.provider} 配置?`,
+        body: "删除后需重新配置 API Key 才能使用该模型。",
+        confirmText: "确认删除",
+        danger: true,
+      });
+      if (!ok) { setBusy(false); return; }
       let r = await api.deleteProvider(p.provider);
       if (!r.deleted && r.needs_confirm) {
-        const ok = await confirmDialog({
+        const ok2 = await confirmDialog({
           title: `删除 ${PROVIDER_NAMES[p.provider] || p.provider} 配置?`,
           body: (r.reason || "该配置当前连接正常。") + "\n删除后将回落到默认/环境配置。",
           confirmText: "确认删除",
           danger: true,
         });
-        if (!ok) { setBusy(false); return; }
+        if (!ok2) { setBusy(false); return; }
         r = await api.deleteProvider(p.provider, true);
       }
       if (r.deleted) { toast.ok("已删除"); onChanged(); }
@@ -634,7 +644,7 @@ function ProviderRow({ p, onChanged }: { p: ProviderSettingOut; onChanged: () =>
 
 // ============ 偏好 ============
 // 外观选择全端生效(写 localStorage 并即改 <html data-theme>);
-// 自动更新开关仅桌面有意义(网页随访问自动最新),非桌面不渲染。
+// 自动更新 / 关闭进托盘开关仅桌面有意义(网页随访问自动最新、没有窗口 X),非桌面不渲染。
 const THEME_OPTIONS: { v: ThemePref; label: string }[] = [
   { v: "auto", label: "跟随系统" },
   { v: "light", label: "浅色" },
@@ -644,6 +654,7 @@ const THEME_OPTIONS: { v: ThemePref; label: string }[] = [
 function PreferencesCard() {
   const [theme, setTheme] = useState<ThemePref>(getThemePref);
   const [autoCheck, setAutoCheck] = useState(getAutoCheck());
+  const [closeToTray, setCloseToTray] = useState(getCloseToTrayPref());
 
   function pickTheme(v: ThemePref) {
     setThemePref(v);
@@ -675,6 +686,21 @@ function PreferencesCard() {
           <input type="checkbox" checked={autoCheck} onChange={(e) => toggle(e.target.checked)} />
           启动时自动检查更新
         </label>
+      )}
+      {isDesktop() && (
+        <label className="default-pick">
+          <input
+            type="checkbox"
+            checked={closeToTray}
+            onChange={(e) => { setCloseToTrayPref(e.target.checked); setCloseToTray(e.target.checked); }}
+          />
+          关闭窗口时最小化到托盘
+        </label>
+      )}
+      {isDesktop() && closeToTray && (
+        <p className="card-desc" style={{ marginBottom: 0 }}>
+          开启后点 X 不询问、直接进托盘;有后台任务运行时仍会先询问,避免误杀任务。
+        </p>
       )}
     </div>
   );

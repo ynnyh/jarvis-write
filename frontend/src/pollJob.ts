@@ -1,6 +1,11 @@
 // 轮询后端 job 直到完成:统一间隔/超时上限/外部中止(组件卸载时取消)
 import { api } from "./api";
 
+/** 渲染错误给用户:Error 取 message(去掉 "Error: " 英文前缀),其余兜底 String。 */
+export function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
 export interface PollJobOptions {
   intervalMs?: number;               // 轮询间隔,默认 3s
   timeoutMs?: number;                // 超时上限,默认 30 分钟,超时 reject

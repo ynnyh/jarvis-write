@@ -1,8 +1,9 @@
 // 大纲工作区:蓝图生成 / 内联编辑 / 大改分级 → 影响分析 → 勾选级联
 import { useEffect, useRef, useState } from "react";
 import { api, CascadeResult, DirectiveApplyResult, DirectiveItem, DirectivePreview, EditorAction, EditResult, ImpactReport, Outline, Project, Tendency } from "../api";
-import { pollJob } from "../pollJob";
+import { pollJob, errMsg } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
+import { confirmDialog } from "../ui/ConfirmDialog";
 import { useJob } from "../ui/useJob";
 import type { Step } from "../pages/ProjectPage";
 import DirectivePanel from "./outline/DirectivePanel";
@@ -50,6 +51,34 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  // 挂载时查有没有还在跑的蓝图生成(切走页面再回来的场景),有则接回轮询
+  // 显示进度,而不是装作没事(与 ChaptersPanel 的 runningJobs 重连同一模式;
+  // 生成与「展开下一卷」后端共用 blueprint-<pid> kind,重连接法一致)。
+  useEffect(() => {
+    let cancelled = false;
+    api.runningJobs(pid).then(({ jobs }) => {
+      if (cancelled) return;
+      const gen = jobs.find((j) => j.kind === `blueprint-${pid}`);
+      if (!gen) return;
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
+      setBusy(`蓝图生成中:${gen.stage}`);
+      pollJob<{ outlines: Outline[] }>(gen.job_id, {
+        signal: ctrl.signal,
+        onStage: (stage) => setBusy(`蓝图生成中:${stage}`),
+      }).then(async (r) => {
+        if (ctrl.signal.aborted) return;
+        await onChanged();
+        setShowGen(false);
+        setGenDone(r.outlines.length);
+      }).catch((e) => {
+        if (!ctrl.signal.aborted) setErr(errMsg(e));
+      }).finally(() => { if (!ctrl.signal.aborted) setBusy(""); });
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pid]);
+
   function toggleExpand(n: number) {
     const s = new Set(expanded);
     if (s.has(n)) s.delete(n); else s.add(n);
@@ -57,6 +86,16 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
   }
 
   async function generateBlueprint() {
+    // 覆盖全部蓝图是重操作:已有蓝图时二次确认(与架构重生成同一做法)
+    if (outlines.length) {
+      const ok = await confirmDialog({
+        title: "覆盖并重新生成全部蓝图?",
+        body: `将覆盖全部 ${outlines.length} 章蓝图(含逐章的手动微调),已写正文会标记失配。`,
+        confirmText: "覆盖并重新生成",
+        danger: true,
+      });
+      if (!ok) return;
+    }
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setBusy("蓝图生成:排队中…"); setErr("");
@@ -74,7 +113,7 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
       setExpanded(new Set());
       setGenDone(r.outlines.length);
     } catch (e) {
-      if (!ctrl.signal.aborted) setErr(String(e));
+      if (!ctrl.signal.aborted) setErr(errMsg(e));
     } finally { if (!ctrl.signal.aborted) setBusy(""); }
   }
 
@@ -94,7 +133,7 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
       setGenDone(r.outlines.length);
       setFlash(`已展开第 ${r.planned_range[0]}-${r.planned_range[1]} 章蓝图。`);
     } catch (e) {
-      if (!ctrl.signal.aborted) setErr(String(e));
+      if (!ctrl.signal.aborted) setErr(errMsg(e));
     } finally { if (!ctrl.signal.aborted) setBusy(""); }
   }
 
@@ -117,7 +156,7 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
       await onChanged();
       if (r.status === "unchanged") { setFlash("内容无实质变化。"); setEditingNum(null); }
       else if (!r.needs_impact_analysis) { setFlash(`已保存(${r.change_summary})`); setEditingNum(null); }
-    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
   }
 
   async function runImpact(n: number) {
@@ -131,7 +170,7 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
         setImpact(r);
         setPicked(new Set(r.affected.filter((a) => a.action === "regenerate").map((a) => a.chapter_number)));
       }
-    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
   }
 
   async function runCascade(n: number) {
@@ -153,7 +192,7 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
         setImpact(null); setEditResult(null); setEditingNum(null);
         await onChanged();
       }
-    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
   }
 
   async function runDirectiveParse() {
@@ -168,7 +207,7 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
         setDrafts(r.items.map((i) => ({ ...i })));
         setDirPicked(new Set(r.items.map((i) => i.chapter_number)));
       }
-    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
   }
 
   function closeDirective() {
@@ -185,7 +224,7 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
       setDirResult(r);
       setPreview(null); setDrafts([]); setDirectiveText("");
       await onChanged();
-    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
   }
 
   const oldOf = (n: number) => outlines.find((o) => o.chapter_number === n);

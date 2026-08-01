@@ -15,6 +15,8 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import httpx
+
 logger = logging.getLogger("jarvis-write.jobs")
 
 _LOCK = threading.Lock()
@@ -146,6 +148,31 @@ def list_for_user(owner_id: Any, running_only: bool = True) -> list[tuple[str, d
         ]
 
 
+def normalize_job_error(exc: Exception) -> str:
+    """把常见 LLM/网络异常归一化成用户可读的中文,存进 job.error 直接上屏。
+
+    原始英文异常不丢:spawn_job 的 logger.warning 带 exc_info 完整进日志。
+    归一化只覆盖高频形态(连接失败/超时、401 key 无效或欠费、404 模型不存在、
+    429 限流),其余原样返回(后端业务错误本身已是中文)。
+    """
+    msg = str(exc)
+    if "HTTP 401" in msg:
+        return "模型 API Key 无效或已欠费(HTTP 401),请到「设置」检查 key 与账户余额"
+    if "HTTP 402" in msg:
+        return "模型账户欠费(HTTP 402),请充值后重试"
+    if "HTTP 404" in msg:
+        return "模型不存在或接口地址错误(HTTP 404),请到「设置」检查模型名与 Base URL"
+    if "HTTP 429" in msg:
+        return "模型限流(HTTP 429),请稍后重试,或到「设置」更换模型"
+    if isinstance(exc, httpx.TimeoutException):
+        return "调用模型超时(网络慢或模型负载高),请稍后重试"
+    if isinstance(exc, httpx.ConnectError):
+        return "无法连接模型服务,请检查网络/代理,或「设置」里的 Base URL"
+    if isinstance(exc, httpx.HTTPError):
+        return f"模型服务网络错误:{msg}"
+    return msg
+
+
 def spawn_job(kind: str, work: Callable[[Callable[[str], None]], Awaitable[Any]]) -> str:
     """通用异步任务封装:建 job → 后台跑 work(progress) → 结果/异常落 job。"""
     job_id = create_job(kind)
@@ -156,7 +183,7 @@ def spawn_job(kind: str, work: Callable[[Callable[[str], None]], Awaitable[Any]]
             finish_job(job_id, result)
         except Exception as exc:  # noqa: BLE001
             logger.warning("任务 %s(%s) 失败: %s", job_id, kind, exc, exc_info=True)
-            fail_job(job_id, str(exc)[:500])
+            fail_job(job_id, normalize_job_error(exc)[:500])
 
     asyncio.create_task(runner())
     return job_id

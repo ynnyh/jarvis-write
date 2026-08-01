@@ -74,7 +74,9 @@ export default function ChapterListItem({
         {ch && (
           <button className="btn-sm" onClick={onOpenReader}>阅读</button>
         )}
-        <button className="btn-sm" disabled={genBlocked} title={genBlocked ? genHint : undefined}
+        <button className="btn-sm"
+          title={genBlocked ? genHint : (ch ? "重写前旧版会自动存快照,可回退" : undefined)}
+          disabled={genBlocked}
           onClick={() => {
             if (ch) onToggleRevise();
             else onGenerate();
@@ -84,6 +86,7 @@ export default function ChapterListItem({
       </div>
       {reviseOpen && (
         <div className="fact-line revise-box">
+          <div className="hint">重写会覆盖当前正文;旧版自动存快照,可随时在「历史版本」对比回退。</div>
           <textarea
             rows={3}
             maxLength={500}

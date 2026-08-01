@@ -1,12 +1,13 @@
-// 写作面板:逐章生成 / 阅读;本章蓝图上下文置顶;润色移步「润色」工作区
+// 写作面板:逐章生成 / 阅读;本章蓝图上下文置顶;润色移步「编辑部」
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   api, ChapterBrief, ChapterDetail, ChapterVersionBrief, ChapterVersionDetail,
   EditorAction, GenerateChapterResponse, Outline, Project, Tendency,
 } from "../api";
-import { pollJob } from "../pollJob";
+import { pollJob, errMsg } from "../pollJob";
 import { useChapters, useInvalidateProject } from "../hooks/queries";
 import { toast } from "../ui/Toaster";
+import { confirmDialog } from "../ui/ConfirmDialog";
 import TendencySelector from "../components/TendencySelector";
 import Reader, { Paragraphs } from "../components/Reader";
 import GenResultCard from "./chapters/GenResultCard";
@@ -85,7 +86,7 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
       await invalidateProject();
       toast.ok(on ? "已开启字数守卫" : "已关闭字数守卫",
         on ? "章节超出目标字数较多时会自动压缩或拆章" : "字数只做宽松参考,不再自动压缩/拆章");
-    } catch (e) { toast.err("开关保存失败", String(e)); }
+    } catch (e) { toast.err("开关保存失败", errMsg(e)); }
   }
 
   // 编辑部审校把关配置:达标线 / 自动回炉开关 / 回炉上限。改完即存,失效缓存重拉。
@@ -97,7 +98,7 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
     try {
       await api.patchProject(pid, patch);
       await invalidateProject();
-    } catch (e) { toast.err("审校配置保存失败", String(e)); }
+    } catch (e) { toast.err("审校配置保存失败", errMsg(e)); }
   }
 
   // 编辑部「按此重写」交接:挂载时消费预填的重写意见,展开对应章的重写框
@@ -163,7 +164,7 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
       setVersionsFor(null); setVersions(null); setCompareVer(null);
       api.getChapter(pid, focusChapter)
         .then(setCurrent)
-        .catch((e) => setErr(String(e)));
+        .catch((e) => setErr(errMsg(e)));
     }
     onFocusConsumed?.();
   }, [focusChapter, chapters, pid, onFocusConsumed]);
@@ -220,7 +221,7 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
       await reload();
     } catch (e) {
       if (!ctrl.signal.aborted) {
-        setErr(e instanceof Error ? e.message : String(e));
+        setErr(errMsg(e));
         await reload().catch(() => undefined);
       }
     } finally { if (!ctrl.signal.aborted) setGenJob(null); }
@@ -230,9 +231,24 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
     ? outlines.find((o) => o.chapter_number === current.chapter_number)
     : null;
 
+  // 编辑中的未保存修改:取消/切章前确认,防手滑丢稿
+  const editDirty =
+    editing && current !== null &&
+    editText !== (current.final_content || current.draft_content);
+  async function confirmDiscardEdit(): Promise<boolean> {
+    if (!editDirty) return true;
+    return confirmDialog({
+      title: "修改未保存,切换将丢弃?",
+      body: "当前编辑中的正文有未保存修改,继续将丢弃这些修改。",
+      confirmText: "丢弃修改",
+      danger: true,
+    });
+  }
+
   async function open(n: number) {
+    if (!(await confirmDiscardEdit())) return;
     setErr(""); setGenResult(null); setEditing(false); closeVersions();
-    try { setCurrent(await api.getChapter(pid, n)); } catch (e) { setErr(String(e)); }
+    try { setCurrent(await api.getChapter(pid, n)); } catch (e) { setErr(errMsg(e)); }
   }
 
   // 阅读器:打开/翻章都走这里(tab/偏好由 Reader 内部管理)
@@ -240,7 +256,7 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
     setReaderLoading(true); setErr("");
     try {
       setReader(await api.getChapter(pid, n));
-    } catch (e) { setErr(String(e)); } finally { setReaderLoading(false); }
+    } catch (e) { setErr(errMsg(e)); } finally { setReaderLoading(false); }
   }
 
   // 上一章/下一章:仅限已生成的章节
@@ -265,7 +281,7 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
       await reload();
       setPendingSync(num);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(errMsg(e));
     } finally { setSaving(false); }
   }
 
@@ -286,7 +302,7 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
       if (!ctrl.signal.aborted) toast.ok(`第 ${num} 章一致性同步完成`);
     } catch (e) {
       if (!ctrl.signal.aborted) {
-        const msg = e instanceof Error ? e.message : String(e);
+        const msg = errMsg(e);
         if (msg.startsWith("任务超时") || msg.startsWith("多次查询")) {
           toast.err("同步进度查询中断", "任务可能仍在后台运行,稍后刷新可见最新状态");
         } else {
@@ -317,7 +333,7 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
       await openVersions(n, true);
     } catch (e) {
       if (!ctrl.signal.aborted) {
-        const msg = e instanceof Error ? e.message : String(e);
+        const msg = errMsg(e);
         // 轮询中断(超时/网络抖动):任务可能仍在后台运行,刷新列表让用户看到真实进度
         if (msg.startsWith("任务超时") || msg.startsWith("多次查询")) {
           setErr(`进度查询中断:${msg}`);
@@ -338,7 +354,7 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
     try {
       ({ job_id: jobId } = await api.generateChapterAsync(pid, n, genTendency, revision));
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(errMsg(e));
       setGenJob(null);
       return;
     }
@@ -359,13 +375,13 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
       if (auto && list.length) {
         setCompareVer(await api.getChapterVersion(pid, n, list[0].id));
       }
-    } catch (e) { setErr(String(e)); }
+    } catch (e) { setErr(errMsg(e)); }
   }
 
   async function selectVersion(n: number, v: ChapterVersionBrief) {
     setErr("");
     try { setCompareVer(await api.getChapterVersion(pid, n, v.id)); }
-    catch (e) { setErr(String(e)); }
+    catch (e) { setErr(errMsg(e)); }
   }
 
   // 回退到旧版:换回正文 → 自动同步一致性引擎。回退是整段替换(改动大)故不询问,
@@ -379,7 +395,7 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
       await reload();
       void triggerSync(n);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(errMsg(e));
     }
   }
 
@@ -572,7 +588,9 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
                         {saving && <span className="spin spin-sm" />}
                         保存正文
                       </button>
-                      <button className="btn-sm" onClick={() => setEditing(false)}>取消</button>
+                      <button className="btn-sm" onClick={async () => {
+                        if (await confirmDiscardEdit()) setEditing(false);
+                      }}>取消</button>
                     </>
                   )}
                 </div>
@@ -591,7 +609,7 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
                   </span>
                 </div>
               )}
-              {!editing && <div className="content-head-tip">改文笔?去「润色」</div>}
+              {!editing && <div className="content-head-tip">改文笔?去「编辑部」</div>}
               {editing ? (
                 <textarea
                   className="editor-area"

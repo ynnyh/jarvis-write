@@ -13,6 +13,9 @@ fn main() {
                 "restart_app",
                 "set_update_proxy",
                 "get_update_proxy",
+                "enable_close_guard",
+                "close_app",
+                "hide_to_tray",
             ]),
         ),
     )

@@ -18,6 +18,9 @@ import EmptyState from "../ui/EmptyState";
 
 export type Step = "inspire" | "arch" | "outline" | "write" | "polish" | "refresh" | "board" | "publish";
 
+// 项目状态英文值 → 中文徽标(未知值原样兜底)
+const PROJECT_STATUS_CN: Record<string, string> = { draft: "草稿", writing: "连载中" };
+
 const STEPS: { key: Step; no: number; label: string }[] = [
   { key: "inspire", no: 1, label: "概念" },
   { key: "arch", no: 2, label: "架构" },
@@ -195,7 +198,7 @@ export default function ProjectPage() {
   return (
     <>
       <h1 className="project-head"><span className="project-title-text">{project.title}</span>
-        <span className="badge">{project.status}</span>
+        <span className="badge">{PROJECT_STATUS_CN[project.status] ?? project.status}</span>
         {project.genre && <span className="badge">{project.genre}</span>}
         {chapters.length > 0 && (
           <button className="primary read-book-btn" onClick={() => setReadingBook(true)}>

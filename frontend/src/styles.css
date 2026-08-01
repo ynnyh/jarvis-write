@@ -45,6 +45,12 @@
   --auth-glow: #e9ebfb;
   --auth-glow-fade: rgba(233, 235, 251, 0);
 
+  /* 锁屏页:双层品牌光晕 + 玻璃卡片(暗色整组覆写) */
+  --lock-glow-a: rgba(75, 84, 225, 0.13);
+  --lock-glow-b: rgba(122, 75, 225, 0.11);
+  --lock-card-bg: rgba(255, 255, 255, 0.75);
+  --lock-card-line: rgba(255, 255, 255, 0.7);
+
   /* 字体栈:UI 用无衬线,阅读/正文用衬线 */
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
@@ -121,6 +127,11 @@
   --overlay-bg-soft: rgba(0, 0, 0, 0.5);
   --auth-glow: #23274d;
   --auth-glow-fade: rgba(35, 39, 77, 0);
+
+  --lock-glow-a: rgba(139, 147, 255, 0.15);
+  --lock-glow-b: rgba(122, 75, 225, 0.17);
+  --lock-card-bg: rgba(31, 32, 37, 0.72);
+  --lock-card-line: rgba(255, 255, 255, 0.09);
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.35);
@@ -557,6 +568,61 @@ select { cursor: pointer; }
   margin-top: var(--sp-3);
   text-align: center;
 }
+
+/* ---------- 锁屏页(应用锁) ----------
+   品牌化全屏:双层品牌光晕 + jW 字标 + 玻璃拟态卡片。
+   全部走主题令牌,明暗两套主题自动适配;交互复用全局表单/按钮样式。 */
+.lock-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-6);
+  background:
+    radial-gradient(52% 42% at 16% 10%, var(--lock-glow-a) 0%, transparent 72%),
+    radial-gradient(46% 40% at 86% 88%, var(--lock-glow-b) 0%, transparent 72%),
+    radial-gradient(70% 50% at 50% 0%, var(--auth-glow) 0%, var(--auth-glow-fade) 70%),
+    var(--bg);
+}
+.lock-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+.lock-mark {
+  width: 60px;
+  height: 60px;
+  border-radius: 18px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-2) 100%);
+  color: var(--on-vivid);
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  box-shadow: 0 8px 24px var(--brand-ring);
+  margin-bottom: var(--sp-4);
+}
+.lock-mark span { font-weight: 500; opacity: 0.85; }
+.lock-brand { font-size: var(--fs-2xl); margin: 0; letter-spacing: -0.02em; }
+.lock-brand span { color: var(--brand); }
+.lock-tag { color: var(--text-2); font-size: var(--fs-sm); margin-top: 6px; }
+.lock-card {
+  width: 100%;
+  max-width: 380px;
+  margin: var(--sp-6) 0 0;
+  padding: 26px 28px 22px;
+  border-radius: var(--r-xl);
+  background: var(--lock-card-bg);
+  border-color: var(--lock-card-line);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: var(--shadow-lg);
+}
+.lock-card form { margin-top: var(--sp-4); }
+.lock-card form .btn-block { margin-top: 18px; }
+.lock-foot { margin-top: var(--sp-5); color: var(--text-3); font-size: var(--fs-xs); }
 
 /* ---------- 登录页 tabs / 通用 tabs ---------- */
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: var(--sp-4); }
@@ -2150,6 +2216,20 @@ html, body { max-width: 100%; overflow-x: hidden; }
   border: 1px solid var(--warn-line);
   border-radius: var(--r-full);
   padding: 2px 8px;
+}
+
+/* 候选过期提示条(warn 令牌,与 wiz-flag 同风格) */
+.wiz-stale {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+  background: var(--warn-weak);
+  border: 1px solid var(--warn-line);
+  color: var(--warn);
+  font-size: var(--fs-sm);
 }
 
 /* 点火流水线:步骤卡四态(等待/生成中/完成/失败) */

@@ -16,6 +16,9 @@
     "allow-download-and-install-update",
     "allow-restart-app",
     "allow-set-update-proxy",
-    "allow-get-update-proxy"
+    "allow-get-update-proxy",
+    "allow-enable-close-guard",
+    "allow-close-app",
+    "allow-hide-to-tray"
   ]
 }

@@ -9,6 +9,8 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
+use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 // 后端子进程句柄:存进 Tauri 管理的状态,退出时终止。
@@ -18,6 +20,17 @@ struct Backend(Mutex<Option<Child>>);
 // 启动兜底检查(8 秒后)据此决定是否弹原生框——桥通则前端漂亮 UI 接管,
 // 桥不通(前端没调成)则原生框兜底,保证任何情况下都能收到更新提示。
 struct FrontendActive(AtomicBool);
+
+// 关闭守卫:前端 CloseGuard 组件挂载后调 enable_close_guard 置 enabled=true,
+// 此后点 X 不再直接销毁窗口,而是拦下并发 close://requested 事件交前端决定
+// (有任务弹确认框 / 按偏好进托盘 / 直接关,见 frontend/src/ui/CloseGuard.tsx)。
+// enabled 默认关:前端没挂载(锁屏早期/JS 崩溃)时点 X 行为照旧,窗口永远关得掉。
+// approved:前端决定「直接关闭」或托盘菜单「退出」时置真,防止拦截逻辑把
+// 自己发起的关闭又拦一次。
+struct CloseGuard {
+    enabled: AtomicBool,
+    approved: AtomicBool,
+}
 
 // 更新日志:release 构建没有控制台,eprintln 看不到;把更新链路的每一步
 // 追加写到 app 日志目录的 updater.log,排查"更新不生效"时有据可查。
@@ -163,6 +176,102 @@ fn set_update_proxy(handle: tauri::AppHandle, proxy: String) -> Result<(), Strin
 #[tauri::command]
 fn get_update_proxy(handle: tauri::AppHandle) -> String {
     read_update_proxy(&handle).unwrap_or_default()
+}
+
+// ===== 关闭守卫 / 托盘 =====
+// 三个命令配套前端 CloseGuard:点 X 被 on_window_event 拦下并发事件,
+// 前端决定去向后回调其中一个命令。窗口操作全走自定义命令而非 window ACL,
+// 与现有更新命令同一模式(远程源只需 allow-<cmd> 权限)。
+
+// 前端 CloseGuard 挂载后调用:开启关闭拦截。此后点 X 拦下并发 close://requested。
+#[tauri::command]
+fn enable_close_guard(handle: tauri::AppHandle) {
+    handle
+        .state::<CloseGuard>()
+        .enabled
+        .store(true, Ordering::SeqCst);
+}
+
+// 前端决定「直接关闭」:置 approved 放行 CloseRequested 再关窗;
+// Destroyed 事件里 kill_backend 照旧执行。
+#[tauri::command]
+fn close_app(handle: tauri::AppHandle) {
+    handle
+        .state::<CloseGuard>()
+        .approved
+        .store(true, Ordering::SeqCst);
+    if let Some(w) = handle.get_webview_window("main") {
+        let _ = w.close();
+    }
+}
+
+// 前端决定「最小化到托盘」:只隐藏窗口(不销毁),后端子进程与后台任务继续跑;
+// 点托盘图标或菜单「显示」恢复。
+#[tauri::command]
+fn hide_to_tray(handle: tauri::AppHandle) {
+    if let Some(w) = handle.get_webview_window("main") {
+        let _ = w.hide();
+    }
+}
+
+// 从托盘隐藏/最小化状态恢复主窗口并聚焦。
+fn show_main_window(handle: &tauri::AppHandle) {
+    if let Some(w) = handle.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
+// 构建系统托盘:左键点图标恢复窗口;菜单「显示」恢复、「退出」彻底退出。
+// 「退出」先置 approved(避免退出触发的 CloseRequested 被自己拦下)、显式杀后端
+// 再 exit——app.exit 不保证走窗口 Destroyed 事件,不显式杀会留孤儿后端。
+fn build_tray(app: &tauri::App) -> Result<(), String> {
+    let show = MenuItemBuilder::with_id("show", "显示 jarvis-write")
+        .build(app)
+        .map_err(|e| format!("{e}"))?;
+    let quit = MenuItemBuilder::with_id("quit", "退出")
+        .build(app)
+        .map_err(|e| format!("{e}"))?;
+    let menu = MenuBuilder::new(app)
+        .item(&show)
+        .item(&quit)
+        .build()
+        .map_err(|e| format!("{e}"))?;
+    // 图标复用 tauri.conf.json bundle.icon(解码由 Tauri 内建,无需额外 image feature)
+    let icon = app
+        .default_window_icon()
+        .cloned()
+        .ok_or_else(|| "配置里没有可用的应用图标".to_string())?;
+    TrayIconBuilder::with_id("main-tray")
+        .icon(icon)
+        .tooltip("jarvis · write")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "show" => show_main_window(app),
+            "quit" => {
+                app.state::<CloseGuard>()
+                    .approved
+                    .store(true, Ordering::SeqCst);
+                kill_backend(app);
+                app.exit(0);
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        })
+        .build(app)
+        .map_err(|e| format!("{e}"))?;
+    Ok(())
 }
 
 // 构建更新器:proxy 为 Some 时检查与下载都走该代理——插件会把代理设置带进
@@ -455,6 +564,10 @@ fn wait_backend_ready(url: &str) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // 重复启动:把已有窗口唤到前台(可能正藏在托盘),不再起第二份后端
+            show_main_window(app);
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
@@ -464,10 +577,17 @@ pub fn run() {
             download_and_install_update,
             restart_app,
             set_update_proxy,
-            get_update_proxy
+            get_update_proxy,
+            enable_close_guard,
+            close_app,
+            hide_to_tray
         ])
         .manage(Backend(Mutex::new(None)))
         .manage(FrontendActive(AtomicBool::new(false)))
+        .manage(CloseGuard {
+            enabled: AtomicBool::new(false),
+            approved: AtomicBool::new(false),
+        })
         .setup(|app| {
             // 定位打包进 resources 的后端 onedir。
             let exe = match app.path().resource_dir() {
@@ -496,15 +616,36 @@ pub fn run() {
                 fatal_setup_error(&app.handle(), &format!("创建窗口失败: {e}"));
             }
 
+            // 系统托盘:「最小化到托盘」关闭偏好的载体。左键点图标恢复窗口;
+            // 菜单提供「显示 / 退出」。图标用打包的同一份 icon.png,不新增资源。
+            // 托盘构建失败不该拖垮启动(极少数桌面环境无托盘区),记日志继续。
+            match build_tray(app) {
+                Ok(_) => {}
+                Err(e) => ulog(&app.handle(), &format!("托盘创建失败,托盘相关功能不可用:{e}")),
+            }
+
             // 窗口已创建,后台检查软件更新(仅发行版真正检查)
             spawn_update_check(app.handle().clone());
 
             Ok(())
         })
         .on_window_event(|window, event| {
-            // 主窗口关闭 → 终止后端子进程,避免端口/进程残留。
-            if let tauri::WindowEvent::Destroyed = event {
-                kill_backend(window.app_handle());
+            match event {
+                // 点了 X:守卫开启且未获放行 → 拦下,发 close://requested 让前端
+                // 决定去向(确认框/托盘/直接关)。守卫未开(前端没挂载/JS 崩了)
+                // 保持原有直接关闭行为,保证任何情况下窗口都关得掉。
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    let guard = window.app_handle().state::<CloseGuard>();
+                    if guard.enabled.load(Ordering::SeqCst)
+                        && !guard.approved.load(Ordering::SeqCst)
+                    {
+                        api.prevent_close();
+                        let _ = window.emit("close://requested", ());
+                    }
+                }
+                // 主窗口销毁 → 终止后端子进程,避免端口/进程残留。
+                tauri::WindowEvent::Destroyed => kill_backend(window.app_handle()),
+                _ => {}
             }
         })
         .run(tauri::generate_context!())
