@@ -96,6 +96,95 @@ struct UpdateInfo {
     current: String,
 }
 
+// ===== 更新代理 =====
+// 用户自定义更新代理,持久化在 app 配置目录的 update_proxy.txt(纯文本一行,
+// 形如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080;文件不存在/为空=直连)。
+// 落盘而非只存内存:启动 8 秒后的后台静默检查没有前端参与,也得读到同一份配置。
+const UPDATE_PROXY_FILE: &str = "update_proxy.txt";
+
+// 读取已保存的更新代理;未设置/读不到/内容为空都返回 None(=直连)。
+fn read_update_proxy(handle: &tauri::AppHandle) -> Option<String> {
+    let dir = handle.path().app_config_dir().ok()?;
+    let content = std::fs::read_to_string(dir.join(UPDATE_PROXY_FILE)).ok()?;
+    let proxy = content.trim();
+    if proxy.is_empty() {
+        None
+    } else {
+        Some(proxy.to_string())
+    }
+}
+
+// 校验代理地址:空串=清除代理(返回 None);非空必须形如 http://host:port
+// 或 socks5://host:port,非法直接报错,不写盘。
+fn validate_update_proxy(proxy: &str) -> Result<Option<url::Url>, String> {
+    let proxy = proxy.trim();
+    if proxy.is_empty() {
+        return Ok(None);
+    }
+    let url = proxy
+        .parse::<url::Url>()
+        .map_err(|e| format!("代理地址格式非法:{e}"))?;
+    let scheme_ok = matches!(url.scheme(), "http" | "socks5");
+    let host_ok = url.host_str().is_some_and(|h| !h.is_empty());
+    let port_ok = url.port().is_some();
+    if !scheme_ok || !host_ok || !port_ok {
+        return Err("代理地址须形如 http://host:port 或 socks5://host:port".to_string());
+    }
+    Ok(Some(url))
+}
+
+// 前端设置页调用:保存更新代理。空串=清除(恢复直连),下次检查/下载生效。
+#[tauri::command]
+fn set_update_proxy(handle: tauri::AppHandle, proxy: String) -> Result<(), String> {
+    let validated = validate_update_proxy(&proxy)?;
+    let dir = handle
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("拿不到配置目录:{e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建配置目录失败:{e}"))?;
+    let path = dir.join(UPDATE_PROXY_FILE);
+    match validated {
+        Some(url) => {
+            ulog(&handle, &format!("更新代理已设置:{url}"));
+            std::fs::write(&path, format!("{url}\n")).map_err(|e| format!("保存代理失败:{e}"))
+        }
+        None => {
+            ulog(&handle, "更新代理已清除,恢复直连");
+            match std::fs::remove_file(&path) {
+                Ok(_) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(format!("清除代理失败:{e}")),
+            }
+        }
+    }
+}
+
+// 前端设置页调用:读取已保存的更新代理(未设置返回空串),用于设置页回显。
+#[tauri::command]
+fn get_update_proxy(handle: tauri::AppHandle) -> String {
+    read_update_proxy(&handle).unwrap_or_default()
+}
+
+// 构建更新器:proxy 为 Some 时检查与下载都走该代理——插件会把代理设置带进
+// check 返回的 Update,后续 download 沿用同一通道,无需再配。
+fn build_updater(
+    handle: &tauri::AppHandle,
+    proxy: Option<&url::Url>,
+) -> Result<tauri_plugin_updater::Updater, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let builder = handle.updater_builder();
+    let builder = match proxy {
+        Some(p) => {
+            ulog(handle, &format!("更新走代理:{p}"));
+            builder.proxy(p.clone())
+        }
+        None => builder,
+    };
+    builder
+        .build()
+        .map_err(|e| format!("更新器构建失败:{e}"))
+}
+
 // updater.check() 的重试封装:国内直连 GitHub 不稳定,瞬时失败大多是网络抖动,
 // 失败后等 2s/4s 再试,最多 3 次。download 沿用 check 出来的 Update,不受影响。
 async fn check_with_retry(
@@ -116,13 +205,80 @@ async fn check_with_retry(
     Err(last_err.unwrap())
 }
 
+// 检查更新,带「代理失败回退直连」:已配置代理时先走代理,重试全失败后
+// 改用直连再查一轮——避免用户填错代理(或代理没开)后永远收不到更新。
+// 返回的 Update 携带最终成功的通道,download 沿用;错误信息区分两种失败。
+async fn check_with_fallback(
+    handle: &tauri::AppHandle,
+) -> Result<Option<tauri_plugin_updater::Update>, String> {
+    // 配置内容必然已通过 validate_update_proxy 校验,这里解析失败按无代理处理。
+    let proxy = read_update_proxy(handle).and_then(|p| p.parse::<url::Url>().ok());
+    let updater = build_updater(handle, proxy.as_ref())?;
+    match check_with_retry(&updater).await {
+        Ok(update) => Ok(update),
+        Err(e) => {
+            if proxy.is_none() {
+                return Err(format!("{e}"));
+            }
+            ulog(handle, &format!("代理检查失败:{e},回退直连重试"));
+            let direct = build_updater(handle, None)?;
+            check_with_retry(&direct)
+                .await
+                .map_err(|e2| format!("代理失败({e});直连也失败({e2})"))
+        }
+    }
+}
+
+// 下载更新包,进度经 update://progress 事件推给前端。与检查同样的代理回退:
+// update 自带通道(代理/直连)下载失败且配了代理时,直连重新 check 再下一次。
+async fn download_with_fallback(
+    handle: &tauri::AppHandle,
+    update: &tauri_plugin_updater::Update,
+) -> Result<Vec<u8>, String> {
+    let ev_handle = handle.clone();
+    let mut downloaded: u64 = 0;
+    let first = update
+        .download(
+            move |chunk, total| {
+                downloaded += chunk as u64;
+                let _ = ev_handle.emit("update://progress", (downloaded, total.unwrap_or(0)));
+            },
+            || {},
+        )
+        .await;
+    match first {
+        Ok(bytes) => Ok(bytes),
+        Err(e) => {
+            if read_update_proxy(handle).is_none() {
+                return Err(format!("{e}"));
+            }
+            ulog(handle, &format!("代理下载失败:{e},回退直连重新下载"));
+            let direct = build_updater(handle, None)?;
+            let update2 = check_with_retry(&direct)
+                .await
+                .map_err(|e2| format!("代理下载失败({e});直连检查也失败({e2})"))?
+                .ok_or_else(|| format!("代理下载失败({e});直连检查不到更新"))?;
+            let ev_handle = handle.clone();
+            let mut downloaded: u64 = 0;
+            update2
+                .download(
+                    move |chunk, total| {
+                        downloaded += chunk as u64;
+                        let _ = ev_handle.emit("update://progress", (downloaded, total.unwrap_or(0)));
+                    },
+                    || {},
+                )
+                .await
+                .map_err(|e2| format!("代理下载失败({e});直连下载也失败({e2})"))
+        }
+    }
+}
+
 // 前端设置页调用:检查是否有新版本。同时把 FrontendActive 置真,
 // 让启动兜底检查(原生框)让位给前端的自定义 UI,避免双重弹窗。
 // 不做下载,只返回结果供前端渲染「关于&更新」。
 #[tauri::command]
 async fn check_update(handle: tauri::AppHandle) -> Result<UpdateInfo, String> {
-    use tauri_plugin_updater::UpdaterExt;
-
     handle
         .state::<FrontendActive>()
         .0
@@ -131,12 +287,7 @@ async fn check_update(handle: tauri::AppHandle) -> Result<UpdateInfo, String> {
     let current = env!("CARGO_PKG_VERSION").to_string();
     ulog(&handle, "前端触发检查更新");
 
-    let updater = handle
-        .updater_builder()
-        .build()
-        .map_err(|e| format!("更新器构建失败:{e}"))?;
-
-    match check_with_retry(&updater).await {
+    match check_with_fallback(&handle).await {
         Ok(Some(u)) => {
             ulog(&handle, &format!("前端检查:发现新版本 v{}", u.version));
             Ok(UpdateInfo {
@@ -169,13 +320,7 @@ async fn check_update(handle: tauri::AppHandle) -> Result<UpdateInfo, String> {
 // 安装前杀后端,避开 NSIS 覆盖 resources 下后端文件时的 Windows 文件锁。
 #[tauri::command]
 async fn download_and_install_update(handle: tauri::AppHandle) -> Result<(), String> {
-    use tauri_plugin_updater::UpdaterExt;
-
-    let updater = handle
-        .updater_builder()
-        .build()
-        .map_err(|e| format!("更新器构建失败:{e}"))?;
-    let update = check_with_retry(&updater)
+    let update = check_with_fallback(&handle)
         .await
         .map_err(|e| format!("检查更新失败:{e}"))?
         .ok_or_else(|| "已是最新版,无需更新".to_string())?;
@@ -183,21 +328,10 @@ async fn download_and_install_update(handle: tauri::AppHandle) -> Result<(), Str
     ulog(&handle, &format!("前端触发下载 v{}", update.version));
 
     // 先下载,进度经 tauri 事件推给前端(设置页监听 update://progress 画进度条)。
-    let ev_handle = handle.clone();
-    let mut downloaded: u64 = 0;
-    let bytes = update
-        .download(
-            move |chunk, total| {
-                downloaded += chunk as u64;
-                let _ = ev_handle.emit("update://progress", (downloaded, total.unwrap_or(0)));
-            },
-            || {},
-        )
-        .await
-        .map_err(|e| {
-            ulog(&handle, &format!("前端下载失败:{e}"));
-            format!("下载失败:{e}")
-        })?;
+    let bytes = download_with_fallback(&handle, &update).await.map_err(|e| {
+        ulog(&handle, &format!("前端下载失败:{e}"));
+        format!("下载失败:{e}")
+    })?;
 
     // 安装前停后端:此后本机 API 断开属预期——装完前端即提示重启。
     kill_backend(&handle);
@@ -328,7 +462,9 @@ pub fn run() {
             desktop_ping,
             check_update,
             download_and_install_update,
-            restart_app
+            restart_app,
+            set_update_proxy,
+            get_update_proxy
         ])
         .manage(Backend(Mutex::new(None)))
         .manage(FrontendActive(AtomicBool::new(false)))
@@ -403,19 +539,12 @@ fn spawn_update_check(handle: tauri::AppHandle) {
 // 能区分"已是最新"与"检查失败"。
 async fn check_for_update(handle: tauri::AppHandle) {
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
-    use tauri_plugin_updater::UpdaterExt;
 
     let current = env!("CARGO_PKG_VERSION");
     ulog(&handle, &format!("启动检查:当前版本 v{current},开始向更新端点查询"));
 
-    let updater = match handle.updater_builder().build() {
-        Ok(u) => u,
-        Err(e) => {
-            ulog(&handle, &format!("更新器构建失败:{e}"));
-            return;
-        }
-    };
-    let update = match updater.check().await {
+    // 与前端路径同一套逻辑:有代理走代理,失败回退直连(见 check_with_fallback)。
+    let update = match check_with_fallback(&handle).await {
         Ok(Some(u)) => u,
         Ok(None) => {
             ulog(&handle, "检查完成:已是最新版,无更新");
@@ -453,7 +582,7 @@ async fn check_for_update(handle: tauri::AppHandle) {
             let h = dialog_handle.clone();
             tauri::async_runtime::spawn(async move {
                 ulog(&h, "开始下载更新…");
-                match update.download(|_chunk, _total| {}, || {}).await {
+                match download_with_fallback(&h, &update).await {
                     Ok(bytes) => {
                         // 安装前停后端,避开 Windows 文件锁(见 kill_backend 注释)。
                         kill_backend(&h);
@@ -470,4 +599,29 @@ async fn check_for_update(handle: tauri::AppHandle) {
                 }
             });
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_update_proxy;
+
+    // 代理地址校验:空=清除;http/socks5 + host:port 合法;其余一律拒绝。
+    #[test]
+    fn validate_update_proxy_rules() {
+        assert!(validate_update_proxy("").unwrap().is_none());
+        assert!(validate_update_proxy("   ").unwrap().is_none());
+
+        let http = validate_update_proxy("http://127.0.0.1:7890").unwrap().unwrap();
+        assert_eq!(http.scheme(), "http");
+        assert_eq!(http.port(), Some(7890));
+        let socks = validate_update_proxy("socks5://127.0.0.1:1080").unwrap().unwrap();
+        assert_eq!(socks.scheme(), "socks5");
+
+        // 缺端口、缺 host、非支持协议都非法
+        assert!(validate_update_proxy("http://127.0.0.1").is_err());
+        assert!(validate_update_proxy("http://:7890").is_err());
+        assert!(validate_update_proxy("https://127.0.0.1:7890").is_err());
+        assert!(validate_update_proxy("127.0.0.1:7890").is_err());
+        assert!(validate_update_proxy("不是地址").is_err());
+    }
 }

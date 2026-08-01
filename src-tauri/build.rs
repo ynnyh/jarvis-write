@@ -11,6 +11,8 @@ fn main() {
                 "check_update",
                 "download_and_install_update",
                 "restart_app",
+                "set_update_proxy",
+                "get_update_proxy",
             ]),
         ),
     )

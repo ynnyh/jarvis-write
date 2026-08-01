@@ -14,6 +14,8 @@ import {
   downloadAndInstallUpdate,
   restartApp,
   onUpdateProgress,
+  setUpdateProxy,
+  getUpdateProxy,
   UpdateInfo,
 } from "../desktop";
 import { getThemePref, setThemePref, ThemePref } from "../theme";
@@ -80,11 +82,32 @@ function AboutUpdateCard() {
   const [progress, setProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
   const unlistenRef = useRef<(() => void) | null>(null);
 
+  // 更新代理:加载时回显已保存值;空串=直连
+  const [proxy, setProxy] = useState("");
+  const [proxyBusy, setProxyBusy] = useState(false);
+
   useEffect(() => {
     api.getVersion()
       .then((v) => setVersion(v.app_version && v.app_version !== "dev" ? v.app_version : v.commit))
       .catch(() => setVersion(""));
   }, []);
+
+  useEffect(() => {
+    if (!desktop) return;
+    getUpdateProxy().then(setProxy).catch(() => {});
+  }, [desktop]);
+
+  async function saveProxy() {
+    setProxyBusy(true);
+    try {
+      await setUpdateProxy(proxy.trim());
+      toast.ok(proxy.trim() ? "更新代理已保存" : "已恢复直连", "下次检查/下载更新生效");
+    } catch (e) {
+      toast.err("保存失败", e instanceof Error ? e.message : String(e));
+    } finally {
+      setProxyBusy(false);
+    }
+  }
 
   // 桌面版:进入设置页自动检查一次(也让 Rust 侧「前端已接管」置真,原生框让位)
   useEffect(() => {
@@ -201,6 +224,23 @@ function AboutUpdateCard() {
           {stage === "idle" && (
             <button className="btn-sm" onClick={doCheck}>检查更新</button>
           )}
+
+          <label className="fl">更新代理</label>
+          <div className="input-row">
+            <input
+              type="text"
+              value={proxy}
+              onChange={(e) => setProxy(e.target.value)}
+              placeholder="http://127.0.0.1:7890"
+              spellCheck={false}
+            />
+            <button className="btn-sm" onClick={saveProxy} disabled={proxyBusy}>
+              {proxyBusy && <span className="spin" />}保存
+            </button>
+          </div>
+          <p className="card-desc" style={{ marginBottom: 0 }}>
+            检查与下载更新走此代理;留空为直连;填错会自动回退直连。
+          </p>
         </div>
       )}
     </div>

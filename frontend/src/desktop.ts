@@ -70,6 +70,19 @@ export function restartApp(): Promise<void> {
 }
 
 /**
+ * 保存更新代理(检查与下载更新都走它)。空串=清除,恢复直连;
+ * 非空须形如 http://host:port 或 socks5://host:port,非法由 Rust 侧校验并抛错。
+ */
+export function setUpdateProxy(proxy: string): Promise<void> {
+  return invoke<void>("set_update_proxy", { proxy });
+}
+
+/** 读取已保存的更新代理(未设置返回空串),用于设置页回显。 */
+export function getUpdateProxy(): Promise<string> {
+  return invoke<string>("get_update_proxy");
+}
+
+/**
  * 订阅下载进度。回调收到 [已下载字节, 总字节];总字节可能为 0(服务端没给)。
  * 返回取消订阅函数。event 插件不可用时返回 no-op(不影响下载,仅进度条不动)。
  */
