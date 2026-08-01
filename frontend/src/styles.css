@@ -594,8 +594,11 @@ select { cursor: pointer; }
   width: 60px;
   height: 60px;
   border-radius: 18px;
-  display: grid;
-  place-items: center;
+  /* 不用 grid:两个字母会被 grid 各占一行,W 换行溢出盒外;flex 强制同行 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
   background: linear-gradient(135deg, var(--brand) 0%, var(--brand-2) 100%);
   color: var(--on-vivid);
   font-size: 26px;
