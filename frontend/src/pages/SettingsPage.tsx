@@ -211,8 +211,12 @@ function AboutUpdateCard() {
 
           {stage === "downloading" && (
             <div className="update-progress">
-              <span className="muted">正在下载并安装…{pct !== null ? ` ${pct}%` : ""}</span>
-              <div className="pbar"><div className="pbar-fill" style={{ width: pct !== null ? `${pct}%` : "40%" }} /></div>
+              <span className="muted">{pct !== null ? `正在下载并安装… ${pct}%` : "正在连接更新服务器…"}</span>
+              <div className="pbar">
+                {pct !== null
+                  ? <div className="pbar-fill" style={{ width: `${pct}%` }} />
+                  : <div className="pbar-fill indet" />}
+              </div>
             </div>
           )}
 

@@ -2100,6 +2100,15 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .update-progress { display: flex; flex-direction: column; gap: var(--sp-2); padding: 10px 12px; }
 .pbar { height: 8px; border-radius: var(--r-full); background: var(--surface-2); overflow: hidden; }
 .pbar-fill { height: 100%; background: var(--brand); border-radius: var(--r-full); transition: width .3s ease; }
+/* 进度未知(等首个进度事件)时的往返扫描动画,不再用静态 40% 误导 */
+.pbar-fill.indet { width: 40%; animation: pbar-indet 1.2s ease-in-out infinite alternate; }
+@keyframes pbar-indet {
+  from { margin-left: 0; }
+  to { margin-left: 60%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pbar-fill.indet { animation: none; margin-left: 0; }
+}
 
 /* 模型设置:每家一行 */
 .provider-list { display: flex; flex-direction: column; gap: var(--sp-4); margin-top: var(--sp-3); }
