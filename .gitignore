@@ -6,6 +6,8 @@ __pycache__/
 
 # 运行时数据(本地私有,不入库)
 backend/jarvis_write.db
+backend/jarvis_write.db-shm
+backend/jarvis_write.db-wal
 backend/chroma_data/
 backend/.env
 backend/app.log
