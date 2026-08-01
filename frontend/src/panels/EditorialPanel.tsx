@@ -17,7 +17,7 @@ const TABS: { key: Tab; label: string; who: string }[] = [
 ];
 
 const SCORE_LABEL: Record<string, string> = {
-  plot: "情节", prose: "文笔", pacing: "节奏", character: "人物",
+  plot: "情节", prose: "文笔", pacing: "节奏", character: "人物", continuity: "连续性",
 };
 const ISSUE_TYPE: Record<string, string> = {
   typo: "错字", grammar: "语病", punct: "标点", dup: "重复",

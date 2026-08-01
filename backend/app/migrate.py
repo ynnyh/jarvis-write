@@ -265,6 +265,45 @@ def _add_chapter_proofread_snapshot_column() -> None:
             logger.info("迁移:chapters 补 proofread_snapshot 列")
 
 
+def _add_queue_require_approved_column() -> None:
+    """给 projects 表补连写前置配置列(幂等)。默认 False=宽松(仅 quarantined 暂停)。"""
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "projects" not in insp.get_table_names():
+            return
+        if not _column_exists("projects", "queue_require_approved"):
+            conn.execute(
+                text(
+                    "ALTER TABLE projects ADD COLUMN queue_require_approved "
+                    "BOOLEAN NOT NULL DEFAULT 0"
+                )
+            )
+            logger.info("迁移:projects 补 queue_require_approved 列")
+
+
+def _migrate_finalized_to_approved() -> None:
+    """状态机扩展(docs/08 §5.5):存量 finalized 章节一次性映射为 approved。
+
+    用 PRAGMA user_version 做一次性标记(1→2):代码已不再写 finalized,
+    老库的 finalized 等价于"已审过的成文章节",映射后行为不变。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "chapters" not in insp.get_table_names():
+            return
+        version = conn.execute(text("PRAGMA user_version")).scalar() or 0
+        if version >= 2:
+            return
+        result = conn.execute(
+            text("UPDATE chapters SET status = 'approved' WHERE status = 'finalized'")
+        )
+        conn.execute(text("PRAGMA user_version = 2"))
+        logger.info(
+            "迁移:存量 finalized 章节映射为 approved 共 %d 行(user_version 1→2)",
+            result.rowcount,
+        )
+
+
 def _disable_word_guard_default() -> None:
     """一次性把存量项目的字数守卫关掉(此前无 UI,全是默认开启,无人主动开过)。
 
@@ -366,7 +405,9 @@ def run_migrations() -> None:
     _add_project_style_memo_column()
     _add_chapter_review_snapshot_column()
     _add_chapter_proofread_snapshot_column()
+    _add_queue_require_approved_column()
     _disable_word_guard_default()
+    _migrate_finalized_to_approved()
     _encrypt_existing_keys()
     with session_scope() as db:
         admin = _ensure_admin(db)

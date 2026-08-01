@@ -3,8 +3,8 @@
 """逐章生成 Prompt:滚动摘要 → 草稿 → 定稿(借鉴 AI_NovelGenerator 的多阶段思路)。
 
 上下文组装(见 docs/02-data-model.md 数据流):
-  本章蓝图 + 下章蓝图(承上启下)+ 最近章节正文尾部 + 滚动摘要
-  + {style_directives} 倾向块
+  本章蓝图 + 下章蓝图(承上启下)+ 最近章节正文尾部 + 上一章章末交接契约
+  + 滚动摘要 + {style_directives} 倾向块
 """
 
 # =============== 滚动摘要:压缩"更早"的剧情 ===============
@@ -70,6 +70,7 @@ CHAPTER_DRAFT_PROMPT = """\
 【最近章节结尾(直接上文,衔接必须自然)】
 {recent_tail}
 
+{handoff_contract}
 【人物当前状态(硬约束,必须遵守,不得违反)】
 {hard_constraints}
 

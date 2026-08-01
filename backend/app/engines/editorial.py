@@ -18,11 +18,21 @@ from app.prompts.editorial import PROOFREAD_PROMPT, REVIEW_PROMPT
 
 # 主审四维(与前端 SCORE_LABEL / ChapterReview.scores 对应)
 DIMS = ("plot", "prose", "pacing", "character")
+# 第五维「连续性」(docs/08 §5.4.4):不来自主审 LLM,由一致性门禁结果折算
+# (checker.continuity_score)后写入 scores。仅在 scores 里存在时参与达标判定——
+# 编辑部手动主审(纯四维)与四维旧快照维持原判定,向后兼容。
+CONTINUITY_DIM = "continuity"
 
 
 def judge_passed(scores: dict, threshold: int) -> bool:
-    """四维均 >= threshold 才算达标;缺维度(0 分)视为不达标。"""
-    return all(int(scores.get(k) or 0) >= threshold for k in DIMS)
+    """四维均 >= threshold 才算达标;缺维度(0 分)视为不达标。
+
+    scores 含 continuity 维度(生成流水线的门禁折算分)时,该维同样必须 >= threshold。
+    """
+    base = all(int(scores.get(k) or 0) >= threshold for k in DIMS)
+    if CONTINUITY_DIM in scores:
+        return base and int(scores.get(CONTINUITY_DIM) or 0) >= threshold
+    return base
 
 
 async def review_chapter(content: str, outline_block: str) -> dict:

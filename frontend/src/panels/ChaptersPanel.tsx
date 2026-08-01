@@ -89,16 +89,33 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
     } catch (e) { toast.err("开关保存失败", errMsg(e)); }
   }
 
-  // 编辑部审校把关配置:达标线 / 自动回炉开关 / 回炉上限。改完即存,失效缓存重拉。
+  // 编辑部审校把关配置:达标线 / 自动回炉开关 / 回炉上限 / 连写前置审核。改完即存,失效缓存重拉。
   async function patchReview(patch: {
     review_pass_threshold?: number;
     review_auto_revise?: boolean;
     review_max_revisions?: number;
+    queue_require_approved?: boolean;
   }) {
     try {
       await api.patchProject(pid, patch);
       await invalidateProject();
     } catch (e) { toast.err("审校配置保存失败", errMsg(e)); }
+  }
+
+  // 人工审核通过(docs/08 §5.5):pending_review → approved;quarantined 后端 400 拦截
+  const [approving, setApproving] = useState<number | null>(null);
+  async function approve(n: number) {
+    setApproving(n);
+    try {
+      const updated = await api.approveChapter(pid, n);
+      toast.ok(`第 ${n} 章已通过审核`);
+      if (current?.chapter_number === n) setCurrent(updated);
+      await reload();
+    } catch (e) {
+      toast.err("通过审核失败", errMsg(e));
+    } finally {
+      setApproving(null);
+    }
   }
 
   // 编辑部「按此重写」交接:挂载时消费预填的重写意见,展开对应章的重写框
@@ -221,7 +238,14 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
       await reload();
     } catch (e) {
       if (!ctrl.signal.aborted) {
-        setErr(errMsg(e));
+        const msg = errMsg(e);
+        setErr(msg);
+        // 严格连写模式暂停:引导先去通过被卡住的那一章
+        const paused = /第\s*(\d+)\s*章尚未人工审核通过/.exec(msg);
+        if (paused) {
+          toast.err("连写队列已暂停",
+            `先去章节列表通过第 ${paused[1]} 章,再重新排队(或在下方关闭「连写要求上一章审核通过」)`);
+        }
         await reload().catch(() => undefined);
       }
     } finally { if (!ctrl.signal.aborted) setGenJob(null); }
@@ -451,7 +475,7 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
               <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
                 <option value="">全部状态</option>
                 <option value="unwritten">未写</option>
-                <option value="finalized">已定稿</option>
+                <option value="finalized">已成文</option>
                 <option value="stale">大纲已变</option>
               </select>
             </div>
@@ -478,6 +502,8 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
                 reviseOpen={reviseFor === o.chapter_number}
                 reviseText={reviseText}
                 proseActions={proseActions}
+                approving={approving === o.chapter_number}
+                onApprove={() => approve(o.chapter_number)}
                 onOpen={() => open(o.chapter_number)}
                 onOpenReader={() => openReader(o.chapter_number)}
                 onToggleQueue={(checked) => {
@@ -533,6 +559,14 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
               </select>
             </label>
           </div>
+          <label className="guard-toggle mt-2">
+            <input type="checkbox" checked={!!project.queue_require_approved}
+              onChange={(e) => patchReview({ queue_require_approved: e.target.checked })} />
+            <span>
+              连写要求上一章审核通过
+              <b className="hint">开启后队列遇待审章会暂停,先人工通过该章再继续</b>
+            </span>
+          </label>
         </div>
       </div>
 
@@ -550,7 +584,25 @@ export default function ChaptersPanel({ pid, project, outlines, focusChapter, on
           />
         )}
 
-        {genResult && <GenResultCard result={genResult} />}
+        {genResult && (
+          <GenResultCard
+            pid={pid}
+            result={genResult}
+            onChanged={() => {
+              reload();
+              // 修订/放行后同步刷新右侧打开的正文
+              if (current?.chapter_number === genResult.chapter_number) {
+                api.getChapter(pid, genResult.chapter_number)
+                  .then(setCurrent)
+                  .catch(() => undefined);
+              }
+            }}
+            onRewrite={() => {
+              setReviseFor(genResult.chapter_number);
+              setReviseText("");
+            }}
+          />
+        )}
 
         {current ? (
           <>

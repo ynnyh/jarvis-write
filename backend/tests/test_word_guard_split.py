@@ -70,7 +70,7 @@ async def _split_case() -> None:
     ch = Chapter(
         project_id=pid, outline_id=outline.id, chapter_number=1,
         draft_content=full_text, final_content=full_text,
-        word_count=len(full_text), status="finalized",
+        word_count=len(full_text), status="approved",
     )
     setup.add(ch)
     setup.commit()

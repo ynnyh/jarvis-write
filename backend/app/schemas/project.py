@@ -38,6 +38,8 @@ class ProjectOut(BaseModel):
     review_pass_threshold: int = 7
     review_auto_revise: bool = True
     review_max_revisions: int = 3
+    # 连写前置:True=严格模式(上一章 approved 才能连写下一章),False=宽松(默认)
+    queue_require_approved: bool = False
     global_tendency: dict[str, Any]
     concept: Concept | None = None
     synopsis: str | None = None

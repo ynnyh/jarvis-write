@@ -215,7 +215,7 @@ def _run(db, project, review_fake) -> dict:
         patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
         patch.object(ch_mod, "review_chapter", new=review_fake),
     ):
-        _chapter, _issues, _stats, _guard, review_result = asyncio.run(
+        _chapter, _issues, _stats, _guard, review_result, _pf = asyncio.run(
             ch_mod.generate_chapter(db, project, 1)
         )
     return review_result

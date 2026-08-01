@@ -87,7 +87,7 @@ def seeded():
         db.flush()
         chapter = Chapter(
             project_id=project.id, chapter_number=1,
-            final_content="这是第一章的正文。" * 10, status="finalized",
+            final_content="这是第一章的正文。" * 10, status="approved",
         )
         db.add(chapter)
         db.commit()

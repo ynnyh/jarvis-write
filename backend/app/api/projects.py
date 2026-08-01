@@ -303,6 +303,8 @@ class ProjectPatch(BaseModel):
     review_pass_threshold: int | None = Field(default=None, ge=1, le=10)
     review_auto_revise: bool | None = None
     review_max_revisions: int | None = Field(default=None, ge=0, le=5)
+    # 连写前置开关:True=严格(上一章 approved 才能连写),False=宽松(仅 quarantined 停)
+    queue_require_approved: bool | None = None
     global_tendency: dict | None = None
     concept: Concept | None = None
     synopsis: str | None = None
@@ -632,7 +634,7 @@ def _build_extract_context(db: Session, project: Project) -> str:
         db.query(Chapter)
         .filter(
             Chapter.project_id == project.id,
-            Chapter.status.in_(["finalized", "stale"]),
+            Chapter.status.in_(["pending_review", "approved", "stale"]),
         )
         .order_by(Chapter.chapter_number)
         .all()

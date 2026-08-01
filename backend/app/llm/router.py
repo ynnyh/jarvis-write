@@ -28,6 +28,7 @@ class Task(str, Enum):
     DRAFT = "draft"                     # 正文草稿
     SUMMARY = "summary"                 # 章节摘要
     FACT_EXTRACT = "fact_extract"       # 章后事实/状态抽取
+    HANDOFF_EXTRACT = "handoff_extract" # 章末交接契约提取
     FINALIZE = "finalize"               # 定稿
     POLISH = "polish"                   # 润色
     CONSISTENCY = "consistency"         # 一致性校验
@@ -46,6 +47,7 @@ _TASK_TIER: dict[Task, Tier] = {
     Task.DRAFT: Tier.FAST,
     Task.SUMMARY: Tier.FAST,
     Task.FACT_EXTRACT: Tier.QUALITY,  # 抽取写圣经是长程一致性的数据源头,抽错污染全书,上强档
+    Task.HANDOFF_EXTRACT: Tier.QUALITY,  # 章末契约是下章衔接与门禁比对的事实源,理由同上
     Task.FINALIZE: Tier.QUALITY,
     Task.POLISH: Tier.QUALITY,
     Task.CONSISTENCY: Tier.FAST,
@@ -63,6 +65,7 @@ _TASK_TEMPERATURE: dict[Task, float] = {
     Task.POLISH: 0.7,          # 润色同上
     Task.SUMMARY: 0.3,         # 摘要忠实压缩,不要二次创作
     Task.FACT_EXTRACT: 0.2,    # 抽取求准,低温最稳
+    Task.HANDOFF_EXTRACT: 0.2, # 契约提取同为抽取类,低温最稳
     Task.CONSISTENCY: 0.3,     # 一致性/审校判断要稳定可复现
     Task.IMPACT: 0.4,          # 影响分析偏判断
 }

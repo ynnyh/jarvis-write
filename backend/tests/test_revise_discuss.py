@@ -54,7 +54,7 @@ def _seed_chapter(project_id: int, n: int = 1, content: str = "这是第一章�
         ))
         db.add(Chapter(
             project_id=project_id, chapter_number=n,
-            final_content=content, status="finalized", word_count=len(content),
+            final_content=content, status="approved", word_count=len(content),
         ))
         db.commit()
     finally:

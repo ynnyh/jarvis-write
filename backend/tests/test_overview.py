@@ -50,7 +50,7 @@ def _seed(client: TestClient, headers: dict) -> dict:
             )
         db.add(
             Chapter(
-                project_id=p["id"], chapter_number=1, status="finalized",
+                project_id=p["id"], chapter_number=1, status="approved",
                 final_content="正文一", word_count=3000, outline_version_used=1,
             )
         )
@@ -101,7 +101,7 @@ def test_overview_structure(client):
     c1, c2, c3 = chapters
     assert c1["title"] == "第1章标题"
     assert c1["chapter_role"] == "铺垫"
-    assert c1["status"] == "finalized"
+    assert c1["status"] == "approved"
     assert c1["word_count"] == 3000
     assert c1["outline_version_used"] == 1
 

@@ -18,9 +18,17 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_project_or_404
 from app.auth import get_current_user
 from app.chapter_versions import snapshot_chapter
-from app.db.models import Chapter, ChapterVersion, Outline, Project
+from app.db.models import Chapter, ChapterIssue, ChapterVersion, Outline, Project
 from app.db.session import SessionLocal, get_db
-from app.engines.pipeline.chapter import discuss_revision, generate_chapter
+from app.engines.common import get_outline
+from app.engines.pipeline.chapter import (
+    apply_chapter_tail,
+    discuss_revision,
+    generate_chapter,
+    rebuild_summaries_after,
+    update_style_memo,
+)
+from app.engines.pipeline.handoff import handoff_payload
 from app.engines.polish import ai_flavor_report
 from app.jobs import create_job, fail_job, finish_job, list_running, update_stage
 from app.schemas.tendency import Tendency
@@ -60,6 +68,19 @@ class ChapterDetail(ChapterBrief):
     draft_content: str
     final_content: str
     outline_version_used: int
+    # 本章章末交接契约(docs/08 §5.2):无契约/正文已改动(指纹不符)时为 None;
+    # status:none(从未提取)/ ok / failed(失败留痕,error 记原因,不阻塞生成)
+    handoff_contract: dict | None = None
+    handoff_extract_status: str = "none"
+    handoff_extract_error: str = ""
+
+
+def _fill_handoff(db: Session, chapter: Chapter, resp: ChapterDetail) -> None:
+    """把本章契约填进响应(契约存在 chapter_states 表,不在 chapters 行上)。"""
+    payload = handoff_payload(db, chapter)
+    resp.handoff_contract = payload["contract"]
+    resp.handoff_extract_status = payload["status"]
+    resp.handoff_extract_error = payload["error"]
 
 
 class GenerateChapterResponse(ChapterDetail):
@@ -72,8 +93,20 @@ class GenerateChapterResponse(ChapterDetail):
     # 字数守卫:none / compressed / split
     word_guard_action: str = "none"
     split_info: dict = {}
-    # 编辑部审校把关:scores/comment/suggestions/passed/revision_rounds/threshold
+    # 编辑部审校把关:scores(四维+continuity)/comment/suggestions/passed/revision_rounds/threshold
     review: dict = {}
+    # 一致性门禁结果(docs/08 §5.4):{"status": "passed"|"quarantined", "blockers": [...]}
+    gate: dict = {}
+    # 写前审核警告(docs/08 §5.3):{"warnings": [...]},severity 一律 major,只警告不阻断
+    preflight: dict = {}
+
+
+def _gate_payload(chapter: Chapter, issues: list[dict]) -> dict:
+    """门禁结果透出:quarantined 状态 + blocker 列表(P1 前端审核面板对接用)。"""
+    return {
+        "status": "quarantined" if chapter.status == "quarantined" else "passed",
+        "blockers": [i for i in issues if i.get("severity") == "blocker"],
+    }
 
 
 def _flavor_dict(text: str) -> dict:
@@ -96,9 +129,11 @@ async def generate(
     """生成一章(草稿/定稿/检查/抽取/摘要,多次 LLM 调用,耗时较长)。"""
     project = get_project_or_404(db, project_id)
     try:
-        chapter, issues, stats, guard_result, review_result = await generate_chapter(
-            db, project, chapter_number, req.tendency,
-            revision=req.revision.strip(),
+        chapter, issues, stats, guard_result, review_result, preflight = (
+            await generate_chapter(
+                db, project, chapter_number, req.tendency,
+                revision=req.revision.strip(),
+            )
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -110,6 +145,9 @@ async def generate(
     resp.word_guard_action = guard_result.action
     resp.split_info = guard_result.split_info
     resp.review = review_result
+    resp.gate = _gate_payload(chapter, issues)
+    resp.preflight = {"warnings": preflight}
+    _fill_handoff(db, chapter, resp)
     return resp
 
 
@@ -144,12 +182,15 @@ async def generate_async(
         session = SessionLocal()
         try:
             project = session.get(Project, project_id)
-            chapter, issues, stats, guard_result, review_result = await generate_chapter(
-                session, project, chapter_number, req.tendency,
-                progress=lambda s: update_stage(job_id, s),
-                revision=req.revision.strip(),
+            chapter, issues, stats, guard_result, review_result, preflight = (
+                await generate_chapter(
+                    session, project, chapter_number, req.tendency,
+                    progress=lambda s: update_stage(job_id, s),
+                    revision=req.revision.strip(),
+                )
             )
             session.commit()
+            handoff = handoff_payload(session, chapter)
             finish_job(job_id, {
                 "chapter_number": chapter.chapter_number,
                 "word_count": chapter.word_count,
@@ -164,6 +205,11 @@ async def generate_async(
                 "word_guard_action": guard_result.action,
                 "split_info": guard_result.split_info,
                 "review": review_result,
+                "gate": _gate_payload(chapter, issues),
+                "preflight": {"warnings": preflight},
+                "handoff_contract": handoff["contract"],
+                "handoff_extract_status": handoff["status"],
+                "handoff_extract_error": handoff["error"],
             })
         except Exception as exc:  # noqa: BLE001 — 任务失败进 job 状态
             session.rollback()
@@ -274,13 +320,52 @@ async def generate_queue(
             session = SessionLocal()
             try:
                 project = session.get(Project, project_id)
-                chapter, _issues, _stats, _guard, _review = await generate_chapter(
-                    session, project, n, req.tendency,
-                    progress=lambda s, _n=n, _i=i: update_stage(
-                        job_id, f"[{_i}/{total}] 第 {_n} 章:{s}"
-                    ),
+                # 严格连写模式(docs/08 §5.5,queue_require_approved=True):
+                # 下一章生成前要求上一章已人工审核通过(approved),否则队列暂停。
+                # 宽松模式(默认)维持现状——仅 quarantined 暂停(见下方生成后判断)。
+                if project.queue_require_approved and n > 1:
+                    prev = (
+                        session.query(Chapter)
+                        .filter(
+                            Chapter.project_id == project_id,
+                            Chapter.chapter_number == n - 1,
+                        )
+                        .first()
+                    )
+                    if prev is not None and prev.final_content and prev.status != "approved":
+                        done = "、".join(str(c["chapter_number"]) for c in completed) or "无"
+                        fail_job(
+                            job_id,
+                            f"严格连写模式:第 {n - 1} 章尚未人工审核通过"
+                            f"(当前状态:{prev.status}),已暂停(已完成:{done};"
+                            "请先在章节列表审核通过该章,或关闭项目设置里的"
+                            "「连写要求审核通过」后再继续)",
+                        )
+                        return
+                chapter, issues, _stats, _guard, _review, _preflight = (
+                    await generate_chapter(
+                        session, project, n, req.tendency,
+                        progress=lambda s, _n=n, _i=i: update_stage(
+                            job_id, f"[{_i}/{total}] 第 {_n} 章:{s}"
+                        ),
+                    )
                 )
                 session.commit()
+                # 一致性门禁拦截(quarantined):与"失败即停"同语义——该章未走章后
+                # 抽取/摘要,后续章没有可靠的前情摘要可用,必须停下等人工处理。
+                if chapter.status == "quarantined":
+                    blockers = [i for i in issues if i.get("severity") == "blocker"]
+                    desc = ";".join(
+                        (i.get("description") or "")[:60] for i in blockers[:3]
+                    ) or "详见该章问题清单"
+                    done = "、".join(str(c["chapter_number"]) for c in completed) or "无"
+                    fail_job(
+                        job_id,
+                        f"第 {n} 章被一致性门禁拦截(quarantined):{desc}"
+                        f"(已完成:{done};该章未抽取进圣经、未更新摘要,已停止。"
+                        "请重写该章或确认忽略放行后再继续连写)",
+                    )
+                    return
                 completed.append({
                     "chapter_number": n, "word_count": chapter.word_count,
                 })
@@ -328,7 +413,8 @@ async def edit_content(
     snapshot_chapter(db, ch, source="edited")
     ch.final_content = req.final_content.strip()
     ch.word_count = len(ch.final_content)
-    ch.status = "finalized"
+    # 手改后内容未经审校/人工审核,回到待审核(docs/08 §5.5)
+    ch.status = "pending_review"
     db.commit()
     return ch
 
@@ -397,6 +483,291 @@ async def re_extract_async(
                 return
             finally:
                 session.close()
+
+    asyncio.create_task(runner())
+    return {"job_id": job_id}
+
+
+# ---------- 一致性门禁:问题清单与 quarantined 放行 ----------
+
+
+class ChapterIssueOut(BaseModel):
+    """chapter_issues 记录(docs/08 §5.7):门禁/预审/诊断产出的一致性问题。"""
+
+    id: int
+    source: str
+    severity: str
+    issue_type: str
+    description: str
+    evidence: str
+    suggestion: str
+    status: str
+    created_at: str
+
+
+@router.get("/{chapter_number}/issues", response_model=list[ChapterIssueOut])
+async def list_issues(
+    project_id: int, chapter_number: int, db: Session = Depends(get_db)
+):
+    """本章的一致性问题清单(最新在前,含 open/resolved/ignored 各状态)。"""
+    get_project_or_404(db, project_id)
+    ch = _get_chapter_or_404(db, project_id, chapter_number)
+    rows = (
+        db.query(ChapterIssue)
+        .filter(ChapterIssue.chapter_id == ch.id)
+        .order_by(ChapterIssue.id.desc())
+        .all()
+    )
+    return [
+        ChapterIssueOut(
+            id=r.id, source=r.source, severity=r.severity, issue_type=r.issue_type,
+            description=r.description, evidence=r.evidence, suggestion=r.suggestion,
+            status=r.status, created_at=r.created_at.isoformat(),
+        )
+        for r in rows
+    ]
+
+
+class IssuePatchRequest(BaseModel):
+    """问题状态流转(docs/08 §5.5):open → resolved / ignored(单向)。"""
+
+    status: str = Field(min_length=1)
+
+
+def _issue_out(r: ChapterIssue) -> ChapterIssueOut:
+    return ChapterIssueOut(
+        id=r.id, source=r.source, severity=r.severity, issue_type=r.issue_type,
+        description=r.description, evidence=r.evidence, suggestion=r.suggestion,
+        status=r.status, created_at=r.created_at.isoformat(),
+    )
+
+
+def _get_issue_or_404(db: Session, chapter_id: int, issue_id: int) -> ChapterIssue:
+    issue = (
+        db.query(ChapterIssue)
+        .filter(ChapterIssue.id == issue_id, ChapterIssue.chapter_id == chapter_id)
+        .first()
+    )
+    if issue is None:
+        raise HTTPException(status_code=404, detail="问题记录不存在")
+    return issue
+
+
+@router.patch("/{chapter_number}/issues/{issue_id}", response_model=ChapterIssueOut)
+async def patch_issue(
+    project_id: int, chapter_number: int, issue_id: int,
+    req: IssuePatchRequest, db: Session = Depends(get_db),
+):
+    """单条问题状态流转:open → resolved(已人工改完)/ ignored(确认忽略)。
+
+    单向流转:已是 resolved/ignored 的不可再改(ignored 的失效语义照旧——
+    正文指纹变化后门禁重建会清除旧 ignored,同一矛盾重新报警)。
+    """
+    get_project_or_404(db, project_id)
+    ch = _get_chapter_or_404(db, project_id, chapter_number)
+    issue = _get_issue_or_404(db, ch.id, issue_id)
+    if req.status not in ("resolved", "ignored"):
+        raise HTTPException(status_code=400, detail="status 只能是 resolved 或 ignored")
+    if issue.status != "open":
+        raise HTTPException(
+            status_code=400, detail=f"该问题已是 {issue.status} 状态,不可再流转"
+        )
+    issue.status = req.status
+    db.commit()
+    return _issue_out(issue)
+
+
+@router.post("/{chapter_number}/issues/{issue_id}/apply-revision")
+async def apply_issue_revision(
+    project_id: int, chapter_number: int, issue_id: int,
+    db: Session = Depends(get_db),
+):
+    """采纳单条问题的修正建议:拼成修订指令走重写链路(异步 job)。
+
+    简化取舍:修订发起(本端点受理)即把该 issue 标 resolved;重写后门禁会重跑
+    并重建 open 集,同类问题若未消除会以新的 open 记录回来(不会漏报,但
+    resolved 标记不代表"已验证消除");且该 resolved 记录的正文指纹随重写失效,
+    门禁重建时按既有指纹语义清除(与 ignored 的失效语义一致)。
+    """
+    get_project_or_404(db, project_id)
+    ch = _get_chapter_or_404(db, project_id, chapter_number)
+    issue = _get_issue_or_404(db, ch.id, issue_id)
+    if issue.status != "open":
+        raise HTTPException(
+            status_code=400, detail=f"该问题已是 {issue.status} 状态,无需再修订"
+        )
+    if not (issue.suggestion or issue.description).strip():
+        raise HTTPException(status_code=400, detail="该问题没有可用的修正建议")
+    if not ch.final_content.strip():
+        raise HTTPException(status_code=400, detail="本章尚无定稿正文,无法按问题修订")
+    busy = (
+        list_running(f"chapter-{project_id}-")
+        + list_running(f"re-extract-{project_id}-")
+        + list_running(f"gate-release-{project_id}-")
+    )
+    if busy:
+        raise HTTPException(
+            status_code=409,
+            detail=f"已有章节任务在进行中({busy[0][1]['stage']}),等它完成再修订。",
+        )
+    # 修订指令:问题点 + 证据 + 修正建议(走 generate_chapter 的 revision 通道)
+    revision = (
+        f"针对一致性问题的修订:\n问题:{issue.description}"
+        + (f"\n证据:{issue.evidence}" if issue.evidence else "")
+        + (f"\n修正建议:{issue.suggestion}" if issue.suggestion else "")
+    )[:500]
+    # 简化语义:发起即标 resolved(见 docstring 的取舍说明)
+    issue.status = "resolved"
+    db.commit()
+    job_id = create_job(f"chapter-{project_id}-{chapter_number}")
+
+    async def runner() -> None:
+        session = SessionLocal()
+        try:
+            project = session.get(Project, project_id)
+            chapter, issues, stats, guard_result, review_result, preflight = (
+                await generate_chapter(
+                    session, project, chapter_number, None,
+                    progress=lambda s: update_stage(job_id, s),
+                    revision=revision,
+                )
+            )
+            session.commit()
+            handoff = handoff_payload(session, chapter)
+            finish_job(job_id, {
+                "chapter_number": chapter.chapter_number,
+                "applied_issue_id": issue_id,
+                "word_count": chapter.word_count,
+                "status": chapter.status,
+                "final_content": chapter.final_content,
+                "draft_content": chapter.draft_content,
+                "is_stale": chapter.is_stale,
+                "outline_version_used": chapter.outline_version_used,
+                "consistency_issues": issues,
+                "extraction_stats": stats,
+                "ai_flavor": _flavor_dict(chapter.final_content),
+                "word_guard_action": guard_result.action,
+                "split_info": guard_result.split_info,
+                "review": review_result,
+                "gate": _gate_payload(chapter, issues),
+                "preflight": {"warnings": preflight},
+                "handoff_contract": handoff["contract"],
+                "handoff_extract_status": handoff["status"],
+                "handoff_extract_error": handoff["error"],
+            })
+        except Exception as exc:  # noqa: BLE001 — 任务失败进 job 状态
+            session.rollback()
+            fail_job(job_id, str(exc)[:500])
+        finally:
+            session.close()
+
+    asyncio.create_task(runner())
+    return {"job_id": job_id}
+
+
+@router.post("/{chapter_number}/approve", response_model=ChapterDetail)
+async def approve_chapter(
+    project_id: int, chapter_number: int, db: Session = Depends(get_db)
+):
+    """人工审核通过(docs/08 §5.5):pending_review → approved。
+
+    幂等:已 approved 重复调用返回 200。quarantined 不可 approve——
+    需先 gate-release 放行或重写通过门禁(返回 400)。
+    """
+    get_project_or_404(db, project_id)
+    ch = _get_chapter_or_404(db, project_id, chapter_number)
+    if ch.status == "approved":
+        return ch  # 幂等
+    if ch.status == "quarantined":
+        raise HTTPException(
+            status_code=400,
+            detail="该章被一致性门禁隔离(quarantined),请先放行或重写通过后再审核",
+        )
+    if ch.status != "pending_review":
+        raise HTTPException(
+            status_code=400,
+            detail=f"当前状态({ch.status})不能审核通过,仅待审核(pending_review)章节可 approve",
+        )
+    ch.status = "approved"
+    db.commit()
+    resp = ChapterDetail.model_validate(ch, from_attributes=True)
+    _fill_handoff(db, ch, resp)
+    return resp
+
+
+@router.post("/{chapter_number}/gate-release")
+async def gate_release(
+    project_id: int, chapter_number: int, db: Session = Depends(get_db)
+):
+    """quarantined 放行:确认忽略全部 blocker,补走被跳过的章后链路。
+
+    后台任务按序执行:open issues 标 ignored → 状态回 pending_review(待人工
+    审核,docs/08 §5.5)→ 章后抽取(写圣经)→ 滚动摘要 → 章末契约 → 文风备忘 →
+    重建下游摘要。
+    任一步失败整体回滚,章节保持 quarantined(不会放出"半同步"状态)。
+    """
+    get_project_or_404(db, project_id)
+    ch = _get_chapter_or_404(db, project_id, chapter_number)
+    if ch.status != "quarantined":
+        raise HTTPException(status_code=400, detail="该章不在隔离(quarantined)状态,无需放行")
+    busy = (
+        list_running(f"chapter-{project_id}-")
+        + list_running(f"re-extract-{project_id}-")
+        + list_running(f"gate-release-{project_id}-")
+    )
+    if busy:
+        raise HTTPException(
+            status_code=409,
+            detail=f"已有章节任务在进行中({busy[0][1]['stage']}),等它完成再放行。",
+        )
+    job_id = create_job(f"gate-release-{project_id}-{chapter_number}")
+
+    async def runner() -> None:
+        session = SessionLocal()
+        try:
+            project = session.get(Project, project_id)
+            ch2 = (
+                session.query(Chapter)
+                .filter(
+                    Chapter.project_id == project_id,
+                    Chapter.chapter_number == chapter_number,
+                )
+                .first()
+            )
+            if ch2 is None or ch2.status != "quarantined":
+                raise ValueError("该章不在隔离(quarantined)状态,无需放行")
+            update_stage(job_id, "1/3 标记放行(issues 转 ignored,状态回 pending_review)")
+            session.query(ChapterIssue).filter(
+                ChapterIssue.chapter_id == ch2.id,
+                ChapterIssue.status == "open",
+            ).update({"status": "ignored"}, synchronize_session=False)
+            ch2.status = "pending_review"
+            session.commit()
+            # 补走 quarantined 时跳过的章后链路(抽取/摘要/契约,与生成主流程同一实现)
+            outline = get_outline(session, project_id, chapter_number)
+            stats = await apply_chapter_tail(
+                session, project, ch2, chapter_number, ch2.final_content,
+                outline.title if outline else "",
+                report=lambda s: update_stage(job_id, f"2/3 {s}"),
+            )
+            update_stage(job_id, "3/3 文风备忘与下游摘要重建")
+            await update_style_memo(session, project, chapter_number, ch2.final_content)
+            rebuilt = await rebuild_summaries_after(
+                session, project, chapter_number,
+                progress=lambda s: update_stage(job_id, f"3/3 {s}"),
+            )
+            session.commit()
+            finish_job(job_id, {
+                "chapter_number": chapter_number,
+                "status": "pending_review",
+                "extraction_stats": stats,
+                "summaries_rebuilt": rebuilt,
+            })
+        except Exception as exc:  # noqa: BLE001 — 失败整体回滚,保持 quarantined
+            session.rollback()
+            fail_job(job_id, str(exc)[:500])
+        finally:
+            session.close()
 
     asyncio.create_task(runner())
     return {"job_id": job_id}
@@ -506,7 +877,8 @@ async def restore_version(
     ch.final_content = v.final_content
     ch.draft_content = v.draft_content or ch.draft_content
     ch.word_count = len(ch.final_content)
-    ch.status = "finalized"
+    # 回滚后的正文未经审核,回到待审核(docs/08 §5.5)
+    ch.status = "pending_review"
     db.commit()
     return ch
 
@@ -536,4 +908,6 @@ async def get_chapter(
     )
     if ch is None:
         raise HTTPException(status_code=404, detail=f"第 {chapter_number} 章尚未生成")
-    return ch
+    resp = ChapterDetail.model_validate(ch, from_attributes=True)
+    _fill_handoff(db, ch, resp)
+    return resp

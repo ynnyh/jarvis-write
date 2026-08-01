@@ -32,7 +32,11 @@ class Chapter(Base, TimestampMixin):
     word_count: Mapped[int] = mapped_column(Integer, default=0)
     outline_version_used: Mapped[int] = mapped_column(Integer, default=0)
     is_stale: Mapped[bool] = mapped_column(Boolean, default=False)
-    # empty / drafting / drafted / finalized / stale
+    # empty / drafting / drafted / pending_review / approved / stale / quarantined
+    # 审核状态机(docs/08 §5.5):生成干净落库 pending_review,人工 approve 后
+    # approved;存量 finalized 由迁移一次性映射为 approved(行为不变)。
+    # quarantined:写后一致性门禁拦截(docs/08 §5.4)——正文落库但不做章后抽取、
+    # 不更新滚动摘要,重写通过或 gate-release 放行后回 pending_review。
     status: Mapped[str] = mapped_column(String(20), default="empty")
     # 最近一次主审结果快照(JSON):四维分/短评/建议/达标/回炉轮数/来源/时间 +
     # 正文指纹(content_hash)。编辑部打开时指纹一致才回显,正文改动自动失效,

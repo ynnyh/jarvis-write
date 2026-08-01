@@ -46,7 +46,7 @@ def _seed_outlines(project_id: int, with_chapter_content: bool = False) -> None:
         db.flush()
         if with_chapter_content:
             db.add(Chapter(project_id=project_id, outline_id=o1.id, chapter_number=1,
-                           final_content="正文……", status="finalized"))
+                           final_content="正文……", status="approved"))
         db.commit()
     finally:
         db.close()

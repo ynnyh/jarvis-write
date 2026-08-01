@@ -918,6 +918,18 @@ button.head { height: auto; margin-left: 0; padding: 0; border: 0; background: n
 .fact-check input[type="checkbox"] { margin-top: 4px; flex-shrink: 0; }
 .fact-title { flex: 1; min-width: 0; }
 
+/* ---------- 章节审核面板(GenResultCard):门禁横幅与可操作问题清单 ---------- */
+.gate-banner { font-size: var(--fs-sm); }
+.issue-head { display: flex; align-items: baseline; gap: var(--sp-1); flex-wrap: wrap; }
+.issue-ev { margin-top: 4px; font-size: var(--fs-xs); }
+.issue-ev summary { cursor: pointer; color: var(--text-2); }
+.issue-ev blockquote {
+  margin: 4px 0 0; padding-left: 10px; border-left: 3px solid var(--line); color: var(--text-2);
+}
+.issue-actions { display: flex; gap: var(--sp-1); margin-top: 6px; flex-wrap: wrap; }
+.issue-done { opacity: 0.55; }
+.issue-done-box summary { cursor: pointer; font-size: var(--fs-xs); }
+
 .entity { margin-bottom: 10px; }
 
 /* ---------- 看板页签 / 人物卡 ---------- */
@@ -976,7 +988,11 @@ button.head { height: auto; margin-left: 0; padding: 0; border: 0; background: n
 }
 .ov-cell b { font-size: var(--fs-sm); color: var(--text-2); }
 .ov-cell.st-drafted { background: var(--warn-weak); border-color: var(--warn-line); color: var(--warn); }
+/* finalized 为存量旧值(已迁移为 approved),保留兜底 */
 .ov-cell.st-finalized { background: var(--ok-weak); border-color: var(--ok-line); color: var(--ok); }
+.ov-cell.st-approved { background: var(--ok-weak); border-color: var(--ok-line); color: var(--ok); }
+.ov-cell.st-pending_review { background: var(--warn-weak); border-color: var(--warn-line); color: var(--warn); }
+.ov-cell.st-quarantined { background: var(--err-weak); border-color: var(--err-line); color: var(--err); }
 .ov-cell.st-stale { background: var(--err-weak); border-color: var(--err-line); color: var(--err); }
 .ov-cell.st-drafting {
   background: var(--brand-weak);

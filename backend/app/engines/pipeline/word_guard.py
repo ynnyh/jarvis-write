@@ -210,7 +210,7 @@ async def _split_chapter(
         word_count=len(part_b),
         outline_version_used=1,
         is_stale=False,
-        status="finalized",
+        status="pending_review",  # 拆出的新章未经人工审核
     )
     db.add(new_chapter)
 
@@ -239,7 +239,7 @@ async def _split_chapter(
     cur_chapter.word_count = len(part_a)
     cur_chapter.outline_version_used = outline.current_version
     cur_chapter.is_stale = False
-    cur_chapter.status = "finalized"
+    cur_chapter.status = "pending_review"
 
     # 9. 更新项目总章数
     project.target_chapters = (project.target_chapters or 0) + 1

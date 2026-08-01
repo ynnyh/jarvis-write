@@ -45,7 +45,7 @@ def _make_db(with_previous: bool):
         db.add(Chapter(
             project_id=project.id, outline_id=outline.id, chapter_number=1,
             draft_content=PREVIOUS_TEXT, final_content=PREVIOUS_TEXT,
-            word_count=len(PREVIOUS_TEXT), status="finalized",
+            word_count=len(PREVIOUS_TEXT), status="approved",
         ))
     db.commit()
     return db, project

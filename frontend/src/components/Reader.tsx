@@ -10,7 +10,12 @@ import { isDark } from "../theme";
 
 export const STATUS_CN: Record<string, string> = {
   empty: "未生成", drafting: "生成中", drafted: "有草稿",
+  pending_review: "待审", approved: "已审", quarantined: "被拦截",
   finalized: "已定稿", stale: "大纲已变",
+};
+// 章节状态徽标配色(badge class):待审 warn / 已审 ok / 被拦截 err
+export const STATUS_BADGE: Record<string, string> = {
+  pending_review: "warn", approved: "ok", quarantined: "err", finalized: "ok",
 };
 
 /** 正文分段:按空行/换行切开,去空白;阅读器渲染与片段替换共用同一套分段逻辑 */
@@ -405,7 +410,7 @@ export default function Reader({
               <h2 className="reader-title">
                 <span className="reader-title-text">第{chapter.chapter_number}章 {title ?? ""}</span>
                 <span className="reader-meta">
-                  <span className={"badge " + (chapter.is_stale ? "err" : chapter.status === "finalized" ? "ok" : "")}>
+                  <span className={"badge " + (chapter.is_stale ? "err" : STATUS_BADGE[chapter.status] ?? "")}>
                     {chapter.is_stale ? "大纲已变" : STATUS_CN[chapter.status] ?? chapter.status}
                   </span>
                   <span className="muted"> {chapter.word_count}字</span>

@@ -1,7 +1,7 @@
 // 章节列表单行:状态徽标、生成/重写按钮、行内重写意见区
 import { useEffect, useState } from "react";
 import { ChapterBrief, EditorAction, Outline } from "../../api";
-import { STATUS_CN } from "../../components/Reader";
+import { STATUS_BADGE, STATUS_CN } from "../../components/Reader";
 import ReviseChat from "./ReviseChat";
 
 interface Props {
@@ -17,6 +17,9 @@ interface Props {
   reviseOpen: boolean;
   reviseText: string;
   proseActions: EditorAction[];
+  // 人工审核通过(docs/08 §5.5):仅 pending_review 章显示行内「通过」按钮
+  approving: boolean;
+  onApprove: () => void;
   onOpen: () => void;
   onOpenReader: () => void;
   onToggleQueue: (checked: boolean) => void;
@@ -29,7 +32,7 @@ interface Props {
 
 export default function ChapterListItem({
   pid, outline: o, chapter: ch, queueMode, queuePicked, generating, genBlocked,
-  genHint, genStage, reviseOpen, reviseText, proseActions,
+  genHint, genStage, reviseOpen, reviseText, proseActions, approving, onApprove,
   onOpen, onOpenReader, onToggleQueue, onToggleRevise,
   onReviseTextChange, onGenerate, onReviseSubmit, onReviseCancel,
 }: Props) {
@@ -52,7 +55,7 @@ export default function ChapterListItem({
         {ch ? (
           <button type="button" className="fact-title linkish" onClick={onOpen}>
             <b>第{o.chapter_number}章</b> {o.title}
-            <span className={"badge " + (ch.is_stale ? "err" : st === "finalized" ? "ok" : "")}>
+            <span className={"badge " + (ch.is_stale ? "err" : STATUS_BADGE[st] ?? "")}>
               {ch.is_stale ? "大纲已变" : STATUS_CN[st] ?? st}
             </span>
             <span className="muted"> {ch.word_count}字</span>
@@ -63,13 +66,20 @@ export default function ChapterListItem({
         ) : (
           <span className="fact-title">
             <b>第{o.chapter_number}章</b> {o.title}
-            <span className={"badge " + (st === "finalized" ? "ok" : "")}>
+            <span className={"badge " + (STATUS_BADGE[st] ?? "")}>
               {STATUS_CN[st] ?? st}
             </span>
             {generating && (
               <span className="gen-stage"><span className="spin" />{genStage}</span>
             )}
           </span>
+        )}
+        {ch && st === "pending_review" && (
+          <button className="btn-sm" disabled={approving}
+            title="人工审核通过:确认本章可定稿,批准后状态变为「已审」"
+            onClick={onApprove}>
+            {approving && <span className="spin spin-sm" />}通过
+          </button>
         )}
         {ch && (
           <button className="btn-sm" onClick={onOpenReader}>阅读</button>

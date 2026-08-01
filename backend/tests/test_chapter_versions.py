@@ -45,7 +45,7 @@ def _make_chapter(project_id: int, n: int, final: str) -> int:
         ch = Chapter(
             project_id=project_id, chapter_number=n,
             final_content=final, draft_content=final,
-            word_count=len(final), status="finalized",
+            word_count=len(final), status="approved",
         )
         db.add(ch)
         db.commit()

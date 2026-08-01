@@ -133,7 +133,7 @@ def test_delete_project_cascades(client):
         db.add(outline)
         db.flush()
         db.add(Chapter(project_id=p["id"], outline_id=outline.id, chapter_number=1,
-                       final_content="正文", status="finalized"))
+                       final_content="正文", status="approved"))
         db.add(ChapterSummary(project_id=p["id"], chapter_number=1, rolling_summary="摘要"))
         db.add(Entity(project_id=p["id"], entity_type="character", name="张三"))
         db.commit()
@@ -696,7 +696,7 @@ def _create_chapter_with_content(client: TestClient, headers: dict, title: str =
         db.add(outline)
         db.flush()
         db.add(Chapter(project_id=p["id"], outline_id=outline.id, chapter_number=1,
-                       final_content="他走进了城门。", status="finalized"))
+                       final_content="他走进了城门。", status="approved"))
         db.commit()
     finally:
         db.close()

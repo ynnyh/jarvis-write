@@ -37,6 +37,9 @@ class Project(Base, TimestampMixin):
     review_pass_threshold: Mapped[int] = mapped_column(Integer, default=7)
     review_auto_revise: Mapped[bool] = mapped_column(default=True)
     review_max_revisions: Mapped[int] = mapped_column(Integer, default=3)
+    # 连写前置(docs/08 §5.5):True=严格模式,队列中下一章生成前要求上一章
+    # 已人工审核通过(approved),否则队列暂停;False(默认,宽松)= 仅 quarantined 暂停。
+    queue_require_approved: Mapped[bool] = mapped_column(default=False)
     # 全局倾向:标签组合 JSON,如 {"pace": "快节奏", "tone": ["热血"], ...}
     global_tendency: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     # 结构化故事概念(灵感工坊产出):logline/hook/twist/protagonist/conflict/setting

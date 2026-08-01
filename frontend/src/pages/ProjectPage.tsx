@@ -152,7 +152,10 @@ export default function ProjectPage() {
 
   const wordsTotal = chapters.reduce((s, c) => s + c.word_count, 0);
   const staleCount = chapters.filter((c) => c.is_stale).length;
-  const doneCount = chapters.filter((c) => c.status === "finalized" || c.status === "stale").length;
+  const doneCount = chapters.filter((c) =>
+    c.status === "pending_review" || c.status === "approved" ||
+    c.status === "quarantined" || c.status === "finalized" || c.status === "stale",
+  ).length;
 
   // 各步完成态:导航打勾 + 引导条给出「下一步」按钮
   const stepDone: Partial<Record<Step, boolean>> = {

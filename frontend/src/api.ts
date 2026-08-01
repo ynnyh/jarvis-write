@@ -105,6 +105,8 @@ export interface Project {
   review_pass_threshold?: number;
   review_auto_revise?: boolean;
   review_max_revisions?: number;
+  // 连写前置:True=严格模式(上一章 approved 才能连写下一章,遇待审章队列暂停)
+  queue_require_approved?: boolean;
   global_tendency: Tendency; status: string;
   concept?: Concept | null;
   synopsis?: string | null;
@@ -134,6 +136,31 @@ export interface ChapterBrief {
 }
 export interface ChapterDetail extends ChapterBrief {
   draft_content: string; final_content: string; outline_version_used: number;
+  // 章末交接契约(docs/08 §5.2):approve 等接口回显;none=从未提取 / ok / failed
+  handoff_contract?: Record<string, unknown> | null;
+  handoff_extract_status?: string;
+  handoff_extract_error?: string;
+}
+/** 写前审核警告(docs/08 §5.3):severity 一律 major,只警告不阻断 */
+export interface PreflightWarning {
+  severity: string;           // "major"
+  type: string;               // state | timeline
+  description: string;
+  evidence: string;
+  conflicting_fact?: string;
+  suggestion: string;
+}
+/** 章节一致性问题记录(docs/08 §5.7):门禁/预审/诊断/审校产出,可操作流转 */
+export interface ChapterIssue {
+  id: number;
+  source: string;             // gate | preflight | diag | review
+  severity: string;           // blocker | major | minor
+  issue_type: string;
+  description: string;
+  evidence: string;
+  suggestion: string;
+  status: string;             // open | resolved | ignored
+  created_at?: string;
 }
 export interface GenerateChapterResponse extends ChapterDetail {
   consistency_issues: Record<string, string>[];
@@ -151,13 +178,18 @@ export interface GenerateChapterResponse extends ChapterDetail {
   };
   // 生成时编辑部审校把关结果(校对+主审+有上限回炉)
   review?: {
-    scores: { plot: number; prose: number; pacing: number; character: number };
+    // 五维评分;continuity(连续性)为新维度,旧四维快照无该键(渲染时兼容)
+    scores: { plot: number; prose: number; pacing: number; character: number; continuity?: number };
     comment: string;
     suggestions: ReviewSuggestion[];
     passed: boolean;
     revision_rounds: number;
     threshold: number;
   };
+  // 一致性门禁结果(docs/08 §5.4):quarantined 时正文已存但未进圣经/摘要
+  gate?: { status: "passed" | "quarantined"; blockers: PreflightWarning[] };
+  // 写前审核警告(docs/08 §5.3):只警告不阻断
+  preflight?: { warnings: PreflightWarning[] };
 }
 /** 章节正文历史版本(覆盖前的快照)。source: generated/polished/edited/restored */
 export interface ChapterVersionBrief {
@@ -351,7 +383,8 @@ export interface EditorAction { key: string; label: string; directive: string; }
 export interface ReviewSuggestion { evidence: string; issue: string; fix: string; }
 export interface ChapterReview {
   chapter_number: number;
-  scores: { plot: number; prose: number; pacing: number; character: number };
+  // 四维+continuity(连续性,新维度;旧快照无该键,Object.entries 遍历天然兼容)
+  scores: { plot: number; prose: number; pacing: number; character: number; continuity?: number };
   comment: string;
   suggestions: ReviewSuggestion[];
   // 后端按项目阈值硬判是否达标(四维均需 >= threshold)
@@ -513,6 +546,21 @@ export const api = {
     req<{ reply: string; directive: string }>("POST", `/api/projects/${pid}/chapters/${n}/revise-discuss`, { messages }, LLM_TIMEOUT),
   editChapterContent: (pid: number, n: number, final_content: string) =>
     req<ChapterDetail>("PUT", `/api/projects/${pid}/chapters/${n}/content`, { final_content }),
+  // 人工审核通过(docs/08 §5.5):pending_review → approved;quarantined 时 400
+  approveChapter: (pid: number, n: number) =>
+    req<ChapterDetail>("POST", `/api/projects/${pid}/chapters/${n}/approve`),
+  // 一致性问题清单(docs/08 §5.7):open/resolved/ignored 各状态,最新在前
+  listChapterIssues: (pid: number, n: number) =>
+    req<ChapterIssue[]>("GET", `/api/projects/${pid}/chapters/${n}/issues`),
+  // 单条问题状态流转:open → resolved(已人工改完)/ ignored(确认忽略)
+  patchChapterIssue: (pid: number, n: number, issueId: number, status: "resolved" | "ignored") =>
+    req<ChapterIssue>("PATCH", `/api/projects/${pid}/chapters/${n}/issues/${issueId}`, { status }),
+  // 采纳单条问题的修正建议:异步修订 job(409=本章有任务在跑),result 含 applied_issue_id
+  applyIssueRevision: (pid: number, n: number, issueId: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/chapters/${n}/issues/${issueId}/apply-revision`),
+  // quarantined 放行:忽略全部 blocker,补走圣经/摘要等章后链路(异步 job)
+  gateRelease: (pid: number, n: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/chapters/${n}/gate-release`),
   reExtractAsync: (pid: number, n: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/chapters/${n}/re-extract-async`),
   listChapterVersions: (pid: number, n: number) =>

@@ -214,7 +214,7 @@ def seeded_with_content():
             character_dynamics="主角隐忍", world_building="冷峻都市", plot_architecture="三幕",
         ))
         db.add(Chapter(
-            project_id=project.id, chapter_number=1, status="finalized",
+            project_id=project.id, chapter_number=1, status="approved",
             final_content="雨下了一整夜。他站在巷口,没有打伞。" * 20,
         ))
         db.commit()

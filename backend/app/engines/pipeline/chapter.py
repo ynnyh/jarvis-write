@@ -4,6 +4,7 @@
 
 上下文来源(见 docs/02-data-model.md 数据流):
   本章蓝图 + 下章蓝图 + 最近 2 章正文尾部(直接衔接)
+  + 上一章章末交接契约(章末瞬态,衔接事实源)
   + 滚动前情摘要 + 倾向块
 """
 from __future__ import annotations
@@ -16,9 +17,16 @@ from sqlalchemy.orm import Session
 from app.db.models import Chapter, ChapterSummary, Outline, Project
 from app.engines.common import chapter_architecture_brief, get_outline
 from app.engines.consistency import BibleService, ForeshadowScheduler
-from app.engines.consistency.checker import check_chapter
+from app.engines.consistency.checker import (
+    blockers_of,
+    check_chapter,
+    continuity_score,
+    persist_issues,
+)
 from app.engines.consistency.extractor import extract_and_apply
+from app.engines.consistency.preflight import preflight_chapter
 from app.engines.consistency.repetition import avoid_block
+from app.engines.pipeline.handoff import extract_handoff_contract, load_handoff_block
 from app.engines.editorial import (
     apply_proofread_fixes,
     build_revision_directive,
@@ -243,6 +251,88 @@ async def rebuild_summaries_after(
     return rebuilt
 
 
+async def apply_chapter_tail(
+    db: Session,
+    project: Project,
+    chapter: Chapter,
+    chapter_number: int,
+    final: str,
+    outline_title: str,
+    report=None,
+) -> dict:
+    """门禁通过后的章后链路:抽取写圣经 → 滚动摘要 → 章末交接契约。
+
+    generate_chapter 干净路径与 quarantined 放行端点(gate-release)共用。
+    滚动摘要按「本章之前」的链尾现算(与生成时口径一致);契约提取放在摘要
+    之后:摘要链是下游章生成的硬依赖,契约失败(只落 failed 行)绝不能拖累它。
+    返回抽取统计。
+    """
+
+    def _report(stage: str) -> None:
+        if report:
+            try:
+                report(stage)
+            except Exception:  # noqa: BLE001 — 进度上报绝不影响主流程
+                pass
+
+    # ---- 章后抽取:状态变化写回圣经/伏笔表(闭环) ----
+    # extract_and_apply 自管事务纪律(入口丢掉遗留读快照、LLM 前后各提交),
+    # 故这里无需再手工 commit。
+    _report("5/6 抽取状态写入故事圣经")
+    logger.info("第 %d 章:抽取状态变化...", chapter_number)
+    extraction_stats = await extract_and_apply(db, project.id, chapter_number, final)
+
+    # ---- 滚动摘要更新 ----
+    _report("6/6 更新前情摘要")
+    logger.info("第 %d 章:更新前情摘要...", chapter_number)
+    rolling = _rolling_summary(db, project.id, chapter_number)
+    new_summary = await get_adapter_for(Task.SUMMARY).ask(
+        ROLLING_SUMMARY_PROMPT.format(
+            previous_summary=rolling,
+            chapter_number=chapter_number,
+            chapter_title=outline_title,
+            chapter_text=final,
+        )
+    )
+    srow = (
+        db.query(ChapterSummary)
+        .filter(
+            ChapterSummary.project_id == project.id,
+            ChapterSummary.chapter_number == chapter_number,
+        )
+        .first()
+    )
+    if srow is None:
+        srow = ChapterSummary(project_id=project.id, chapter_number=chapter_number)
+        db.add(srow)
+    srow.rolling_summary = new_summary.strip()
+    db.flush()
+    db.commit()
+
+    # ---- 章末交接契约提取:章末瞬态(时间/地点/人物即时状态)落 chapter_states ----
+    # 供下一章草稿注入(见 load_handoff_block)与下章门禁对照(见 checker)。
+    # 失败只落 failed 行留痕,不阻塞主流程(docs/08 §4 可降级)。
+    _report("提取章末交接契约")
+    await extract_handoff_contract(
+        db, chapter, chapter_number, final, get_adapter_for(Task.HANDOFF_EXTRACT)
+    )
+    return extraction_stats
+
+
+def _gate_merged_review(review_result: dict, blockers: list[dict]) -> dict:
+    """把门禁 blocker 问题并入主审结果,供 build_revision_directive 拼修订指令。"""
+    merged = dict(review_result)
+    merged["suggestions"] = list(review_result.get("suggestions") or []) + [
+        {
+            "evidence": i.get("evidence") or "",
+            "issue": f"一致性矛盾({i.get('type') or 'state'}):{i.get('description')}",
+            "fix": i.get("suggestion") or "",
+        }
+        for i in blockers
+    ]
+    return merged
+
+
 async def generate_chapter(
     db: Session,
     project: Project,
@@ -250,8 +340,8 @@ async def generate_chapter(
     tendency: Tendency | None = None,
     progress=None,
     revision: str | None = None,
-) -> tuple[Chapter, list[dict], dict, "GuardResult", dict]:
-    """生成一章:草稿 → 定稿 → 审校把关 → 一致性检查 → 抽取写圣经 → 摘要 → 入库。
+) -> tuple[Chapter, list[dict], dict, "GuardResult", dict, list[dict]]:
+    """生成一章:写前审核 → 草稿 → 定稿 → 审校把关+一致性门禁 → 落库 → 抽取写圣经 → 摘要 → 契约。
 
     progress: 可选回调 fn(stage_text),六段各报一次(异步任务进度用)。
     revision: 重写时用户的修改意见;仅当本章已有正文时连同上一版
@@ -261,8 +351,18 @@ async def generate_chapter(
     review_pass_threshold 硬判达标;不达标且 review_auto_revise 开启时,带主审意见
     回炉重走草稿+定稿,封顶 review_max_revisions 轮,到点接受当前最好的一版。
 
-    返回 (Chapter, 一致性问题列表, 抽取统计, 字数守卫结果, 审校结果 dict)。
-    审校结果含 scores/comment/suggestions/passed/revision_rounds/threshold。
+    一致性门禁(第 4 段,docs/08 §5.4):在回炉循环内对当前定稿跑 checker
+    (对照圣经 + 上一章契约 + 上一章结尾原文),结果折算审校第五维「连续性」
+    纳入达标判定;有 blocker 时把问题拼进修订指令一并回炉(与审校共享
+    review_max_revisions 上限)。回炉封顶仍有 blocker → 落库但
+    status="quarantined":不做章后抽取(矛盾不进圣经)、不更新滚动摘要、
+    不提契约;无 blocker 才走章后链路(apply_chapter_tail)。
+
+    返回 (Chapter, 一致性门禁问题列表, 抽取统计, 字数守卫结果, 审校结果 dict, 写前审核警告列表)。
+    审校结果含 scores(四维+continuity)/comment/suggestions/passed/
+    revision_rounds/threshold;quarantined 时抽取统计为空 dict。
+    写前审核警告(docs/08 §5.3)severity 一律 major,只警告不阻断,已随落库
+    持久化(source="preflight");无契约/LLM 失败时为空列表。
     """
 
     def _report(stage: str) -> None:
@@ -291,6 +391,15 @@ async def generate_chapter(
 
     rolling = _rolling_summary(db, project.id, chapter_number)
     recent = _recent_tail(db, project.id, chapter_number)
+    # 上一章章末交接契约(docs/08 §5.2):与 recent_tail 并存——原文供语感,契约供事实。
+    # 无契约的老章节/提取失败 → 空串,回退现状不报错。
+    handoff_block = load_handoff_block(db, project.id, chapter_number)
+
+    # ---- 写前审核(docs/08 §5.3):本章蓝图 vs 上一章契约,动笔前找矛盾 ----
+    # 只警告不阻断(蓝图可以故意安排时间跳跃);无契约/无大纲跳过,LLM 失败降级。
+    # 警告随落库持久化(source="preflight")并随返回值透出给生成响应。
+    _report("写前审核(蓝图 vs 上章契约)")
+    preflight_issues = await preflight_chapter(db, project.id, chapter_number, outline)
 
     # ---- 一致性引擎:硬约束 + 伏笔提醒 + 重复检测 ----
     bible = BibleService(db, project.id)
@@ -336,6 +445,7 @@ async def generate_chapter(
             architecture_brief=chapter_architecture_brief(project),
             rolling_summary=rolling,
             recent_tail=recent,
+            handoff_contract=handoff_block,
             hard_constraints=hard_constraints,
             foreshadow_reminders=foreshadow_reminders,
             avoid_repetition=avoid_repetition,
@@ -386,6 +496,7 @@ async def generate_chapter(
     revision_rounds = 0
     proofread_fixed = 0  # 校对累计自动修复的硬伤数(回显给用户看"校对跑过了")
     last_fixed_issues: list[dict] = []  # 末轮校对自动修复的清单(对应最终正文,回显用)
+    gate_issues: list[dict] = []  # 末轮一致性门禁结果(对应最终正文,落 chapter_issues 用)
     while True:
         _report(
             "3/6 审校把关"
@@ -402,22 +513,33 @@ async def generate_chapter(
             applied_originals = {a["original"] for a in _applied}
             round_fixed = [it for it in proof["issues"] if it["original"] in applied_originals]
         last_fixed_issues = round_fixed
-        # 主审打分 + 按项目阈值硬判达标
+        # 主审打分(四维)
         review_result = await review_chapter(final, outline_block)
-        if judge_passed(review_result["scores"], threshold):
-            review_result["passed"] = True
+        # ---- 一致性门禁(docs/08 §5.4):对照圣经 + 上章契约 + 上章结尾原文 ----
+        # 在回炉循环内检查:结果折算第五维「连续性」纳入达标判定;blocker 拼进
+        # 修订指令一并回炉(与审校共享 review_max_revisions 上限)。门禁在落库前,
+        # 拦住的矛盾不会抽进圣经。
+        _report("4/6 一致性门禁")
+        gate_issues = await check_chapter(
+            db, project.id, chapter_number, final, rolling_summary=rolling
+        )
+        review_result["scores"]["continuity"] = continuity_score(gate_issues)
+        blockers = blockers_of(gate_issues)
+        # 达标判定:五维阈值硬判 + blocker 一票否决(阈值调得再低 blocker 也不过)
+        passed = judge_passed(review_result["scores"], threshold) and not blockers
+        review_result["passed"] = passed
+        if passed:
             break
-        review_result["passed"] = False
         if not auto_revise or revision_rounds >= max_revisions:
             break
-        # 不达标 → 主审意见拼成重写指令,回炉重走草稿+定稿
+        # 不达标 → 主审意见 + 门禁 blocker 拼成重写指令,回炉重走草稿+定稿
         revision_rounds += 1
         logger.info(
-            "第 %d 章审校未达标(四维=%s,阈值=%d),第 %d/%d 轮回炉",
+            "第 %d 章未通过(五维=%s,阈值=%d,blocker=%d),第 %d/%d 轮回炉",
             chapter_number, review_result["scores"], threshold,
-            revision_rounds, max_revisions,
+            len(blockers), revision_rounds, max_revisions,
         )
-        directive = build_revision_directive(review_result)
+        directive = build_revision_directive(_gate_merged_review(review_result, blockers))
         draft, final = await _compose(
             _revision_block(directive, final),
             f"3/6 审校把关(第 {revision_rounds}/{max_revisions} 轮回炉·草稿)",
@@ -426,11 +548,11 @@ async def generate_chapter(
     review_result["revision_rounds"] = revision_rounds
     review_result["threshold"] = threshold
     review_result["proofread_fixed"] = proofread_fixed
-    reviewed_text = final  # 审校对应的正文(字数守卫可能在其后改动,指纹以此为准)
+    reviewed_text = final  # 审校/门禁对应的正文(字数守卫可能在其后改动,指纹以此为准)
     logger.info(
-        "第 %d 章审校把关完成:达标=%s,四维=%s,回炉 %d 轮",
+        "第 %d 章审校+门禁完成:通过=%s,五维=%s,blocker=%d,回炉 %d 轮",
         chapter_number, review_result.get("passed"),
-        review_result.get("scores"), revision_rounds,
+        review_result.get("scores"), len(blockers_of(gate_issues)), revision_rounds,
     )
 
     # ---- 字数守卫:超标压缩/拆章(只对审校后的最终定稿跑一次) ----
@@ -472,58 +594,39 @@ async def generate_chapter(
     chapter.word_count = len(final)
     chapter.outline_version_used = outline.current_version
     chapter.is_stale = False
-    chapter.status = "finalized"
+    # 门禁判定(docs/08 §5.4.3):回炉封顶仍有 blocker → 落库但隔离(quarantined),
+    # 不做章后抽取(矛盾不进圣经)、不更新滚动摘要、不提契约;
+    # 无 blocker → pending_review(docs/08 §5.5 审核状态机,人工 approve 后 approved)。
+    blockers = blockers_of(gate_issues)
+    chapter.status = "quarantined" if blockers else "pending_review"
     # 审校快照落库:编辑部打开时回显本次主审结果,免去用户再点一次「请主编审读」
     store_review_snapshot(chapter, review_result, "generation", reviewed_text)
     # 校对快照落库:回显生成时自动修复了哪些硬伤(指纹与主审一致,正文改动同步失效)
     store_proofread_snapshot(chapter, last_fixed_issues, "generation", reviewed_text)
     db.flush()
-    # 正文立刻提交:后面一致性/抽取/摘要还有数分钟 LLM 调用,
+    # 正文立刻提交:后面章后链路还有数分钟 LLM 调用,
     # 不能拿着写锁跨这些 await(会把并发写卡到超时),失败也不该丢正文。
     db.commit()
-
-    # ---- 一致性检查(vs 本章之前的圣经状态) ----
-    _report("4/6 一致性检查")
-    logger.info("第 %d 章:一致性检查...", chapter_number)
-    issues = await check_chapter(
-        db, project.id, chapter_number, final, rolling_summary=rolling
-    )
-
-    # ---- 章后抽取:状态变化写回圣经/伏笔表(闭环) ----
-    _report("5/6 抽取状态写入故事圣经")
-    logger.info("第 %d 章:抽取状态变化...", chapter_number)
-    # extract_and_apply 自管事务纪律(入口丢掉上面 check_chapter 遗留的读快照、
-    # LLM 前后各提交),故这里无需再手工 commit —— S1「越写到后面越容易在 4/5 抽取处
-    # 随机报 database is locked」的根因正在于此前少了这道快照释放。
-    extraction_stats = await extract_and_apply(
-        db, project.id, chapter_number, final
-    )
-
-    # ---- 滚动摘要更新 ----
-    _report("6/6 更新前情摘要")
-    logger.info("第 %d 章:更新前情摘要...", chapter_number)
-    new_summary = await get_adapter_for(Task.SUMMARY).ask(
-        ROLLING_SUMMARY_PROMPT.format(
-            previous_summary=rolling,
-            chapter_number=chapter_number,
-            chapter_title=outline.title,
-            chapter_text=final,
-        )
-    )
-    srow = (
-        db.query(ChapterSummary)
-        .filter(
-            ChapterSummary.project_id == project.id,
-            ChapterSummary.chapter_number == chapter_number,
-        )
-        .first()
-    )
-    if srow is None:
-        srow = ChapterSummary(project_id=project.id, chapter_number=chapter_number)
-        db.add(srow)
-    srow.rolling_summary = new_summary.strip()
-    db.flush()
+    # issues 落库:purge 本章旧 open 按当前结果重建(幂等);
+    # 指纹已变的旧 ignored 清除(不再生效),未变的保留(用户已确认忽略)。
+    persist_issues(db, chapter, gate_issues, source="gate", text=final)
+    # 写前审核警告同法落库(source="preflight"),与门禁问题同面板展示
+    persist_issues(db, chapter, preflight_issues, source="preflight", text=final)
     db.commit()
+
+    if blockers:
+        _report("一致性门禁拦截:存在未消除的硬矛盾,本章已隔离(quarantined)")
+        logger.warning(
+            "第 %d 章被一致性门禁拦截(quarantined):%d 个 blocker 未消除,"
+            "跳过章后抽取/滚动摘要/契约提取(待人工处理或放行)",
+            chapter_number, len(blockers),
+        )
+        return chapter, gate_issues, {}, guard_result, review_result, preflight_issues
+
+    # ---- 章后链路(门禁通过才走):抽取写圣经 → 滚动摘要 → 章末契约 ----
+    extraction_stats = await apply_chapter_tail(
+        db, project, chapter, chapter_number, final, outline.title, report=_report
+    )
 
     # ---- 重写场景:下游章节的滚动摘要基于旧文,重建 ----
     # 文风备忘:随书累积"这本书怎么写"(与摘要互补),注入后续章草稿
@@ -535,7 +638,7 @@ async def generate_chapter(
         logger.info("第 %d 章重写,已重建下游摘要: %s", chapter_number, rebuilt)
 
     logger.info("第 %d 章完成,共 %d 字。", chapter_number, chapter.word_count)
-    return chapter, issues, extraction_stats, guard_result, review_result
+    return chapter, gate_issues, extraction_stats, guard_result, review_result, preflight_issues
 
 
 # =============== 重写研讨(对话式:聊清不满意 → 蒸馏成重写要求)===============
