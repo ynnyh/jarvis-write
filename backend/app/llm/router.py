@@ -3,18 +3,14 @@
 """
 任务级模型路由（借鉴 AI_NovelGenerator 的 choose_configs 思路）。
 
-不同生成任务用不同档位的模型，平衡成本与质量：
-- 架构/蓝图/定稿/润色 → 强模型（quality）
-- 草稿/摘要/事实抽取/一致性校验 → 快模型（fast）
-
-路由表可被环境变量覆盖；阶段 0 先给一份合理默认值，
-后续阶段（尤其阶段 7）再做成用户可配置。
+不同生成任务用不同档位的配置，平衡成本与质量：
+- 架构/蓝图/定稿/润色 → 强模型（quality 档 = 设置页标「默认」的配置）
+- 草稿/摘要/事实抽取/一致性校验 → 快模型（fast 档 = 设置页标「快档」的配置,
+  未单独指定时跟随 quality 档）
 """
 from __future__ import annotations
 
 from enum import Enum
-
-from app.config import get_settings
 
 from .base import LLMAdapter
 from .factory import create_llm_adapter
@@ -71,29 +67,46 @@ _TASK_TEMPERATURE: dict[Task, float] = {
 }
 
 
-def _tier_provider(tier: Tier) -> str:
-    """档位 -> provider 名。
+# 任务 -> 输出预算。长文本任务(草稿/定稿/润色)给足 max_tokens:
+# 全局默认 8192 对长章节偏紧,推理模型思考还会再吃掉一截,容易截断/空正文。
+# 短任务不在表里,用配置/全局默认即可。
+_TASK_MAX_TOKENS: dict[Task, int] = {
+    Task.DRAFT: 16384,
+    Task.FINALIZE: 16384,
+    Task.POLISH: 12288,
+    Task.ARCHITECTURE: 8192,
+    Task.BLUEPRINT: 8192,
+}
 
-    阶段 0 简化策略：quality 与 fast 暂都走用户设置的默认 provider
-    (设置页 > .env),后续接入多 provider 时按档位细化(留给阶段 7)。
+
+def _tier_config(tier: Tier) -> dict:
+    """档位 -> 当前生效的命名配置(cc-switch 风格)。
+
+    quality 档用标了「默认」的配置;fast 档用标了「快档」的配置,
+    未单独指定快档时跟随 quality 档(见 factory.resolve_tier_config)。
     """
-    from .factory import resolve_default_provider
+    from .factory import resolve_tier_config
 
-    return resolve_default_provider()
+    return resolve_tier_config(tier.value)
 
 
 def get_adapter_for(task: Task, **overrides) -> LLMAdapter:
     """按任务拿到合适的适配器。
 
-    按任务档位选 provider,按任务默认温度选采样温度(调用方未显式传 temperature
-    时套用 _TASK_TEMPERATURE;显式传入则以调用方为准)。
-    overrides 可覆盖 temperature / max_tokens 等。
+    按任务档位选配置,按任务默认温度/输出预算补默认值(调用方显式传入的
+    temperature / max_tokens 优先,其次任务默认,最后才是配置/全局默认)。
+    overrides 可覆盖 temperature / max_tokens / timeout 等。
     """
     tier = _TASK_TIER.get(task, Tier.FAST)
-    provider = _tier_provider(tier)
+    cfg = _tier_config(tier)
     if "temperature" not in overrides and task in _TASK_TEMPERATURE:
         overrides["temperature"] = _TASK_TEMPERATURE[task]
-    return create_llm_adapter(provider, **overrides)
+    if "max_tokens" not in overrides and task in _TASK_MAX_TOKENS:
+        overrides["max_tokens"] = _TASK_MAX_TOKENS[task]
+    if cfg.get("id") is not None:
+        return create_llm_adapter(config_id=cfg["id"], **overrides)
+    # .env 兜底的配置没有 id,按协议名走旧路径
+    return create_llm_adapter(cfg["interface_format"], **overrides)
 
 
 def tier_of(task: Task) -> Tier:

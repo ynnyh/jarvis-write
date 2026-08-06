@@ -299,23 +299,34 @@ export interface PolishResult {
   flavor_before: FlavorInfo; flavor_after: FlavorInfo;
 }
 export interface ProviderState { deepseek: boolean; openai: boolean; gemini: boolean; }
-// 模型设置:单个 provider 的配置回显(key 打码)与各家默认值
-export interface ProviderSettingOut {
-  provider: string;
+// 模型设置(cc-switch 风格):每用户多套命名配置,回显 key 打码与协议默认值
+export interface ProviderConfigOut {
+  id: number;
+  name: string;
+  interface_format: string; // deepseek | openai | gemini
   api_key_masked: string;
   has_key: boolean;
   base_url: string;
   model: string;
+  timeout: number;      // 0 = 跟随全局
+  max_tokens: number;   // 0 = 跟随全局/任务默认
   is_default: boolean;
+  is_default_fast: boolean;
   default_base_url: string;
   default_model: string;
 }
-// 保存 provider:api_key 留空/不传 = 不改动已存 key
-export interface ProviderSettingIn {
+// 新增/更新配置:api_key 留空/不传 = 不改动已存 key(仅更新);
+// is_default/is_default_fast 传 true 时后端会清掉该用户其他配置的同名标记(全用户唯一)
+export interface ProviderConfigIn {
+  name?: string;
+  interface_format?: string;
   api_key?: string | null;
-  base_url: string;
-  model: string;
-  is_default: boolean;
+  base_url?: string;
+  model?: string;
+  timeout?: number;
+  max_tokens?: number;
+  is_default?: boolean | null;
+  is_default_fast?: boolean | null;
 }
 export interface AuthResult { token: string; username: string; is_admin: boolean; }
 export interface Me { id: number; username: string; is_admin: boolean; }
@@ -439,16 +450,19 @@ export const api = {
       "GET", "/api/settings/providers/status"),
   // ---- 模型设置(设置页「模型设置」分区,对齐 backend/app/api/settings.py)----
   listProviders: () =>
-    req<ProviderSettingOut[]>("GET", "/api/settings/providers"),
-  saveProvider: (name: string, body: ProviderSettingIn) =>
-    req<ProviderSettingOut>("PUT", `/api/settings/providers/${name}`, body),
+    req<ProviderConfigOut[]>("GET", "/api/settings/providers"),
+  // 新增一套配置:用户首套配置后端自动设为默认
+  createProvider: (body: ProviderConfigIn) =>
+    req<ProviderConfigOut>("POST", "/api/settings/providers", body),
+  updateProvider: (id: number, body: ProviderConfigIn) =>
+    req<ProviderConfigOut>("PUT", `/api/settings/providers/${id}`, body),
   // 删除:不带 confirmed 先探连通性,连通则返回 needs_confirm 由前端二次确认
-  deleteProvider: (name: string, confirmed = false) =>
+  deleteProvider: (id: number, confirmed = false) =>
     req<{ deleted: boolean; needs_confirm?: boolean; reason?: string }>(
-      "DELETE", `/api/settings/providers/${name}${confirmed ? "?confirmed=true" : ""}`),
-  testProvider: (name: string) =>
+      "DELETE", `/api/settings/providers/${id}${confirmed ? "?confirmed=true" : ""}`),
+  testProvider: (id: number) =>
     req<{ ok: boolean; provider: string; model?: string; reply?: string; error?: string }>(
-      "POST", `/api/settings/providers/${name}/test`, undefined, 60000),
+      "POST", `/api/settings/providers/${id}/test`, undefined, 60000),
   suggestTitle: (topic: string, genre: string, concept?: Concept | null) =>
     req<{ titles: string[] }>("POST", "/api/projects/title-suggestion",
       { topic, genre, concept: concept ?? null }, 60000),

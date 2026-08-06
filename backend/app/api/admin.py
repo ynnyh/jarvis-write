@@ -23,7 +23,15 @@ from sqlalchemy.orm import Session
 from app.api.deps import delete_project_cascade
 from app.auth import get_current_user, hash_password
 from app.config import get_settings
-from app.db.models import AppSetting, InviteCode, LlmUsage, Project, ProviderSetting, User
+from app.db.models import (
+    AppSetting,
+    InviteCode,
+    LlmUsage,
+    Project,
+    ProviderConfig,
+    ProviderSetting,
+    User,
+)
 from app.db.session import get_db
 
 logger = logging.getLogger("jarvis-write.admin")
@@ -177,6 +185,9 @@ async def delete_user(
         deleted_projects += 1
     db.query(ProviderSetting).filter(
         ProviderSetting.user_id == user.id
+    ).delete(synchronize_session=False)
+    db.query(ProviderConfig).filter(
+        ProviderConfig.user_id == user.id
     ).delete(synchronize_session=False)
     db.query(LlmUsage).filter(LlmUsage.user_id == user.id).delete(
         synchronize_session=False

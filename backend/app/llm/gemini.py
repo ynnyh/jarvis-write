@@ -13,7 +13,13 @@ from typing import AsyncIterator
 
 import httpx
 
-from app.llm.base import LLMAdapter, LLMMessage, LLMResponse, check_upstream
+from app.llm.base import (
+    LLMAdapter,
+    LLMMessage,
+    LLMResponse,
+    check_upstream,
+    with_retries,
+)
 
 
 class GeminiAdapter(LLMAdapter):
@@ -49,6 +55,13 @@ class GeminiAdapter(LLMAdapter):
         return payload
 
     async def complete(self, messages: list[LLMMessage]) -> LLMResponse:
+        return await with_retries(
+            lambda _attempt: self._complete_once(messages),
+            attempts=self.retry_attempts,
+            base_delay=self.retry_base_delay,
+        )
+
+    async def _complete_once(self, messages: list[LLMMessage]) -> LLMResponse:
         url = f"{self._base()}/models/{self.model_name}:generateContent?key={self.api_key}"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             resp = await client.post(url, json=self._payload(messages))

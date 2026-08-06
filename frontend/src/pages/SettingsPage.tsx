@@ -2,13 +2,13 @@
 //   · 关于 & 更新:显示版本;桌面版可检查更新 → 静默下载 → 提示重启生效
 //   · 账号:修改登录密码(仅 server 多用户模式)
 //   · 应用锁:启动密码设/改/移除(仅 local 桌面单机模式)
-//   · 模型设置:三家 provider 增删改测(取代旧的独立 settings.html)
+//   · 模型设置:每用户多套命名配置,增删改测 + 一键切换默认/快档(取代旧的独立 settings.html)
 //   · 偏好:外观(跟随系统/浅色/深色,全端生效)+ 启动时自动检查更新开关、
 //     关闭窗口时最小化到托盘开关(后两者仅桌面)
 // 桌面能力经 desktop.ts 优雅降级:非桌面(网页)隐藏更新相关 UI。
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, ProviderSettingOut } from "../api";
+import { api, ProviderConfigOut } from "../api";
 import {
   isDesktop,
   checkUpdate,
@@ -24,17 +24,29 @@ import { getCloseToTrayPref, setCloseToTrayPref } from "../ui/CloseGuard";
 import { toast } from "../ui/Toaster";
 import { confirmDialog } from "../ui/ConfirmDialog";
 
-// 各家展示名与一句话说明(与旧 settings.html 一致)
-const PROVIDER_NAMES: Record<string, string> = {
-  deepseek: "DeepSeek",
-  openai: "OpenAI",
-  gemini: "Google Gemini",
-};
-const PROVIDER_DESCS: Record<string, string> = {
-  deepseek: "推荐:国产,便宜量大,写长篇性价比高。",
-  openai: "需要海外网络环境。",
-  gemini: "需要海外网络环境。",
-};
+// 协议预设:展示名、一句话说明、默认 base_url/model(与后端 settings.py 的 _PRESETS 一致)
+interface InterfacePreset {
+  key: string; label: string; desc: string; baseUrl: string; model: string;
+}
+const INTERFACE_PRESETS: InterfacePreset[] = [
+  {
+    key: "deepseek", label: "DeepSeek",
+    desc: "DeepSeek 官方 API。也可用中转站,改 Base URL 即可。",
+    baseUrl: "https://api.deepseek.com", model: "deepseek-chat",
+  },
+  {
+    key: "openai", label: "OpenAI 兼容",
+    desc: "OpenAI 官方及兼容中转站——用中转站(如 token 站、API 超市)就选这张卡,填中转地址和中转里的模型名。",
+    baseUrl: "https://api.openai.com/v1", model: "gpt-4o",
+  },
+  {
+    key: "gemini", label: "Gemini",
+    desc: "仅 Google 官方原生 API。卖 Gemini 模型的中转站请走 OpenAI 兼容卡。",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-2.0-flash",
+  },
+];
+const PRESET_BY_KEY: Record<string, InterfacePreset> = Object.fromEntries(
+  INTERFACE_PRESETS.map((p) => [p.key, p]));
 
 // 偏好:启动时自动检查更新(仅桌面有意义)。默认开。
 const AUTO_CHECK_KEY = "jarvis_auto_check_update";
@@ -472,9 +484,13 @@ function AppLockCard() {
 }
 
 // ============ 模型设置 ============
+// cc-switch 风格:每用户多套命名配置,可增删改、一键切换默认/快档(各全用户唯一)。
 function ProvidersCard() {
-  const [list, setList] = useState<ProviderSettingOut[] | null>(null);
+  const [list, setList] = useState<ProviderConfigOut[] | null>(null);
   const [err, setErr] = useState("");
+  // adding=展开添加表单;editingId=正在行内编辑的配置 id
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
 
   async function load() {
     try { setList(await api.listProviders()); }
@@ -501,49 +517,65 @@ function ProvidersCard() {
 
   return (
     <div className="card">
-      <div className="card-head"><h2>模型设置</h2></div>
+      <div className="card-head">
+        <h2>模型设置</h2>
+        {!adding && (
+          <button className="btn-sm" onClick={() => { setAdding(true); setEditingId(null); }}>
+            + 添加配置
+          </button>
+        )}
+      </div>
       <p className="card-desc">
-        配置至少一家模型的 API Key 即可开始创作。设为默认的模型会在生成时优先使用;
-        只配一家时可不设,系统会自动用它。
+        配置至少一套模型的 API Key 即可开始创作,同一个协议可以配多套(官方、中转站各一套)。
+        「默认」为生成时优先使用的配置,「快档」用于轻量快任务;各只能设一套。
       </p>
+
+      {adding && (
+        <ProviderForm
+          onSaved={() => { setAdding(false); void load(); }}
+          onCancel={() => setAdding(false)}
+        />
+      )}
+
+      {list.length === 0 && !adding && (
+        <p className="card-desc">还没有模型配置,点右上角「添加配置」开始。</p>
+      )}
+
       <div className="provider-list">
         {list.map((p) => (
-          <ProviderRow key={p.provider} p={p} onChanged={load} />
+          editingId === p.id ? (
+            <ProviderForm
+              key={p.id}
+              editing={p}
+              onSaved={() => { setEditingId(null); void load(); }}
+              onCancel={() => setEditingId(null)}
+            />
+          ) : (
+            <ProviderRow
+              key={p.id}
+              p={p}
+              onChanged={load}
+              onEdit={() => { setEditingId(p.id); setAdding(false); }}
+            />
+          )
         ))}
       </div>
     </div>
   );
 }
 
-function ProviderRow({ p, onChanged }: { p: ProviderSettingOut; onChanged: () => void }) {
-  const [apiKey, setApiKey] = useState("");
-  const [baseUrl, setBaseUrl] = useState(p.base_url);
-  const [model, setModel] = useState(p.model);
-  const [isDefault, setIsDefault] = useState(p.is_default);
+// 单套配置的展示卡片:名称 + 协议/默认/快档徽标 + 打码 key + base_url/model + 操作按钮
+function ProviderRow({ p, onChanged, onEdit }: {
+  p: ProviderConfigOut; onChanged: () => void; onEdit: () => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
-
-  async function save() {
-    setBusy(true); setTestMsg(null);
-    try {
-      await api.saveProvider(p.provider, {
-        api_key: apiKey || null,
-        base_url: baseUrl,
-        model,
-        is_default: isDefault,
-      });
-      toast.ok(`${PROVIDER_NAMES[p.provider] || p.provider} 已保存`);
-      setApiKey("");
-      onChanged();
-    } catch (e) {
-      toast.err("保存失败", e instanceof Error ? e.message : String(e));
-    } finally { setBusy(false); }
-  }
+  const preset = PRESET_BY_KEY[p.interface_format];
 
   async function test() {
     setBusy(true); setTestMsg(null);
     try {
-      const r = await api.testProvider(p.provider);
+      const r = await api.testProvider(p.id);
       if (r.ok) setTestMsg({ ok: true, text: `✓ 连通(${r.model}):${r.reply}` });
       else setTestMsg({ ok: false, text: `✗ 连接失败:${r.error}` });
     } catch (e) {
@@ -556,22 +588,22 @@ function ProviderRow({ p, onChanged }: { p: ProviderSettingOut; onChanged: () =>
     try {
       // 删除是一锤子买卖:无论后端是否要求二次确认,先统一确认一遍
       const ok = await confirmDialog({
-        title: `删除 ${PROVIDER_NAMES[p.provider] || p.provider} 配置?`,
-        body: "删除后需重新配置 API Key 才能使用该模型。",
+        title: `删除「${p.name}」?`,
+        body: "删除后需重新配置 API Key 才能使用该配置。",
         confirmText: "确认删除",
         danger: true,
       });
       if (!ok) { setBusy(false); return; }
-      let r = await api.deleteProvider(p.provider);
+      let r = await api.deleteProvider(p.id);
       if (!r.deleted && r.needs_confirm) {
         const ok2 = await confirmDialog({
-          title: `删除 ${PROVIDER_NAMES[p.provider] || p.provider} 配置?`,
-          body: (r.reason || "该配置当前连接正常。") + "\n删除后将回落到默认/环境配置。",
+          title: `删除「${p.name}」?`,
+          body: (r.reason || "该配置当前连接正常。") + "\n删除后将回落到其他默认配置。",
           confirmText: "确认删除",
           danger: true,
         });
         if (!ok2) { setBusy(false); return; }
-        r = await api.deleteProvider(p.provider, true);
+        r = await api.deleteProvider(p.id, true);
       }
       if (r.deleted) { toast.ok("已删除"); onChanged(); }
     } catch (e) {
@@ -579,26 +611,149 @@ function ProviderRow({ p, onChanged }: { p: ProviderSettingOut; onChanged: () =>
     } finally { setBusy(false); }
   }
 
+  // 一键设为默认/快档:PUT 全量字段,只翻转目标标记(后端会清掉其他配置的同名标记)
+  async function setFlag(flag: "is_default" | "is_default_fast") {
+    setBusy(true); setTestMsg(null);
+    try {
+      await api.updateProvider(p.id, {
+        name: p.name,
+        interface_format: p.interface_format,
+        base_url: p.base_url,
+        model: p.model,
+        timeout: p.timeout,
+        max_tokens: p.max_tokens,
+        [flag]: true,
+      });
+      toast.ok(flag === "is_default" ? `「${p.name}」已设为默认` : `「${p.name}」已设为快档`);
+      onChanged();
+    } catch (e) {
+      toast.err("设置失败", e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
+  }
+
   return (
     <div className="provider-row">
       <div className="card-head">
-        <h3>{PROVIDER_NAMES[p.provider] || p.provider}</h3>
+        <h3>{p.name}</h3>
+        <span className="badge">{preset?.label || p.interface_format}</span>
         <span className={`badge ${p.has_key ? "ok" : "err"}`}>
           {p.has_key ? "已配置" : "未配置"}
         </span>
-        {p.is_default && <span className="badge">默认模型</span>}
+        {p.is_default && <span className="badge">默认</span>}
+        {p.is_default_fast && <span className="badge">快档</span>}
       </div>
-      <p className="provider-desc">{PROVIDER_DESCS[p.provider] || ""}</p>
+      <p className="provider-desc">
+        {preset?.desc || ""}
+        {p.has_key && ` Key:${p.api_key_masked}。`}
+        {p.base_url || p.model
+          ? ` ${p.base_url || preset?.baseUrl || ""} · ${p.model || preset?.model || ""}`
+          : ""}
+        {(p.timeout > 0 || p.max_tokens > 0) &&
+          ` · 超时 ${p.timeout > 0 ? `${p.timeout}s` : "跟随全局"} · max_tokens ${p.max_tokens > 0 ? p.max_tokens : "跟随全局"}`}
+      </p>
 
-      <label className="fl">
-        API Key{p.has_key ? `(已保存:${p.api_key_masked},留空则不修改)` : ""}
-      </label>
-      <input
-        type="password"
-        value={apiKey}
-        onChange={(e) => setApiKey(e.target.value)}
-        placeholder={p.has_key ? "留空保持不变" : "sk-..."}
-      />
+      <div className="provider-actions">
+        <button className="btn-sm" onClick={onEdit} disabled={busy}>编辑</button>
+        <button className="btn-sm" onClick={test} disabled={busy}>测试连接</button>
+        {!p.is_default && (
+          <button className="btn-sm" onClick={() => setFlag("is_default")} disabled={busy}>
+            设为默认
+          </button>
+        )}
+        {!p.is_default_fast && (
+          <button className="btn-sm" onClick={() => setFlag("is_default_fast")} disabled={busy}>
+            设为快档
+          </button>
+        )}
+        <button className="btn-sm danger" onClick={remove} disabled={busy}>删除</button>
+      </div>
+
+      {testMsg && (
+        <div className={`test-line ${testMsg.ok ? "ok" : "err"}`}>{testMsg.text}</div>
+      )}
+    </div>
+  );
+}
+
+// 添加/编辑共用的表单:先选协议预设(预填 base_url/model 占位),再填名称/Key/地址/模型名;
+// 高级项(timeout、max_tokens,0=跟随全局)折叠收起。编辑时 key 留空表示不修改。
+function ProviderForm({ editing, onSaved, onCancel }: {
+  editing?: ProviderConfigOut; onSaved: () => void; onCancel: () => void;
+}) {
+  const [preset, setPreset] = useState(editing?.interface_format || "deepseek");
+  const [name, setName] = useState(editing?.name || "");
+  const [apiKey, setApiKey] = useState("");
+  const [baseUrl, setBaseUrl] = useState(editing?.base_url || "");
+  const [model, setModel] = useState(editing?.model || "");
+  const [timeout_, setTimeout_] = useState(String(editing?.timeout ?? 0));
+  const [maxTokens, setMaxTokens] = useState(String(editing?.max_tokens ?? 0));
+  const [busy, setBusy] = useState(false);
+
+  const cur = PRESET_BY_KEY[preset];
+  const canSubmit = !busy && (editing ? true : !!apiKey.trim());
+
+  async function save() {
+    setBusy(true);
+    try {
+      const body = {
+        name: name.trim(),
+        interface_format: preset,
+        api_key: apiKey.trim() || null,
+        base_url: baseUrl.trim(),
+        model: model.trim(),
+        timeout: Math.max(0, parseInt(timeout_, 10) || 0),
+        max_tokens: Math.max(0, parseInt(maxTokens, 10) || 0),
+      };
+      if (editing) await api.updateProvider(editing.id, body);
+      else await api.createProvider(body);
+      toast.ok(editing ? `「${body.name || editing.name}」已保存` : "配置已添加");
+      onSaved();
+    } catch (e) {
+      toast.err("保存失败", e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="provider-row">
+      <div className="card-head">
+        <h3>{editing ? `编辑「${editing.name}」` : "添加配置"}</h3>
+      </div>
+
+      <label className="fl">协议</label>
+      <div className="chips">
+        {INTERFACE_PRESETS.map((o) => (
+          <button key={o.key} type="button"
+            className={"chip" + (preset === o.key ? " on" : "")}
+            onClick={() => setPreset(o.key)}>
+            {o.label}
+          </button>
+        ))}
+      </div>
+      {cur && <div className="fld-hint" style={{ marginTop: 6 }}>{cur.desc}</div>}
+
+      <div className="fld-row" style={{ marginTop: 12 }}>
+        <div className="fld">
+          <label className="fl">配置名称</label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={cur ? `${cur.label} 官方` : "给这套配置起个名字"}
+          />
+          <div className="fld-hint">留空则自动用模型名;同一协议配多套时建议起个能区分的名字。</div>
+        </div>
+        <div className="fld">
+          <label className="fl">
+            API Key{editing?.has_key ? `(已保存:${editing.api_key_masked},留空则不修改)` : ""}
+          </label>
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder={editing?.has_key ? "留空保持不变" : "sk-..."}
+          />
+        </div>
+      </div>
 
       <div className="fld-row">
         <div className="fld">
@@ -607,9 +762,9 @@ function ProviderRow({ p, onChanged }: { p: ProviderSettingOut; onChanged: () =>
             type="text"
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
-            placeholder={p.default_base_url}
+            placeholder={cur?.baseUrl}
           />
-          <div className="fld-hint">用中转站就填中转地址,如 https://xxx.com/v1</div>
+          <div className="fld-hint">用中转站就填中转地址,如 https://xxx.com/v1;留空用官方地址。</div>
         </div>
         <div className="fld">
           <label className="fl">模型名</label>
@@ -617,31 +772,45 @@ function ProviderRow({ p, onChanged }: { p: ProviderSettingOut; onChanged: () =>
             type="text"
             value={model}
             onChange={(e) => setModel(e.target.value)}
-            placeholder={p.default_model}
+            placeholder={cur?.model}
           />
         </div>
       </div>
 
-      <label className="default-pick">
-        <input
-          type="checkbox"
-          checked={isDefault}
-          onChange={(e) => setIsDefault(e.target.checked)}
-        />
-        设为默认(生成时优先用它)
-      </label>
+      <details style={{ marginTop: 12 }}>
+        <summary className="fld-hint" style={{ cursor: "pointer" }}>
+          高级选项(超时 / max_tokens,0 = 跟随全局)
+        </summary>
+        <div className="fld-row" style={{ marginTop: 8 }}>
+          <div className="fld">
+            <label className="fl">超时(秒)</label>
+            <input
+              type="text"
+              value={timeout_}
+              onChange={(e) => setTimeout_(e.target.value)}
+              placeholder="0"
+              spellCheck={false}
+            />
+          </div>
+          <div className="fld">
+            <label className="fl">max_tokens</label>
+            <input
+              type="text"
+              value={maxTokens}
+              onChange={(e) => setMaxTokens(e.target.value)}
+              placeholder="0"
+              spellCheck={false}
+            />
+          </div>
+        </div>
+      </details>
 
       <div className="provider-actions">
-        <button className="primary btn-sm" onClick={save} disabled={busy}>保存</button>
-        <button className="btn-sm" onClick={test} disabled={busy}>测试连接</button>
-        {p.has_key && (
-          <button className="btn-sm danger" onClick={remove} disabled={busy}>删除</button>
-        )}
+        <button className="primary btn-sm" onClick={save} disabled={!canSubmit}>
+          {busy && <span className="spin" />}{editing ? "保存" : "添加"}
+        </button>
+        <button className="btn-sm" onClick={onCancel} disabled={busy}>取消</button>
       </div>
-
-      {testMsg && (
-        <div className={`test-line ${testMsg.ok ? "ok" : "err"}`}>{testMsg.text}</div>
-      )}
     </div>
   );
 }

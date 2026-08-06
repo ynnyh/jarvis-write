@@ -4,8 +4,9 @@
 > knowrite（时序真相库）、NovelClaw（分桶记忆/伏笔四态）、KazKozDev
 > （读者已知/角色已知分离）的做法。
 >
-> 当前共 15 张表：主体 11 张 + 阶段 2 的 `chapter_summaries`、阶段 7 的
-> `llm_usage`、阶段 8 的 `users` / `provider_settings`（见下）。
+> 当前共 16 张表：主体 11 张 + 阶段 2 的 `chapter_summaries`、阶段 7 的
+> `llm_usage`、阶段 8 的 `users` / `provider_settings`（已废弃，仅作迁移
+> 数据源）与替代它的 `provider_configs`（见下）。
 
 ---
 
@@ -223,18 +224,25 @@
 | is_admin | bool | 初始 admin 由启动迁移（migrate.py）自动创建 |
 | created_at / updated_at | datetime | |
 
-> 数据隔离：`projects.user_id` / `provider_settings.user_id` / `llm_usage.user_id`
+> 数据隔离：`projects.user_id` / `provider_configs.user_id` / `llm_usage.user_id`
 > 均按用户过滤，跨账号访问返回 404。
 
-### `provider_settings` — 每用户 LLM provider 配置（阶段 8 起 per-user）
+### `provider_configs` — 每用户 LLM 模型配置（cc-switch 风格，多套命名）
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | id | PK | |
-| user_id | FK → users | 每用户 × provider 一行（唯一约束 `uq_provider_per_user`） |
-| provider | str | deepseek / openai / gemini |
-| api_key / base_url / model | str | 该用户自己的 key 与接入点，在站点设置页配置 |
-| is_default | bool | 该用户的默认 provider |
+| user_id | FK → users | 每用户多套，级联删除 |
+| name | str | 显示名（如「DeepSeek 官方」「中转站 A」） |
+| interface_format | str | 协议卡：deepseek / openai / gemini，决定用哪个适配器 |
+| api_key / base_url / model | str | key 落库为密文；在站点设置页配置 |
+| timeout / max_tokens | int | 0 = 跟随全局 `default_*` 与任务级默认 |
+| is_default | bool | quality 档（主）配置，全用户唯一 |
+| is_default_fast | bool | fast 档配置，全用户唯一；未设则 fast 跟随 quality |
 | created_at / updated_at | datetime | |
+
+> 旧表 `provider_settings`（每用户 × provider 一行）已废弃，启动迁移
+> （`migrate._migrate_provider_settings_to_configs`）把老行一次性拷入本表，
+> 老表保留不删。数据隔离说明同上（按 user_id 过滤，跨账号 404）。
 
 > 优先级：数据库里当前用户的配置 > .env / 环境变量（.env 仅作开发兜底）。
 

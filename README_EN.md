@@ -78,7 +78,7 @@ Full setup, smoke tests, and directory layout: [backend/README.md](backend/READM
 | `JWT_SECRET` | JWT signing key, **required** — must be a long random string (otherwise tokens can be forged on a public deployment). With `APP_ENV=prod`, startup is **refused** if the weak default is still in use |
 | `ADMIN_PASSWORD` | Initial admin password, **required** (no default under Docker; the in-code default is for local development only) |
 | `INVITE_CODE` | Invite code for registration; **leave empty to disable registration entirely** |
-| LLM API keys | DeepSeek / OpenAI / Gemini supported. Each account configures its own key on the **settings page** (stored in the database, recommended); `.env` values act as a fallback |
+| LLM API keys | DeepSeek / OpenAI / Gemini and any OpenAI-compatible relay supported. Each account configures its own keys on the **settings page** — multiple named configs with one-click default (quality tier) / fast-tier switching (stored in the database, recommended); `.env` values act as a fallback |
 
 Full list of options: [backend/.env.example](backend/.env.example).
 
@@ -101,7 +101,7 @@ The design docs are written in Chinese:
 ## Tech Stack
 
 - **Backend**: Python 3.12 + FastAPI (REST + SSE), SQLAlchemy 2.x + SQLite (Postgres-ready), Pydantic v2
-- **LLM layer**: self-built adapter layer (DeepSeek / OpenAI / Gemini, no LangChain), task-level model routing (strong vs. fast tiers)
+- **LLM layer**: self-built adapter layer (DeepSeek / OpenAI / Gemini, no LangChain), task-level model routing (strong vs. fast tiers, each mapped to its own config), cc-switch-style multi-config management, automatic retry with streaming fallback for transient failures (survives CDN timeouts on long generations)
 - **Frontend**: React + TypeScript + Vite
 - **Deployment**: single-container Docker (multi-stage build; frontend assets served by FastAPI at `/app`)
 - **Desktop**: Tauri 2 shell + PyInstaller-frozen backend, with GitHub Actions automatically building the NSIS installer and publishing it to Releases
@@ -113,7 +113,6 @@ Phases 0–8 are complete: the generation pipeline and tendency assembler, chapt
 Known remaining items:
 
 - **True token-level SSE streaming**: replaced by "async job + five-stage progress polling," which delivers a comparable experience
-- **Finer model routing** (separate providers for quality/fast tiers): to be exposed on the settings page when a second provider is integrated
 
 ## Testing
 

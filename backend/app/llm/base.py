@@ -9,17 +9,44 @@
 from __future__ import annotations
 
 import abc
+import asyncio
 import json
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Literal
 
 import httpx
 
+# 瞬时错误状态码:限流/服务端抖动/网关与 CDN 异常,值得退避重试。
+# 520-529 是 Cloudflare 系错误(524=CDN 等源站超时掐断,中转站高发)。
+RETRYABLE_STATUSES = frozenset(
+    {408, 409, 425, 429, 500, 502, 503, 504, 529} | set(range(520, 530))
+)
+
+# 网络层瞬时异常:超时/连接失败,同样值得重试
+TRANSIENT_NET_ERRORS = (httpx.TimeoutException, httpx.ConnectError)
+
+
+class UpstreamError(RuntimeError):
+    """上游调用失败(继承 RuntimeError,老代码的 except 不受影响)。
+
+    附带 status / retryable,供重试层判断要不要再来一次;
+    retryable=False 的错(401/403/404/参数错误)重试无意义,直接抛给用户。
+    """
+
+    def __init__(
+        self, message: str, *, status: int | None = None, retryable: bool = False
+    ) -> None:
+        super().__init__(message)
+        self.status = status
+        self.retryable = retryable
+
 
 def check_upstream(resp: httpx.Response, *, hint: str = "") -> dict:
     """校验上游响应并返回 JSON;异常时抛出用户可读的错误。
 
     - HTTP 错误(>=400):带上状态码和上游错误消息(若有);
+    - 52x(Cloudflare 网关/CDN 错误):单独说明"生成耗时过长被掐断/渠道拥挤",
+      不误导用户去查 Base URL;
     - HTTP 200 但 body 夹 error 字段(中转站软错误,如"无可用渠道"):也抛出,
       不再被当成正常响应放行、退化成下游"空回复";
     - 非 JSON(Base URL 填错/协议不匹配,上游回了 HTML 错误页):说明原因并附 hint。
@@ -35,9 +62,18 @@ def check_upstream(resp: httpx.Response, *, hint: str = "") -> dict:
             snippet = resp.text[:80].strip()
             if snippet:
                 msg += f"(响应非 JSON,开头: {snippet})"
-        if hint:
+        if 520 <= resp.status_code <= 529:
+            msg += (
+                "。这是中转站网关/CDN 错误,通常是生成耗时过长被 CDN 掐断"
+                "或渠道拥挤,稍后重试一般可恢复(系统会自动重试并改走流式)"
+            )
+        elif hint:
             msg += f"。{hint}"
-        raise RuntimeError(msg)
+        raise UpstreamError(
+            msg,
+            status=resp.status_code,
+            retryable=resp.status_code in RETRYABLE_STATUSES,
+        )
     try:
         data = resp.json()
     except json.JSONDecodeError:
@@ -48,12 +84,42 @@ def check_upstream(resp: httpx.Response, *, hint: str = "") -> dict:
         )
         if hint:
             msg += f"。{hint}"
-        raise RuntimeError(msg) from None
+        raise UpstreamError(msg, status=resp.status_code) from None
     if isinstance(data, dict) and data.get("error"):
         err = data["error"]
         detail = err.get("message") if isinstance(err, dict) else str(err)
-        raise RuntimeError(f"上游返回错误(HTTP {resp.status_code}): {detail or err}")
+        raise UpstreamError(
+            f"上游返回错误(HTTP {resp.status_code}): {detail or err}",
+            status=resp.status_code,
+        )
     return data
+
+
+async def with_retries(call, *, attempts: int = 3, base_delay: float = 2.0, on_retry=None):
+    """瞬时错误退避重试:retryable 的 UpstreamError / 网络超时连接错误。
+
+    - call(attempt): 第几次尝试(0 起),返回 awaitable;
+    - on_retry(exc): 每次重试前回调,调用方可借此调整下一次尝试的方式
+      (如被 CDN 掐断后改走流式聚合);
+    - 非 retryable 的错误(鉴权/参数/Base URL 错)立即抛出,不浪费重试。
+    """
+    last: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return await call(attempt)
+        except UpstreamError as exc:
+            if not exc.retryable:
+                raise
+            last = exc
+        except TRANSIENT_NET_ERRORS as exc:
+            last = exc
+        if attempt < attempts - 1:
+            if on_retry is not None:
+                on_retry(last)
+            await asyncio.sleep(base_delay * (2**attempt))
+    raise UpstreamError(
+        f"上游连续 {attempts} 次调用失败,最后错误: {last}", retryable=True
+    ) from last
 Role = Literal["system", "user", "assistant"]
 
 
@@ -105,6 +171,9 @@ class LLMAdapter(abc.ABC):
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.timeout = timeout
+        # 瞬时错误重试:次数与退避基数(秒)。置 1 即关闭重试。
+        self.retry_attempts = 3
+        self.retry_base_delay = 2.0
 
     # ---- 便捷构造:把一个纯文本 prompt 包成 messages ----
     @staticmethod

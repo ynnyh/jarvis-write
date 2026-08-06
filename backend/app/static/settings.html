@@ -51,7 +51,13 @@
   button.danger { color: var(--err); border-color: #f3c0c0; }
   button.danger:hover { background: #fef2f2; }
   button:disabled { opacity: .5; cursor: not-allowed; }
-  .default-pick { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line);
+    background: #fff; font-size: 13px; cursor: pointer;
+  }
+  .chip:hover { border-color: var(--brand); color: var(--brand); }
+  .chip.on { background: var(--brand-weak); border-color: var(--brand); color: var(--brand); font-weight: 500; }
   .msg { font-size: 13px; }
   .msg.ok { color: var(--ok); }
   .msg.err { color: var(--err); }
@@ -59,23 +65,40 @@
   .test-line.ok { display: block; background: #ecfdf5; color: var(--ok); }
   .test-line.err { display: block; background: #fef2f2; color: var(--err); }
   .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  details { margin-top: 12px; }
+  details summary { font-size: 12px; color: var(--muted); cursor: pointer; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="topline"><a class="back" href="/app/">← 返回工作台</a></div>
   <h1>模型设置</h1>
-  <div class="sub">配置各家大模型的 API Key。支持 OpenAI 兼容格式(DeepSeek 官方与中转站均可,改 Base URL 即可)。Key 保存在本地数据库。</div>
-  <div id="cards"></div>
+  <div class="sub">配置各家大模型的 API Key,同一个协议可以配多套(官方、中转站各一套)。「默认」为生成时优先使用的配置,「快档」用于轻量快任务;各只能设一套。Key 保存在本地数据库。</div>
+  <div class="card">
+    <div class="card-head">
+      <h2>模型配置</h2>
+      <button id="add-btn">+ 添加配置</button>
+    </div>
+    <div id="form-wrap"></div>
+    <div id="cards"></div>
+  </div>
 </div>
 
 <script>
-const NAMES = { deepseek: "DeepSeek", openai: "OpenAI (GPT)", gemini: "Google Gemini" };
-const DESCS = {
-  deepseek: "DeepSeek 官方 API。也可用中转站,改 Base URL 即可。",
-  openai: "OpenAI 官方及兼容中转站——用中转站(如 token 站、API 超市)就选这张卡,填中转地址和中转里的模型名(如 deepseek-v4-pro)。",
-  gemini: "仅 Google 官方原生 API。注意:中转站(包括卖 Gemini 模型的)一律走 OpenAI 卡,填中转地址。",
-};
+// 协议预设:展示名、一句话说明、默认 base_url/model(与后端 settings.py 的 _PRESETS 一致)
+const PRESETS = [
+  { key: "deepseek", label: "DeepSeek",
+    desc: "DeepSeek 官方 API。也可用中转站,改 Base URL 即可。",
+    baseUrl: "https://api.deepseek.com", model: "deepseek-chat" },
+  { key: "openai", label: "OpenAI 兼容",
+    desc: "OpenAI 官方及兼容中转站——用中转站(如 token 站、API 超市)就选这张卡,填中转地址和中转里的模型名。",
+    baseUrl: "https://api.openai.com/v1", model: "gpt-4o" },
+  { key: "gemini", label: "Gemini",
+    desc: "仅 Google 官方原生 API。卖 Gemini 模型的中转站请走 OpenAI 兼容卡。",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-2.0-flash" },
+];
+const PRESET_BY_KEY = {};
+for (const p of PRESETS) PRESET_BY_KEY[p.key] = p;
 
 // 与 SPA 共用同一份登录态(同源 localStorage)
 const TOKEN = localStorage.getItem("jarvis_token") || "";
@@ -93,52 +116,59 @@ function guard(res) {
   }
   return res;
 }
+// 用户可填的名称要转义后再拼进 HTML
+function esc(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 
 async function load() {
   const res = guard(await fetch("/api/settings/providers", { headers: authHeaders() }));
   const list = await res.json();
   const root = document.getElementById("cards");
   root.innerHTML = "";
+  if (!list.length) {
+    const empty = document.createElement("div");
+    empty.className = "hint";
+    empty.style.marginTop = "8px";
+    empty.textContent = "还没有模型配置,点右上角「添加配置」开始。";
+    root.appendChild(empty);
+  }
   for (const p of list) {
     root.appendChild(card(p));
   }
 }
 
+// 单套配置的展示卡片:名称 + 协议/默认/快档徽标 + 打码 key + base_url/model + 操作按钮
 function card(p) {
+  const preset = PRESET_BY_KEY[p.interface_format];
   const el = document.createElement("div");
-  el.className = "card";
+  el.className = "card optional";
+  const bits = [];
+  if (p.has_key) bits.push("Key:" + esc(p.api_key_masked));
+  bits.push(esc(p.base_url || (preset ? preset.baseUrl : "")) + " · " + esc(p.model || (preset ? preset.model : "")));
+  if (p.timeout > 0 || p.max_tokens > 0) {
+    bits.push("超时 " + (p.timeout > 0 ? p.timeout + "s" : "跟随全局")
+      + " · max_tokens " + (p.max_tokens > 0 ? p.max_tokens : "跟随全局"));
+  }
   el.innerHTML = `
     <div class="card-head">
-      <h2>${NAMES[p.provider] || p.provider}</h2>
+      <h2>${esc(p.name)}</h2>
+      <span class="badge">${esc(preset ? preset.label : p.interface_format)}</span>
       <span class="badge ${p.has_key ? "ok" : "no"}">${p.has_key ? "已配置" : "未配置"}</span>
-      ${p.is_default ? '<span class="badge">默认模型</span>' : ""}
+      ${p.is_default ? '<span class="badge">默认</span>' : ""}
+      ${p.is_default_fast ? '<span class="badge">快档</span>' : ""}
     </div>
-    <div class="hint" style="margin-bottom:8px">${DESCS[p.provider] || ""}</div>
-    <div class="row">
-      <div class="field">
-        <label>API Key ${p.has_key ? "(已保存:" + p.api_key_masked + ",留空则不修改)" : ""}</label>
-        <input type="password" data-f="api_key" placeholder="${p.has_key ? "留空保持不变" : "sk-..."}">
-      </div>
-    </div>
-    <div class="row">
-      <div class="field">
-        <label>Base URL</label>
-        <input type="text" data-f="base_url" value="${p.base_url || ""}" placeholder="${p.default_base_url}">
-        <div class="hint">用中转站就填中转地址,如 https://xxx.com/v1</div>
-      </div>
-      <div class="field">
-        <label>模型名</label>
-        <input type="text" data-f="model" value="${p.model || ""}" placeholder="${p.default_model}">
-      </div>
+    <div class="hint" style="margin-bottom:8px">
+      ${preset ? esc(preset.desc) + "<br>" : ""}${bits.join(" · ")}
     </div>
     <div class="actions">
-      <button class="primary" data-a="save">保存</button>
+      <button data-a="edit">编辑</button>
       <button data-a="test">测试连接</button>
-      ${p.has_key ? '<button class="danger" data-a="del">删除</button>' : ""}
-      <label class="default-pick">
-        <input type="radio" name="default_provider" data-f="is_default" ${p.is_default ? "checked" : ""}>
-        设为默认(生成时优先用这张卡;只配了一张卡可不设,会自动用它)
-      </label>
+      ${p.is_default ? "" : '<button data-a="set-default">设为默认</button>'}
+      ${p.is_default_fast ? "" : '<button data-a="set-fast">设为快档</button>'}
+      <button class="danger" data-a="del">删除</button>
       <span class="msg" data-f="msg"></span>
     </div>
     <div class="test-line" data-f="chat"></div>`;
@@ -146,49 +176,173 @@ function card(p) {
   const $ = (sel) => el.querySelector(sel);
   const msg = $('[data-f=msg]');
 
-  $('[data-a=save]').onclick = async () => {
-    msg.className = "msg"; msg.textContent = "保存中...";
-    const body = {
-      api_key: $('[data-f=api_key]').value || null,
-      base_url: $('[data-f=base_url]').value,
-      model: $('[data-f=model]').value,
-      is_default: $('[data-f=is_default]').checked,
-    };
-    const res = guard(await fetch(`/api/settings/providers/${p.provider}`, {
-      method: "PUT", headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify(body),
-    }));
-    if (res.ok) { msg.className = "msg ok"; msg.textContent = "已保存 ✓"; setTimeout(load, 600); }
-    else { const e = await res.json(); msg.className = "msg err"; msg.textContent = "保存失败: " + (e.detail || res.status); }
-  };
+  $('[data-a=edit]').onclick = () => openForm(p);
 
   $('[data-a=test]').onclick = async () => {
     const chat = $('[data-f=chat]');
     chat.className = "test-line"; chat.textContent = "";
     msg.className = "msg"; msg.textContent = "测试中(最长 60 秒)...";
-    const res = guard(await fetch(`/api/settings/providers/${p.provider}/test`, { method: "POST", headers: authHeaders() }));
+    const res = guard(await fetch(`/api/settings/providers/${p.id}/test`, { method: "POST", headers: authHeaders() }));
     const r = await res.json();
     msg.className = "msg"; msg.textContent = "";
     if (r.ok) {
       chat.className = "test-line ok";
-      chat.textContent = `✓ 聊天模型连通(${r.model})：${r.reply}`;
+      chat.textContent = `✓ 连通(${r.model}):${r.reply}`;
     } else {
       chat.className = "test-line err";
-      chat.textContent = "✗ 聊天模型连接失败：" + r.error;
+      chat.textContent = "✗ 连接失败:" + r.error;
     }
   };
 
-  const del = $('[data-a=del]');
-  if (del) del.onclick = () => deleteProvider(p.provider, msg);
+  // 一键设为默认/快档:PUT 全量字段,只翻转目标标记(后端会清掉其他配置的同名标记)
+  async function setFlag(flag, label) {
+    msg.className = "msg"; msg.textContent = "设置中...";
+    const res = guard(await fetch(`/api/settings/providers/${p.id}`, {
+      method: "PUT", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        name: p.name,
+        interface_format: p.interface_format,
+        base_url: p.base_url,
+        model: p.model,
+        timeout: p.timeout,
+        max_tokens: p.max_tokens,
+        [flag]: true,
+      }),
+    }));
+    if (res.ok) { msg.className = "msg ok"; msg.textContent = "已设为" + label + " ✓"; setTimeout(load, 600); }
+    else { const e = await res.json(); msg.className = "msg err"; msg.textContent = "设置失败: " + (e.detail || res.status); }
+  }
+  const sd = $('[data-a=set-default]');
+  if (sd) sd.onclick = () => setFlag("is_default", "默认");
+  const sf = $('[data-a=set-fast]');
+  if (sf) sf.onclick = () => setFlag("is_default_fast", "快档");
+
+  $('[data-a=del]').onclick = () => deleteProvider(p, msg);
 
   return el;
 }
 
-// 删除某 provider 配置:先不带 confirmed 请求,后端现场探测——
+// 添加/编辑共用的表单(同一时刻只开一个):先选协议预设(预填 base_url/model 占位),
+// 再填名称/Key/地址/模型名;高级项(timeout、max_tokens,0=跟随全局)折叠收起。
+// 编辑时 key 留空表示不修改。
+function openForm(editing) {
+  const wrap = document.getElementById("form-wrap");
+  wrap.innerHTML = "";
+  let presetKey = editing ? editing.interface_format : "deepseek";
+
+  const el = document.createElement("div");
+  el.className = "card optional";
+  el.style.marginBottom = "14px";
+  el.innerHTML = `
+    <div class="card-head"><h2>${editing ? "编辑「" + esc(editing.name) + "」" : "添加配置"}</h2></div>
+    <label>协议</label>
+    <div class="chips" data-f="chips"></div>
+    <div class="hint" data-f="preset-desc" style="margin:6px 0 12px"></div>
+    <div class="row">
+      <div class="field">
+        <label>配置名称</label>
+        <input type="text" data-f="name" value="${editing ? esc(editing.name) : ""}">
+        <div class="hint">留空则自动用模型名;同一协议配多套时建议起个能区分的名字。</div>
+      </div>
+      <div class="field">
+        <label>API Key ${editing && editing.has_key ? "(已保存:" + esc(editing.api_key_masked) + ",留空则不修改)" : ""}</label>
+        <input type="password" data-f="api_key" placeholder="${editing && editing.has_key ? "留空保持不变" : "sk-..."}">
+      </div>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>Base URL</label>
+        <input type="text" data-f="base_url" value="${editing ? esc(editing.base_url) : ""}">
+        <div class="hint">用中转站就填中转地址,如 https://xxx.com/v1;留空用官方地址。</div>
+      </div>
+      <div class="field">
+        <label>模型名</label>
+        <input type="text" data-f="model" value="${editing ? esc(editing.model) : ""}">
+      </div>
+    </div>
+    <details>
+      <summary>高级选项(超时 / max_tokens,0 = 跟随全局)</summary>
+      <div class="row" style="margin-top:8px">
+        <div class="field">
+          <label>超时(秒)</label>
+          <input type="text" data-f="timeout" value="${editing ? editing.timeout : 0}">
+        </div>
+        <div class="field">
+          <label>max_tokens</label>
+          <input type="text" data-f="max_tokens" value="${editing ? editing.max_tokens : 0}">
+        </div>
+      </div>
+    </details>
+    <div class="actions" style="margin-top:12px">
+      <button class="primary" data-a="save">${editing ? "保存" : "添加"}</button>
+      <button data-a="cancel">取消</button>
+      <span class="msg" data-f="msg"></span>
+    </div>`;
+
+  const $ = (sel) => el.querySelector(sel);
+  const msg = $('[data-f=msg]');
+
+  function renderChips() {
+    const cur = PRESET_BY_KEY[presetKey];
+    const chips = $('[data-f=chips]');
+    chips.innerHTML = "";
+    for (const o of PRESETS) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "chip" + (o.key === presetKey ? " on" : "");
+      b.textContent = o.label;
+      b.onclick = () => { presetKey = o.key; renderChips(); };
+      chips.appendChild(b);
+    }
+    $('[data-f=preset-desc]').textContent = cur ? cur.desc : "";
+    $('[data-f=name]').placeholder = cur ? cur.label + " 官方" : "给这套配置起个名字";
+    $('[data-f=base_url]').placeholder = cur ? cur.baseUrl : "";
+    $('[data-f=model]').placeholder = cur ? cur.model : "";
+  }
+  renderChips();
+
+  $('[data-a=cancel]').onclick = () => { wrap.innerHTML = ""; };
+
+  $('[data-a=save]').onclick = async () => {
+    const body = {
+      name: $('[data-f=name]').value.trim(),
+      interface_format: presetKey,
+      api_key: $('[data-f=api_key]').value.trim() || null,
+      base_url: $('[data-f=base_url]').value.trim(),
+      model: $('[data-f=model]').value.trim(),
+      timeout: Math.max(0, parseInt($('[data-f=timeout]').value, 10) || 0),
+      max_tokens: Math.max(0, parseInt($('[data-f=max_tokens]').value, 10) || 0),
+    };
+    if (!editing && !body.api_key) {
+      msg.className = "msg err"; msg.textContent = "请填写 API Key"; return;
+    }
+    msg.className = "msg"; msg.textContent = "保存中...";
+    const res = guard(await fetch(
+      editing ? `/api/settings/providers/${editing.id}` : "/api/settings/providers",
+      {
+        method: editing ? "PUT" : "POST",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify(body),
+      }));
+    if (res.ok) {
+      wrap.innerHTML = "";
+      load();
+    } else {
+      const e = await res.json();
+      msg.className = "msg err"; msg.textContent = "保存失败: " + (e.detail || res.status);
+    }
+  };
+
+  wrap.appendChild(el);
+  el.scrollIntoView({ block: "nearest" });
+}
+
+// 删除某套配置:先不带 confirmed 请求,后端现场探测——
 // 连不通直接删;连通则返回 needs_confirm,弹窗确认后带 confirmed 重发。
-async function deleteProvider(provider, msg) {
+async function deleteProvider(p, msg) {
+  if (!confirm(`删除「${p.name}」?\n删除后需重新配置 API Key 才能使用该配置。`)) return;
   msg.className = "msg"; msg.textContent = "删除中(可能先测一次连通性)...";
-  let res = guard(await fetch(`/api/settings/providers/${provider}`, {
+  let res = guard(await fetch(`/api/settings/providers/${p.id}`, {
     method: "DELETE", headers: authHeaders(),
   }));
   if (!res.ok) {
@@ -200,17 +354,19 @@ async function deleteProvider(provider, msg) {
   if (r.deleted) { msg.className = "msg ok"; msg.textContent = "已删除 ✓"; setTimeout(load, 500); return; }
   if (r.needs_confirm) {
     msg.className = "msg"; msg.textContent = "";
-    if (!confirm((r.reason || "该配置当前连接正常,确认删除?") + "\n\n删除后将回落到默认/环境配置。")) {
+    if (!confirm((r.reason || "该配置当前连接正常,确认删除?") + "\n\n删除后将回落到其他默认配置。")) {
       msg.textContent = "已取消"; return;
     }
     msg.textContent = "删除中...";
-    res = guard(await fetch(`/api/settings/providers/${provider}?confirmed=true`, {
+    res = guard(await fetch(`/api/settings/providers/${p.id}?confirmed=true`, {
       method: "DELETE", headers: authHeaders(),
     }));
     if (res.ok) { msg.className = "msg ok"; msg.textContent = "已删除 ✓"; setTimeout(load, 500); }
     else { const e = await res.json(); msg.className = "msg err"; msg.textContent = "删除失败: " + (e.detail || res.status); }
   }
 }
+
+document.getElementById("add-btn").onclick = () => openForm(null);
 
 load();
 </script>

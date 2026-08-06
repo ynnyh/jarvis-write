@@ -80,7 +80,7 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 | `JWT_SECRET` | JWT 签名密钥，**必填**，必须设为随机长串（公网部署否则 token 可被伪造）。`APP_ENV=prod` 下仍用弱默认值将**拒绝启动** |
 | `ADMIN_PASSWORD` | 初始管理员密码，**必填**（Docker 下无默认值；代码默认值仅限本地开发） |
 | `INVITE_CODE` | 注册邀请码：填对才能注册；**留空则关闭注册** |
-| LLM API key | 支持 DeepSeek / OpenAI / Gemini。每个账号登录后在**设置页**配自己的 key（存数据库，推荐）；也可用 `.env` 做兜底 |
+| LLM API key | 支持 DeepSeek / OpenAI / Gemini 及任意 OpenAI 兼容中转站。每个账号登录后在**设置页**配自己的 key——可存多套命名配置，一键切换默认（强模型档）/快档（存数据库，推荐）；也可用 `.env` 做兜底 |
 
 完整配置项见 [backend/.env.example](backend/.env.example)。
 
@@ -101,7 +101,7 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 ## 技术栈
 
 - **后端**：Python 3.12 + FastAPI（REST + SSE），SQLAlchemy 2.x + SQLite（可切 Postgres），Pydantic v2
-- **LLM 层**：自封适配层（DeepSeek / OpenAI / Gemini，不用 LangChain），任务级模型路由（强模型/快模型分档）
+- **LLM 层**：自封适配层（DeepSeek / OpenAI / Gemini，不用 LangChain），任务级模型路由（强模型/快模型分档，各选一套配置），cc-switch 风格多配置管理，瞬时错误自动重试 + 流式聚合兜底（防中转站 CDN 掐断长请求）
 - **前端**：React + TypeScript + Vite
 - **部署**：单容器 Docker（多阶段构建，前端产物由 FastAPI 托管在 `/app`）
 - **桌面版**：Tauri 2 壳 + PyInstaller 冻结后端，GitHub Actions 自动构建 NSIS 安装包并发布到 Releases
@@ -113,7 +113,6 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 已知遗留项：
 
 - **SSE 逐 token 真流式**：已用"异步任务 + 五段进度轮询"替代，体验达标
-- **多模型路由细化**（quality/fast 分 provider）：待接入第二家模型时做成设置页配置
 
 ## 测试
 

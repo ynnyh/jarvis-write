@@ -17,7 +17,7 @@ from app.db.models.story_bible import (
 )
 from app.db.models.foreshadowing import Foreshadowing
 from app.db.models.preset import TendencyPreset
-from app.db.models.setting import ProviderSetting
+from app.db.models.setting import ProviderConfig, ProviderSetting
 from app.db.models.summary import ChapterSummary
 from app.db.models.chapter_state import ChapterState
 from app.db.models.chapter_issue import ChapterIssue
@@ -44,6 +44,7 @@ __all__ = [
     "Foreshadowing",
     "TendencyPreset",
     "ProviderSetting",
+    "ProviderConfig",
     "ChapterSummary",
     "ChapterState",
     "ChapterIssue",

@@ -54,18 +54,18 @@ def _auth(client: TestClient, username: str) -> tuple[dict, int]:
 
 
 def test_saved_key_is_ciphertext_in_db(client):
-    from app.db.models import ProviderSetting
+    from app.db.models import ProviderConfig
     from app.db.session import SessionLocal
 
     headers, uid = _auth(client, "enc_user")
-    r = client.put(
-        "/api/settings/providers/deepseek",
+    r = client.post(
+        "/api/settings/providers",
         headers=headers,
         json={
+            "interface_format": "deepseek",
             "api_key": "sk-plaintext-abc",
             "base_url": "https://api.deepseek.com",
             "model": "deepseek-chat",
-            "is_default": True,
         },
     )
     assert r.status_code == 200, r.text
@@ -74,10 +74,10 @@ def test_saved_key_is_ciphertext_in_db(client):
     db = SessionLocal()
     try:
         row = (
-            db.query(ProviderSetting)
+            db.query(ProviderConfig)
             .filter(
-                ProviderSetting.user_id == uid,
-                ProviderSetting.provider == "deepseek",
+                ProviderConfig.user_id == uid,
+                ProviderConfig.interface_format == "deepseek",
             )
             .first()
         )
@@ -89,7 +89,7 @@ def test_saved_key_is_ciphertext_in_db(client):
 
     # 设置页返回的是打码后的明文(has_key 为真)
     body = client.get("/api/settings/providers", headers=headers).json()
-    deepseek = next(p for p in body if p["provider"] == "deepseek")
+    deepseek = next(p for p in body if p["interface_format"] == "deepseek")
     assert deepseek["has_key"] is True
     assert "sk-plaintext-abc" not in deepseek["api_key_masked"]
 
@@ -100,10 +100,10 @@ def test_factory_resolves_decrypted_key(client):
     from app.llm.factory import resolve_provider_config
 
     headers, uid = _auth(client, "enc_factory_user")
-    client.put(
-        "/api/settings/providers/openai",
+    client.post(
+        "/api/settings/providers",
         headers=headers,
-        json={"api_key": "sk-openai-xyz", "base_url": "", "model": "", "is_default": True},
+        json={"interface_format": "openai", "api_key": "sk-openai-xyz"},
     )
     tok = current_user_id.set(uid)
     try:

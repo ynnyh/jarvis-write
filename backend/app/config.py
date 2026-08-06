@@ -14,8 +14,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 DEFAULT_JWT_SECRET = "change-me-in-production-please-use-a-random-secret"
 
 
-class ProviderConfig:
-    """单个 LLM provider 的配置载体（运行时从 Settings 组装）。"""
+class EnvProviderConfig:
+    """单个 LLM provider 的 .env 配置载体(运行时从 Settings 组装)。"""
 
     def __init__(self, api_key: str, base_url: str, model: str):
         self.api_key = api_key
@@ -77,18 +77,18 @@ class Settings(BaseSettings):
     admin_username: str = "admin"
     admin_password: str = "admin12345"  # 首次登录后请在设置页修改
 
-    def provider(self, name: str) -> ProviderConfig:
+    def provider(self, name: str) -> EnvProviderConfig:
         name = name.lower()
         if name == "deepseek":
-            return ProviderConfig(
+            return EnvProviderConfig(
                 self.deepseek_api_key, self.deepseek_base_url, self.deepseek_model
             )
         if name == "openai":
-            return ProviderConfig(
+            return EnvProviderConfig(
                 self.openai_api_key, self.openai_base_url, self.openai_model
             )
         if name == "gemini":
-            return ProviderConfig(
+            return EnvProviderConfig(
                 self.gemini_api_key, self.gemini_base_url, self.gemini_model
             )
         raise ValueError(f"未知的 provider: {name}")

@@ -171,17 +171,18 @@ def test_delete_project_not_owner_404(client):
 
 
 def _setup_user_with_key(client, username: str) -> dict:
-    """注册并给 deepseek 存一个假 key(走数据库,不碰 .env)。"""
+    """注册并存一套 deepseek 假配置(走数据库,不碰 .env)。"""
     user = _register(client, username)
     headers = _auth(user["token"])
-    r = client.put(
-        "/api/settings/providers/deepseek",
+    r = client.post(
+        "/api/settings/providers",
         headers=headers,
         json={
+            "interface_format": "deepseek",
+            "name": "DeepSeek",
             "api_key": "sk-test",
             "base_url": "https://api.deepseek.com",
             "model": "deepseek-chat",
-            "is_default": True,
         },
     )
     assert r.status_code == 200, r.text
@@ -302,10 +303,10 @@ def test_default_provider_falls_back_to_only_configured(client):
     from app.llm.factory import resolve_default_provider
 
     headers = _auth(_register(client, "fb_openai_only")["token"])
-    r = client.put(
-        "/api/settings/providers/openai",
+    r = client.post(
+        "/api/settings/providers",
         headers=headers,
-        json={"api_key": "sk-openai", "base_url": "", "model": "", "is_default": False},
+        json={"interface_format": "openai", "api_key": "sk-openai"},
     )
     assert r.status_code == 200, r.text
 
@@ -317,16 +318,17 @@ def test_default_provider_prefers_db_default(client):
     from app.llm.factory import resolve_default_provider
 
     headers = _auth(_register(client, "fb_db_default")["token"])
-    r = client.put(
-        "/api/settings/providers/openai",
+    r = client.post(
+        "/api/settings/providers",
         headers=headers,
-        json={"api_key": "sk-openai", "base_url": "", "model": "", "is_default": False},
+        json={"interface_format": "openai", "api_key": "sk-openai"},
     )
     assert r.status_code == 200, r.text
-    r = client.put(
-        "/api/settings/providers/deepseek",
+    r = client.post(
+        "/api/settings/providers",
         headers=headers,
         json={
+            "interface_format": "deepseek",
             "api_key": "sk-deep",
             "base_url": "https://api.deepseek.com",
             "model": "deepseek-chat",

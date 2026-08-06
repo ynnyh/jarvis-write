@@ -28,6 +28,13 @@ logger = logging.getLogger("jarvis-write.migrate")
 # 需要补 user_id 的旧表
 _TABLES_NEEDING_USER = ("projects", "provider_settings", "llm_usage")
 
+# 老 provider key → 迁移到新表时的默认显示名
+_PROVIDER_DISPLAY_NAMES = {
+    "deepseek": "DeepSeek",
+    "openai": "OpenAI 兼容",
+    "gemini": "Gemini",
+}
+
 
 def _column_exists(table: str, column: str) -> bool:
     insp = inspect(engine)
@@ -364,6 +371,61 @@ def _claim_orphans(db: Session, admin_id: int) -> None:
             logger.info("迁移:%s 归属 admin 共 %d 行", table, result.rowcount)
 
 
+def _migrate_provider_settings_to_configs() -> None:
+    """老表 provider_settings → 新表 provider_configs(每用户一次性,幂等)。
+
+    cc-switch 风格改造:每用户每协议一行升级为多套命名配置。
+    判定方式:某协议配置已存在于 provider_configs 则跳过该行;
+    api_key 已是密文,原样拷贝即可。老表保留不删,便于回滚排查。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        tables = insp.get_table_names()
+        if "provider_settings" not in tables or "provider_configs" not in tables:
+            return  # 老库没新表由 create_all 先建;全新库没老表无事可做
+        rows = conn.execute(
+            text(
+                "SELECT user_id, provider, api_key, base_url, model, is_default "
+                "FROM provider_settings"
+            )
+        ).fetchall()
+        migrated = 0
+        for user_id, provider, api_key, base_url, model, is_default in rows:
+            exists = conn.execute(
+                text(
+                    "SELECT 1 FROM provider_configs "
+                    "WHERE user_id = :u AND interface_format = :f LIMIT 1"
+                ),
+                {"u": user_id, "f": provider},
+            ).first()
+            if exists:
+                continue
+            conn.execute(
+                text(
+                    "INSERT INTO provider_configs "
+                    "(user_id, name, interface_format, api_key, base_url, model, "
+                    " timeout, max_tokens, is_default, is_default_fast, "
+                    " created_at, updated_at) "
+                    "VALUES (:u, :n, :f, :k, :b, :m, 0, 0, :d, 0, "
+                    "        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                ),
+                {
+                    "u": user_id,
+                    "n": _PROVIDER_DISPLAY_NAMES.get(provider, provider),
+                    "f": provider,
+                    "k": api_key,
+                    "b": base_url or "",
+                    "m": model or "",
+                    "d": bool(is_default),
+                },
+            )
+            migrated += 1
+        if migrated:
+            logger.info(
+                "迁移:provider_settings → provider_configs 共 %d 行", migrated
+            )
+
+
 def _encrypt_existing_keys() -> None:
     """把 provider_settings 里历史明文 api_key 加密回写(幂等:已加密的跳过)。
 
@@ -408,7 +470,9 @@ def run_migrations() -> None:
     _add_queue_require_approved_column()
     _disable_word_guard_default()
     _migrate_finalized_to_approved()
+    # 先补加密老表存量明文 key,再拷到新表,保证 provider_configs 落库必为密文
     _encrypt_existing_keys()
+    _migrate_provider_settings_to_configs()
     with session_scope() as db:
         admin = _ensure_admin(db)
         db.flush()

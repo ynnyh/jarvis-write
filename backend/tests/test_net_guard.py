@@ -58,10 +58,15 @@ def _auth_headers(client: TestClient, username: str) -> dict:
 
 def test_save_provider_rejects_internal_base_url(client):
     headers = _auth_headers(client, "ssrf_user")
-    r = client.put(
-        "/api/settings/providers/deepseek",
+    r = client.post(
+        "/api/settings/providers",
         headers=headers,
-        json={"api_key": "sk-x", "base_url": "http://127.0.0.1:11434", "model": ""},
+        json={
+            "interface_format": "deepseek",
+            "api_key": "sk-x",
+            "base_url": "http://127.0.0.1:11434",
+            "model": "",
+        },
     )
     assert r.status_code == 400
     assert "内网" in r.json()["detail"]
