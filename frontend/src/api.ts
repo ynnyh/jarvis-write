@@ -121,6 +121,8 @@ export interface Project {
   macro_plan?: { start: number; end: number; goal: string }[] | null;
   // 文风备忘(随书累积的文风基线;翻新面板可手动编辑,后续生成以此为底继续累积)
   style_memo?: string | null;
+  // 世界观硬规则钉板:每行一条不可违背的设定/常识,注入后续所有生成;规则扫描以此体检正文
+  world_rules?: string | null;
 }
 export interface Architecture {
   core_seed: string; character_dynamics: string;
@@ -152,10 +154,10 @@ export interface PreflightWarning {
   conflicting_fact?: string;
   suggestion: string;
 }
-/** 章节一致性问题记录(docs/08 §5.7):门禁/预审/诊断/审校产出,可操作流转 */
+/** 章节一致性问题记录(docs/08 §5.7):门禁/预审/诊断/审校/规则扫描产出,可操作流转 */
 export interface ChapterIssue {
   id: number;
-  source: string;             // gate | preflight | diag | review
+  source: string;             // gate | preflight | diag | review | rules
   severity: string;           // blocker | major | minor
   issue_type: string;
   description: string;
@@ -655,6 +657,9 @@ export const api = {
   // 全书体检(LLM 逐章扫跨章矛盾,问题以「诊断」落各章审核报告)/ 老书批量补契约
   diagAsync: (pid: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/diag-async`),
+  // 规则扫描:逐章对照世界观硬规则(world_rules)体检正文,问题以「规则」落各章审核报告
+  ruleScanAsync: (pid: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/rule-scan-async`),
   contractsBackfillAsync: (pid: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/contracts/backfill-async`),
   // 指令改异步解析(应用仍走同步 apply,纯 DB 快)

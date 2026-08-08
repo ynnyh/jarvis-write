@@ -18,7 +18,7 @@ const SEV_BADGE: Record<string, string> = { blocker: "err", major: "warn", minor
 const SEV_CN: Record<string, string> = { blocker: "致命", major: "重要", minor: "次要" };
 // 问题来源中文
 const SOURCE_CN: Record<string, string> = {
-  gate: "门禁", preflight: "预审", diag: "诊断", review: "审校",
+  gate: "门禁", preflight: "预审", diag: "诊断", review: "审校", rules: "规则",
 };
 const ISSUE_STATUS_CN: Record<string, string> = { resolved: "已人工解决", ignored: "已忽略" };
 

@@ -27,7 +27,8 @@ class ChapterIssue(Base, TimestampMixin):
     chapter_id: Mapped[int] = mapped_column(
         ForeignKey("chapters.id", ondelete="CASCADE"), index=True
     )
-    # 来源:gate(写后一致性门禁)/ preflight(写前审核,P1)/ diag(离线诊断,P2)/ review(审校)
+    # 来源:gate(写后一致性门禁)/ preflight(写前审核,P1)/ diag(离线诊断,P2)/
+    # review(审校)/ rules(规则扫描,对照世界观硬规则钉板)
     source: Mapped[str] = mapped_column(String(20), default="gate")
     # blocker(硬矛盾,阻断)/ major / minor
     severity: Mapped[str] = mapped_column(String(20), default="minor")

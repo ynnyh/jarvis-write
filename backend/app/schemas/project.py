@@ -49,6 +49,9 @@ class ProjectOut(BaseModel):
     macro_plan: list[Any] | None = None
     # 文风备忘(随书累积的文风基线;可在翻新面板手动查看/编辑)
     style_memo: str | None = None
+    # 世界观硬规则(钉板):不可违背的设定/常识,逐行一条;注入生成各环节,
+    # 并可发起「规则扫描」逐章体检正文
+    world_rules: str | None = None
     status: str
     # 列表页进度(list 接口聚合填充;详情接口为 0)
     written_chapters: int = 0

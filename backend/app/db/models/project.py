@@ -60,6 +60,11 @@ class Project(Base, TimestampMixin):
     # 每写完一章由快模型增量更新,注入后续章节草稿,防长篇后段人物声音漂移、调性变淡。
     # 空/NULL = 尚未累积(开篇几章)。见 prompts/chapter.py STYLE_MEMO_UPDATE_PROMPT。
     style_memo: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 世界观硬规则(钉板):用户手填的"本书不可违背的设定/常识"(如"2024 新高考,
+    # 理科不考政治,高考 6.7-6.8 两天"),逐行一条。注入蓝图/草稿/定稿等生成环节
+    # (见 engines/common.world_rules_block),并可发起「规则扫描」逐章体检正文
+    # (见 engines/diagnosis.rule_scan_book)。空/NULL = 未设置。
+    world_rules: Mapped[str | None] = mapped_column(Text, nullable=True)
     # draft / outlining / writing / done
     status: Mapped[str] = mapped_column(String(20), default="draft")
 

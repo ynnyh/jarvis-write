@@ -24,6 +24,7 @@
 | target_words_per_chapter | int | 每章目标字数 |
 | global_tendency | JSON | 全局倾向（见 04 文档，标签组合） |
 | style_memo | text \| NULL | 文风备忘（随书累积）：本书调性 + 人物声音 + 复现意象，每章定稿后由快模型增量更新，注入后续章草稿，防长篇后段人物声音漂移；NULL=尚未累积 |
+| world_rules | text \| NULL | 世界观硬规则（钉板）：用户手填的不可违背设定/常识（如"理科不考政治""高考两天"），每行一条；注入蓝图/草稿/定稿/修改指令等生成环节，并可发起「规则扫描」逐章体检正文（engines/diagnosis.rule_scan_book，问题以 source="rules" 落 chapter_issues）；NULL=未设置 |
 | status | enum | draft / outlining / writing / done |
 | created_at / updated_at | datetime | |
 

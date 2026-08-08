@@ -8,6 +8,7 @@ POST /api/projects/{id}/chapters/{n}/proofread-async 校对(错别字/语病/标
 POST /api/projects/{id}/chapters/{n}/proofread-apply 应用勾选的校对修复(逐条精确替换)
 GET  /api/projects/{id}/audit-report                 审核报告(聚合失配章/伏笔/退场人物,零 LLM)
 POST /api/projects/{id}/diag-async                   全书体检(LLM 逐章扫矛盾,问题落各章清单)
+POST /api/projects/{id}/rule-scan-async              规则扫描(对照世界观硬规则钉板逐章体检)
 POST /api/projects/{id}/contracts/backfill-async     老书批量补提章末契约(缺契约章逐章重提)
 """
 from __future__ import annotations
@@ -39,6 +40,7 @@ from app.engines.diagnosis import (
     backfill_contracts,
     chapters_missing_contract,
     diagnose_book,
+    rule_scan_book,
 )
 from app.jobs import list_running, spawn_job
 from app.paths import resource_path
@@ -316,6 +318,7 @@ def _book_job_busy(project_id: int) -> str:
         + list_running(f"re-extract-{project_id}-")
         + list_running(f"gate-release-{project_id}-")
         + list_running(f"diag-{project_id}")
+        + list_running(f"rulescan-{project_id}")
         + list_running(f"contract-backfill-{project_id}")
     )
     return busy[0][1]["stage"] if busy else ""
@@ -353,3 +356,27 @@ async def contracts_backfill_async(project_id: int, db: Session = Depends(get_db
             session.close()
 
     return {"job_id": spawn_job(f"contract-backfill-{project_id}", work)}
+
+
+@router.post("/api/projects/{project_id}/rule-scan-async")
+async def rule_scan_async(project_id: int, db: Session = Depends(get_db)):
+    """规则扫描:LLM 逐章对照「世界观硬规则」体检正文,问题以「规则」来源落各章清单。
+
+    需先在项目里填 world_rules(审核报告页的「世界观硬规则」编辑框)。
+    """
+    project = get_project_or_404(db, project_id)
+    if not (project.world_rules or "").strip():
+        raise HTTPException(
+            status_code=400, detail="尚未设置世界观硬规则,请先填写再扫描。"
+        )
+    if busy := _book_job_busy(project_id):
+        raise HTTPException(status_code=409, detail=f"已有章节任务在进行中({busy}),稍后再试。")
+
+    async def work(progress) -> dict:
+        session = SessionLocal()
+        try:
+            return await rule_scan_book(session, project_id, progress=progress)
+        finally:
+            session.close()
+
+    return {"job_id": spawn_job(f"rulescan-{project_id}", work)}

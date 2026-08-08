@@ -48,6 +48,13 @@ export default function EditorialPanel({ pid }: Props) {
   const [backfillResult, setBackfillResult] = useState<{
     extracted: number[]; skipped: number[]; failed: number[];
   } | null>(null);
+  // 规则扫描结果(与全书体检同构,问题以「规则」来源落各章审核报告)
+  const [scanResult, setScanResult] = useState<{
+    scanned: number; with_issues: number[]; total_issues: number; total_blockers: number;
+  } | null>(null);
+  // 世界观硬规则钉板:每行一条,注入后续所有生成;null=尚未加载
+  const [worldRules, setWorldRules] = useState<string | null>(null);
+  const [rulesSaving, setRulesSaving] = useState(false);
 
   useEffect(() => {
     api.listChapters(pid).then((list) => {
@@ -55,6 +62,8 @@ export default function EditorialPanel({ pid }: Props) {
       setChapters(withText);
       if (withText.length && chapterNum === null) setChapterNum(withText[0].chapter_number);
     }).catch((e) => setErr(String(e)));
+    // 世界观硬规则编辑区初始值(未设置 = 空串)
+    api.getProject(pid).then((p) => setWorldRules(p.world_rules ?? "")).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pid]);
 
@@ -116,6 +125,17 @@ export default function EditorialPanel({ pid }: Props) {
     } catch (e) { setErr(String(e)); } finally { setBusy(""); }
   }
 
+  // 规则扫描:LLM 逐章对照世界观硬规则体检正文,问题以「规则」落各章审核报告
+  async function runRuleScan() {
+    setErr(""); setBusy("规则扫描中(逐章对照硬规则,较长)…"); setScanResult(null);
+    try {
+      const r = await runJob<{
+        scanned: number; with_issues: number[]; total_issues: number; total_blockers: number;
+      }>(() => api.ruleScanAsync(pid), { kind: `rule-scan-${pid}` });
+      if (r) { setScanResult(r); setAudit(null); }
+    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+  }
+
   // 老书批量补契约:缺有效契约的章逐章重提;完成后刷新聚合报告(缺契约数变)
   async function runBackfill() {
     setErr(""); setBusy("批量补提契约中…"); setBackfillResult(null);
@@ -125,6 +145,16 @@ export default function EditorialPanel({ pid }: Props) {
       );
       if (r) { setBackfillResult(r); setAudit(null); }
     } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+  }
+
+  // 保存世界观硬规则(整段覆盖,空串清空)
+  async function saveWorldRules() {
+    if (worldRules === null) return;
+    setErr(""); setRulesSaving(true);
+    try {
+      await api.patchProject(pid, { world_rules: worldRules });
+      toast.ok("世界观硬规则已保存", "将注入后续所有生成,可用于规则扫描体检正文");
+    } catch (e) { setErr(String(e)); } finally { setRulesSaving(false); }
   }
 
   async function runReview() {
@@ -344,10 +374,16 @@ export default function EditorialPanel({ pid }: Props) {
             体检:LLM 逐章对照圣经/上章契约/上章结尾,把跨章矛盾一次扫出来,按「诊断」来源落进
             各章的审核报告(写作页 → 打开章节 → 审核报告,可逐条修订/忽略)。
             契约是门禁和下章衔接的对照基准,老书缺契约时先批量补提,体检结果才完整。
+            规则扫描:逐章对照下方世界观硬规则体检正文,违反项按「规则」来源落进审核报告。
           </div>
           <div className="actions mt-2">
             <button className="primary btn-sm" disabled={!!busy} onClick={runDiag}>
               {busy.startsWith("全书体检") && <span className="spin spin-sm" />}全书体检
+            </button>
+            <button className="btn-sm" disabled={!!busy || !worldRules?.trim()}
+              title={!worldRules?.trim() ? "先在下方填写并保存世界观硬规则" : undefined}
+              onClick={runRuleScan}>
+              {busy.startsWith("规则扫描") && <span className="spin spin-sm" />}规则扫描
             </button>
             <button className="btn-sm" disabled={!!busy} onClick={runBackfill}>
               {busy.startsWith("批量补提") && <span className="spin spin-sm" />}
@@ -369,6 +405,19 @@ export default function EditorialPanel({ pid }: Props) {
               </div>
             )
           )}
+          {scanResult && (
+            scanResult.total_issues ? (
+              <div className="notice notice-warn mt-2">
+                规则扫描完成:扫 {scanResult.scanned} 章,第 {scanResult.with_issues.join("、")} 章
+                共 {scanResult.total_issues} 处违反硬规则({scanResult.total_blockers} 处致命),
+                去各章「审核报告」逐条处理(来源:规则)。
+              </div>
+            ) : (
+              <div className="msg-ok mt-2">
+                规则扫描完成:扫 {scanResult.scanned} 章,未发现违反硬规则的内容。
+              </div>
+            )
+          )}
           {backfillResult && (
             <div className="msg-ok mt-2">
               补提完成:成功 {backfillResult.extracted.length} 章,
@@ -377,6 +426,22 @@ export default function EditorialPanel({ pid }: Props) {
                 `,失败 ${backfillResult.failed.length} 章(第 ${backfillResult.failed.join("、")} 章,可重试)`}
             </div>
           )}
+          <div className="mt-3">
+            <label className="fl">世界观硬规则(每行一条)</label>
+            <div className="hint mb-1">
+              钉死本书不可违背的设定/常识(如:2024 新高考,理科不考政治;高考只考 6.7-6.8 两天)。
+              保存后注入后续所有生成,并可发起规则扫描全书体检正文。
+            </div>
+            <textarea rows={4} value={worldRules ?? ""}
+              placeholder={"2024 新高考,理科不考政治\n高考只考 6.7-6.8 两天"}
+              onChange={(e) => setWorldRules(e.target.value)} />
+            <div className="actions mt-2">
+              <button className="primary btn-sm" disabled={rulesSaving || worldRules === null}
+                onClick={saveWorldRules}>
+                {rulesSaving && <span className="spin spin-sm" />}保存规则
+              </button>
+            </div>
+          </div>
         </div>
         <div className="card">
           <div className="card-head">

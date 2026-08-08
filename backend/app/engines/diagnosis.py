@@ -7,6 +7,9 @@
   「审核报告」面板按来源「诊断」展示与流转(open → resolved/ignored)。
 - backfill_contracts:为没有有效契约(从未提取 / 提取失败 / 正文已改指纹失效)
   的已成文章节批量补提章末交接契约,让门禁与写前预审对老书也能三路对照。
+- rule_scan_book:规则扫描——逐章对照项目里的「世界观硬规则」(world_rules
+  钉板)体检正文,违反项以 source="rules" 幂等落库。与全书体检互补:
+  体检查前后矛盾,规则扫描查"违反作者钉死的设定/常识"(错得前后一致也能抓到)。
 
 两函数都按章推进、逐章提交,不拿写锁跨 LLM 调用(对齐 extractor 事务纪律);
 单章失败不中断整批,留痕后继续。
@@ -17,12 +20,14 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Chapter, ChapterState
+from app.db.models import Chapter, ChapterState, Outline, Project
 from app.engines.consistency.checker import (
+    _normalize_issue,
     blockers_of,
     check_chapter,
     persist_issues,
 )
+from app.engines.consistency.extractor import parse_llm_json
 from app.engines.pipeline.chapter import _rolling_summary
 from app.engines.pipeline.handoff import _fresh_contract, extract_handoff_contract
 from app.llm.router import Task, get_adapter_for
@@ -131,3 +136,71 @@ async def backfill_contracts(db: Session, project_id: int, progress=None) -> dic
         len(extracted), len(skipped), len(failed),
     )
     return {"extracted": extracted, "skipped": skipped, "failed": failed}
+
+
+async def rule_scan_book(db: Session, project_id: int, progress=None) -> dict:
+    """规则扫描:逐章对照「世界观硬规则」体检正文,问题落库(source="rules")。
+
+    与全书体检(跨章矛盾)互补:体检查的是"与圣经/契约/上文矛不矛盾",
+    错得前后一致就抓不到;规则扫描查的是"是否违反作者钉死的设定/常识",
+    理科生背政治、高考天数写错这类全文性事实错误即属此类。
+
+    复用 checker._normalize_issue 做防幻觉举证(evidence 必须是正文逐字引用)。
+    返回 {scanned, with_issues, total_issues, total_blockers}。
+    """
+    from app.prompts.consistency import RULE_SCAN_PROMPT  # noqa: PLC0415 — 避免环
+
+    project = db.get(Project, project_id)
+    rules = (project.world_rules or "").strip() if project else ""
+    if not rules:
+        raise RuntimeError("尚未设置世界观硬规则,请先在「审核报告」页填写")
+
+    chapters = _written_chapters(db, project_id)
+    titles = {
+        o.chapter_number: o.title
+        for o in db.query(Outline).filter(Outline.project_id == project_id).all()
+    }
+    total = len(chapters)
+    with_issues: list[int] = []
+    total_issues = 0
+    total_blockers = 0
+    adapter = get_adapter_for(Task.CONSISTENCY)
+    for i, ch in enumerate(chapters, 1):
+        if progress:
+            progress(f"[{i}/{total}] 第 {ch.chapter_number} 章:规则扫描")
+        try:
+            db.commit()  # 结束读事务,不拿快照跨 LLM 调用
+            prompt = RULE_SCAN_PROMPT.format(
+                world_rules=rules,
+                chapter_number=ch.chapter_number,
+                title=titles.get(ch.chapter_number) or f"第{ch.chapter_number}章",
+                chapter_text=ch.final_content[:12000],
+            )
+            raw = await adapter.ask(prompt)
+            data = parse_llm_json(raw) or {}
+            issues = [
+                _normalize_issue(it, ch.final_content)
+                for it in (data.get("issues") or [])
+                if isinstance(it, dict)
+            ]
+            issues = [it for it in issues if it["description"]]
+            persist_issues(db, ch, issues, source="rules", text=ch.final_content)
+            db.commit()
+        except Exception as exc:  # noqa: BLE001 — 单章失败不中断整批
+            db.rollback()
+            logger.warning("规则扫描第 %d 章失败,跳过: %s", ch.chapter_number, exc)
+            continue
+        if issues:
+            with_issues.append(ch.chapter_number)
+            total_issues += len(issues)
+            total_blockers += len(blockers_of(issues))
+    logger.info(
+        "规则扫描完成:扫 %d 章,%d 章违反,共 %d 个(blocker %d)",
+        total, len(with_issues), total_issues, total_blockers,
+    )
+    return {
+        "scanned": total,
+        "with_issues": with_issues,
+        "total_issues": total_issues,
+        "total_blockers": total_blockers,
+    }

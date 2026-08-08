@@ -272,6 +272,17 @@ def _add_chapter_proofread_snapshot_column() -> None:
             logger.info("迁移:chapters 补 proofread_snapshot 列")
 
 
+def _add_world_rules_column() -> None:
+    """给 projects 表补 world_rules 列(世界观硬规则钉板,每行一条,幂等)。"""
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "projects" not in insp.get_table_names():
+            return
+        if not _column_exists("projects", "world_rules"):
+            conn.execute(text("ALTER TABLE projects ADD COLUMN world_rules TEXT"))
+            logger.info("迁移:projects 补 world_rules 列")
+
+
 def _add_queue_require_approved_column() -> None:
     """给 projects 表补连写前置配置列(幂等)。默认 False=宽松(仅 quarantined 暂停)。"""
     with engine.begin() as conn:
@@ -465,6 +476,7 @@ def run_migrations() -> None:
     _add_review_columns()
     _add_outline_beats_column()
     _add_project_style_memo_column()
+    _add_world_rules_column()
     _add_chapter_review_snapshot_column()
     _add_chapter_proofread_snapshot_column()
     _add_queue_require_approved_column()

@@ -53,8 +53,23 @@ def _concept_spark_block(project: Project) -> str:
     )
 
 
+def world_rules_block(project: Project) -> str:
+    """世界观硬规则(钉板)注入块:用户在项目里钉死的"不可违背的设定/常识"。
+
+    附在架构简报后,注入草稿/定稿/大纲改写/修改指令等所有生成环节——
+    高考制度、年代规则、世界观硬设定这类模型容易临场编错的东西,钉一次全书生效。
+    """
+    rules = (project.world_rules or "").strip()
+    if not rules:
+        return ""
+    return (
+        "\n\n【本书世界观硬规则——绝对不可违背,写到相关设定时必须照此执行,"
+        "与你的常识冲突时以本规则为准】:\n" + rules
+    )
+
+
 def chapter_architecture_brief(project: Project) -> str:
-    """逐章生成用:创作初衷 + 核心种子 + 世界观 + 角色动力学。
+    """逐章生成用:创作初衷 + 核心种子 + 世界观 + 角色动力学 + 世界观硬规则。
 
     角色动力学给足篇幅并点明用途——不只是背景设定,更是揣摩各角色说话口吻、
     性格差异的依据(让笔下人物各有各的声音,是长篇质感的关键)。
@@ -62,14 +77,16 @@ def chapter_architecture_brief(project: Project) -> str:
     """
     arch = project.architecture
     if arch is None:
-        return "(无)"
-    return (
-        f"核心种子:{arch.core_seed}\n\n"
-        f"世界观(节选):{arch.world_building[:600]}\n\n"
-        f"角色动力学(据此揣摩各角色的性格、处境与说话口吻,让他们的声音互不相同):\n"
-        f"{arch.character_dynamics[:1800]}"
-        f"{_concept_spark_block(project)}"
-    )
+        base = "(无)"
+    else:
+        base = (
+            f"核心种子:{arch.core_seed}\n\n"
+            f"世界观(节选):{arch.world_building[:600]}\n\n"
+            f"角色动力学(据此揣摩各角色的性格、处境与说话口吻,让他们的声音互不相同):\n"
+            f"{arch.character_dynamics[:1800]}"
+            f"{_concept_spark_block(project)}"
+        )
+    return base + world_rules_block(project)
 
 
 def cascade_architecture_brief(project: Project) -> str:

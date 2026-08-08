@@ -314,6 +314,8 @@ class ProjectPatch(BaseModel):
     chat_log: list | None = None
     # 文风备忘手动编辑:传字符串整段覆盖(传 "" 清空);不传(None)则不动
     style_memo: str | None = Field(default=None, max_length=20000)
+    # 世界观硬规则(钉板):整段覆盖(传 "" 清空);逐行一条规则
+    world_rules: str | None = Field(default=None, max_length=20000)
 
 
 @router.patch("/{project_id}", response_model=ProjectOut)
@@ -704,6 +706,9 @@ async def generate_project_blueprint(
         world_building=project.architecture.world_building,
         plot_architecture=project.architecture.plot_architecture,
     ).full_text
+    from app.engines.common import world_rules_block
+
+    arch_text += world_rules_block(project)
 
     chapters, warnings = await generate_blueprint(
         novel_architecture=arch_text,
@@ -789,12 +794,14 @@ ROLLING_THRESHOLD = 40
 def _arch_text(p: Project) -> str:
     from app.engines.pipeline.architecture import ArchitectureResult
 
+    from app.engines.common import world_rules_block
+
     return ArchitectureResult(
         core_seed=p.architecture.core_seed,
         character_dynamics=p.architecture.character_dynamics,
         world_building=p.architecture.world_building,
         plot_architecture=p.architecture.plot_architecture,
-    ).full_text
+    ).full_text + world_rules_block(p)
 
 
 async def _ensure_macro_plan(session, p: Project, style_block: str) -> list[dict]:
