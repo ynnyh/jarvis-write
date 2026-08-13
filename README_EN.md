@@ -6,7 +6,30 @@
 
 The hard problem of AI-assisted novel writing isn't producing text — it's keeping a several-hundred-thousand-word story coherent: characters stay in character, foreshadowing gets paid off, and the outline stays editable. jarvis-write is not another "one-click novel generator." Text generation is delegated to the LLM; this project builds the **control layer** around it: a temporal story bible for facts, a foreshadowing scheduler for setups and payoffs, a cascading outline engine for edits, and a tag-based tendency system for style — so a long novel stays controllable, revisable, and traceable from the first chapter to the last.
 
-<!-- 📸 Screenshots / demo GIF TODO: suggested order — 1) writing workbench overview, 2) cascading-edit downstream-impact selection, 3) story bible / foreshadowing board. Drop images into docs/assets/ and embed here with <img src="docs/assets/xxx.png" width="820">. -->
+<p align="center">
+  <img src="docs/assets/screenshots/01-workbench.png" alt="Writing workbench" width="820">
+</p>
+<p align="center"><i>The writing workbench: six-step pipeline navigation and a chapter map (review status, word counts) on the left; chapter-by-chapter generation / reading / rewriting on the right</i></p>
+
+> 🎬 See the cascading outline update end to end in 30 seconds → [watch the demo](docs/assets/screenshots/demo-cascade.mp4)
+
+<details>
+<summary>📸 More screenshots (desktop / mobile)</summary>
+
+| Home · My novels | App lock |
+|---|---|
+| <img src="docs/assets/screenshots/02-home.png" width="400"> | <img src="docs/assets/screenshots/03-applock.png" width="400"> |
+
+The mobile UI is fully adapted — just open it in a phone browser:
+
+<p>
+  <img src="docs/assets/screenshots/mobile-01.jpg" width="180">
+  <img src="docs/assets/screenshots/mobile-02.jpg" width="180">
+  <img src="docs/assets/screenshots/mobile-03.jpg" width="180">
+  <img src="docs/assets/screenshots/mobile-04.jpg" width="180">
+</p>
+
+</details>
 
 > 🖥️ **Download the desktop app (Windows installer, works out of the box)** → [GitHub Releases](https://github.com/ynnyh/jarvis-write/releases/latest)
 >

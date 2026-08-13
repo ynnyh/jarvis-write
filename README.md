@@ -6,7 +6,30 @@
 
 写长篇小说时，AI 工具的头号问题不是"写不出来"，而是写到几十万字后**人设崩、伏笔丢、大纲改不动**。jarvis-write 不是又一个"一键生成器"——生成文字的活交给 LLM，本项目做的是包在 LLM 外面的**控制层**：故事圣经管事实、伏笔调度管回收、大纲级联管改动、倾向标签管风格，让长篇创作全程可控、可改、可追溯。
 
-<!-- 📸 截图/演示 GIF 待补:建议依次放 1) 写作工作台全景 2) 大纲级联改动的下游影响勾选 3) 故事圣经/伏笔看板。把图片放进 docs/assets/ 后，在此处用 <img src="docs/assets/xxx.png" width="820"> 引入即可。 -->
+<p align="center">
+  <img src="docs/assets/screenshots/01-workbench.png" alt="写作工作台" width="820">
+</p>
+<p align="center"><i>写作工作台：左侧六步流水线导航 + 章节地图（审核状态、字数一览），右侧逐章生成 / 阅读 / 重写</i></p>
+
+> 🎬 30 秒看懂「大纲级联更新」全流程 → [观看演示视频](docs/assets/screenshots/demo-cascade.mp4)
+
+<details>
+<summary>📸 更多截图（桌面版 / 移动端）</summary>
+
+| 首页 · 我的小说 | 应用锁 |
+|---|---|
+| <img src="docs/assets/screenshots/02-home.png" width="400"> | <img src="docs/assets/screenshots/03-applock.png" width="400"> |
+
+移动端已适配，手机浏览器打开即用：
+
+<p>
+  <img src="docs/assets/screenshots/mobile-01.jpg" width="180">
+  <img src="docs/assets/screenshots/mobile-02.jpg" width="180">
+  <img src="docs/assets/screenshots/mobile-03.jpg" width="180">
+  <img src="docs/assets/screenshots/mobile-04.jpg" width="180">
+</p>
+
+</details>
 
 > 🖥️ **下载桌面版（Windows 安装包，开箱即用）** → [GitHub Releases](https://github.com/ynnyh/jarvis-write/releases/latest)
 >
