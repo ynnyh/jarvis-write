@@ -11,7 +11,11 @@ The hard problem of AI-assisted novel writing isn't producing text — it's keep
 </p>
 <p align="center"><i>The writing workbench: six-step pipeline navigation and a chapter map (review status, word counts) on the left; chapter-by-chapter generation / reading / rewriting on the right</i></p>
 
-> 🎬 See the cascading outline update end to end in 30 seconds → [watch the demo](docs/assets/screenshots/demo-cascade.mp4)
+**🎬 The cascading outline update, end to end in 30 seconds:**
+
+<p align="center">
+  <img src="docs/assets/screenshots/demo-cascade.gif" alt="Cascading outline update demo" width="820">
+</p>
 
 <details>
 <summary>📸 More screenshots (desktop / mobile)</summary>
