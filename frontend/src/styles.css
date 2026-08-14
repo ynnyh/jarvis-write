@@ -2323,3 +2323,32 @@ html, body { max-width: 100%; overflow-x: hidden; }
 }
 
 .ml-2 { margin-left: var(--sp-2); }
+
+/* ---------- 写作手法卡(项目级手法库,启用即注入生成/润色/重写) ---------- */
+.wcard {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-2);
+  background: var(--surface);
+}
+.wcard.on { border-color: var(--brand); background: var(--brand-weak, var(--surface)); }
+.wcard-head { display: flex; align-items: center; gap: var(--sp-2); }
+.wcard-title { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; cursor: pointer; }
+.wcard-title .muted { font-size: var(--fs-xs); }
+.wcard-ops { display: flex; gap: 4px; flex-shrink: 0; }
+.wcard-body { margin-top: 4px; white-space: pre-wrap; word-break: break-word; }
+.wcard-samples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.wcard-preview {
+  margin: 0;
+  padding: var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-2, var(--surface));
+  font-size: var(--fs-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow: auto;
+}
+.wcard input[type="text"], .wcard input:not([type]), .wcard textarea { width: 100%; }

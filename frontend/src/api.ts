@@ -95,6 +95,15 @@ export interface StyleProfile {
   other: string;    // 其他创作主张
 }
 
+// 写作手法卡:本书自己的手法库,勾选启用即拼成一块注入生成/润色/重写
+export interface WritingCard {
+  id: number;
+  title: string;
+  body: string;
+  enabled: boolean;
+  sort: number;
+}
+
 export interface Project {
   id: number; title: string; topic: string; genre: string;
   target_chapters: number; target_words_per_chapter: number;
@@ -685,6 +694,21 @@ export const api = {
   aiFlavor: (text: string) =>
     req<FlavorInfo & { hits?: Record<string, unknown>[]; total_chars?: number }>(
       "POST", "/api/polish/ai-flavor", { text }),
+
+  // ---------- 写作手法卡(项目级手法库,启用即注入) ----------
+  listCards: (pid: number) => req<WritingCard[]>("GET", `/api/projects/${pid}/cards`),
+  createCard: (pid: number, body: { title: string; body: string; enabled?: boolean }) =>
+    req<WritingCard>("POST", `/api/projects/${pid}/cards`, body),
+  updateCard: (
+    pid: number,
+    cardId: number,
+    patch: { title?: string; body?: string; enabled?: boolean; sort?: number },
+  ) => req<WritingCard>("PATCH", `/api/projects/${pid}/cards/${cardId}`, patch),
+  deleteCard: (pid: number, cardId: number) =>
+    req<{ status: string; id: number }>("DELETE", `/api/projects/${pid}/cards/${cardId}`),
+  cardsPreview: (pid: number) =>
+    req<{ block: string; enabled_count: number; max_inject: number }>(
+      "GET", `/api/projects/${pid}/cards/preview`),
 
   // ---------- 鉴权 ----------
   register: (username: string, password: string, invite_code: string) =>

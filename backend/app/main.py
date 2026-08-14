@@ -47,6 +47,7 @@ from app.api.settings import router as settings_router
 from app.api.submission import router as submission_router
 from app.api.system import router as system_router
 from app.api.tendency import router as tendency_router
+from app.api.writing_cards import router as writing_cards_router
 from app.config import get_settings
 from app.db.base import Base
 from app.db.session import engine
@@ -195,6 +196,7 @@ def create_app() -> FastAPI:
     app.include_router(app_lock_router)
     app.include_router(projects_router)
     app.include_router(tendency_router)
+    app.include_router(writing_cards_router)
     app.include_router(settings_router)
     app.include_router(chapters_router)
     app.include_router(consistency_router)

@@ -2,6 +2,7 @@
 """E. 倾向拼装器:标签 chips -> 写作指令片段 -> 注入 Prompt。"""
 from .catalog import get_catalog, get_node_catalog, iter_chip_directives
 from .assembler import assemble_tendency, merge_tendency
+from .cards import render_cards_block
 
 __all__ = [
     "get_catalog",
@@ -9,4 +10,5 @@ __all__ = [
     "iter_chip_directives",
     "assemble_tendency",
     "merge_tendency",
+    "render_cards_block",
 ]

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, Architecture, Project, StyleProfile, Tendency } from "../api";
 import { pollJob, errMsg } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
+import CardsPanel from "./CardsPanel";
 import { confirmDialog } from "../ui/ConfirmDialog";
 import { toast } from "../ui/Toaster";
 
@@ -284,6 +285,9 @@ export default function ArchPanel({ project, arch, onChanged, hasContent }: Prop
         </div>
         {profileBusy && <div className="muted mt-2">{profileBusy}</div>}
       </div>
+
+      {/* 手法卡紧跟偏好档案:两者都是整书级约束,档案管「写什么」,手法卡管「怎么写」 */}
+      <CardsPanel pid={project.id} />
 
       {arch && (
         <div className="card">

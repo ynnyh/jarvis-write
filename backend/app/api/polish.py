@@ -10,6 +10,8 @@ POST /api/polish/ai-flavor                   只做 AI 味检测(不调 LLM,秒�
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -17,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_project_or_404
 from app.auth import get_current_user
 from app.chapter_versions import snapshot_chapter
-from app.db.models import Chapter, Outline
+from app.db.models import Chapter, Outline, WritingCard
 from app.db.session import get_db
 from app.engines.polish import (
     ai_flavor_report,
@@ -67,6 +69,20 @@ def _chapter(db: Session, project_id: int, n: int) -> Chapter:
     return ch
 
 
+def _cards(db: Session, project_id: int) -> list[SimpleNamespace]:
+    """本书的写作手法卡快照(含未启用的,渲染时按 enabled 过滤)。
+
+    返回脱离 ORM 的普通对象:异步端点的 job 协程跑在请求 session 之外,
+    直接带 ORM 实例过去,延迟取属性会撞上已关闭的 session(DetachedInstance)。
+    """
+    return [
+        SimpleNamespace(title=c.title, body=c.body, enabled=c.enabled, sort=c.sort)
+        for c in db.query(WritingCard)
+        .filter(WritingCard.project_id == project_id)
+        .all()
+    ]
+
+
 @router.post("/api/projects/{project_id}/polish/chapter/{n}", response_model=PolishResult)
 async def polish_chapter(
     project_id: int, n: int, req: ChapterPolishRequest, db: Session = Depends(get_db)
@@ -76,7 +92,10 @@ async def polish_chapter(
     ch = _chapter(db, project_id, n)
     try:
         result = await polish_text(
-            ch.final_content, req.tendency, project.global_tendency
+            ch.final_content,
+            req.tendency,
+            project.global_tendency,
+            cards=_cards(db, project_id),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -95,10 +114,11 @@ async def polish_chapter_async(
         if job["kind"] == f"polish-{project_id}-{n}":
             return {"job_id": jid}
     text, global_tendency = ch.final_content, project.global_tendency
+    cards = _cards(db, project_id)
 
     async def work(progress):
         progress(f"AI 正在润色第 {n} 章")
-        return await polish_text(text, req.tendency, global_tendency)
+        return await polish_text(text, req.tendency, global_tendency, cards=cards)
 
     return {"job_id": spawn_job(f"polish-{project_id}-{n}", work)}
 
@@ -125,7 +145,9 @@ async def polish_segment_inget_project_or_404(
     """润色选段(带项目全局倾向)。"""
     project = get_project_or_404(db, project_id)
     try:
-        result = await polish_text(req.text, req.tendency, project.global_tendency)
+        result = await polish_text(
+            req.text, req.tendency, project.global_tendency, cards=_cards(db, project_id)
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return PolishResult(**result)
@@ -138,10 +160,11 @@ async def polish_segment_async(
     """异步版选段润色:立即返回 job_id。"""
     project = get_project_or_404(db, project_id)
     global_tendency = project.global_tendency
+    cards = _cards(db, project_id)
 
     async def work(progress):
         progress("AI 正在润色选段")
-        return await polish_text(req.text, req.tendency, global_tendency)
+        return await polish_text(req.text, req.tendency, global_tendency, cards=cards)
 
     return {"job_id": spawn_job(f"polish-segment-{project_id}", work)}
 

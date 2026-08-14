@@ -18,7 +18,7 @@ import logging
 from sqlalchemy.orm import Session
 
 from app.chapter_versions import snapshot_chapter
-from app.db.models import Chapter, Outline, Project
+from app.db.models import Chapter, Outline, Project, WritingCard
 from app.engines.common import get_outline
 from app.engines.pipeline.chapter import update_style_memo
 from app.engines.polish.polisher import polish_text
@@ -163,7 +163,13 @@ async def light_refresh_chapter(
     )
     if ch is None or not (ch.final_content or "").strip():
         raise ValueError(f"第 {chapter_number} 章还没有正文,无法重润")
-    result = await polish_text(ch.final_content, None, project.global_tendency, directive=directive)
+    result = await polish_text(
+        ch.final_content,
+        None,
+        project.global_tendency,
+        directive=directive,
+        cards=db.query(WritingCard).filter(WritingCard.project_id == project.id).all(),
+    )
     after = (result.get("polished") or "").strip()
     applied = False
     if after and after != ch.final_content.strip():

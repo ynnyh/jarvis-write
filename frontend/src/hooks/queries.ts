@@ -1,7 +1,7 @@
 // hooks/queries.ts
 // React Query hooks:替代手动 useState + reload() 模式。
 // 所有项目级数据通过 query keys 管理缓存,mutation 后 invalidate 对应 key 即可刷新。
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 
 // =============== Query Key Factory ===============
@@ -10,6 +10,7 @@ export const qk = {
   architecture: (pid: number) => ["architecture", pid] as const,
   outlines: (pid: number) => ["outlines", pid] as const,
   chapters: (pid: number) => ["chapters", pid] as const,
+  cards: (pid: number) => ["cards", pid] as const,
   // 全部项目级数据(用于一次性 invalidate)
   all: (pid: number) => ["project", pid] as const, // prefix match 会命中 project/architecture/outlines/chapters
 };
@@ -42,6 +43,39 @@ export function useChapters(pid: number) {
     queryKey: qk.chapters(pid),
     queryFn: () => api.listChapters(pid),
   });
+}
+
+// =============== 写作手法卡 ===============
+
+export function useCards(pid: number) {
+  return useQuery({
+    queryKey: qk.cards(pid),
+    queryFn: () => api.listCards(pid),
+  });
+}
+
+/** 手法卡的增改删:成功后统一 invalidate ['cards', pid]。 */
+export function useCardMutations(pid: number) {
+  const qc = useQueryClient();
+  const refresh = () => qc.invalidateQueries({ queryKey: qk.cards(pid) });
+
+  const create = useMutation({
+    mutationFn: (body: { title: string; body: string; enabled?: boolean }) =>
+      api.createCard(pid, body),
+    onSuccess: refresh,
+  });
+  const update = useMutation({
+    mutationFn: (v: {
+      id: number;
+      patch: { title?: string; body?: string; enabled?: boolean; sort?: number };
+    }) => api.updateCard(pid, v.id, v.patch),
+    onSuccess: refresh,
+  });
+  const remove = useMutation({
+    mutationFn: (id: number) => api.deleteCard(pid, id),
+    onSuccess: refresh,
+  });
+  return { create, update, remove };
 }
 
 // =============== Invalidation Helper ===============

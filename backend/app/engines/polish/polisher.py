@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Any, Iterable
 
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.polish.ai_flavor import FlavorReport, ai_flavor_report
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import render_style_block
+from app.engines.tendency.cards import render_cards_block
 from app.llm.base import LLMAdapter, LLMMessage
 from app.llm.router import Task, get_adapter_for
 from app.prompts.polish import (
@@ -102,11 +104,14 @@ async def polish_text(
     tendency: Tendency | None = None,
     global_tendency: Tendency | None = None,
     directive: str = "",
+    cards: Iterable[Any] | None = None,
 ) -> dict:
     """润色一段文本。
 
     directive: 用户的自定义修改要求(批量重润时透传),注入 prompt,
     优先级低于润色铁律(仍不改情节)。
+    cards: 本书启用的写作手法卡(WritingCard 列表),拼成块追加到风格约束;
+    无项目上下文的通用润色端点传 None。
     返回 {polished, locked_facts, violations, flavor_before, flavor_after}。
     """
     text = text.strip()
@@ -119,6 +124,9 @@ async def polish_text(
 
     assembled = assemble_tendency("polish", tendency, global_tendency)
     style_block = render_style_block(assembled)
+    # 写作手法卡:作者为本书启用的写法技巧,追加到风格约束块(同 style_memo 套路,
+    # 不新增模板占位符)。手法卡是软约束,润色铁律与情节事实仍优先。
+    style_block += render_cards_block(cards)
 
     # ---- 0. AI 味检测(纯规则,零成本):命中点供定点改写,报告供前后对比 ----
     before = ai_flavor_report(text)

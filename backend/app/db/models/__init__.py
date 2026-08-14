@@ -21,6 +21,7 @@ from app.db.models.setting import ProviderConfig, ProviderSetting
 from app.db.models.summary import ChapterSummary
 from app.db.models.chapter_state import ChapterState
 from app.db.models.chapter_issue import ChapterIssue
+from app.db.models.writing_card import WritingCard
 from app.db.models.usage import LlmUsage
 from app.db.models.user import User
 from app.db.models.app_setting import AppSetting
@@ -43,6 +44,7 @@ __all__ = [
     "KnowledgeState",
     "Foreshadowing",
     "TendencyPreset",
+    "WritingCard",
     "ProviderSetting",
     "ProviderConfig",
     "ChapterSummary",

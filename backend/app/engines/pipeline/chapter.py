@@ -14,7 +14,7 @@ import re
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Chapter, ChapterSummary, Outline, Project
+from app.db.models import Chapter, ChapterSummary, Outline, Project, WritingCard
 from app.engines.common import chapter_architecture_brief, get_outline
 from app.engines.consistency import BibleService, ForeshadowScheduler
 from app.engines.consistency.checker import (
@@ -38,6 +38,7 @@ from app.engines.editorial import (
 )
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import render_style_block
+from app.engines.tendency.cards import render_cards_block
 from app.llm.base import LLMMessage
 from app.llm.router import Task, get_adapter_for
 from app.prompts.chapter import (
@@ -403,6 +404,10 @@ async def generate_chapter(
             + project.style_memo.strip()
             + "\n"
         )
+    # 写作手法卡:作者为本书启用的写法技巧,同样追加到 style_block(草稿/定稿/重写全生效)
+    style_block += render_cards_block(
+        db.query(WritingCard).filter(WritingCard.project_id == project.id).all()
+    )
 
     rolling = _rolling_summary(db, project.id, chapter_number)
     recent = _recent_tail(db, project.id, chapter_number)

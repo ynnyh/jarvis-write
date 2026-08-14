@@ -19,6 +19,7 @@ from app.db.models import (
     OutlineVersion,
     Project,
     Relationship,
+    WritingCard,
 )
 
 
@@ -60,6 +61,7 @@ def delete_project_cascade(db: Session, project: Project) -> int:
         Relationship,
         Entity,
         Foreshadowing,
+        WritingCard,
         Outline,
         Architecture,
     ):
