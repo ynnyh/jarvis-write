@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
@@ -223,6 +223,103 @@ fn show_main_window(handle: &tauri::AppHandle) {
     }
 }
 
+// 关闭所有 label 以 read- 开头的对照阅读附窗。附窗生命周期跟随主窗:
+// 主窗真正关闭/应用退出前连带关掉,否则主窗没了附窗还留着失联页面。
+// 最小化到托盘不调它——附窗与主窗一样只是藏起来,恢复时还在。
+fn close_read_windows(handle: &tauri::AppHandle) {
+    for (label, window) in handle.webview_windows() {
+        if label.starts_with("read-") {
+            let _ = window.close();
+        }
+    }
+}
+
+// ===== 应用菜单栏 =====
+// 自定义菜单项的 id 即前端 AppAction 名(见 frontend/src/ui/actions.ts);
+// 点击后 on_menu_event 按此白名单转发 menu-action 事件。predefined 项
+// (复制/粘贴/最小化等)与托盘菜单项(show/quit)不在列,各走原有行为。
+// 「新建项目」没有对应动作,借 goto-home:前端不认识会静默忽略,可接受。
+const MENU_ACTIONS: &[&str] = &[
+    "goto-home",
+    "export-txt",
+    "export-epub",
+    "goto-settings",
+    "toggle-rail",
+    "toggle-ref",
+    "immersive",
+    "command-palette",
+    "theme-light",
+    "theme-dark",
+    "theme-auto",
+    "open-read-window",
+    "goto-help",
+];
+
+// 构建应用菜单栏。编辑/窗口的系统项必须用 PredefinedMenuItem(自带系统行为
+// 与快捷键),否则 webview 里复制粘贴不全。自定义项 id = 动作名,
+// 点击经 on_menu_event 以 menu-action 事件发主窗,前端走统一 dispatch。
+fn build_app_menu(app: &tauri::App) -> Result<(), String> {
+    // 自定义菜单项:id = 前端动作名,text = 菜单显示名
+    let item = |id: &str, text: &str| -> Result<tauri::menu::MenuItem<tauri::Wry>, String> {
+        MenuItemBuilder::with_id(id, text)
+            .build(app)
+            .map_err(|e| format!("{e}"))
+    };
+
+    let file_menu = SubmenuBuilder::new(app, "文件")
+        .item(&item("goto-home", "新建项目")?)
+        .item(&item("export-txt", "导出 TXT")?)
+        .item(&item("export-epub", "导出 EPUB")?)
+        .separator()
+        .item(&item("goto-settings", "设置")?)
+        .build()
+        .map_err(|e| format!("{e}"))?;
+
+    let edit_menu = SubmenuBuilder::new(app, "编辑")
+        .item(&PredefinedMenuItem::undo(app, Some("撤销")).map_err(|e| format!("{e}"))?)
+        .item(&PredefinedMenuItem::redo(app, Some("重做")).map_err(|e| format!("{e}"))?)
+        .separator()
+        .item(&PredefinedMenuItem::cut(app, Some("剪切")).map_err(|e| format!("{e}"))?)
+        .item(&PredefinedMenuItem::copy(app, Some("复制")).map_err(|e| format!("{e}"))?)
+        .item(&PredefinedMenuItem::paste(app, Some("粘贴")).map_err(|e| format!("{e}"))?)
+        .item(&PredefinedMenuItem::select_all(app, Some("全选")).map_err(|e| format!("{e}"))?)
+        .build()
+        .map_err(|e| format!("{e}"))?;
+
+    let view_menu = SubmenuBuilder::new(app, "视图")
+        .item(&item("toggle-rail", "章节轨")?)
+        .item(&item("toggle-ref", "参考栏")?)
+        .item(&item("immersive", "沉浸模式")?)
+        .separator()
+        .item(&item("command-palette", "命令面板")?)
+        .separator()
+        .item(&item("theme-light", "浅色主题")?)
+        .item(&item("theme-dark", "深色主题")?)
+        .item(&item("theme-auto", "跟随系统")?)
+        .build()
+        .map_err(|e| format!("{e}"))?;
+
+    let window_menu = SubmenuBuilder::new(app, "窗口")
+        .item(&item("open-read-window", "新建对照阅读窗")?)
+        .separator()
+        .item(&PredefinedMenuItem::minimize(app, Some("最小化")).map_err(|e| format!("{e}"))?)
+        .item(&PredefinedMenuItem::close_window(app, Some("关闭")).map_err(|e| format!("{e}"))?)
+        .build()
+        .map_err(|e| format!("{e}"))?;
+
+    let help_menu = SubmenuBuilder::new(app, "帮助")
+        .item(&item("goto-help", "使用指南")?)
+        .build()
+        .map_err(|e| format!("{e}"))?;
+
+    let menu = MenuBuilder::new(app)
+        .items(&[&file_menu, &edit_menu, &view_menu, &window_menu, &help_menu])
+        .build()
+        .map_err(|e| format!("{e}"))?;
+    app.set_menu(menu).map_err(|e| format!("{e}"))?;
+    Ok(())
+}
+
 // 构建系统托盘:左键点图标恢复窗口;菜单「显示」恢复、「退出」彻底退出。
 // 「退出」先置 approved(避免退出触发的 CloseRequested 被自己拦下)、显式杀后端
 // 再 exit——app.exit 不保证走窗口 Destroyed 事件,不显式杀会留孤儿后端。
@@ -254,6 +351,8 @@ fn build_tray(app: &tauri::App) -> Result<(), String> {
                 app.state::<CloseGuard>()
                     .approved
                     .store(true, Ordering::SeqCst);
+                // 彻底退出前连带关掉对照阅读附窗(exit 不保证走窗口关闭事件)
+                close_read_windows(app);
                 kill_backend(app);
                 app.exit(0);
             }
@@ -568,9 +667,27 @@ pub fn run() {
             // 重复启动:把已有窗口唤到前台(可能正藏在托盘),不再起第二份后端
             show_main_window(app);
         }))
+        // 窗口状态记忆:自动保存/恢复各窗口的位置、尺寸与最大化状态
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
+        // 菜单点击转发:白名单内的自定义项以 menu-action 事件发主窗
+        // (附窗 read-* 不处理菜单动作);主窗不在时退化为全局广播。
+        // predefined 项与托盘菜单项不在白名单,不受影响。
+        .on_menu_event(|app, event| {
+            let id = event.id().as_ref();
+            if MENU_ACTIONS.contains(&id) {
+                match app.get_webview_window("main") {
+                    Some(w) => {
+                        let _ = w.emit("menu-action", id);
+                    }
+                    None => {
+                        let _ = app.emit("menu-action", id);
+                    }
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             desktop_ping,
             check_update,
@@ -624,6 +741,13 @@ pub fn run() {
                 Err(e) => ulog(&app.handle(), &format!("托盘创建失败,托盘相关功能不可用:{e}")),
             }
 
+            // 应用菜单栏:自定义项点击经 menu-action 事件交前端 dispatch。
+            // 构建失败同样只记日志——前端快捷键/命令面板可触发同样的动作。
+            match build_app_menu(app) {
+                Ok(_) => {}
+                Err(e) => ulog(&app.handle(), &format!("菜单栏创建失败,应用菜单不可用:{e}")),
+            }
+
             // 窗口已创建,后台检查软件更新(仅发行版真正检查)
             spawn_update_check(app.handle().clone());
 
@@ -635,16 +759,30 @@ pub fn run() {
                 // 决定去向(确认框/托盘/直接关)。守卫未开(前端没挂载/JS 崩了)
                 // 保持原有直接关闭行为,保证任何情况下窗口都关得掉。
                 tauri::WindowEvent::CloseRequested { api, .. } => {
+                    // 守卫只拦主窗:附窗(read-*)不挂 CloseGuard,点 X 直接关,
+                    // 否则 close://requested 发在附窗上没人接,附窗永远关不掉。
+                    if window.label() != "main" {
+                        return;
+                    }
                     let guard = window.app_handle().state::<CloseGuard>();
                     if guard.enabled.load(Ordering::SeqCst)
                         && !guard.approved.load(Ordering::SeqCst)
                     {
                         api.prevent_close();
                         let _ = window.emit("close://requested", ());
+                    } else {
+                        // 主窗真正关闭(守卫未开或前端已放行)→ 连带关对照阅读附窗;
+                        // 拦下分支(进托盘/弹确认)不走这里,附窗不动。
+                        close_read_windows(window.app_handle());
                     }
                 }
                 // 主窗口销毁 → 终止后端子进程,避免端口/进程残留。
-                tauri::WindowEvent::Destroyed => kill_backend(window.app_handle()),
+                // 只认主窗:附窗(read-*)随开随关,销毁不该动后端。
+                tauri::WindowEvent::Destroyed => {
+                    if window.label() == "main" {
+                        kill_backend(window.app_handle());
+                    }
+                }
                 _ => {}
             }
         })

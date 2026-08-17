@@ -2352,3 +2352,353 @@ html, body { max-width: 100%; overflow-x: hidden; }
   overflow: auto;
 }
 .wcard input[type="text"], .wcard input:not([type]), .wcard textarea { width: 100%; }
+
+/* ---------- 三区导航 / write 区三栏工作台(交互重构 B 阶段) ---------- */
+/* 区导航:开书/写作/全书横排 tab + 右侧设置入口,沿用 flow-step 的选中态语言 */
+.zone-nav {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.zone-nav .grow { flex: 1; }
+.zone-tab {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: var(--fs-md);
+  box-shadow: var(--shadow-sm);
+  transition: background 0.12s, color 0.12s;
+}
+.zone-tab:hover { background: var(--surface-2); color: var(--text); }
+.zone-tab.on { background: var(--brand); color: var(--on-brand); font-weight: 600; border-color: var(--brand); }
+.zone-tab.on:hover { background: var(--brand); }
+.zone-tab .no {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.zone-tab.on .no { background: var(--on-brand-weak); color: var(--on-brand); }
+.zone-tab .dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--err);
+  flex-shrink: 0;
+}
+.zone-gear { font-size: var(--fs-sm); }
+
+/* 三栏:左=章节轨,中=正文(视觉重心),右=参考抽屉(图标条/360px) */
+.write-bench { display: flex; gap: 16px; align-items: flex-start; }
+.write-rail { width: 300px; flex-shrink: 0; }
+.write-main { flex: 1; min-width: 0; }
+
+/* 参考抽屉:折叠态为竖排图标条,展开态 360px */
+.ref-wrap { display: flex; gap: 10px; flex-shrink: 0; align-items: flex-start; }
+.ref-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: sticky;
+  top: 70px;
+}
+.ref-icon {
+  width: 46px;
+  padding: 7px 0 5px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+}
+.ref-icon:hover { background: var(--surface-2); color: var(--text); }
+.ref-icon.on { background: var(--brand-weak); border-color: var(--brand-line); color: var(--brand); }
+.ref-icon-glyph { font-size: 16px; line-height: 1; }
+.ref-icon-label { font-size: var(--fs-xs); }
+.ref-drawer {
+  width: 360px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: var(--sp-3) 14px;
+  box-shadow: var(--shadow-sm);
+  max-height: calc(100vh - 90px);
+  overflow-y: auto;
+  position: sticky;
+  top: 70px;
+}
+/* 抽屉内复用的看板子组件自带 .card 外边距,收紧让抽屉更紧凑(保留卡片底色/边框) */
+.ref-drawer > .card { padding: var(--sp-3) 12px; margin-bottom: 0; }
+.ref-drawer .char-grid { grid-template-columns: 1fr; }
+.ref-body { font-size: var(--fs-sm); }
+
+/* 底部动作条:生成本章/重写/润色/校对/评分/连写 + 设置入口,吸底常驻 */
+.write-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  margin-top: 14px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+}
+.write-actions .grow { flex: 1; }
+
+/* read 区:单章纯阅读页 */
+.read-zone { max-width: 760px; margin: 0 auto; }
+.read-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.read-bar + .card { margin-bottom: 10px; }
+.read-bar:last-child { margin-bottom: 0; margin-top: 4px; }
+
+
+/* ==========================================================================
+   移动端壳(交互重构 C 阶段)
+   断点 (max-width: 767px),与 hooks/useBreakpoint.ts 的 MOBILE_QUERY 对齐。
+   只新增 class 与媒体查询,不改桌面样式;safe-area 用 env(),constant() 兜底(老 iOS)。
+   新组件 class(m-*)始终定义,但元素只在窄屏渲染(useBreakpoint 判定)。
+   ========================================================================== */
+
+/* ---- 移动端 write 区顶栏:←返回 + 当前章标题(点开章节轨)+ 阅读入口 ---- */
+.m-topbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.m-topbar button + button { margin-left: 0; }
+.m-topbar-btn {
+  min-width: 44px; min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.m-topbar-title {
+  flex: 1; min-width: 0; min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  text-align: left;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  cursor: pointer;
+}
+
+/* ---- 底部栏:写 / 读 / 参考 / 设置(吸底,safe-area 垫高) ---- */
+.m-bottombar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+  display: flex;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  padding-bottom: constant(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.m-bb-item {
+  flex: 1;
+  min-height: 52px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  background: none; border: none;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+button.m-bb-item + button.m-bb-item { margin-left: 0; }
+.m-bb-item.on { color: var(--brand); font-weight: 600; }
+.m-bb-glyph { font-size: 16px; line-height: 1; }
+
+/* ---- FAB(右下,safe-area 之上):点按=最该做的动作;⋮ 在 FAB 正上方展开动作扇 ---- */
+.m-fab {
+  position: fixed; right: 16px; z-index: 35;
+  bottom: calc(72px + constant(safe-area-inset-bottom));
+  bottom: calc(72px + env(safe-area-inset-bottom));
+  min-width: 56px; height: 56px;
+  padding: 0 18px;
+  border: none; border-radius: var(--r-full);
+  background: var(--brand); color: var(--on-brand);
+  font-size: var(--fs-md); font-weight: 600;
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+}
+.m-fab-more {
+  position: fixed; right: 24px; z-index: 35;
+  bottom: calc(140px + constant(safe-area-inset-bottom));
+  bottom: calc(140px + env(safe-area-inset-bottom));
+  width: 40px; height: 40px;
+  padding: 0;
+  border: 1px solid var(--line-strong); border-radius: var(--r-full);
+  background: var(--surface); color: var(--text-2);
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+}
+.m-fan-backdrop { position: fixed; inset: 0; z-index: 44; background: var(--overlay-bg-soft); }
+.m-fan {
+  position: fixed; right: 16px; z-index: 45;
+  bottom: calc(186px + constant(safe-area-inset-bottom));
+  bottom: calc(186px + env(safe-area-inset-bottom));
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 8px;
+}
+.m-fan button { min-width: 128px; min-height: 44px; }
+.m-fan button + button { margin-left: 0; }
+
+/* ---- 全屏遮罩 / 章节轨抽屉(从左滑入)/ 底部升起的全屏 sheet ---- */
+.m-overlay { position: fixed; inset: 0; z-index: 70; background: var(--overlay-bg); }
+.m-rail-drawer {
+  position: absolute; top: 0; bottom: 0; left: 0;
+  width: min(88vw, 380px);
+  background: var(--bg);
+  overflow-y: auto;
+  padding: 8px 12px 20px;
+  padding-bottom: calc(20px + constant(safe-area-inset-bottom));
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  animation: m-slide-in 0.18s ease-out;
+}
+.m-sheet-overlay { position: fixed; inset: 0; z-index: 70; background: var(--overlay-bg); }
+.m-sheet {
+  position: absolute; left: 0; right: 0; top: 12px; bottom: 0;
+  background: var(--bg);
+  border-radius: var(--r-xl) var(--r-xl) 0 0;
+  overflow-y: auto;
+  padding: 4px 14px 20px;
+  padding-bottom: calc(20px + constant(safe-area-inset-bottom));
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  animation: m-rise 0.18s ease-out;
+}
+/* sheet/抽屉头部:标题 + 关闭,滚动时吸附 */
+.m-sheet-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 0 10px;
+  position: sticky; top: 0;
+  background: var(--bg);
+  z-index: 1;
+}
+.m-sheet-head h3 { margin: 0; }
+@keyframes m-slide-in { from { transform: translateX(-24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
+@keyframes m-rise { from { transform: translateY(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
+
+/* 参考抽屉的移动端形态(全屏 sheet 内):图标条横排,内容区平铺 */
+.ref-wrap-m { flex-direction: column; width: 100%; }
+.ref-strip-m { flex-direction: row; flex-wrap: wrap; position: static; margin-bottom: 10px; }
+.ref-strip-m .ref-icon { flex: 1; min-width: 56px; padding: 8px 0 6px; }
+.ref-drawer-m { width: 100%; position: static; max-height: none; overflow: visible; }
+.m-ref-empty { padding: 18px 4px; font-size: var(--fs-sm); }
+
+/* 移动端无 ch 的「选章」引导 */
+.m-pick-guide { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.m-pick-guide .btn-sm { min-height: 44px; padding: 0 18px; font-size: var(--fs-sm); }
+
+@media (max-width: 767px) {
+  /* write 区:三栏退化为单列;底部动作条隐藏,功能由 FAB + 动作扇承接 */
+  .write-zone {
+    padding-bottom: calc(76px + constant(safe-area-inset-bottom));
+    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+  .write-bench { flex-direction: column; }
+  .write-rail { width: 100%; }
+  .write-actions { display: none; }
+
+  /* 区导航/项目头:窄屏紧凑,允许折行不溢出 */
+  .zone-tab { padding: 6px 10px; gap: 6px; }
+  .zone-tab .flow-sub { display: none; }
+
+  /* setup/book 页签 chips:横向滚动(单列堆叠由既有 ≤900px 规则负责) */
+  .chips.board-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+  }
+  .chips.board-tabs .chip { flex-shrink: 0; }
+
+  /* read 区:翻章按钮触摸目标 ≥44px */
+  .read-bar { gap: 10px; }
+  .read-bar .btn-sm { min-height: 44px; padding: 0 16px; font-size: var(--fs-sm); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .m-rail-drawer, .m-sheet { animation: none; }
+}
+
+/* ================= 桌面端(D 阶段):命令面板 + 沉浸模式 ================= */
+/* 命令面板:层级高于确认弹层(dlg-overlay z900),只用现有令牌,暗色自动正确 */
+.cmdk-overlay { position: fixed; inset: 0; z-index: 950; background: var(--overlay-bg-soft); }
+.cmdk-panel {
+  position: fixed; top: 16vh; left: 50%; transform: translateX(-50%);
+  width: 560px; max-width: calc(100vw - 40px);
+  z-index: 951;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.cmdk-input {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding: 14px 16px;
+  font-size: var(--fs-md);
+  background: transparent;
+  color: var(--text);
+}
+.cmdk-input:focus { border-color: var(--line); box-shadow: none; }
+.cmdk-list { max-height: 46vh; overflow-y: auto; padding: 6px; }
+.cmdk-item {
+  display: flex; align-items: baseline; gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none; border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-md); font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+}
+.cmdk-item + .cmdk-item { margin-left: 0; }
+.cmdk-item.on { background: var(--brand-weak); }
+.cmdk-item.disabled { opacity: 0.45; cursor: default; }
+.cmdk-item-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmdk-item-sub { margin-left: auto; flex-shrink: 0; color: var(--text-3); font-size: var(--fs-xs); }
+.cmdk-hint { padding: 16px; color: var(--text-3); font-size: var(--fs-sm); }
+
+/* 沉浸模式(F11,Esc 退出):class 挂在 write-zone,只留中栏。
+   区导航/项目头/统计条/引导条在 write-zone 之外,用 :has 从外层隐藏。 */
+.write-zone.immersive .write-rail,
+.write-zone.immersive .ref-wrap,
+.write-zone.immersive .write-actions { display: none; }
+.write-zone.immersive .write-main { max-width: 860px; width: 100%; margin: 0 auto; }
+body:has(.write-zone.immersive) .project-head,
+body:has(.write-zone.immersive) .stat-strip,
+body:has(.write-zone.immersive) .zone-nav,
+body:has(.write-zone.immersive) .next-bar,
+body:has(.write-zone.immersive) .step-guide { display: none; }

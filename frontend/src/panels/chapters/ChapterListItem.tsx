@@ -1,8 +1,7 @@
-// 章节列表单行:状态徽标、生成/重写按钮、行内重写意见区
-import { useEffect, useState } from "react";
+// 章节列表单行:状态徽标、生成/重写按钮、行内重写意见区(编辑器抽自 write/ReviseEditor)
 import { ChapterBrief, EditorAction, Outline } from "../../api";
 import { STATUS_BADGE, STATUS_CN } from "../../components/Reader";
-import ReviseChat from "./ReviseChat";
+import ReviseEditor from "../write/ReviseEditor";
 
 interface Props {
   pid: number;
@@ -37,11 +36,6 @@ export default function ChapterListItem({
   onReviseTextChange, onGenerate, onReviseSubmit, onReviseCancel,
 }: Props) {
   const st = ch?.status ?? "empty";
-  // 重写框里的可选对话区开关;重写框收起时一并复位
-  const [chatOpen, setChatOpen] = useState(false);
-  useEffect(() => {
-    if (!reviseOpen) setChatOpen(false);
-  }, [reviseOpen]);
   return (
     <>
       <div className="fact-line fact-row">
@@ -95,47 +89,19 @@ export default function ChapterListItem({
         </button>
       </div>
       {reviseOpen && (
-        <div className="fact-line revise-box">
-          <div className="hint">重写会覆盖当前正文;旧版自动存快照,可随时在「历史版本」对比回退。</div>
-          {ch?.is_stale && (
-            <div className="hint" style={{ color: "var(--warn, #b45309)" }}>
-              本章大纲已更新:这次重写会完全按新大纲重新构思,不再参照旧正文;补充意见可留空。
-            </div>
-          )}
-          <textarea
-            rows={3}
-            maxLength={500}
-            placeholder={ch?.is_stale
-              ? "对新大纲的补充要求(可留空):比如侧重点、节奏、视角;情节走向以新大纲为准"
-              : "哪里不满意?比如:节奏太拖 / 对话不像这个角色 / 结尾太仓促;想要什么方向?比如:加强冲突、多些心理描写(可留空,直接重写)"}
-            value={reviseText}
-            onChange={(e) => onReviseTextChange(e.target.value)}
+        <div className="fact-line">
+          <ReviseEditor
+            pid={pid}
+            chapterNumber={o.chapter_number}
+            isStale={!!ch?.is_stale}
+            text={reviseText}
+            proseActions={proseActions}
+            genBlocked={genBlocked}
+            genHint={genHint}
+            onTextChange={onReviseTextChange}
+            onSubmit={onReviseSubmit}
+            onCancel={onReviseCancel}
           />
-          <div className="chips">
-            {proseActions.map((a) => (
-              <button key={a.key} type="button" className="chip" title={a.directive}
-                onClick={() => onReviseTextChange(((reviseText ? reviseText.trimEnd() + ";" : "") + a.directive).slice(0, 500))}>
-                {a.label}
-              </button>
-            ))}
-          </div>
-          <div className="revise-chat-toggle">
-            <button type="button" className="linkish-btn" onClick={() => setChatOpen((v) => !v)}>
-              {chatOpen ? "收起对话 ↑" : "说不清?先和 AI 聊聊怎么改 ↓"}
-            </button>
-          </div>
-          {chatOpen && (
-            <ReviseChat pid={pid} n={o.chapter_number}
-              onApply={(d) => onReviseTextChange(d.slice(0, 500))} />
-          )}
-          <div className="revise-actions">
-            <button className="primary btn-sm" disabled={genBlocked}
-              title={genBlocked ? genHint : undefined}
-              onClick={onReviseSubmit}>
-              开始重写
-            </button>
-            <button className="btn-sm" onClick={onReviseCancel}>取消</button>
-          </div>
         </div>
       )}
     </>

@@ -107,7 +107,7 @@ const DIRECTION_CHIPS = ["更生动", "更紧张", "更简洁", "去 AI 味"];
 /** 全书目录条目:disabled 表示该章尚未生成正文(置灰不可点) */
 export interface ReaderTocItem { num: number; label: string; disabled?: boolean; }
 
-/** 片段润色上下文:由 BookReader / ChaptersPanel 传入以开启段落点选润色 */
+/** 片段润色上下文:由 BookReader / WritePanel 传入以开启段落点选润色 */
 export interface PolishCtx {
   pid: number;
   chapterNumber: number;

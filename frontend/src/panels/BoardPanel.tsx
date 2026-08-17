@@ -1,9 +1,12 @@
-// 一致性看板:全书概览(进度地图) + 人物卡管理 + 故事圣经(时序快照) + 伏笔四态面板
+// 一致性看板:全书概览(进度地图) + 人物卡管理 + 故事圣经(时序快照) + 伏笔四态面板。
+// tab 由 book 区经 props 受控传入(tab 进 URL);CharactersBoard/ForeshadowBoard 导出供 write 区参考抽屉复用。
 import { useCallback, useEffect, useState } from "react";
 import {
   api, BibleSnapshot, CharacterCard, CharactersOut, FactOut, ForeshadowOut, Outline,
   OverviewChapter, OverviewOut, TimelineItem,
 } from "../api";
+
+export type BoardTab = "overview" | "characters" | "bible" | "foreshadow";
 
 interface Props { pid: number; outlines: Outline[]; onGotoChapter?: (n: number) => void; }
 
@@ -13,27 +16,12 @@ const FS_CN: Record<string, string> = {
 const IMP_BADGE: Record<string, string> = { critical: "err", major: "warn", minor: "" };
 const FACT_PREVIEW = 3;
 
-type Tab = "overview" | "characters" | "bible" | "foreshadow";
-
-export default function BoardPanel({ pid, outlines, onGotoChapter }: Props) {
-  const [tab, setTab] = useState<Tab>("overview");
-  return (
-    <>
-      <div className="chips board-tabs">
-        {([["overview", "概览"], ["characters", "人物"], ["bible", "故事圣经"], ["foreshadow", "伏笔"]] as [Tab, string][]).map(
-          ([key, label]) => (
-            <button key={key} type="button" className={"chip" + (tab === key ? " on" : "")} onClick={() => setTab(key)}>
-              {label}
-            </button>
-          ),
-        )}
-      </div>
-      {tab === "overview" && <OverviewBoard pid={pid} onGotoChapter={onGotoChapter} />}
-      {tab === "characters" && <CharactersBoard pid={pid} />}
-      {tab === "bible" && <BibleBoard pid={pid} outlines={outlines} />}
-      {tab === "foreshadow" && <ForeshadowBoard pid={pid} outlines={outlines} />}
-    </>
-  );
+// 看板四 tab 的内容分发(tab 栏在 book 区统一渲染,此处不再自带 chips)
+export default function BoardPanel({ pid, outlines, tab, onGotoChapter }: Props & { tab: BoardTab }) {
+  if (tab === "characters") return <CharactersBoard pid={pid} />;
+  if (tab === "bible") return <BibleBoard pid={pid} outlines={outlines} />;
+  if (tab === "foreshadow") return <ForeshadowBoard pid={pid} outlines={outlines} />;
+  return <OverviewBoard pid={pid} onGotoChapter={onGotoChapter} />;
 }
 
 /* ================= 全书概览 ================= */
@@ -249,7 +237,7 @@ function OverviewBoard({ pid, onGotoChapter }: { pid: number; onGotoChapter?: (n
 
 /* ================= 人物卡 ================= */
 
-function CharactersBoard({ pid }: { pid: number }) {
+export function CharactersBoard({ pid }: { pid: number }) {
   const [data, setData] = useState<CharactersOut | null>(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -474,7 +462,7 @@ function BibleBoard({ pid, outlines }: Props) {
 
 /* ================= 伏笔 ================= */
 
-function ForeshadowBoard({ pid, outlines }: Props) {
+export function ForeshadowBoard({ pid, outlines }: Props) {
   const maxCh = outlines.length ? Math.max(...outlines.map((o) => o.chapter_number)) : 1;
   const [foreshadows, setForeshadows] = useState<ForeshadowOut[]>([]);
   const [err, setErr] = useState("");

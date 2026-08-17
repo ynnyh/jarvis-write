@@ -5,7 +5,7 @@ import { pollJob, errMsg } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
 import { confirmDialog } from "../ui/ConfirmDialog";
 import { useJob } from "../ui/useJob";
-import type { Step } from "../pages/ProjectPage";
+import type { GotoTarget } from "../pages/ProjectPage";
 import DirectivePanel from "./outline/DirectivePanel";
 import OutlineDiscussChat from "./outline/OutlineDiscussChat";
 import OutlineItem from "./outline/OutlineItem";
@@ -16,7 +16,7 @@ interface Props {
   outlines: Outline[];
   hasArch: boolean;
   onChanged: () => Promise<void>;
-  onGotoStep?: (step: Step) => void;
+  onGotoStep?: (step: GotoTarget) => void;
 }
 
 type Form = Partial<Outline>;
@@ -55,7 +55,7 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
   useEffect(() => () => abortRef.current?.abort(), []);
 
   // 挂载时查有没有还在跑的蓝图生成(切走页面再回来的场景),有则接回轮询
-  // 显示进度,而不是装作没事(与 ChaptersPanel 的 runningJobs 重连同一模式;
+  // 显示进度,而不是装作没事(与 WritePanel 的 runningJobs 重连同一模式;
   // 生成与「展开下一卷」后端共用 blueprint-<pid> kind,重连接法一致)。
   useEffect(() => {
     let cancelled = false;

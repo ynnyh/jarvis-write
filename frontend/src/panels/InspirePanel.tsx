@@ -8,9 +8,9 @@ import {
 import TendencySelector from "../components/TendencySelector";
 import { useJob } from "../ui/useJob";
 import { confirmDialog } from "../ui/ConfirmDialog";
-import type { Step } from "../pages/ProjectPage";
+import type { SetupStep } from "../pages/ProjectPage";
 
-interface Props { project: Project; onChanged: () => Promise<void>; onGotoStep?: (step: Step) => void; }
+interface Props { project: Project; onChanged: () => Promise<void>; onGotoStep?: (step: SetupStep) => void; }
 
 // 从项目已存概念/主题恢复当前草稿:有 concept 用 concept,否则把 topic 灌进 logline
 function conceptFromProject(p: Project): Concept {

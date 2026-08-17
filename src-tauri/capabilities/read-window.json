@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "read-window",
+  "description": "对照阅读附窗(label 形如 read-{pid}-{ch},由主窗前端经 webviewWindow API 创建)。同样加载本机后端页面(远程源,remote.urls 同主窗);只需 core:default 中的事件 listen/emit 来接收主窗保存后的 chapter-saved 广播,无自定义命令。",
+  "windows": ["read-*"],
+  "remote": {
+    "urls": ["http://localhost:*", "http://127.0.0.1:*"]
+  },
+  "permissions": ["core:default"]
+}

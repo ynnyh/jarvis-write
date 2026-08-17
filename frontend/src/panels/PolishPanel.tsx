@@ -1,18 +1,27 @@
-// 润色工作区:选章或贴文本 → 选风格 → 左右对照预览(润色稿可微调) → 应用;原文支持手动编辑
-import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ChapterBrief, flavorTitle, PolishResult, Tendency } from "../api";
+// 润色工作区:选段或整章 → 选风格 → 左右对照预览(润色稿可微调) → 应用;原文支持手动编辑
+// 「当前章」来自 URL ch(useChapterContext,由 write 区经 props 传入);原文走 qk.chapter 共享缓存
+import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { api, flavorTitle, PolishResult, Tendency } from "../api";
 import { pollJob } from "../pollJob";
+import { qk, useChapter, useInvalidateProject } from "../hooks/queries";
 import TendencySelector from "../components/TendencySelector";
 import { useJob } from "../ui/useJob";
 
-interface Props { pid: number; }
+interface Props {
+  pid: number;
+  chapterNum: number | null;
+}
 
-export default function PolishPanel({ pid }: Props) {
+export default function PolishPanel({ pid, chapterNum }: Props) {
   const { run: runAsyncJob } = useJob();
-  const [chapters, setChapters] = useState<ChapterBrief[]>([]);
+  const qc = useQueryClient();
+  const invalidateProject = useInvalidateProject(pid);
   const [mode, setMode] = useState<"chapter" | "segment">("chapter");
-  const [chapterNum, setChapterNum] = useState<number | null>(null);
-  const [original, setOriginal] = useState("");
+  // 原文走共享缓存:写作页保存/润色应用后失效重拉,不各存一份
+  const chapterQuery = useChapter(pid, mode === "chapter" ? chapterNum : null);
+  const chapter = chapterQuery.data ?? null;
+  const original = chapter ? (chapter.final_content || chapter.draft_content) : "";
   const [segment, setSegment] = useState("");
   const [tendency, setTendency] = useState<Tendency>({ polish_style: ["去AI味"] });
   const [result, setResult] = useState<PolishResult | null>(null);
@@ -28,22 +37,14 @@ export default function PolishPanel({ pid }: Props) {
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  const reload = useCallback(async () => {
-    const list = (await api.listChapters(pid)).filter((c) => c.status !== "empty");
-    setChapters(list);
-    if (list.length && chapterNum === null) setChapterNum(list[0].chapter_number);
-  }, [pid, chapterNum]);
-  useEffect(() => { reload().catch((e) => setErr(String(e))); }, [reload]);
+  // 切换章节/模式:清空对照结果与两侧编辑态
+  useEffect(() => {
+    setResult(null); setPolishedDraft(""); setEditingOriginal(false); setEditText(""); setMsg("");
+  }, [pid, mode, chapterNum]);
 
   useEffect(() => {
-    if (mode === "chapter" && chapterNum !== null) {
-      api.getChapter(pid, chapterNum)
-        .then((c) => setOriginal(c.final_content || c.draft_content))
-        .catch((e) => setErr(String(e)));
-      // 切换章节:清空对照结果与两侧编辑态
-      setResult(null); setPolishedDraft(""); setEditingOriginal(false); setEditText(""); setMsg("");
-    }
-  }, [pid, mode, chapterNum]);
+    if (chapterQuery.error) setErr(String(chapterQuery.error));
+  }, [chapterQuery.error]);
 
   async function run() {
     const text = mode === "chapter" ? original : segment;
@@ -73,11 +74,14 @@ export default function PolishPanel({ pid }: Props) {
     abortRef.current = ctrl;
     setBusy("保存正文…"); setErr(""); setMsg("");
     try {
-      const updated = await api.editChapterContent(pid, num, editText);
-      setOriginal(updated.final_content || updated.draft_content);
+      await api.editChapterContent(pid, num, editText);
       setEditingOriginal(false);
       setResult(null); setPolishedDraft("");
-      await reload();
+      // 失效共享缓存:原文与章节列表自动重拉
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: qk.chapter(pid, num) }),
+        invalidateProject(),
+      ]);
       // 手改后同步一致性引擎
       const { job_id } = await api.reExtractAsync(pid, num);
       await pollJob(job_id, {
@@ -91,7 +95,7 @@ export default function PolishPanel({ pid }: Props) {
         // 轮询中断(超时/网络抖动):任务可能仍在后台运行,刷新列表让用户看到真实进度
         if (m.startsWith("任务超时") || m.startsWith("多次查询")) {
           setErr(`进度查询中断:${m}`);
-          await reload().catch(() => undefined);
+          await invalidateProject().catch(() => undefined);
         } else {
           setErr(m);
         }
@@ -105,8 +109,11 @@ export default function PolishPanel({ pid }: Props) {
     try {
       // 应用用户微调后的润色稿
       await api.applyPolish(pid, chapterNum, polishedDraft);
-      setOriginal(polishedDraft);
       setResult(null); setPolishedDraft("");
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: qk.chapter(pid, chapterNum) }),
+        invalidateProject(),
+      ]);
       setMsg(`第 ${chapterNum} 章已更新为润色稿。`);
     } catch (e) { setErr(String(e)); } finally { setBusy(""); }
   }
@@ -128,17 +135,10 @@ export default function PolishPanel({ pid }: Props) {
         </div>
 
         {mode === "chapter" ? (
-          chapters.length ? (
+          chapterNum !== null ? (
             <>
-              <select className="narrow" value={chapterNum ?? ""} onChange={(e) => setChapterNum(Number(e.target.value))}>
-                {chapters.map((c) => (
-                  <option key={c.chapter_number} value={c.chapter_number}>
-                    第{c.chapter_number}章({c.word_count}字{c.is_stale ? " · 大纲已变" : ""})
-                  </option>
-                ))}
-              </select>
               <div className="card-head mb-2 mt-3">
-                <span className="fl grow">原文({original.length}字)</span>
+                <span className="fl grow">原文(第{chapterNum}章 · {original.length}字)</span>
                 {!editingOriginal ? (
                   <button className="btn-sm" disabled={!!busy}
                     onClick={() => { setEditText(original); setEditingOriginal(true); }}>
@@ -163,7 +163,7 @@ export default function PolishPanel({ pid }: Props) {
                 <div className="pane pane-prose prose">{original}</div>
               )}
             </>
-          ) : <div className="muted">还没有已生成的章节,先去「写作」生成正文。</div>
+          ) : <div className="muted">先在左侧章节轨选一章已生成的章节。</div>
         ) : (
           <textarea rows={6} value={segment} onChange={(e) => setSegment(e.target.value)}
             placeholder="把要润色的段落贴进来(最长 12000 字)…" />

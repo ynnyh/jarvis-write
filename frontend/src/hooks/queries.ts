@@ -10,6 +10,8 @@ export const qk = {
   architecture: (pid: number) => ["architecture", pid] as const,
   outlines: (pid: number) => ["outlines", pid] as const,
   chapters: (pid: number) => ["chapters", pid] as const,
+  // 单章正文:写作/编辑部/润色共享同一缓存,章号来自 URL(见 useChapterContext)
+  chapter: (pid: number, ch: number) => ["chapter", pid, ch] as const,
   cards: (pid: number) => ["cards", pid] as const,
   // 全部项目级数据(用于一次性 invalidate)
   all: (pid: number) => ["project", pid] as const, // prefix match 会命中 project/architecture/outlines/chapters
@@ -42,6 +44,15 @@ export function useChapters(pid: number) {
   return useQuery({
     queryKey: qk.chapters(pid),
     queryFn: () => api.listChapters(pid),
+  });
+}
+
+/** 单章正文(共享缓存):ch 为 null 时不拉取。 */
+export function useChapter(pid: number, ch: number | null) {
+  return useQuery({
+    queryKey: qk.chapter(pid, ch ?? 0),
+    queryFn: () => api.getChapter(pid, ch!),
+    enabled: ch !== null,
   });
 }
 

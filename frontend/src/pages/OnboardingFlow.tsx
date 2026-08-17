@@ -500,7 +500,7 @@ export default function OnboardingFlow() {
   async function enterWorkbench() {
     if (pid === null) return;
     try { await patch({ setup_state: "" }); } catch { /* 不阻塞进台 */ }
-    nav(`/project/${pid}/arch`);
+    nav(`/project/${pid}/setup?step=arch`);
   }
 
   async function abandon() {

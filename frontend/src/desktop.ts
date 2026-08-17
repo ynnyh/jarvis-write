@@ -8,6 +8,9 @@
 // 调用方据此决定走 Tauri 更新流还是保留原有 Web 轮询横幅。
 
 // withGlobalTauri 注入的全局。只声明用到的部分,避免引入整包类型依赖。
+interface ReadWindowHandle {
+  setFocus: () => Promise<void>;
+}
 interface TauriGlobal {
   core: { invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T> };
   event?: {
@@ -15,6 +18,13 @@ interface TauriGlobal {
       event: string,
       handler: (e: { payload: T }) => void,
     ) => Promise<() => void>;
+    emit: (event: string, payload?: unknown) => Promise<void>;
+  };
+  webviewWindow?: {
+    WebviewWindow: {
+      new (label: string, options: Record<string, unknown>): ReadWindowHandle;
+      getByLabel: (label: string) => Promise<ReadWindowHandle | null>;
+    };
   };
 }
 declare global {
@@ -120,4 +130,52 @@ export async function onCloseRequested(cb: () => void): Promise<() => void> {
   const t = window.__TAURI__;
   if (!t?.event) return () => {};
   return t.event.listen<null>("close://requested", () => cb());
+}
+
+// ===== 菜单事件 / 多窗口对照阅读(交互重构 D 阶段)=====
+// 菜单由 Rust 侧 MenuBuilder 发 menu-action 事件(payload 为动作名字符串),
+// 前端在 ProjectPage listen 后走统一 dispatch(与快捷键/命令面板同一入口)。
+
+/** 订阅 Rust 菜单动作事件;浏览器环境返回 no-op(零影响)。 */
+export async function onMenuAction(cb: (action: string) => void): Promise<() => void> {
+  const t = window.__TAURI__;
+  if (!t?.event) return () => {};
+  return t.event.listen<string>("menu-action", (e) => cb(e.payload));
+}
+
+/** 主窗保存正文成功后广播;对照阅读窗(ReadPanel)listen 后失效对应章缓存。 */
+export async function emitChapterSaved(pid: number, ch: number): Promise<void> {
+  const t = window.__TAURI__;
+  if (!t?.event) return;
+  await t.event.emit("chapter-saved", { pid, ch });
+}
+
+/** 订阅「某章已保存」广播;浏览器环境返回 no-op。 */
+export async function onChapterSaved(
+  cb: (p: { pid: number; ch: number }) => void,
+): Promise<() => void> {
+  const t = window.__TAURI__;
+  if (!t?.event) return () => {};
+  return t.event.listen<{ pid: number; ch: number }>("chapter-saved", (e) => cb(e.payload));
+}
+
+/**
+ * 打开只读对照阅读窗(/project/:id/read?ch=N,HashRouter 注意 hash 段)。
+ * 同 label 窗已存在则聚焦而非重开。返回 false = 非桌面环境(调用方 toast 降级)。
+ */
+export async function openReadWindow(pid: number, ch: number): Promise<boolean> {
+  const ww = window.__TAURI__?.webviewWindow;
+  if (!ww) return false;
+  const label = `read-${pid}-${ch}`;
+  const existed = await ww.WebviewWindow.getByLabel(label);
+  if (existed) {
+    await existed.setFocus();
+    return true;
+  }
+  const url = `${window.location.origin}/#/project/${pid}/read?ch=${ch}`;
+  // 构造函数即创建窗口(异步在 Rust 侧完成),返回的 handle 这里用不到
+  new ww.WebviewWindow(label, {
+    url, width: 900, height: 700, title: `第 ${ch} 章 · 对照阅读`,
+  });
+  return true;
 }

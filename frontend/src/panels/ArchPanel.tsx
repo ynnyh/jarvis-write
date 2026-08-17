@@ -37,7 +37,7 @@ export default function ArchPanel({ project, arch, onChanged, hasContent }: Prop
   useEffect(() => () => abortRef.current?.abort(), []);
 
   // 挂载时查有没有还在跑的架构生成(切走页面再回来的场景),有则接回轮询
-  // 显示进度,而不是装作没事(与 ChaptersPanel 的 runningJobs 重连同一模式)。
+  // 显示进度,而不是装作没事(与 WritePanel 的 runningJobs 重连同一模式)。
   useEffect(() => {
     let cancelled = false;
     api.runningJobs(project.id).then(({ jobs }) => {
