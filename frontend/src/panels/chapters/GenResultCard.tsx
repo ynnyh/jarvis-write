@@ -5,6 +5,7 @@ import {
   api, ChapterIssue, flavorTitle, GenerateChapterResponse,
 } from "../../api";
 import { errMsg } from "../../pollJob";
+import { dispatchAction } from "../../ui/actions";
 import { useJob } from "../../ui/useJob";
 import { toast } from "../../ui/Toaster";
 import { confirmDialog } from "../../ui/ConfirmDialog";
@@ -21,6 +22,8 @@ const SOURCE_CN: Record<string, string> = {
   gate: "门禁", preflight: "预审", diag: "诊断", review: "审校", rules: "规则",
 };
 const ISSUE_STATUS_CN: Record<string, string> = { resolved: "已人工解决", ignored: "已忽略" };
+// AI 味偏高分界线(/千字,加权命中+统计罚分;经验值,可调):超过即提示一键去味
+const FLAVOR_HIGH = 6;
 
 interface Props {
   pid: number;
@@ -169,12 +172,19 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, histo
     <div className={"card " + (quarantined ? "card-warn" : "card-ok")}>
       <b>{historical ? "审核报告" : "生成完成"}</b> {result.word_count} 字
       {result.ai_flavor && (
-        <span className="badge" title={flavorTitle(result.ai_flavor)}>
+        <span className={"badge" + (result.ai_flavor.score >= FLAVOR_HIGH ? " warn" : "")}
+          title={flavorTitle(result.ai_flavor)}>
           AI味 {result.ai_flavor.score} /千字
         </span>
       )}
-      {result.ai_flavor && (
-        <span className="muted"> 偏高可去「编辑部」,选「去AI味」方向</span>
+      {result.ai_flavor && result.ai_flavor.score >= FLAVOR_HIGH && (
+        <>
+          <span className="muted"> 腔调偏重,建议过一遍去味</span>
+          <button className="btn-sm" title="打开本章的润色工作台(默认去AI味方向)"
+            onClick={() => dispatchAction("polish")}>
+            一键去味
+          </button>
+        </>
       )}
 
       {quarantined && (

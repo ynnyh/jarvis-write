@@ -27,6 +27,8 @@ from app.engines.consistency.extractor import extract_and_apply
 from app.engines.consistency.preflight import preflight_chapter
 from app.engines.consistency.repetition import avoid_block
 from app.engines.pipeline.handoff import extract_handoff_contract, load_handoff_block
+from app.engines.polish import ai_flavor_report
+from app.engines.polish.polisher import _flavor_hits_block
 from app.engines.editorial import (
     apply_proofread_fixes,
     build_revision_directive,
@@ -490,6 +492,9 @@ async def generate_chapter(
         )
         d = _strip_meta(await get_adapter_for(Task.DRAFT).ask(draft_prompt))
         _report(finalize_label)
+        # 定稿前的去味诊断(纯规则零成本):草稿先过 AI 味检测,命中句贴进定稿
+        # prompt 定点改写 —— 复用润色端"先诊断后治疗"的成熟模式,生成端不再只靠自觉。
+        flavor_hits = _flavor_hits_block(ai_flavor_report(d))
         finalize_prompt = CHAPTER_FINALIZE_PROMPT.format(
             chapter_number=chapter_number,
             chapter_title=outline.title,
@@ -498,6 +503,7 @@ async def generate_chapter(
             chapter_summary=outline.summary,
             rolling_summary=rolling,
             draft_text=d,
+            flavor_hits=flavor_hits,
             style_directives=style_block,
         )
         f = _strip_meta(await get_adapter_for(Task.FINALIZE).ask(finalize_prompt))
