@@ -1,5 +1,5 @@
 // write 区左栏「章节轨」:唯一选章入口。
-// 从原 ChaptersPanel 侧栏抽出:搜索/状态筛选/连写勾选/正文倾向/每章操作(生成·阅读·通过·重写框)。
+// 从原 ChaptersPanel 侧栏抽出:搜索/状态筛选/连写勾选/正文倾向/每章操作(生成·阅读·通过·放行·重写框)。
 import { useState } from "react";
 import { ChapterBrief, EditorAction, Outline, Tendency } from "../../api";
 import TendencySelector from "../../components/TendencySelector";
@@ -11,7 +11,7 @@ interface Props {
   chapters: ChapterBrief[];
   // 进行中的「生成/重写」任务:null=空闲(阻塞式,锁住列表操作)
   genJob: { num: number; stage: string } | null;
-  // 连写队列(状态由 WritePanel 持有:底部动作条也要切换 queueMode)
+  // 连写队列(状态由 WritePanel 持有:StageBar 阶段条也要跟随 genJob 切换)
   queueMode: boolean;
   queuePicked: Set<number>;
   onToggleQueueMode: () => void;
@@ -32,6 +32,9 @@ interface Props {
   // 人工审核通过(仅 pending_review 章显示)
   approving: number | null;
   onApprove: (n: number) => void;
+  // quarantined 放行(仅被拦截章显示行内[放行],与[通过]同位)
+  releasing: number | null;
+  onRelease: (n: number) => void;
   onOpen: (n: number) => void;
   onOpenReader: (n: number) => void;
   onGenerate: (n: number) => void;
@@ -42,7 +45,7 @@ export default function ChapterRail({
   queueMode, queuePicked, onToggleQueueMode, onToggleQueuePick, onPickNextBatch, onStartQueue,
   genTendency, onTendencyChange,
   reviseFor, reviseText, proseActions, onToggleRevise, onReviseTextChange, onReviseSubmit, onReviseCancel,
-  approving, onApprove, onOpen, onOpenReader, onGenerate,
+  approving, onApprove, releasing, onRelease, onOpen, onOpenReader, onGenerate,
 }: Props) {
   const byNum = new Map(chapters.map((c) => [c.chapter_number, c]));
   // 正文倾向选择器展开态(纯视图态,留在本组件)
@@ -125,6 +128,8 @@ export default function ChapterRail({
             proseActions={proseActions}
             approving={approving === o.chapter_number}
             onApprove={() => onApprove(o.chapter_number)}
+            releasing={releasing === o.chapter_number}
+            onRelease={() => onRelease(o.chapter_number)}
             onOpen={() => onOpen(o.chapter_number)}
             onOpenReader={() => onOpenReader(o.chapter_number)}
             onToggleQueue={(checked) => onToggleQueuePick(o.chapter_number, checked)}

@@ -19,6 +19,9 @@ interface Props {
   // 人工审核通过(docs/08 §5.5):仅 pending_review 章显示行内「通过」按钮
   approving: boolean;
   onApprove: () => void;
+  // quarantined 放行入口上浮:仅被拦截章显示行内「放行」按钮(与「通过」同位)
+  releasing: boolean;
+  onRelease: () => void;
   onOpen: () => void;
   onOpenReader: () => void;
   onToggleQueue: (checked: boolean) => void;
@@ -32,6 +35,7 @@ interface Props {
 export default function ChapterListItem({
   pid, outline: o, chapter: ch, queueMode, queuePicked, generating, genBlocked,
   genHint, genStage, reviseOpen, reviseText, proseActions, approving, onApprove,
+  releasing, onRelease,
   onOpen, onOpenReader, onToggleQueue, onToggleRevise,
   onReviseTextChange, onGenerate, onReviseSubmit, onReviseCancel,
 }: Props) {
@@ -73,6 +77,13 @@ export default function ChapterListItem({
             title="人工审核通过:确认本章可定稿,批准后状态变为「已审」"
             onClick={onApprove}>
             {approving && <span className="spin spin-sm" />}通过
+          </button>
+        )}
+        {ch && st === "quarantined" && (
+          <button className="btn-sm danger" disabled={releasing || genBlocked}
+            title={genBlocked ? genHint : "放行:忽略全部致命矛盾,补走圣经/摘要链路,状态回「待审」"}
+            onClick={onRelease}>
+            {releasing && <span className="spin spin-sm" />}放行
           </button>
         )}
         {ch && (

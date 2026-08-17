@@ -1,10 +1,14 @@
-// settings 区:书级设置。字数守卫 / 审校把关(达标线·回炉上限·连写要求)/ 世界观硬规则。
-// 前两张卡从原 ChaptersPanel 侧栏搬来,世界观硬规则从原 EditorialPanel audit 页签搬来,功能文案不变。
+// settings 区:书级设置。每章目标字数 / 字数守卫 / 审校把关(达标线·回炉上限·连写要求)/ 世界观硬规则。
+// 字数守卫与审校把关两张卡从原 ChaptersPanel 侧栏搬来,世界观硬规则从原 EditorialPanel audit 页签搬来,功能文案不变。
 import { useState } from "react";
 import { api, Project } from "../api";
 import { useInvalidateProject } from "../hooks/queries";
 import { errMsg } from "../pollJob";
 import { toast } from "../ui/Toaster";
+
+// 每章目标字数的合法区间(前端自校验,后端 ProjectPatch 不设上下界;区间来自交互改造计划)
+const TARGET_WORDS_MIN = 200;
+const TARGET_WORDS_MAX = 20000;
 
 interface Props { pid: number; project: Project; }
 
@@ -13,6 +17,24 @@ export default function ProjectSettingsPanel({ pid, project }: Props) {
   // 世界观硬规则编辑态(整段覆盖,空串清空);初始值取自项目(进入本区时 project 已就绪)
   const [worldRules, setWorldRules] = useState(project.world_rules ?? "");
   const [rulesSaving, setRulesSaving] = useState(false);
+  // 每章目标字数编辑态(字符串保存原始输入,允许清空重输;保存时校验区间)
+  const [targetWords, setTargetWords] = useState(String(project.target_words_per_chapter));
+  const [wordsSaving, setWordsSaving] = useState(false);
+
+  // 保存每章目标字数:后端 ProjectPatch 已支持 target_words_per_chapter,纯前端接线
+  async function saveTargetWords() {
+    const n = Number(targetWords);
+    if (!Number.isInteger(n) || n < TARGET_WORDS_MIN || n > TARGET_WORDS_MAX) {
+      toast.err("每章目标字数无效", `请输入 ${TARGET_WORDS_MIN}-${TARGET_WORDS_MAX} 之间的整数`);
+      return;
+    }
+    setWordsSaving(true);
+    try {
+      await api.patchProject(pid, { target_words_per_chapter: n });
+      await invalidateProject();
+      toast.ok("每章目标字数已保存", "将作用于后续生成与字数守卫");
+    } catch (e) { toast.err("每章目标字数保存失败", errMsg(e)); } finally { setWordsSaving(false); }
+  }
 
   // 字数守卫开关:超标自动压缩/拆章。一个开关同时管压缩与拆章,默认关闭。
   async function toggleGuard(on: boolean) {
@@ -49,7 +71,20 @@ export default function ProjectSettingsPanel({ pid, project }: Props) {
 
   return (
     <>
+      {/* 每章目标字数(死路 #3:此前只能在创建向导设,成书后无处可改) */}
       <div className="card card-compact">
+        <label className="fl">每章目标字数</label>
+        <div className="hint mb-1">生成与字数守卫的基准,保存后作用于后续章节。</div>
+        <div className="input-row">
+          <input type="number" min={TARGET_WORDS_MIN} max={TARGET_WORDS_MAX}
+            value={targetWords} onChange={(e) => setTargetWords(e.target.value)} />
+          <button className="primary btn-sm" disabled={wordsSaving}
+            onClick={saveTargetWords}>
+            {wordsSaving && <span className="spin spin-sm" />}保存
+          </button>
+        </div>
+      </div>
+      <div className="card card-compact mt-2">
         <label className="guard-toggle">
           <input type="checkbox" checked={!!project.word_guard_enabled}
             onChange={(e) => toggleGuard(e.target.checked)} />

@@ -1,9 +1,10 @@
-// write 区三栏工作台:左=章节轨(唯一选章入口),中=当前章正文+蓝图+动作产出卡,
-// 右=参考抽屉(ctx= 进 URL),底部动作条(生成/重写/润色/校对/评分/连写,act= 进 URL)。
+// write 区三栏工作台:左=章节轨(唯一选章入口),中=阶段条+当前章正文+蓝图+动作产出卡,
+// 右=参考抽屉(ctx= 进 URL)。中栏顶部 StageBar 按章节阶段(deriveStage)摆出 1-2 个主动作,
+// 次动作收进「更多动作」下拉(act= 进 URL)——状态驱动流水线,替代旧底部动作条。
 // 「当前章」以 URL ch 参数为唯一来源(useChapterContext),正文走 qk.chapter 共享缓存。
 // 由原 ChaptersPanel 拆解而来;字数守卫/审校把关设置卡已搬去 settings 区(ProjectSettingsPanel)。
 // 移动端壳(交互重构 C 阶段,isMobile 由 useBreakpoint 判定,与 @media (max-width: 767px) 对齐):
-// 顶栏(返回/章标题/阅读)+ 底部栏(写/读/参考/设置)+ FAB(点按最该做的动作/长按动作扇)
+// 顶栏(返回/章标题/阅读)+ 底部栏(写/读/参考/本书设置)+ FAB(点按=当前阶段主动作/长按动作扇)
 // + 左右滑切章;章节轨/参考/动作卡换成全屏抽屉与 sheet,组件与桌面同一份。
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TouchEvent } from "react";
@@ -23,13 +24,17 @@ import { toast } from "../ui/Toaster";
 import { confirmDialog } from "../ui/ConfirmDialog";
 import Reader, { Paragraphs } from "../components/Reader";
 import GenResultCard from "./chapters/GenResultCard";
+import { confirmAndReleaseGate } from "./chapters/releaseGate";
 import VersionCompare from "./chapters/VersionCompare";
 import ChapterRail from "./write/ChapterRail";
 import ReviseCard from "./write/ReviseCard";
 import ReviewCard from "./write/ReviewCard";
 import ProofreadCard from "./write/ProofreadCard";
 import RefDrawer from "./write/RefDrawer";
+import StageBar from "./write/StageBar";
+import { deriveStage } from "./write/chapterStage";
 import PolishPanel from "./PolishPanel";
+import { useJob } from "../ui/useJob";
 
 interface Props {
   pid: number; outlines: Outline[];
@@ -38,7 +43,7 @@ interface Props {
 // 稳定的空数组引用:RQ 数据未就绪时用它,避免每次渲染新建 [] 触发 effect 抖动
 const EMPTY_CHAPTERS: ChapterBrief[] = [];
 
-// 底部动作条的动作(act= URL 参数):在中栏开对应动作卡
+// 中栏阶段条「更多动作」与动作卡(act= URL 参数):在中栏开对应动作卡
 type Act = "revise" | "polish" | "proofread" | "review";
 const ACTS: Act[] = ["revise", "polish", "proofread", "review"];
 // 移动端动作卡全屏 sheet 的标题
@@ -49,6 +54,8 @@ const ACT_TITLE: Record<Act, string> = {
 export default function WritePanel({ pid, outlines }: Props) {
   const invalidateProject = useInvalidateProject(pid);
   const nav = useNavigate();
+  // 放行/按建议修订等异步长任务的统一入口(进全局任务中心,本地轮询拿结果)
+  const { run } = useJob();
   // 章节列表走 React Query(与父级顶栏统计同一缓存,消除双真相);reload 即失效缓存重拉。
   const chaptersQuery = useChapters(pid);
   const chapters = chaptersQuery.data ?? EMPTY_CHAPTERS;
@@ -137,7 +144,7 @@ export default function WritePanel({ pid, outlines }: Props) {
   const [versionsFor, setVersionsFor] = useState<number | null>(null);
   const [versions, setVersions] = useState<ChapterVersionBrief[] | null>(null);
   const [compareVer, setCompareVer] = useState<ChapterVersionDetail | null>(null);
-  // 连写队列:勾选多章 → 后端一个 job 串行生成(状态在此持有,底部动作条也要切换)
+  // 连写队列:勾选多章 → 后端一个 job 串行生成(状态在此持有,章节轨头部与 StageBar 跟随切换)
   const [queueMode, setQueueMode] = useState(false);
   const [queuePicked, setQueuePicked] = useState<Set<number>>(new Set());
   // 组件卸载时中止轮询,防止卸载后继续 setState(生成与同步各用一个,互不覆盖)
@@ -178,6 +185,22 @@ export default function WritePanel({ pid, outlines }: Props) {
       toast.err("通过审核失败", errMsg(e));
     } finally {
       setApproving(null);
+    }
+  }
+
+  // quarantined 放行入口上浮(确认+调用逻辑与 GenResultCard 共用 chapters/releaseGate):
+  // StageBar blocked 主动作与章节轨行内[放行]都走这里,完成后刷新列表与打开的正文
+  const [releasing, setReleasing] = useState<number | null>(null);
+  async function releaseChapter(n: number) {
+    setReleasing(n);
+    try {
+      const released = await confirmAndReleaseGate({ pid, n, run });
+      if (released) {
+        await reload();
+        qc.invalidateQueries({ queryKey: qk.chapter(pid, n) });
+      }
+    } finally {
+      setReleasing(null);
     }
   }
 
@@ -255,6 +278,14 @@ export default function WritePanel({ pid, outlines }: Props) {
 
   const byNum = new Map(chapters.map((c) => [c.chapter_number, c]));
   const currentBrief = chapterNum !== null ? byNum.get(chapterNum) : undefined;
+
+  // 章节阶段(状态驱动流水线):StageBar 与移动端 FAB 共用同一份推断(chapterStage.ts)
+  const stage = deriveStage({ chapterNum, currentBrief, genJob });
+  // approved 阶段的「写下一章」目标:大纲中第一个还没有正文的章(仅选中,不自动生成)
+  const nextChapterNum = outlines.find((o) => !byNum.get(o.chapter_number))?.chapter_number ?? null;
+  // 生成完成后自动选章要用「当时的」选章状态做守卫,轮询回调里闭包会过期,故走 ref
+  const chapterNumRef = useRef(chapterNum);
+  useEffect(() => { chapterNumRef.current = chapterNum; }, [chapterNum]);
 
   // 编辑部预设优化动作(重写意见 chips)
   const [proseActions, setProseActions] = useState<EditorAction[]>([]);
@@ -340,8 +371,9 @@ export default function WritePanel({ pid, outlines }: Props) {
     void openReader(n);
   }
 
-  // 移动端 FAB:点按=当前最该做的动作(未选章→开章节轨;本章未生成→生成本章;
-  // 已生成→展开动作扇);长按(≥0.5s,仅已有正文时)直接展开动作扇
+  // 移动端 FAB:点按=当前阶段(deriveStage,与 StageBar 共用)的主动作——
+  // 未选章→开章节轨;待生成→生成本章;被拦截→开审核 sheet;待审核→通过审核(带确认);
+  // 已定稿→选中下一章未写的章(仅选中不自动生成);长按(≥0.5s,仅已有正文时)直接展开动作扇
   function fabTouchStart() {
     fabLongRef.current = false;
     fabTimerRef.current = window.setTimeout(() => {
@@ -357,9 +389,31 @@ export default function WritePanel({ pid, outlines }: Props) {
   }
   function fabTap() {
     if (fabLongRef.current) { fabLongRef.current = false; return; } // 长按已处理
-    if (chapterNum === null) { setRailOpen(true); return; }
-    if (!currentBrief) { if (!genBlocked) void generate(chapterNum); return; }
-    setFanOpen(true);
+    // 任务锁:不再静默无效,给明确反馈(坏味道:FAB 静默无效 → toast)。
+    // approved 的「写下一章」只是选中下一章(不发起生成),不在拦截之列
+    if (genBlocked && (stage === "empty" || stage === "review")) {
+      toast.err("正在生成其他章节", genHint);
+      return;
+    }
+    switch (stage) {
+      case "unselected": setRailOpen(true); return;
+      case "empty": if (chapterNum !== null) void generate(chapterNum); return;
+      case "blocked": setCtx("review"); return; // ctx= 会触发参考 sheet 打开审核报告
+      case "review": if (chapterNum !== null) void approveFromFab(chapterNum); return;
+      case "approved":
+        if (nextChapterNum !== null) { void open(nextChapterNum); return; }
+        setFanOpen(true); return; // 全部写完:FAB 退化为动作扇入口
+      default: return; // generating:进度已有横幅/阶段条展示,点按不做事
+    }
+  }
+  // FAB 的「通过审核」带一次确认(移动端误触代价高,与 StageBar 主动作语义一致)
+  async function approveFromFab(n: number) {
+    const ok = await confirmDialog({
+      title: `通过第 ${n} 章审核?`,
+      body: "确认本章可定稿,通过后状态变为「已审」。",
+      confirmText: "通过审核",
+    });
+    if (ok) await approve(n);
   }
 
   // 左右滑切章(仅移动端、仅限已生成章):水平位移 >60px 且纵向位移小于水平的一半才触发,
@@ -463,6 +517,9 @@ export default function WritePanel({ pid, outlines }: Props) {
         outline_version_used: result.outline_version_used,
       });
       await reload();
+      // 生成后自动选章(坏味道 #8):当前未选章或选的就是它时把 ch 写进 URL,
+      // 消除"结果卡悬空 + 中栏请选择章节";用户中途切到别的章则不拽回
+      if (chapterNumRef.current === null || chapterNumRef.current === n) setChapterNum(n);
       // 重写完成:若有旧版快照,自动弹「旧版 vs 新版」对比供选择
       await openVersions(n, true);
     } catch (e) {
@@ -542,7 +599,10 @@ export default function WritePanel({ pid, outlines }: Props) {
 
   const genBlocked = !!genJob;
   const genHint = genJob
-    ? (genJob.num === chapterNum ? "本章任务进行中" : `第 ${genJob.num} 章任务进行中,完成后可继续操作`)
+    ? (genJob.num === 0
+      // num=0 是切走重连的连写队列标记,没有具体章号,不给「第 0 章」
+      ? "连写任务进行中,完成后可继续操作"
+      : genJob.num === chapterNum ? "本章任务进行中" : `第 ${genJob.num} 章任务进行中,完成后可继续操作`)
     : "";
 
   // ---- 统一动作 dispatch(D 阶段):快捷键/命令面板/Tauri 菜单共用的章级 handler ----
@@ -648,8 +708,8 @@ export default function WritePanel({ pid, outlines }: Props) {
               : "选择章节"}
           </button>
           <button type="button" className="m-topbar-btn" disabled={!currentBrief}
-            title={currentBrief ? "阅读本章" : "先在章节轨选一章已生成的章节"}
-            onClick={() => chapterNum !== null && nav(`/project/${pid}/read?ch=${chapterNum}`)}>
+            title={currentBrief ? "阅读本章(全屏阅读器,可选段润色)" : "先在章节轨选一章已生成的章节"}
+            onClick={() => chapterNum !== null && void openReader(chapterNum)}>
             阅读
           </button>
         </div>
@@ -689,6 +749,8 @@ export default function WritePanel({ pid, outlines }: Props) {
               onReviseCancel={() => setReviseFor(null)}
               approving={approving}
               onApprove={approve}
+              releasing={releasing}
+              onRelease={releaseChapter}
               onOpen={open}
               onOpenReader={openReader}
               onGenerate={(n) => generate(n)}
@@ -696,8 +758,33 @@ export default function WritePanel({ pid, outlines }: Props) {
           </div>
         )}
 
-        {/* ---- 中栏:当前章正文 + 蓝图 + 动作产出卡(移动端支持左右滑切章) ---- */}
+        {/* ---- 中栏:阶段条(顶部)+ 当前章正文 + 蓝图 + 动作产出卡(移动端支持左右滑切章) ---- */}
         <div className="write-main" onTouchStart={onMainTouchStart} onTouchEnd={onMainTouchEnd}>
+          {/* 阶段条:状态驱动流水线的唯一动作入口,选章/空态/生成中/拦截/待审/定稿全覆盖 */}
+          <StageBar
+            stage={stage}
+            isMobile={isMobile}
+            stale={!!currentBrief?.is_stale}
+            genStage={genJob?.stage ?? ""}
+            genBlocked={genBlocked}
+            genHint={genHint}
+            actBusy={approving !== null || releasing !== null}
+            hasCurrent={!!current}
+            nextNum={nextChapterNum}
+            onOpenRail={() => setRailOpen(true)}
+            onGenerate={() => { if (chapterNum !== null) void generate(chapterNum); }}
+            onApprove={() => { if (chapterNum !== null) void approve(chapterNum); }}
+            onRelease={() => { if (chapterNum !== null) void releaseChapter(chapterNum); }}
+            onOpenReview={() => setCtx("review")}
+            onNextChapter={() => { if (nextChapterNum !== null) void open(nextChapterNum); }}
+            onAct={(a) => {
+              if (a === "revise") openReviseWith(reviseDraft);
+              else setAct(a);
+            }}
+            onVersions={() => { if (chapterNum !== null) void openVersions(chapterNum); }}
+            onOpenSettings={() => nav(`/project/${pid}/settings`)}
+          />
+
           {versionsFor !== null && versions !== null && (
             <VersionCompare
               chapterNumber={versionsFor}
@@ -715,6 +802,9 @@ export default function WritePanel({ pid, outlines }: Props) {
             <GenResultCard
               pid={pid}
               result={genResult}
+              genBlocked={genBlocked}
+              genHint={genHint}
+              onClose={() => setGenResult(null)}
               onChanged={() => {
                 reload();
                 // 修订/放行后同步刷新右侧打开的正文(失效缓存,共享 qk.chapter 自动重拉)
@@ -729,7 +819,7 @@ export default function WritePanel({ pid, outlines }: Props) {
             />
           )}
 
-          {/* 底部动作条打开的动作卡(act= 进 URL,可刷新/分享);移动端为全屏 sheet */}
+          {/* 阶段条「更多动作」打开的动作卡(act= 进 URL,可刷新/分享);移动端为全屏 sheet */}
           {isMobile && act && current ? (
             <div className="m-sheet-overlay">
               <div className="m-sheet">
@@ -801,7 +891,7 @@ export default function WritePanel({ pid, outlines }: Props) {
                     </span>
                   </div>
                 )}
-                {!editing && <div className="content-head-tip">改文笔?点底部动作条的「润色」</div>}
+                {!editing && <div className="content-head-tip">改文笔?点上方阶段条的「更多动作 → 润色」</div>}
                 {editing ? (
                   <textarea
                     className="editor-area"
@@ -837,6 +927,8 @@ export default function WritePanel({ pid, outlines }: Props) {
             chapterNum={chapterNum}
             current={current}
             currentOutline={currentOutline}
+            genBlocked={genBlocked}
+            genHint={genHint}
             onChanged={() => reload()}
             onRewrite={() => {
               if (chapterNum !== null) openReviseWith("");
@@ -846,45 +938,8 @@ export default function WritePanel({ pid, outlines }: Props) {
         )}
       </div>
 
-      {/* ---- 底部动作条:章级动作入口,act= 写进 URL 并在中栏开卡 ---- */}
-      <div className="write-actions">
-        <button className="primary btn-sm" disabled={genBlocked || chapterNum === null || !!currentBrief}
-          title={chapterNum === null
-            ? "先在左侧章节轨选一章"
-            : currentBrief ? "本章已有正文,要重写请用「重写」" : undefined}
-          onClick={() => chapterNum !== null && generate(chapterNum)}>
-          生成本章
-        </button>
-        <button className="btn-sm" disabled={genBlocked || !current}
-          title={!current ? "先在左侧选一章已生成的章节" : undefined}
-          onClick={() => openReviseWith(reviseDraft)}>
-          重写
-        </button>
-        <button className={"btn-sm" + (act === "polish" ? " primary" : "")} disabled={!current}
-          title={!current ? "先在左侧选一章已生成的章节" : undefined}
-          onClick={() => setAct(act === "polish" ? null : "polish")}>
-          润色
-        </button>
-        <button className={"btn-sm" + (act === "proofread" ? " primary" : "")} disabled={!current}
-          title={!current ? "先在左侧选一章已生成的章节" : undefined}
-          onClick={() => setAct(act === "proofread" ? null : "proofread")}>
-          校对
-        </button>
-        <button className={"btn-sm" + (act === "review" ? " primary" : "")} disabled={!current}
-          title={!current ? "先在左侧选一章已生成的章节" : undefined}
-          onClick={() => setAct(act === "review" ? null : "review")}>
-          评分
-        </button>
-        <button className={"btn-sm" + (queueMode ? " primary" : "")}
-          onClick={() => { setQueueMode(!queueMode); setQueuePicked(new Set()); }}>
-          连写
-        </button>
-        <div className="grow" />
-        <button className="btn-sm" title="字数守卫 / 审校把关 / 世界观硬规则"
-          onClick={() => nav(`/project/${pid}/settings`)}>
-          ⚙︎ 设置
-        </button>
-      </div>
+      {/* 底部动作条已删除:章级动作由中栏顶部 StageBar(阶段主动作 + 更多动作下拉)承接,
+          连写入口保留在左栏 ChapterRail 头部,本书设置入口在 StageBar 右端 ⚙︎ */}
 
       {/* ---- 移动端:章节轨全屏抽屉(选章/阅读后自动关闭;连写队列也在这里进) ---- */}
       {isMobile && railOpen && (
@@ -923,6 +978,8 @@ export default function WritePanel({ pid, outlines }: Props) {
               onReviseCancel={() => setReviseFor(null)}
               approving={approving}
               onApprove={approve}
+              releasing={releasing}
+              onRelease={releaseChapter}
               onOpen={openFromRail}
               onOpenReader={openReaderFromRail}
               onGenerate={(n) => generate(n)}
@@ -946,6 +1003,8 @@ export default function WritePanel({ pid, outlines }: Props) {
               chapterNum={chapterNum}
               current={current}
               currentOutline={currentOutline}
+              genBlocked={genBlocked}
+              genHint={genHint}
               onChanged={() => reload()}
               onRewrite={() => {
                 closeRefSheet();
@@ -965,12 +1024,22 @@ export default function WritePanel({ pid, outlines }: Props) {
       {isMobile && (
         <>
           <button type="button" className="m-fab"
-            disabled={genBlocked && chapterNum !== null && !currentBrief}
-            title={chapterNum === null ? "选择章节" : !currentBrief ? "生成本章" : "章级动作"}
+            disabled={stage === "generating"}
+            title={stage === "unselected" ? "选择章节"
+              : stage === "empty" ? (genBlocked ? genHint : "生成本章")
+              : stage === "blocked" ? "去处理门禁拦截"
+              : stage === "review" ? "通过审核"
+              : stage === "approved" ? (nextChapterNum !== null ? `写下一章(第${nextChapterNum}章)` : "章级动作")
+              : "生成中…"}
             onTouchStart={fabTouchStart}
             onTouchEnd={fabTouchEnd}
             onClick={fabTap}>
-            {chapterNum === null ? "选章" : !currentBrief ? "生成" : "✍"}
+            {stage === "unselected" ? "选章"
+              : stage === "empty" ? "生成"
+              : stage === "generating" ? "…"
+              : stage === "blocked" ? "处理"
+              : stage === "review" ? "通过"
+              : nextChapterNum !== null ? "下一章" : "✍"}
           </button>
           <button type="button" className="m-fab-more" title="更多动作"
             onClick={() => setFanOpen(true)}>⋮</button>
@@ -983,18 +1052,18 @@ export default function WritePanel({ pid, outlines }: Props) {
                   onClick={() => { setFanOpen(false); openReviseWith(reviseDraft); }}>
                   重写
                 </button>
-                <button type="button" disabled={!current}
-                  title={!current ? "先在章节轨选一章已生成的章节" : undefined}
+                <button type="button" disabled={!current || genBlocked}
+                  title={!current ? "先在章节轨选一章已生成的章节" : genBlocked ? genHint : undefined}
                   onClick={() => { setFanOpen(false); setAct("polish"); }}>
                   润色
                 </button>
-                <button type="button" disabled={!current}
-                  title={!current ? "先在章节轨选一章已生成的章节" : undefined}
+                <button type="button" disabled={!current || genBlocked}
+                  title={!current ? "先在章节轨选一章已生成的章节" : genBlocked ? genHint : undefined}
                   onClick={() => { setFanOpen(false); setAct("proofread"); }}>
                   校对
                 </button>
-                <button type="button" disabled={!current}
-                  title={!current ? "先在章节轨选一章已生成的章节" : undefined}
+                <button type="button" disabled={!current || genBlocked}
+                  title={!current ? "先在章节轨选一章已生成的章节" : genBlocked ? genHint : undefined}
                   onClick={() => { setFanOpen(false); setAct("review"); }}>
                   评分
                 </button>
@@ -1004,7 +1073,7 @@ export default function WritePanel({ pid, outlines }: Props) {
         </>
       )}
 
-      {/* ---- 移动端底部栏:写 / 读 / 参考 / 设置(吸底,safe-area 垫高) ---- */}
+      {/* ---- 移动端底部栏:写 / 读 / 参考 / 本书设置(吸底,safe-area 垫高) ---- */}
       {isMobile && (
         <nav className="m-bottombar">
           <button type="button" className={"m-bb-item" + (!refSheetVisible ? " on" : "")}
@@ -1015,17 +1084,17 @@ export default function WritePanel({ pid, outlines }: Props) {
             <span className="m-bb-glyph">✍</span>写
           </button>
           <button type="button" className="m-bb-item" disabled={!currentBrief}
-            title={currentBrief ? "阅读本章" : "先在章节轨选一章已生成的章节"}
-            onClick={() => chapterNum !== null && nav(`/project/${pid}/read?ch=${chapterNum}`)}>
+            title={currentBrief ? "阅读本章(全屏阅读器,可选段润色)" : "先在章节轨选一章已生成的章节"}
+            onClick={() => chapterNum !== null && void openReader(chapterNum)}>
             <span className="m-bb-glyph">📖</span>读
           </button>
           <button type="button" className={"m-bb-item" + (refSheetVisible ? " on" : "")}
             onClick={() => (refSheetVisible ? closeRefSheet() : setRefSheetOpen(true))}>
             <span className="m-bb-glyph">🗂</span>参考
           </button>
-          <button type="button" className="m-bb-item"
+          <button type="button" className="m-bb-item" title="本书设置:字数守卫 / 审校把关 / 世界观硬规则"
             onClick={() => nav(`/project/${pid}/settings`)}>
-            <span className="m-bb-glyph">⚙︎</span>设置
+            <span className="m-bb-glyph">⚙︎</span>本书设置
           </button>
         </nav>
       )}

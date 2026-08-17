@@ -1,5 +1,5 @@
 // 一致性看板:全书概览(进度地图) + 人物卡管理 + 故事圣经(时序快照) + 伏笔四态面板。
-// tab 由 book 区经 props 受控传入(tab 进 URL);CharactersBoard/ForeshadowBoard 导出供 write 区参考抽屉复用。
+// tab 由 book 区经 props 受控传入(tab 进 URL);CharactersBoard/ForeshadowBoard/BibleBoard 导出供 write 区参考抽屉复用。
 import { useCallback, useEffect, useState } from "react";
 import {
   api, BibleSnapshot, CharacterCard, CharactersOut, FactOut, ForeshadowOut, Outline,
@@ -34,8 +34,10 @@ function cellState(c: OverviewChapter): string {
   return c.status;
 }
 
+// 格子状态文案。注意:drafting 保留——overview 接口仍用它标记「生成中」(overview.py,蓝色脉动),
+// 与章节 status 的死枚举清理不同源;drafted 已删(后端不再产生);finalized 为存量旧数据保留
 const CELL_CN: Record<string, string> = {
-  empty: "未生成", drafting: "生成中", drafted: "草稿", finalized: "定稿", stale: "失配",
+  empty: "未生成", drafting: "生成中", finalized: "定稿", stale: "失配",
   pending_review: "待审", approved: "已审", quarantined: "拦截",
 };
 
@@ -402,7 +404,7 @@ export function CharactersBoard({ pid }: { pid: number }) {
 
 /* ================= 故事圣经 ================= */
 
-function BibleBoard({ pid, outlines }: Props) {
+export function BibleBoard({ pid, outlines }: Props) {
   const maxCh = outlines.length ? Math.max(...outlines.map((o) => o.chapter_number)) : 1;
   const [atChapter, setAtChapter] = useState(maxCh);
   // 输入框用字符串保存原始输入(允许清空重输),仅在解析合法时才切换章节时刻

@@ -8,7 +8,7 @@ import { errMsg } from "../../pollJob";
 import { dispatchAction } from "../../ui/actions";
 import { useJob } from "../../ui/useJob";
 import { toast } from "../../ui/Toaster";
-import { confirmDialog } from "../../ui/ConfirmDialog";
+import { confirmAndReleaseGate } from "./releaseGate";
 
 // 审校五维分中文标签;旧快照无 continuity 键,Object.entries 遍历天然不渲染该行
 const SCORE_LABEL: Record<string, string> = {
@@ -32,12 +32,19 @@ interface Props {
   onChanged: () => void;
   // 「重写」引导:展开本章的行内重写框
   onRewrite: () => void;
+  // 关闭按钮(右上角 ×):仅刚生成完的结果卡传入(WritePanel setGenResult(null));
+  // 历史模式(审核报告)由抽屉/sheet 容器负责关闭,不传
+  onClose?: () => void;
+  // 任务锁(坏味道 #9 统一):有生成/重写任务在跑时禁用「按建议修订」与门禁横幅
+  // 「放行」(gate-release 后端对进行中的章节任务返回 409),title 给原因
+  genBlocked?: boolean;
+  genHint?: string;
   // 历史模式:从章节列表「审核报告」打开(非刚生成完)。标题换为「审核报告」,
   // 无当次一致性检查数据时不显示"检查通过"徽标;拦截状态按章节 status 推导
   historical?: boolean;
 }
 
-export default function GenResultCard({ pid, result, onChanged, onRewrite, historical }: Props) {
+export default function GenResultCard({ pid, result, onChanged, onRewrite, onClose, genBlocked, genHint, historical }: Props) {
   const { run } = useJob();
   const n = result.chapter_number;
   // 问题清单:挂载后按章拉取(与生成响应里的 consistency_issues 互补,这份可操作)
@@ -104,25 +111,17 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, histo
   }
 
   // quarantined 放行:确认忽略全部 blocker → 异步补走圣经/摘要链路,状态回 pending_review
+  // (确认+调用逻辑与 WritePanel.releaseChapter 共用 ./releaseGate)
   async function releaseGate() {
-    const blockers = result.gate?.blockers?.length ?? 0;
-    const ok = await confirmDialog({
-      title: `放行第 ${n} 章?`,
-      body: `将忽略全部${blockers ? ` ${blockers} 个` : ""}致命矛盾,并补走圣经抽取/滚动摘要等被跳过的同步。矛盾仍留在正文里,后续章节可能继续触发提醒。`,
-      confirmText: "放行(忽略全部)",
-      danger: true,
-    });
-    if (!ok) return;
     setGateBusy(true);
     try {
-      const res = await run(() => api.gateRelease(pid, n), { kind: `gate-release-${pid}-${n}` });
-      if (res !== null) {
-        toast.ok(`第 ${n} 章已放行`, "状态变为「待审」,圣经/摘要已补齐");
+      const released = await confirmAndReleaseGate({
+        pid, n, blockerCount: result.gate?.blockers?.length ?? 0, run,
+      });
+      if (released) {
         await reloadIssues();
         onChanged();
       }
-    } catch (e) {
-      toast.err("放行失败", errMsg(e));
     } finally {
       setGateBusy(false);
     }
@@ -170,7 +169,15 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, histo
 
   return (
     <div className={"card " + (quarantined ? "card-warn" : "card-ok")}>
-      <b>{historical ? "审核报告" : "生成完成"}</b> {result.word_count} 字
+      <div className="card-head">
+        <b className="grow">{historical ? "审核报告" : "生成完成"}</b>
+        {/* 关闭入口(引导断裂修复):结果卡此前只能切章才消失,给用户明确的退出路径 */}
+        {onClose && (
+          <button className="btn-sm" title="关闭结果卡(正文已保存,可随时从参考抽屉「审核」复查)"
+            onClick={onClose}>×</button>
+        )}
+      </div>
+      {result.word_count} 字
       {result.ai_flavor && (
         <span className={"badge" + (result.ai_flavor.score >= FLAVOR_HIGH ? " warn" : "")}
           title={flavorTitle(result.ai_flavor)}>
@@ -195,7 +202,9 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, histo
             确认矛盾可接受时可放行(忽略全部),放行后进入「待审」。
           </div>
           <div className="issue-actions">
-            <button className="danger btn-sm" disabled={gateBusy} onClick={releaseGate}>
+            <button className="danger btn-sm" disabled={gateBusy || genBlocked}
+              title={genBlocked ? genHint : "忽略全部致命矛盾,补走圣经/摘要链路,状态回「待审」"}
+              onClick={releaseGate}>
               {gateBusy && <span className="spin spin-sm" />}放行(忽略全部)
             </button>
             <button className="btn-sm" disabled={gateBusy} onClick={onRewrite}>去重写本章</button>
@@ -252,6 +261,7 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, histo
         )}
         {openIssues.map((issue) => (
           <IssueRow key={issue.id} issue={issue} busy={busyIssue === issue.id}
+            genBlocked={genBlocked} genHint={genHint}
             onApply={() => applyRevision(issue)}
             onResolve={() => markIssue(issue, "resolved")}
             onIgnore={() => markIssue(issue, "ignored")} />
@@ -308,10 +318,13 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, histo
 }
 
 // 单条问题:severity 徽标 + 来源 + 描述 + 可折叠证据 + 建议;open 状态给三个操作
-function IssueRow({ issue, busy, done, onApply, onResolve, onIgnore }: {
+function IssueRow({ issue, busy, done, genBlocked, genHint, onApply, onResolve, onIgnore }: {
   issue: ChapterIssue;
   busy: boolean;
   done?: boolean;
+  // 任务锁:生成/重写任务在跑时禁用「按建议修订」(它也是一条重写链路,409 会被后端拦)
+  genBlocked?: boolean;
+  genHint?: string;
   onApply?: () => void;
   onResolve?: () => void;
   onIgnore?: () => void;
@@ -335,8 +348,8 @@ function IssueRow({ issue, busy, done, onApply, onResolve, onIgnore }: {
       {issue.suggestion && <div className="muted">建议: {issue.suggestion}</div>}
       {!done && (
         <div className="issue-actions">
-          <button className="primary btn-sm" disabled={busy}
-            title="把该问题的修正建议交给 AI 走重写链路(受理即标记解决,门禁会重跑验证)"
+          <button className="primary btn-sm" disabled={busy || genBlocked}
+            title={genBlocked ? genHint : "把该问题的修正建议交给 AI 走重写链路(受理即标记解决,门禁会重跑验证)"}
             onClick={onApply}>
             {busy && <span className="spin spin-sm" />}按建议修订
           </button>

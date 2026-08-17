@@ -2451,23 +2451,55 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .ref-drawer .char-grid { grid-template-columns: 1fr; }
 .ref-body { font-size: var(--fs-sm); }
 
-/* 底部动作条:生成本章/重写/润色/校对/评分/连写 + 设置入口,吸底常驻 */
-.write-actions {
+/* 阶段条:中栏顶部,状态驱动流水线的唯一动作入口(替代旧底部动作条)。
+   阶段圆点 + 阶段名 + 引导文案 + 1-2 个主动作 + 「更多动作」下拉 + 本书设置入口 */
+.stage-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  position: sticky;
-  bottom: 0;
-  z-index: 20;
-  margin-top: 14px;
+  gap: 10px;
+  flex-wrap: wrap;              /* 窄屏(≤767px)主动作可换行,不溢出 */
+  margin-bottom: 10px;
   padding: 10px 14px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-sm);
 }
-.write-actions .grow { flex: 1; }
+.stage-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--line-strong); }
+.stage-dot.st-empty { background: var(--brand); }
+.stage-dot.st-generating { background: var(--brand); animation: stage-pulse 1.2s infinite; }
+.stage-dot.st-blocked { background: var(--err); }
+.stage-dot.st-review { background: var(--warn); }
+.stage-dot.st-approved { background: var(--ok); }
+@keyframes stage-pulse { 50% { opacity: 0.4; } }
+.stage-name { flex-shrink: 0; }
+.stage-guide { color: var(--text-2); font-size: var(--fs-sm); min-width: 0; }
+.stage-bar .grow { flex: 1; }
+/* 「更多动作」下拉:相对定位锚点 + 全屏透明背板(点外关闭) */
+.stage-more { position: relative; }
+.stage-more-backdrop { position: fixed; inset: 0; z-index: 29; }
+.stage-more-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+  min-width: 128px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-sm);
+}
+.stage-more-menu button {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: var(--r-sm);
+}
+.stage-more-menu button:hover:not(:disabled) { background: var(--surface-2); }
 
 /* read 区:单章纯阅读页 */
 .read-zone { max-width: 760px; margin: 0 auto; }
@@ -2617,14 +2649,13 @@ button.m-bb-item + button.m-bb-item { margin-left: 0; }
 .m-pick-guide .btn-sm { min-height: 44px; padding: 0 18px; font-size: var(--fs-sm); }
 
 @media (max-width: 767px) {
-  /* write 区:三栏退化为单列;底部动作条隐藏,功能由 FAB + 动作扇承接 */
+  /* write 区:三栏退化为单列;章级动作由阶段条(可换行)+ FAB + 动作扇承接 */
   .write-zone {
     padding-bottom: calc(76px + constant(safe-area-inset-bottom));
     padding-bottom: calc(76px + env(safe-area-inset-bottom));
   }
   .write-bench { flex-direction: column; }
   .write-rail { width: 100%; }
-  .write-actions { display: none; }
 
   /* 区导航/项目头:窄屏紧凑,允许折行不溢出 */
   .zone-tab { padding: 6px 10px; gap: 6px; }
@@ -2695,7 +2726,7 @@ button.m-bb-item + button.m-bb-item { margin-left: 0; }
    区导航/项目头/统计条/引导条在 write-zone 之外,用 :has 从外层隐藏。 */
 .write-zone.immersive .write-rail,
 .write-zone.immersive .ref-wrap,
-.write-zone.immersive .write-actions { display: none; }
+.write-zone.immersive .stage-bar { display: none; }
 .write-zone.immersive .write-main { max-width: 860px; width: 100%; margin: 0 auto; }
 body:has(.write-zone.immersive) .project-head,
 body:has(.write-zone.immersive) .stat-strip,

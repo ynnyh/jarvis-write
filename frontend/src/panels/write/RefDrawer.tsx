@@ -1,5 +1,5 @@
 // write 区右栏「参考抽屉」:默认折叠为竖排图标条,点开 360px 抽屉,ctx= 进 URL(与 ch 共存)。
-// 项:蓝图(当前章 outline 详情)/人物/伏笔(复用 BoardPanel 子板)/审核报告(当前章 review 快照)/
+// 项:蓝图(当前章 outline 详情)/人物/伏笔/圣经(复用 BoardPanel 子板)/审核报告(当前章 review 快照)/
 // 历史版本(入口,实际在中栏打开 VersionCompare)。世界观规则在 settings 区,不在此抽屉。
 // 移动端(mobile=true):同一组件换容器——由 WritePanel 的全屏 sheet 包裹,
 // 图标条横排在 sheet 顶部,内容区平铺(样式见 styles.css 移动端壳一节)。
@@ -11,18 +11,20 @@ import {
 } from "../../api";
 import { qk } from "../../hooks/queries";
 import GenResultCard from "../chapters/GenResultCard";
-import { CharactersBoard, ForeshadowBoard } from "../BoardPanel";
+import { BibleBoard, CharactersBoard, ForeshadowBoard } from "../BoardPanel";
 
 // 抽屉项:key=ctx 参数值(versions 不设 ctx,点击直接在中栏开对比)
 const ITEMS: { key: string; icon: string; label: string }[] = [
   { key: "blueprint", icon: "🧭", label: "蓝图" },
   { key: "characters", icon: "👥", label: "人物" },
   { key: "foreshadow", icon: "🧵", label: "伏笔" },
+  { key: "bible", icon: "📖", label: "圣经" },
   { key: "review", icon: "🛡", label: "审核" },
   { key: "versions", icon: "🕘", label: "版本" },
 ];
 const CTX_TITLE: Record<string, string> = {
-  blueprint: "本章蓝图", characters: "人物", foreshadow: "伏笔", review: "审核报告",
+  blueprint: "本章蓝图", characters: "人物", foreshadow: "伏笔", bible: "故事圣经",
+  review: "审核报告",
 };
 
 interface Props {
@@ -39,11 +41,15 @@ interface Props {
   onOpenVersions: () => void;
   // 移动端:图标条横排、内容平铺(全屏 sheet 容器由 WritePanel 提供)
   mobile?: boolean;
+  // 任务锁(与 StageBar 次动作同源):有生成/重写任务在跑时,审核报告卡内的
+  // 「按建议修订/放行」一并禁用——gate-release 后端会对进行中的章节任务 409
+  genBlocked?: boolean;
+  genHint?: string;
 }
 
 export default function RefDrawer({
   pid, outlines, chapterNum, current, currentOutline, onChanged, onRewrite, onOpenVersions,
-  mobile = false,
+  mobile = false, genBlocked, genHint,
 }: Props) {
   const [searchParams, setSearchParams] = useSearchParams();
   const qc = useQueryClient();
@@ -106,7 +112,7 @@ export default function RefDrawer({
       </div>
       {/* 移动端 sheet 未选 ctx 时给引导;桌面端 ctx 为 null 即收起,不渲染内容 */}
       {mobile && !ctx && (
-        <div className="muted m-ref-empty">点上方图标查看本章蓝图、人物、伏笔或审核报告。</div>
+        <div className="muted m-ref-empty">点上方图标查看本章蓝图、人物、伏笔、圣经或审核报告。</div>
       )}
       {ctx && (
         <div className={"ref-drawer" + (mobile ? " ref-drawer-m" : "")}>
@@ -134,6 +140,8 @@ export default function RefDrawer({
 
           {ctx === "characters" && <CharactersBoard pid={pid} />}
           {ctx === "foreshadow" && <ForeshadowBoard pid={pid} outlines={outlines} />}
+          {/* 故事圣经(时间机)进抽屉:写第 N 章时查任意时刻世界状态不离开写作上下文 */}
+          {ctx === "bible" && <BibleBoard pid={pid} outlines={outlines} />}
 
           {ctx === "review" && (
             chapterNum === null || !current ? (
@@ -143,6 +151,8 @@ export default function RefDrawer({
                 pid={pid}
                 result={reviewReportResult}
                 historical
+                genBlocked={genBlocked}
+                genHint={genHint}
                 onChanged={() => {
                   onChanged(reviewReportResult.chapter_number);
                   // 修订/放行后同步刷新主审快照
