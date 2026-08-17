@@ -42,12 +42,12 @@ features:
 
 ## 直击现场
 
-写作以章节为中心：左侧章节轨管选章与状态，中间正文永远是视觉重心，右侧参考抽屉放蓝图/人物/伏笔/审核报告，底部动作条一键发起生成、重写、润色、校对、评分。
+正文即界面：打开就是本章正文，选中段落就地「改这段 / 手改」，多处问题边读边批注一次改；一条常驻 AI 窄栏梳理意见后锁情节整章优化或重写，改动一律 diff 逐条验收，旧版留快照。章首一张交稿单一句话报告自检（校对、与设定有无冲突），要改的一键带进验收流。
 
 <p align="center">
   <img src="./assets/screenshots/01-workbench.png" alt="写作工作台" width="860">
 </p>
-<p align="center"><i>写作工作台（截图为早期版本，界面已按「以章节为中心」重构，持续迭代中）</i></p>
+<p align="center"><i>写作区（截图为早期三栏版本；现已升级为「正文即界面」单栏交互——正文为主场、段落气泡改写、AI 窄栏常驻、章首交稿单，截图待更新）</i></p>
 
 改大纲不再是大工程。改任意一章，系统自动分级改动、分析下游影响、勾选后级联重生成：
 
@@ -58,7 +58,7 @@ features:
 
 ## 移动端
 
-手机浏览器打开即用：进来就是当前章正文，底部栏 + 悬浮动作按钮，左右滑动切章，参考与结果以全屏面板弹出。
+手机浏览器打开即用：进来就是全屏正文，顶栏只留返回 / 章题（点＝目录）/ 任务中心；改段落、AI 窄栏、交稿单、目录、书房都以全屏 sheet 弹出，左右滑动切章。
 
 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;max-width:600px;margin:16px 0;">
   <img src="./assets/screenshots/mobile-01.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
@@ -71,7 +71,7 @@ features:
   <img src="./assets/screenshots/mobile-08.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
   <img src="./assets/screenshots/mobile-09.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
 </div>
-<p><i>移动端截图（界面持续迭代中）</i></p>
+<p><i>移动端截图（早期版本；现已改为全屏正文 + 顶栏目录 / 任务中心 + 全屏 sheet，截图待更新）</i></p>
 
 ## 三种使用方式
 

@@ -173,7 +173,7 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, onClo
         <b className="grow">{historical ? "审核报告" : "生成完成"}</b>
         {/* 关闭入口(引导断裂修复):结果卡此前只能切章才消失,给用户明确的退出路径 */}
         {onClose && (
-          <button className="btn-sm" title="关闭结果卡(正文已保存,可随时从参考抽屉「审核」复查)"
+          <button className="btn-sm" title="关闭结果卡(正文已保存,可随时从章首状态卡「查看审核报告」复查)"
             onClick={onClose}>×</button>
         )}
       </div>
@@ -187,7 +187,7 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, onClo
       {result.ai_flavor && result.ai_flavor.score >= FLAVOR_HIGH && (
         <>
           <span className="muted"> 腔调偏重,建议过一遍去味</span>
-          <button className="btn-sm" title="打开本章的润色工作台(默认去AI味方向)"
+          <button className="btn-sm" title="打开 AI 栏梳理整章优化意见(默认去AI味方向)"
             onClick={() => dispatchAction("polish")}>
             一键去味
           </button>

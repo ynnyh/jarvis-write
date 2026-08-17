@@ -1,5 +1,5 @@
 // quarantined 放行(确认 + 异步 job + toast)的共用逻辑:
-// GenResultCard 门禁横幅与 WritePanel.releaseChapter(StageBar blocked 主动作 / 章节轨行内按钮)共用,
+// GenResultCard 门禁横幅与 WritePanel.releaseChapter(章首状态卡[放行]按钮)共用,
 // 提取于此避免两处确认文案/调用漂移。返回 true=已放行(调用方自行刷新各自视图)。
 import { api } from "../../api";
 import { errMsg } from "../../pollJob";

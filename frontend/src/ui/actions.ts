@@ -7,10 +7,11 @@
 // handler 一律经 ref 取最新实现(见 WritePanel/ProjectPage 的 actionHandlersRef),
 // 注册只在挂载/卸载发生,避免闭包过期。
 export type AppAction =
-  // 章级(作用于当前 ch,由 WritePanel 注册)
-  | "save" | "generate" | "revise" | "polish" | "proofread" | "review"
+  // 章级(作用于当前 ch,由 WritePanel 注册;save 已随整章编辑态删除,
+  // toggle-ref 已随参考抽屉废除——「正文即界面」P1,见 docs/10 §8)
+  | "generate" | "revise" | "polish" | "proofread" | "review"
   | "versions" | "queue"
-  | "prev-chapter" | "next-chapter" | "toggle-rail" | "toggle-ref" | "immersive"
+  | "prev-chapter" | "next-chapter" | "toggle-rail" | "immersive"
   // 全局(由 ProjectPage 注册)
   | "command-palette" | "open-read-window"
   | "goto-setup" | "goto-write" | "goto-book" | "goto-settings" | "goto-help"
@@ -18,9 +19,9 @@ export type AppAction =
   | "export-txt" | "export-epub";
 
 const ALL_ACTIONS: AppAction[] = [
-  "save", "generate", "revise", "polish", "proofread", "review",
+  "generate", "revise", "polish", "proofread", "review",
   "versions", "queue",
-  "prev-chapter", "next-chapter", "toggle-rail", "toggle-ref", "immersive",
+  "prev-chapter", "next-chapter", "toggle-rail", "immersive",
   "command-palette", "open-read-window",
   "goto-setup", "goto-write", "goto-book", "goto-settings", "goto-help",
   "theme-light", "theme-dark", "theme-auto",

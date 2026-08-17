@@ -1,5 +1,6 @@
 // 一致性看板:全书概览(进度地图) + 人物卡管理 + 故事圣经(时序快照) + 伏笔四态面板。
-// tab 由 book 区经 props 受控传入(tab 进 URL);CharactersBoard/ForeshadowBoard/BibleBoard 导出供 write 区参考抽屉复用。
+// tab 由 book 区经 props 受控传入(tab 进 URL);人物/伏笔/圣经看板仅此一处入口
+// (write 区参考抽屉已随「正文即界面」P1 废除,见 docs/10 §8)。
 import { useCallback, useEffect, useState } from "react";
 import {
   api, BibleSnapshot, CharacterCard, CharactersOut, FactOut, ForeshadowOut, Outline,

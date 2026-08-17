@@ -6,11 +6,11 @@ import { dispatchAction, isAppAction, registerActionHandler } from "../ui/action
 describe("dispatch 注册表", () => {
   it("注册后可 dispatch;注销后无人认领返回 false", () => {
     const fn = vi.fn();
-    const off = registerActionHandler("save", fn);
-    expect(dispatchAction("save")).toBe(true);
+    const off = registerActionHandler("generate", fn);
+    expect(dispatchAction("generate")).toBe(true);
     expect(fn).toHaveBeenCalledTimes(1);
     off();
-    expect(dispatchAction("save")).toBe(false);
+    expect(dispatchAction("generate")).toBe(false);
   });
 
   it("同一动作重复注册:栈顶(后注册者)优先,卸载后回落", () => {

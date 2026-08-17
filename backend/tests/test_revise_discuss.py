@@ -125,6 +125,51 @@ def test_revise_discuss_empty_directive_when_dash(client):
     assert r.json()["directive"] == ""
 
 
+def test_revise_discuss_parses_json_level(client):
+    """蒸馏按 JSON 契约输出时:directive 与 suggested_level(③polish/④regenerate)拆出。"""
+    headers = _auth(client, "revise_disc_json")
+    p = _create_project(client, headers)
+    _seed_chapter(p["id"])
+
+    from app.engines.pipeline import chapter as ch_mod
+
+    adapter = _ChatAdapter(
+        reply="那就只动文笔,情节保持。",
+        distilled='{"directive": "1. 去掉 AI 腔\\n2. 对话口语化", "level": "polish"}',
+    )
+    with patch.object(ch_mod, "get_adapter_for", return_value=adapter):
+        r = client.post(
+            f"/api/projects/{p['id']}/chapters/1/revise-discuss",
+            headers=headers,
+            json={"messages": [{"role": "user", "content": "文笔不行,情节没问题"}]},
+        )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "去掉 AI 腔" in body["directive"]
+    assert body["suggested_level"] == "polish"
+
+
+def test_revise_discuss_plain_text_no_level(client):
+    """模型没按 JSON 输出(旧行为):整段当 directive,suggested_level 为 None 中性呈现。"""
+    headers = _auth(client, "revise_disc_plain")
+    p = _create_project(client, headers)
+    _seed_chapter(p["id"])
+
+    from app.engines.pipeline import chapter as ch_mod
+
+    adapter = _ChatAdapter(reply="情节要动,建议重跑。", distilled="1. 重写结尾,留个钩子")
+    with patch.object(ch_mod, "get_adapter_for", return_value=adapter):
+        r = client.post(
+            f"/api/projects/{p['id']}/chapters/1/revise-discuss",
+            headers=headers,
+            json={"messages": [{"role": "user", "content": "结尾得重来"}]},
+        )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "重写结尾" in body["directive"]
+    assert body["suggested_level"] is None
+
+
 def test_revise_discuss_distill_failure_keeps_reply(client):
     """蒸馏调用抛错:不阻塞对话,reply 正常返回,directive 置空。"""
     headers = _auth(client, "revise_disc_fail")

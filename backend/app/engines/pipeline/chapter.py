@@ -23,7 +23,7 @@ from app.engines.consistency.checker import (
     continuity_score,
     persist_issues,
 )
-from app.engines.consistency.extractor import extract_and_apply
+from app.engines.consistency.extractor import extract_and_apply, parse_llm_json
 from app.engines.consistency.preflight import preflight_chapter
 from app.engines.consistency.repetition import avoid_block
 from app.engines.pipeline.handoff import extract_handoff_contract, load_handoff_block
@@ -742,15 +742,24 @@ async def discuss_revision(
     if not reply:
         raise ValueError("模型没有回应,请重试")
 
-    # ② 蒸馏:把含最新回复的完整对话提炼成「修改意见」(独立调用,不污染对话)
+    # ② 蒸馏:把含最新回复的完整对话提炼成「修改意见 + 档位建议」(独立调用,不污染对话)
     transcript = _format_revise_transcript(turns, reply)
     directive = ""
+    level: str | None = None
     try:
         raw = (await adapter.ask(REVISE_DISTILL_PROMPT.format(transcript=transcript))).strip()
-        # 蒸馏出"尚无明确意见"时约定回一个短横线,归一化成空串
+        # 蒸馏出"尚无明确意见"时约定回空/短横线,归一化成空串
         if raw and raw != "-":
-            directive = raw
+            parsed = parse_llm_json(raw)
+            if isinstance(parsed.get("directive"), str):
+                # JSON 契约:directive 正文 + level 档位建议(polish=锁情节优化 / regenerate=重生成)
+                directive = parsed["directive"].strip()
+                lv = parsed.get("level")
+                level = lv if lv in ("polish", "regenerate") else None
+            else:
+                # 模型没按 JSON 输出:整段当意见,不给档位建议(前端中性呈现两个选项)
+                directive = raw
     except Exception:  # noqa: BLE001 — 蒸馏失败不阻塞对话
         logger.warning("重写研讨蒸馏失败,directive 置空", exc_info=True)
 
-    return {"reply": reply, "directive": directive}
+    return {"reply": reply, "directive": directive, "suggested_level": level}

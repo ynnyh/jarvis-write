@@ -47,23 +47,32 @@ export function nthParaSpan(
   return null;
 }
 
-/** 正文按空行/换行分段渲染成 <p>,保证可读性;传 onSelect 时段落可点选(片段润色用) */
-export function Paragraphs({ text, selectedIdx, onSelect }: {
+/** 正文按空行/换行分段渲染成 <p>,保证可读性;传 onSelect 时段落可点选(片段润色用)。
+ *  markedIdx/staleIdx:②档批注的左侧标记(已批注/批注失效标灰),不传则无标记。 */
+export function Paragraphs({ text, selectedIdx, onSelect, markedIdx, staleIdx }: {
   text: string;
   selectedIdx?: number | null;
   onSelect?: (idx: number) => void;
+  markedIdx?: Set<number>;
+  staleIdx?: Set<number>;
 }) {
   const paras = splitParas(text);
   if (!paras.length) return <div className="muted">(空)</div>;
-  return <>{paras.map((p, i) => (
-    <p
-      key={i}
-      className={
-        (onSelect ? "pickable" : "") + (onSelect && selectedIdx === i ? " sel" : "") || undefined
-      }
-      onClick={onSelect ? (e) => { e.stopPropagation(); onSelect(i); } : undefined}
-    >{p}</p>
-  ))}</>;
+  return <>{paras.map((p, i) => {
+    const cls = [
+      onSelect ? "pickable" : "",
+      onSelect && selectedIdx === i ? "sel" : "",
+      markedIdx?.has(i) ? "para-annotated" : "",
+      staleIdx?.has(i) ? "para-annotated-stale" : "",
+    ].filter(Boolean).join(" ");
+    return (
+      <p
+        key={i}
+        className={cls || undefined}
+        onClick={onSelect ? (e) => { e.stopPropagation(); onSelect(i); } : undefined}
+      >{p}</p>
+    );
+  })}</>;
 }
 
 /** 阅读器个性化设置:背景主题/字体/字号,localStorage 持久化,不登录、跨项目生效 */

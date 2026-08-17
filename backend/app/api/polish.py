@@ -40,6 +40,9 @@ class SegmentPolishRequest(BaseModel):
 
 class ChapterPolishRequest(BaseModel):
     tendency: Tendency = Field(default_factory=dict)
+    # ③档整章优化:AI 窄栏多轮对话蒸馏出的修改意见,透传进润色 prompt(锁情节铁律仍优先)。
+    # 上限对齐 generate 的 revision(500):二者共用 revise-discuss 蒸馏出的同一份 directive。
+    directive: str = Field(default="", max_length=500)
 
 
 class PolishResult(BaseModel):
@@ -95,6 +98,7 @@ async def polish_chapter(
             ch.final_content,
             req.tendency,
             project.global_tendency,
+            directive=req.directive,
             cards=_cards(db, project_id),
         )
     except ValueError as exc:
@@ -118,7 +122,9 @@ async def polish_chapter_async(
 
     async def work(progress):
         progress(f"AI 正在润色第 {n} 章")
-        return await polish_text(text, req.tendency, global_tendency, cards=cards)
+        return await polish_text(
+            text, req.tendency, global_tendency, directive=req.directive, cards=cards
+        )
 
     return {"job_id": spawn_job(f"polish-{project_id}-{n}", work)}
 
@@ -246,7 +252,8 @@ class DiscussMessage(BaseModel):
 
 
 class DiscussRequest(BaseModel):
-    target: str = Field(min_length=1, description="选中、正在讨论的段落原文")
+    # 置空 = 无选段的整章自由问答(AI 窄栏「随便问」),只答不改,不产出 suggestion
+    target: str = Field(default="", description="选中、正在讨论的段落原文;空=整章自由问答")
     messages: list[DiscussMessage] = Field(default_factory=list)
 
 
@@ -267,6 +274,7 @@ async def discuss_chapter_fragment(
 
     注入本章蓝图摘要 + 选段在定稿正文中的上下文(前后各一段),
     模型给出改写建议时返回 suggestion,由前端确认后替换(复用润色链路)。
+    target 置空 = 无选段的整章自由问答(AI 窄栏):注入整章正文节选,只答不改。
     """
     get_project_or_404(db, project_id)
     ch = (
@@ -288,13 +296,14 @@ async def discuss_chapter_fragment(
             status_code=400, detail="对话过长,请开新的讨论"
         )
 
-    # 定位选段在定稿正文中的上下文(前后各一段窗口,仅供模型理解)
+    # 定位选段在定稿正文中的上下文(前后各一段窗口,仅供模型理解);无选段则跳过
     before = after = ""
     source = ch.final_content or ""
-    at = source.find(target)
-    if at >= 0:
-        before = source[:at]
-        after = source[at + len(target):]
+    if target:
+        at = source.find(target)
+        if at >= 0:
+            before = source[:at]
+            after = source[at + len(target):]
 
     outline = (
         db.query(Outline)
@@ -308,6 +317,7 @@ async def discuss_chapter_fragment(
             chapter_summary=outline.summary if outline else "",
             before=before,
             after=after,
+            chapter_excerpt=source,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -22,15 +22,14 @@ interface PaletteItem {
 interface ActionEntry { words: string[]; label: string; sub?: string; action?: AppAction; path?: string }
 const ACTION_ENTRIES: ActionEntry[] = [
   { words: ["生成"], label: "生成本章", action: "generate", sub: "Ctrl+Enter" },
-  { words: ["重写"], label: "重写本章", action: "revise" },
-  { words: ["润色"], label: "润色本章", action: "polish" },
+  { words: ["重写"], label: "和 AI 梳理本章修改意见", action: "revise" },
+  { words: ["润色"], label: "整章优化(和 AI 梳理)", action: "polish" },
   { words: ["校对"], label: "校对本章", action: "proofread" },
   { words: ["评分", "审核"], label: "主编评分", action: "review" },
   { words: ["版本", "历史"], label: "历史版本", action: "versions" },
   { words: ["连写", "队列"], label: "连写队列", action: "queue" },
   { words: ["沉浸"], label: "沉浸模式", action: "immersive", sub: "F11" },
-  { words: ["章节轨", "左栏"], label: "开合章节轨", action: "toggle-rail", sub: "Ctrl+B" },
-  { words: ["参考", "抽屉", "右栏"], label: "开合参考抽屉", action: "toggle-ref", sub: "Ctrl+\\" },
+  { words: ["目录", "章节"], label: "开合目录抽屉", action: "toggle-rail", sub: "Ctrl+B" },
   { words: ["阅读", "对照"], label: "打开对照阅读窗", action: "open-read-window" },
   { words: ["开书"], label: "去开书区", action: "goto-setup" },
   { words: ["写作"], label: "去写作区", action: "goto-write" },

@@ -28,6 +28,7 @@ from app.llm.router import Task, get_adapter_for
 from app.prompts.polish import (
     _DEAI_RULES,
     _OUTPUT_CONTRACT,
+    DISCUSS_CHAPTER_SYSTEM_PROMPT,
     DISCUSS_SUGGESTION_MARK,
     DISCUSS_SYSTEM_PROMPT,
     FACT_LOCK_PROMPT,
@@ -200,6 +201,7 @@ async def polish_text(
 _MAX_DISCUSS_TURNS = 40
 _MAX_DISCUSS_MSG_LEN = 2000
 _MAX_DISCUSS_CONTEXT_CHARS = 1200  # 上/下文各截断,防 token 膨胀
+_MAX_DISCUSS_CHAPTER_CHARS = 3000  # 无选段自由问答:整章正文注入 system 时截断
 
 
 def _split_discuss_output(raw: str) -> tuple[str, str | None]:
@@ -224,19 +226,20 @@ async def discuss_fragment(
     chapter_summary: str = "",
     before: str = "",
     after: str = "",
+    chapter_excerpt: str = "",
 ) -> dict:
     """就选中段落与作者多轮对话:可解释、可给改写建议。
 
     - messages:对话历史 [{role, content}, ...],最后一条应为作者(user)发言。
-    - target:作者选中、正在讨论的段落原文。
+    - target:作者选中、正在讨论的段落原文;置空 = 无选段的整章自由问答
+      (AI 窄栏「随便问」),此时只答不改,不产出改写建议。
     - chapter_summary / before / after:上下文(本章梗概、选段上下文),仅供理解。
+    - chapter_excerpt:无选段时注入的整章正文(截断注入,防 token 膨胀)。
 
     返回 {reply, suggestion};suggestion 非空时前端浮出「采用此改写」按钮,
     复用与润色相同的替换+同步链路。单次调用,复用 inspire chat 的多轮范式。
     """
     target = target.strip()
-    if not target:
-        raise ValueError("选中的段落为空")
 
     turns = [
         m for m in messages
@@ -247,13 +250,20 @@ async def discuss_fragment(
     if turns[-1]["role"] != "user":
         raise ValueError("最后一条应为你的发言")
 
-    system = DISCUSS_SYSTEM_PROMPT.format(
-        chapter_summary=chapter_summary.strip() or "(无)",
-        before=before.strip()[-_MAX_DISCUSS_CONTEXT_CHARS:] or "(无)",
-        target=target,
-        after=after.strip()[:_MAX_DISCUSS_CONTEXT_CHARS] or "(无)",
-        mark=DISCUSS_SUGGESTION_MARK,
-    )
+    if target:
+        system = DISCUSS_SYSTEM_PROMPT.format(
+            chapter_summary=chapter_summary.strip() or "(无)",
+            before=before.strip()[-_MAX_DISCUSS_CONTEXT_CHARS:] or "(无)",
+            target=target,
+            after=after.strip()[:_MAX_DISCUSS_CONTEXT_CHARS] or "(无)",
+            mark=DISCUSS_SUGGESTION_MARK,
+        )
+    else:
+        # 整章自由问答:只答不改(无选段锚点,建议无处落)
+        system = DISCUSS_CHAPTER_SYSTEM_PROMPT.format(
+            chapter_summary=chapter_summary.strip() or "(无)",
+            chapter_excerpt=chapter_excerpt[:_MAX_DISCUSS_CHAPTER_CHARS] or "(本章还没有正文)",
+        )
     chat_messages = [LLMMessage(role="system", content=system)] + [
         LLMMessage(role=m["role"], content=(m["content"] or "").strip()[:_MAX_DISCUSS_MSG_LEN])
         for m in turns

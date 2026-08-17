@@ -272,7 +272,6 @@ const MENU_ACTIONS: &[&str] = &[
     "export-epub",
     "goto-settings",
     "toggle-rail",
-    "toggle-ref",
     "immersive",
     "command-palette",
     "theme-light",
@@ -314,8 +313,7 @@ fn build_app_menu(app: &tauri::App) -> Result<(), String> {
         .map_err(|e| format!("{e}"))?;
 
     let view_menu = SubmenuBuilder::new(app, "视图")
-        .item(&item("toggle-rail", "章节轨")?)
-        .item(&item("toggle-ref", "参考栏")?)
+        .item(&item("toggle-rail", "目录")?)
         .item(&item("immersive", "沉浸模式")?)
         .separator()
         .item(&item("command-palette", "命令面板")?)

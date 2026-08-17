@@ -901,17 +901,8 @@ button.head { height: auto; margin-left: 0; padding: 0; border: 0; background: n
 .fact-line { padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: var(--fs-sm); }
 .fact-line:last-child { border-bottom: none; }
 .fact-row { display: flex; align-items: center; gap: 6px; }
-/* 章节行内重写意见输入区 */
-.revise-box textarea { min-height: 72px; font-size: var(--fs-sm); }
-.revise-box .chips { margin: 6px 0; }
-.revise-actions { display: flex; gap: 6px; }
-.revise-chat-toggle { margin: 2px 0 6px; }
-.revise-chat-toggle .linkish-btn {
-  background: none; border: none; padding: 0; cursor: pointer;
-  color: var(--brand); font-size: var(--fs-xs);
-}
-.revise-chat-toggle .linkish-btn:hover { text-decoration: underline; }
-/* 嵌在重写框里的对话区:日志高度比整页架构研讨矮一些 */
+/* 嵌在研讨卡里的对话区:日志高度比整页架构研讨矮一些(OutlineDiscussChat 在用;
+   重写卡的 revise-box/revise-chat-toggle 已随 P2 退场删除) */
 .revise-chat { margin-bottom: 8px; }
 .revise-chat .rd-log { max-height: 32vh; }
 .fact-check { display: flex; gap: var(--sp-2); }
@@ -1599,7 +1590,7 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
   .reader-nav { padding: 10px 14px; }
 
   /* 片段润色:窄屏对照视图改上下排列,工具条贴底 */
-  .rp-compare { grid-template-columns: 1fr; }
+  .rp-compare, .para-compare { grid-template-columns: 1fr; }
   .rp-text { max-height: 32vh; }
   .reader-polish { padding: 12px; }
 
@@ -2103,7 +2094,6 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .content-head-meta { color: var(--text-2); font-size: var(--fs-sm); white-space: nowrap; }
 .content-head-actions { display: flex; align-items: center; gap: var(--sp-2); }
 .content-head-actions button + button { margin-left: 0; }
-.content-head-tip { color: var(--text-3); font-size: var(--fs-xs); margin-bottom: var(--sp-2); }
 .guard-toggle { display: flex; align-items: flex-start; gap: var(--sp-2); cursor: pointer; }
 .guard-toggle input { margin-top: 3px; }
 .guard-toggle span { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-sm); }
@@ -2401,105 +2391,218 @@ html, body { max-width: 100%; overflow-x: hidden; }
 }
 .zone-gear { font-size: var(--fs-sm); }
 
-/* 三栏:左=章节轨,中=正文(视觉重心),右=参考抽屉(图标条/360px) */
-.write-bench { display: flex; gap: 16px; align-items: flex-start; }
-.write-rail { width: 300px; flex-shrink: 0; }
-.write-main { flex: 1; min-width: 0; }
+/* ==========================================================================
+   「正文即界面」P1(docs/10):write 区从三栏工作台改为单列居中正文。
+   旧永久左栏(.write-rail)/参考抽屉(.ref-*)/阶段条(.stage-*)/FAB(.m-fab*)/
+   底部栏(.m-bottombar)样式已全部删除;目录改为覆盖式抽屉(.catalog-drawer)。
+   新增类只用 CSS 变量令牌,暗色主题由 [data-theme="dark"] 令牌覆写自动覆盖。
+   ========================================================================== */
 
-/* 参考抽屉:折叠态为竖排图标条,展开态 360px */
-.ref-wrap { display: flex; gap: 10px; flex-shrink: 0; align-items: flex-start; }
-.ref-strip {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  position: sticky;
-  top: 70px;
+/* 单列正文:视觉重心居中,正文阅读宽度 ~760px(含卡片内边距取 800px) */
+.write-main { max-width: 800px; margin: 0 auto; width: 100%; }
+
+/* 主场正文:段落可点选(与 .reader-content p.pickable/.sel 同一视觉语言) */
+.prose p.pickable { cursor: pointer; border-radius: var(--r-sm); }
+.prose p.sel {
+  background: var(--brand-weak);
+  box-shadow: inset 3px 0 0 var(--brand);
 }
-.ref-icon {
-  width: 46px;
-  padding: 7px 0 5px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
+/* 气泡/段内编辑框的锚点容器(相对定位,气泡贴选中段下沿) */
+.prose-wrap { position: relative; }
+.prose-bubble {
+  position: absolute;
+  left: 0; right: 0;
+  z-index: 3;
   background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 10px 12px;
+}
+.prose-bubble-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.prose-bubble input { width: 100%; }
+/* 手改:盖在选中段原位的自适应高度编辑框(仅该段,不再是整章 textarea) */
+.prose-edit-area {
+  width: 100%;
+  min-height: 72px;
+  line-height: 1.9;
+  font-size: 15px;
+  font-family: var(--font-serif);
+}
+/* 原文/润色后两栏对照(字符基调沿用校对卡的 .diff-old/.diff-new;窄屏上下,见底部媒体查询) */
+.para-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.para-compare-col { min-width: 0; }
+
+/* 章首状态卡:三态人话(冲突拍板/过目通过/大纲已变)+ 「更多」过渡入口 */
+.chapter-status-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* 交稿单校对子行:比主结论行次一级(小字、窄间距),读作附注 */
+.chapter-status-sub { font-size: var(--fs-sm); gap: 8px; }
+.chapter-status-more { margin-bottom: var(--sp-4); font-size: var(--fs-sm); }
+.chapter-status-more summary { cursor: pointer; color: var(--text-2); }
+.chapter-status-links { display: flex; gap: 14px; flex-wrap: wrap; padding: 6px 0 2px; }
+.chapter-status-links .linkish { color: var(--brand); font-size: var(--fs-sm); }
+
+/* 章首蓝图卡:<details> 默认收起一行 */
+.blueprint-card summary { cursor: pointer; }
+
+/* 章尾下一章卡 */
+.next-chapter { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* 目录抽屉:复用 .m-overlay/.m-rail-drawer(左滑入),桌面端固定 320px + 阴影 */
+.catalog-drawer { box-shadow: var(--shadow-lg); }
+@media (min-width: 768px) {
+  .catalog-drawer { width: 320px; }
+}
+
+/* ==========================================================================
+   「正文即界面」P2(docs/10 §4):AI 窄栏(AiDock)+ 整章优化对照卡。
+   对话 UI 复用全局 .rd-*/.arch-directive 样式族;这里只补布局壳,同样只用令牌。
+   ========================================================================== */
+
+/* 正文列 + AI 窄栏横向排布(移动端 AiDock 为 fixed 元素,flex 不影响) */
+.write-body { display: flex; gap: 18px; align-items: flex-start; }
+.write-body .write-main { flex: 1; min-width: 0; }
+
+/* 桌面展开:右侧 320px sticky 窄栏,对话流撑满剩余高度 */
+.ai-dock {
+  width: 320px; flex-shrink: 0;
+  position: sticky; top: 12px;
+  max-height: calc(100vh - 24px);
+  display: flex; flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 10px 12px;
+}
+.ai-dock-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.ai-dock-head .chips { margin-bottom: 0; }
+.ai-dock-ctx { margin-bottom: 6px; }
+.ai-dock .ai-dock-log, .ai-dock-sheet .ai-dock-log { flex: 1 1 auto; min-height: 140px; max-height: none; }
+/* 意见清单卡的档位提示/阶段文案行 */
+.ai-dock-level { margin-top: 6px; }
+
+/* 桌面收起:40px 细条(整高可点,居中 💬) */
+.ai-dock-mini {
+  width: 40px; flex-shrink: 0; align-self: stretch;
+  min-height: 160px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
   color: var(--text-2);
   cursor: pointer;
-  box-shadow: var(--shadow-sm);
 }
-.ref-icon:hover { background: var(--surface-2); color: var(--text); }
-.ref-icon.on { background: var(--brand-weak); border-color: var(--brand-line); color: var(--brand); }
-.ref-icon-glyph { font-size: 16px; line-height: 1; }
-.ref-icon-label { font-size: var(--fs-xs); }
-.ref-drawer {
-  width: 360px;
-  flex-shrink: 0;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  padding: var(--sp-3) 14px;
-  box-shadow: var(--shadow-sm);
-  max-height: calc(100vh - 90px);
-  overflow-y: auto;
-  position: sticky;
-  top: 70px;
+.ai-dock-mini:hover { border-color: var(--line-strong); color: var(--text); }
+/* 新回复圆点(细条/移动输入条共用) */
+.ai-dot {
+  display: inline-block; width: 8px; height: 8px; margin-left: 4px;
+  border-radius: 50%; background: var(--brand);
+  vertical-align: top;
 }
-/* 抽屉内复用的看板子组件自带 .card 外边距,收紧让抽屉更紧凑(保留卡片底色/边框) */
-.ref-drawer > .card { padding: var(--sp-3) 12px; margin-bottom: 0; }
-.ref-drawer .char-grid { grid-template-columns: 1fr; }
-.ref-body { font-size: var(--fs-sm); }
 
-/* 阶段条:中栏顶部,状态驱动流水线的唯一动作入口(替代旧底部动作条)。
-   阶段圆点 + 阶段名 + 引导文案 + 1-2 个主动作 + 「更多动作」下拉 + 本书设置入口 */
-.stage-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;              /* 窄屏(≤767px)主动作可换行,不溢出 */
-  margin-bottom: 10px;
-  padding: 10px 14px;
+/* 移动端收起:底部固定输入条(占位外观,点击展开全屏 sheet) */
+.m-ai-bar {
+  position: fixed; left: 8px; right: 8px;
+  bottom: calc(8px + constant(safe-area-inset-bottom));
+  bottom: calc(8px + env(safe-area-inset-bottom));
+  z-index: 60;
+  display: flex; align-items: center; gap: 8px;
+  min-height: 48px; padding: 8px 14px;
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-lg);
+  color: var(--text-3);
+  cursor: text;
 }
-.stage-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--line-strong); }
-.stage-dot.st-empty { background: var(--brand); }
-.stage-dot.st-generating { background: var(--brand); animation: stage-pulse 1.2s infinite; }
-.stage-dot.st-blocked { background: var(--err); }
-.stage-dot.st-review { background: var(--warn); }
-.stage-dot.st-approved { background: var(--ok); }
-@keyframes stage-pulse { 50% { opacity: 0.4; } }
-.stage-name { flex-shrink: 0; }
-.stage-guide { color: var(--text-2); font-size: var(--fs-sm); min-width: 0; }
-.stage-bar .grow { flex: 1; }
-/* 「更多动作」下拉:相对定位锚点 + 全屏透明背板(点外关闭) */
-.stage-more { position: relative; }
-.stage-more-backdrop { position: fixed; inset: 0; z-index: 29; }
-.stage-more-menu {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 4px);
-  z-index: 30;
-  min-width: 128px;
-  display: flex;
-  flex-direction: column;
-  padding: 4px;
-  background: var(--surface);
+.m-ai-bar-label { text-align: left; }
+/* 移动端展开:sheet 内对话流纵向撑满 */
+.ai-dock-sheet { display: flex; flex-direction: column; }
+
+/* 沉浸模式:AI 窄栏一并退场,只留正文 */
+.write-zone.immersive .ai-dock,
+.write-zone.immersive .ai-dock-mini,
+.write-zone.immersive .m-ai-bar { display: none; }
+
+/* ==========================================================================
+   「正文即界面」P3(docs/10 §4/§6):四档修改的「验收即 diff」+ ②档批注。
+   字符级 diff 沿用 .diff-old(删/删除线)/.diff-new(增/绿)基调;全部只用令牌,
+   暗色靠 :root 令牌覆盖自动生效,无硬编码色值。
+   ========================================================================== */
+
+/* 字符级 diff 行内容器(DiffText):①②段内卡、③④整章共用;自保留空白与换行 */
+.diff-inline { white-space: pre-wrap; word-break: break-word; }
+/* 段内 diff 卡(与 .rp-text 合用:盒子由 rp-text 给,这里只调行高便于看删除线) */
+.diff-card { line-height: 2; }
+
+/* 已批注段落标记(Reader Paragraphs 的 markedIdx/staleIdx → 段落上加类):
+   新鲜批注=细绿边(有意见待处理);失效=琥珀边+底(快照对不上,不参与成批) */
+.prose p.para-annotated { box-shadow: inset 2px 0 0 var(--ok); }
+.prose p.para-annotated-stale { box-shadow: inset 2px 0 0 var(--warn); background: var(--warn-weak); }
+/* 选中态优先:选中已批注段时仍显强选择条(两类同选择器更高特指度,压过上面单类) */
+.prose p.para-annotated.sel,
+.prose p.para-annotated-stale.sel { box-shadow: inset 3px 0 0 var(--brand); background: var(--brand-weak); }
+
+/* AI 窄栏 ②档待处理批注区 */
+.ai-dock-annos {
   border: 1px solid var(--line);
   border-radius: var(--r-md);
-  box-shadow: var(--shadow-sm);
+  background: var(--surface-2);
+  padding: 8px 10px;
+  margin-bottom: 8px;
 }
-.stage-more-menu button {
-  border: none;
-  background: transparent;
-  text-align: left;
-  padding: 8px 12px;
-  border-radius: var(--r-sm);
+.anno-list {
+  list-style: none; margin: 6px 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 30vh; overflow-y: auto;
 }
-.stage-more-menu button:hover:not(:disabled) { background: var(--surface-2); }
+.anno-item { display: flex; align-items: baseline; gap: 6px; font-size: var(--fs-sm); line-height: 1.5; }
+.anno-item.stale { opacity: .6; }
+.anno-item.stale .anno-note { text-decoration: line-through; }
+.anno-seg { flex-shrink: 0; font-size: var(--fs-xs); color: var(--text-3); }
+.anno-note { flex: 1; min-width: 0; color: var(--text); word-break: break-word; }
+.anno-stale-tag {
+  flex-shrink: 0; font-size: var(--fs-xs);
+  color: var(--warn); background: var(--warn-weak);
+  border-radius: var(--r-sm); padding: 0 4px;
+}
+.anno-del {
+  flex-shrink: 0; background: none; border: none; cursor: pointer;
+  color: var(--text-3); padding: 0 2px; line-height: 1;
+}
+.anno-del:hover { color: var(--err); }
+/* 桌面细条上的批注计数徽标 */
+.ai-dock-mini-badge {
+  display: inline-block; min-width: 16px; padding: 0 4px;
+  border-radius: var(--r-sm); text-align: center;
+  font-size: var(--fs-xs);
+  color: var(--brand); background: var(--brand-weak); border: 1px solid var(--brand);
+}
+
+/* ②档验收卡(AnnotatedReviseCard):每条批注一张子卡,逐条 diff 验收 */
+.revise-pairs { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.revise-pair {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  padding: 10px 12px;
+}
+.revise-pair.resolved { display: flex; align-items: center; gap: 8px; opacity: .75; }
+.revise-notes { margin-top: 6px; }
+
+/* ③④整章优化对照卡(PolishCompareCard)的逐段 diff 视图 */
+.polish-diff {
+  max-height: 60vh; overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  padding: 10px 14px;
+}
+.pd-para { margin: 0 0 10px; line-height: 1.9; white-space: pre-wrap; word-break: break-word; }
+.pd-para:last-child { margin-bottom: 0; }
+.pd-same { color: var(--text-2); }                                  /* 未改动段:压暗作上下文 */
+.pd-changed { box-shadow: inset 2px 0 0 var(--brand); padding-left: 8px; } /* 段内有增删 */
+.pd-added { box-shadow: inset 2px 0 0 var(--ok); padding-left: 8px; }      /* 整段新增 */
+.pd-removed { box-shadow: inset 2px 0 0 var(--err); padding-left: 8px; }   /* 整段删除 */
 
 /* read 区:单章纯阅读页 */
 .read-zone { max-width: 760px; margin: 0 auto; }
@@ -2515,7 +2618,7 @@ html, body { max-width: 100%; overflow-x: hidden; }
    新组件 class(m-*)始终定义,但元素只在窄屏渲染(useBreakpoint 判定)。
    ========================================================================== */
 
-/* ---- 移动端 write 区顶栏:←返回 + 当前章标题(点开章节轨)+ 阅读入口 ---- */
+/* ---- 移动端 write 区顶栏:←返回 + 当前章标题(点开目录抽屉)+ 阅读入口 ---- */
 .m-topbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .m-topbar button + button { margin-left: 0; }
 .m-topbar-btn {
@@ -2541,68 +2644,7 @@ html, body { max-width: 100%; overflow-x: hidden; }
   cursor: pointer;
 }
 
-/* ---- 底部栏:写 / 读 / 参考 / 设置(吸底,safe-area 垫高) ---- */
-.m-bottombar {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
-  display: flex;
-  background: var(--surface);
-  border-top: 1px solid var(--line);
-  padding-bottom: constant(safe-area-inset-bottom);
-  padding-bottom: env(safe-area-inset-bottom);
-}
-.m-bb-item {
-  flex: 1;
-  min-height: 52px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
-  background: none; border: none;
-  color: var(--text-2);
-  font-size: var(--fs-xs);
-  cursor: pointer;
-}
-button.m-bb-item + button.m-bb-item { margin-left: 0; }
-.m-bb-item.on { color: var(--brand); font-weight: 600; }
-.m-bb-glyph { font-size: 16px; line-height: 1; }
-
-/* ---- FAB(右下,safe-area 之上):点按=最该做的动作;⋮ 在 FAB 正上方展开动作扇 ---- */
-.m-fab {
-  position: fixed; right: 16px; z-index: 35;
-  bottom: calc(72px + constant(safe-area-inset-bottom));
-  bottom: calc(72px + env(safe-area-inset-bottom));
-  min-width: 56px; height: 56px;
-  padding: 0 18px;
-  border: none; border-radius: var(--r-full);
-  background: var(--brand); color: var(--on-brand);
-  font-size: var(--fs-md); font-weight: 600;
-  box-shadow: var(--shadow-lg);
-  cursor: pointer;
-}
-.m-fab-more {
-  position: fixed; right: 24px; z-index: 35;
-  bottom: calc(140px + constant(safe-area-inset-bottom));
-  bottom: calc(140px + env(safe-area-inset-bottom));
-  width: 40px; height: 40px;
-  padding: 0;
-  border: 1px solid var(--line-strong); border-radius: var(--r-full);
-  background: var(--surface); color: var(--text-2);
-  box-shadow: var(--shadow-md);
-  cursor: pointer;
-}
-.m-fan-backdrop { position: fixed; inset: 0; z-index: 44; background: var(--overlay-bg-soft); }
-.m-fan {
-  position: fixed; right: 16px; z-index: 45;
-  bottom: calc(186px + constant(safe-area-inset-bottom));
-  bottom: calc(186px + env(safe-area-inset-bottom));
-  display: flex; flex-direction: column; gap: 6px;
-  background: var(--surface);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-lg);
-  padding: 8px;
-}
-.m-fan button { min-width: 128px; min-height: 44px; }
-.m-fan button + button { margin-left: 0; }
-
-/* ---- 全屏遮罩 / 章节轨抽屉(从左滑入)/ 底部升起的全屏 sheet ---- */
+/* ---- 全屏遮罩 / 目录抽屉(从左滑入)/ 底部升起的全屏 sheet ---- */
 .m-overlay { position: fixed; inset: 0; z-index: 70; background: var(--overlay-bg); }
 .m-rail-drawer {
   position: absolute; top: 0; bottom: 0; left: 0;
@@ -2637,25 +2679,10 @@ button.m-bb-item + button.m-bb-item { margin-left: 0; }
 @keyframes m-slide-in { from { transform: translateX(-24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
 @keyframes m-rise { from { transform: translateY(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
 
-/* 参考抽屉的移动端形态(全屏 sheet 内):图标条横排,内容区平铺 */
-.ref-wrap-m { flex-direction: column; width: 100%; }
-.ref-strip-m { flex-direction: row; flex-wrap: wrap; position: static; margin-bottom: 10px; }
-.ref-strip-m .ref-icon { flex: 1; min-width: 56px; padding: 8px 0 6px; }
-.ref-drawer-m { width: 100%; position: static; max-height: none; overflow: visible; }
-.m-ref-empty { padding: 18px 4px; font-size: var(--fs-sm); }
-
-/* 移动端无 ch 的「选章」引导 */
-.m-pick-guide { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
-.m-pick-guide .btn-sm { min-height: 44px; padding: 0 18px; font-size: var(--fs-sm); }
-
 @media (max-width: 767px) {
-  /* write 区:三栏退化为单列;章级动作由阶段条(可换行)+ FAB + 动作扇承接 */
-  .write-zone {
-    padding-bottom: calc(76px + constant(safe-area-inset-bottom));
-    padding-bottom: calc(76px + env(safe-area-inset-bottom));
-  }
-  .write-bench { flex-direction: column; }
-  .write-rail { width: 100%; }
+  /* write 区:单列正文;章级动作由章首状态卡 + 目录抽屉 + 章尾卡承接 */
+  /* 底部给 AI 输入条(.m-ai-bar)让位,不遮章尾卡 */
+  .write-main { padding-bottom: 76px; }
 
   /* 区导航/项目头:窄屏紧凑,允许折行不溢出 */
   .zone-tab { padding: 6px 10px; gap: 6px; }
@@ -2722,12 +2749,9 @@ button.m-bb-item + button.m-bb-item { margin-left: 0; }
 .cmdk-item-sub { margin-left: auto; flex-shrink: 0; color: var(--text-3); font-size: var(--fs-xs); }
 .cmdk-hint { padding: 16px; color: var(--text-3); font-size: var(--fs-sm); }
 
-/* 沉浸模式(F11,Esc 退出):class 挂在 write-zone,只留中栏。
+/* 沉浸模式(F11,Esc 退出):class 挂在 write-zone,只留中栏正文。
    区导航/项目头/统计条/引导条在 write-zone 之外,用 :has 从外层隐藏。 */
-.write-zone.immersive .write-rail,
-.write-zone.immersive .ref-wrap,
-.write-zone.immersive .stage-bar { display: none; }
-.write-zone.immersive .write-main { max-width: 860px; width: 100%; margin: 0 auto; }
+.write-zone.immersive .write-main { max-width: 860px; }
 body:has(.write-zone.immersive) .project-head,
 body:has(.write-zone.immersive) .stat-strip,
 body:has(.write-zone.immersive) .zone-nav,

@@ -309,6 +309,10 @@ export interface PolishResult {
   polished: string; locked_facts: string[]; violations: Record<string, string>[];
   flavor_before: FlavorInfo; flavor_after: FlavorInfo;
 }
+/** ②档多处批注改(revise-annotated-async job)返回的逐段旧/新对:ok=false 时 new 空、notes 载失败原因 */
+export interface RevisePair {
+  para_idx: number; old: string; new: string; notes: string | null; ok: boolean;
+}
 export interface ProviderState { deepseek: boolean; openai: boolean; gemini: boolean; }
 // 模型设置(cc-switch 风格):每用户多套命名配置,回显 key 打码与协议默认值
 export interface ProviderConfigOut {
@@ -510,8 +514,8 @@ export const api = {
     req<{ job_id: string }>("POST", "/api/inspire/async", { spark, tendency, count }),
   refineConceptAsync: (concept: Concept, directive: string, tendency: Tendency = {}) =>
     req<{ job_id: string }>("POST", "/api/inspire/refine-async", { concept, directive, tendency }),
-  polishChapterAsync: (pid: number, n: number, tendency: Tendency) =>
-    req<{ job_id: string }>("POST", `/api/projects/${pid}/polish/chapter/${n}/async`, { tendency }),
+  polishChapterAsync: (pid: number, n: number, tendency: Tendency, directive = "") =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/polish/chapter/${n}/async`, { tendency, directive }),
   polishSegmentAsync: (pid: number, text: string, tendency: Tendency) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/polish/segment-async`, { text, tendency }),
   impactAsync: (pid: number, n: number) =>
@@ -579,9 +583,14 @@ export const api = {
     req<GenerateChapterResponse>("POST", `/api/projects/${pid}/chapters/${n}/generate`, { tendency }, LLM_TIMEOUT),
   generateChapterAsync: (pid: number, n: number, tendency: Tendency, revision = "") =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/chapters/${n}/generate-async`, { tendency, revision }),
-  // 重写研讨:多轮对话聊清"这章哪里不满意" → 蒸馏出修改意见 directive,回填重写文本框
+  // ②档多处批注改(job):批注清单{段号,原文快照,意见}整批发给 LLM 逐段定点润色,返回逐段旧/新对
+  reviseAnnotatedAsync: (
+    pid: number, n: number, annotations: { para_idx: number; original: string; note: string }[],
+  ) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/chapters/${n}/revise-annotated-async`, { annotations }),
+  // 重写研讨:多轮对话聊清"这章哪里不满意" → 蒸馏出修改意见 directive(+ AI 建议档位)
   discussRevision: (pid: number, n: number, messages: { role: string; content: string }[]) =>
-    req<{ reply: string; directive: string }>("POST", `/api/projects/${pid}/chapters/${n}/revise-discuss`, { messages }, LLM_TIMEOUT),
+    req<{ reply: string; directive: string; suggested_level: string | null }>("POST", `/api/projects/${pid}/chapters/${n}/revise-discuss`, { messages }, LLM_TIMEOUT),
   editChapterContent: (pid: number, n: number, final_content: string) =>
     req<ChapterDetail>("PUT", `/api/projects/${pid}/chapters/${n}/content`, { final_content }),
   // 人工审核通过(docs/08 §5.5):pending_review → approved;quarantined 时 400
@@ -687,8 +696,9 @@ export const api = {
   polishFragment: (pid: number, n: number, fragment: string, direction: string) =>
     req<{ polished: string; notes: string | null }>(
       "POST", `/api/projects/${pid}/chapters/${n}/polish-fragment`, { fragment, direction }, LLM_TIMEOUT),
-  // 就选中段落与 AI 多轮对话:可解释、可给改写建议(suggestion 非空时可一键采用)
-  discussFragment: (pid: number, n: number, messages: { role: string; content: string }[], target: string) =>
+  // 就选中段落与 AI 多轮对话:可解释、可给改写建议(suggestion 非空时可一键采用);
+  // target 置空 = 整章自由问答(只答不改,后端走 DISCUSS_CHAPTER prompt)
+  discussFragment: (pid: number, n: number, messages: { role: string; content: string }[], target = "") =>
     req<{ reply: string; suggestion: string | null }>(
       "POST", `/api/projects/${pid}/chapters/${n}/discuss`, { messages, target }, LLM_TIMEOUT),
   aiFlavor: (text: string) =>

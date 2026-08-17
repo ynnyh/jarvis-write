@@ -1,6 +1,8 @@
 # tests/test_api.py
 # -*- coding: utf-8 -*-
 """接口级测试(TestClient + 临时库):注册边界与任务归属隔离。"""
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -760,6 +762,44 @@ def test_polish_fragment_empty_400(client):
     assert r.status_code == 404
 
 
+def test_polish_chapter_threads_directive_into_prompt(client):
+    """③档整章优化:请求带 directive → 蒸馏出的修改意见透传进润色 prompt。
+
+    回归 docs/10 ③档「意见清单不落地」缺陷:AiDock 承诺「③④ 都会高优先级遵循」,
+    但旧签名/端点丢 directive、只做标准去 AI 味。此测锁定 directive 经
+    ChapterPolishRequest → polish_text → POLISH_PROMPT 的【用户修改要求】块全程不断线。
+    """
+    from unittest.mock import patch
+
+    headers = _auth(_register(client, "polish_dir")["token"])
+    p = _create_chapter_with_content(client, headers, "③档意见书")
+
+    prompts: list[str] = []
+
+    class _CaptureAdapter:
+        # polish_text 三次调 LLM(抽事实/润色/校验),按 prompt 内容分发(仿 _LoopAdapter)
+        async def ask(self, prompt, system=None):
+            prompts.append(prompt)
+            if "抽取" in prompt and "事实" in prompt:
+                return '{"facts": ["他走进了城门"]}'
+            if "逐条检查" in prompt:
+                return '{"violations": []}'
+            return "【润色稿】他迈步走进了高大的城门。"
+
+    directive = "开头环境描写压缩一半,直接进冲突"
+    with patch("app.engines.polish.polisher.get_adapter_for", return_value=_CaptureAdapter()):
+        r = client.post(
+            f"/api/projects/{p['id']}/polish/chapter/1",
+            headers=headers,
+            json={"tendency": {}, "directive": directive},
+        )
+    assert r.status_code == 200, r.text
+    # directive 落进润色 prompt(那条含"待润色文本"的),且带【用户修改要求】优先级标记
+    polish_prompt = next(pr for pr in prompts if "待润色文本" in pr)
+    assert "【用户修改要求" in polish_prompt
+    assert directive in polish_prompt
+
+
 def test_polish_fragment_not_owner_404(client):
     """非 owner 润色他人项目片段 → 404(不泄露存在性)。"""
     a = _auth(_register(client, "frag_a")["token"])
@@ -886,6 +926,33 @@ def test_discuss_not_owner_404(client):
     assert r.status_code == 404
 
 
+def test_discuss_chapter_freeqa_without_target(client):
+    """target 置空/缺省 = 无选段的整章自由问答(AI 窄栏「随便问」):
+    注入整章正文与梗概,只答不改(不给 suggestion),prompt 不含选段锚点块。"""
+    from unittest.mock import patch
+
+    headers = _auth(_register(client, "disc_free")["token"])
+    p = _create_chapter_with_content(client, headers, "自由问答书")
+
+    adapter = _DiscussAdapter("这章主角的动机是进城寻亲,站得住。")
+    with patch("app.engines.polish.polisher.get_adapter_for", return_value=adapter):
+        r = client.post(
+            f"/api/projects/{p['id']}/chapters/1/discuss",
+            headers=headers,
+            # target 整个缺省(前端无选段时不传)
+            json={"messages": [{"role": "user", "content": "这章主角的动机站得住吗?"}]},
+        )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "寻亲" in body["reply"]
+    assert body["suggestion"] is None
+    # system 注入整章正文节选与梗概,且无「选中段落」锚点块
+    system = adapter.captured[0].content
+    assert "他走进了城门。" in system
+    assert "主角进城" in system
+    assert "作者选中、正在讨论的段落" not in system
+
+
 # ---------- 书籍简介(synopsis) ----------
 
 
@@ -970,3 +1037,121 @@ def test_synopsis_patch_roundtrip(client):
     ).json()["synopsis"] == text
     items = client.get("/api/projects", headers=headers).json()
     assert next(i for i in items if i["id"] == p["id"])["synopsis"] == text
+
+
+# ---------- ②档多处批注改(revise-annotated-async) ----------
+
+
+def _wait_job(client: TestClient, headers: dict, job_id: str, timeout: float = 10.0) -> dict:
+    """轮询 job 至结束(非 running)。TestClient 同步驱动:每次 GET 推进事件循环,
+    让后台 work 协程往前跑。mock 适配器下几十毫秒即完成。"""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        r = client.get(f"/api/jobs/{job_id}", headers=headers)
+        assert r.status_code == 200, r.text
+        job = r.json()
+        if job["status"] != "running":
+            return job
+        time.sleep(0.02)
+    raise AssertionError(f"job {job_id} 超时未结束")
+
+
+def test_revise_annotated_async_ok(client):
+    """②档:逐条复用 polish_fragment,返回逐段 old/new pairs;
+    每条批注的意见与蓝图摘要都注入各自 prompt。"""
+    from unittest.mock import patch
+
+    headers = _auth(_register(client, "anno_ok")["token"])
+    p = _create_chapter_with_content(client, headers, "批注书")
+
+    prompts: list[str] = []
+
+    class _CaptureAdapter:
+        async def ask(self, prompt, system=None):
+            prompts.append(prompt)
+            return "改好的段落。"
+
+    with patch("app.engines.polish.polisher.get_adapter_for", return_value=_CaptureAdapter()):
+        r = client.post(
+            f"/api/projects/{p['id']}/chapters/1/revise-annotated-async",
+            headers=headers,
+            json={"annotations": [
+                {"para_idx": 0, "original": "他走进了城门。", "note": "更紧张一些"},
+                {"para_idx": 2, "original": "夜色降临。", "note": "更抒情一些"},
+            ]},
+        )
+        assert r.status_code == 200, r.text
+        job = _wait_job(client, headers, r.json()["job_id"])
+
+    assert job["status"] == "done", job
+    pairs = job["result"]["pairs"]
+    assert [x["para_idx"] for x in pairs] == [0, 2]
+    assert all(x["ok"] for x in pairs)
+    assert pairs[0]["old"] == "他走进了城门。" and pairs[0]["new"] == "改好的段落。"
+    # 蓝图摘要注入每条 prompt;两条意见各注入各自 prompt(不串)
+    assert all("主角进城" in pr for pr in prompts)
+    assert any("更紧张一些" in pr for pr in prompts)
+    assert any("更抒情一些" in pr for pr in prompts)
+
+
+def test_revise_annotated_item_failure_marked(client):
+    """单条空白批注(strip 后为空 → polish_fragment 抛错)只标 ok=False,
+    不拖垮整个 job;其余条目照常返回。"""
+    from unittest.mock import patch
+
+    headers = _auth(_register(client, "anno_fail")["token"])
+    p = _create_chapter_with_content(client, headers, "半失败书")
+
+    class _Adapter:
+        async def ask(self, prompt, system=None):
+            return "改好的段落。"
+
+    with patch("app.engines.polish.polisher.get_adapter_for", return_value=_Adapter()):
+        r = client.post(
+            f"/api/projects/{p['id']}/chapters/1/revise-annotated-async",
+            headers=headers,
+            json={"annotations": [
+                {"para_idx": 0, "original": "他走进了城门。", "note": "更紧张"},
+                {"para_idx": 1, "original": "   ", "note": "改这段"},
+            ]},
+        )
+        assert r.status_code == 200, r.text
+        job = _wait_job(client, headers, r.json()["job_id"])
+
+    assert job["status"] == "done", job
+    pairs = job["result"]["pairs"]
+    assert pairs[0]["ok"] is True and pairs[0]["new"] == "改好的段落。"
+    assert pairs[1]["ok"] is False and pairs[1]["new"] == ""
+
+
+def test_revise_annotated_empty_422(client):
+    """空批注列表 → 422(Pydantic min_length);章节不存在 → 404。"""
+    headers = _auth(_register(client, "anno_empty")["token"])
+    p = _create_chapter_with_content(client, headers, "空批注书")
+
+    r = client.post(
+        f"/api/projects/{p['id']}/chapters/1/revise-annotated-async",
+        headers=headers, json={"annotations": []},
+    )
+    assert r.status_code == 422
+
+    r = client.post(
+        f"/api/projects/{p['id']}/chapters/99/revise-annotated-async",
+        headers=headers,
+        json={"annotations": [{"para_idx": 0, "original": "一段正文", "note": ""}]},
+    )
+    assert r.status_code == 404
+
+
+def test_revise_annotated_not_owner_404(client):
+    """非 owner 对他人章节批注改 → 404(不泄露存在性)。"""
+    a = _auth(_register(client, "anno_a")["token"])
+    b = _auth(_register(client, "anno_b")["token"])
+    p = _create_chapter_with_content(client, a, "别人的批注书")
+
+    r = client.post(
+        f"/api/projects/{p['id']}/chapters/1/revise-annotated-async",
+        headers=b,
+        json={"annotations": [{"para_idx": 0, "original": "他走进了城门。", "note": "改"}]},
+    )
+    assert r.status_code == 404

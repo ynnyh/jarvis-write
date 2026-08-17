@@ -29,8 +29,8 @@ from app.engines.pipeline.chapter import (
     update_style_memo,
 )
 from app.engines.pipeline.handoff import handoff_payload
-from app.engines.polish import ai_flavor_report
-from app.jobs import create_job, fail_job, finish_job, list_running, update_stage
+from app.engines.polish import ai_flavor_report, polish_fragment
+from app.jobs import create_job, fail_job, finish_job, list_running, spawn_job, update_stage
 from app.schemas.tendency import Tendency
 
 logger = logging.getLogger("jarvis-write.chapters")
@@ -228,6 +228,9 @@ class ReviseDiscussRequest(BaseModel):
 class ReviseDiscussResponse(BaseModel):
     reply: str
     directive: str = ""
+    # AI 档位建议(docs/10 §0 四级梯度):polish=③锁情节整章优化 / regenerate=④整章重生成;
+    # None=模型没给建议(前端中性呈现两个选项,升档永远由用户确认)
+    suggested_level: str | None = None
 
 
 def _blueprint_block(outline: Outline | None, n: int) -> str:
@@ -275,6 +278,78 @@ async def revise_discuss(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ReviseDiscussResponse(**result)
+
+
+class AnnotationItem(BaseModel):
+    para_idx: int = Field(ge=0)
+    original: str = Field(min_length=1)
+    note: str = Field(default="", max_length=200)
+
+
+class ReviseAnnotatedRequest(BaseModel):
+    annotations: list[AnnotationItem] = Field(min_length=1, max_length=30)
+
+
+@router.post("/{chapter_number}/revise-annotated-async")
+async def revise_annotated_async(
+    project_id: int,
+    chapter_number: int,
+    req: ReviseAnnotatedRequest,
+    db: Session = Depends(get_db),
+):
+    """②档「多处批注改」:一次性对若干被批注段落做定点改写(job 模式)。
+
+    每条批注 = {para_idx, original(原文快照), note(意见)};逐条复用①档的
+    polish_fragment(只改文笔不改情节),返回逐段 {old,new} 供前端做 diff 逐条验收。
+    不落库——用户在前端逐条接受后走 PUT content 写回并留快照。
+
+    单条校验失败(空/超长)只把该条标 ok=False,不拖垮整个 job;基础设施错误
+    (LLM 网络/欠费)按 spawn_job 语义整个 job 失败,前端可整体重试(kind 去重)。
+    """
+    get_project_or_404(db, project_id)
+    ch = (
+        db.query(Chapter)
+        .filter(Chapter.project_id == project_id, Chapter.chapter_number == chapter_number)
+        .first()
+    )
+    if ch is None or not (ch.final_content or "").strip():
+        raise HTTPException(status_code=404, detail=f"第 {chapter_number} 章尚无定稿正文")
+    # 同章批注改任务已在跑 → 复用(去重复提交/断线重连)
+    kind = f"revise-annotated-{project_id}-{chapter_number}"
+    for jid, job in list_running(f"revise-annotated-{project_id}-"):
+        if job["kind"] == kind:
+            return {"job_id": jid}
+    outline = (
+        db.query(Outline)
+        .filter(Outline.project_id == project_id, Outline.chapter_number == chapter_number)
+        .first()
+    )
+    summary = outline.summary if outline else ""
+    # 脱离 ORM:job 协程跑在请求 session 之外(见 polish._cards 注释)
+    items = [
+        {"para_idx": a.para_idx, "original": a.original.strip(), "note": a.note}
+        for a in req.annotations
+    ]
+
+    async def work(progress):
+        pairs = []
+        total = len(items)
+        for i, it in enumerate(items, 1):
+            progress(f"正在改第 {i}/{total} 处批注")
+            try:
+                r = await polish_fragment(it["original"], it["note"], summary)
+                pairs.append({
+                    "para_idx": it["para_idx"], "old": it["original"],
+                    "new": r["polished"], "notes": r.get("notes"), "ok": True,
+                })
+            except ValueError as exc:
+                pairs.append({
+                    "para_idx": it["para_idx"], "old": it["original"],
+                    "new": "", "notes": str(exc), "ok": False,
+                })
+        return {"pairs": pairs}
+
+    return {"job_id": spawn_job(kind, work)}
 
 
 class GenerateQueueRequest(BaseModel):

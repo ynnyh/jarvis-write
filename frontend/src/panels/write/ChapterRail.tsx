@@ -1,17 +1,17 @@
-// write 区左栏「章节轨」:唯一选章入口。
-// 从原 ChaptersPanel 侧栏抽出:搜索/状态筛选/连写勾选/正文倾向/每章操作(生成·阅读·通过·放行·重写框)。
+// 目录(「正文即界面」P1 瘦身版):原左栏「章节轨」改为 CatalogDrawer 的内容体,双端同一份。
+// 只保留:搜索/状态筛选、连写队列(头部「连写多章」+ 队列条,逻辑不动)、正文倾向、
+// 状态徽标与生成中 spinner;行内操作(生成/阅读/通过/放行/行内重写框)全部删除,点行即开章。
 import { useState } from "react";
-import { ChapterBrief, EditorAction, Outline, Tendency } from "../../api";
+import { ChapterBrief, Outline, Tendency } from "../../api";
 import TendencySelector from "../../components/TendencySelector";
 import ChapterListItem from "../chapters/ChapterListItem";
 
 interface Props {
-  pid: number;
   outlines: Outline[];
   chapters: ChapterBrief[];
-  // 进行中的「生成/重写」任务:null=空闲(阻塞式,锁住列表操作)
+  // 进行中的「生成/重写」任务:null=空闲(连写排队时禁用,行内 spinner 跟随)
   genJob: { num: number; stage: string } | null;
-  // 连写队列(状态由 WritePanel 持有:StageBar 阶段条也要跟随 genJob 切换)
+  // 连写队列(状态由 WritePanel 持有)
   queueMode: boolean;
   queuePicked: Set<number>;
   onToggleQueueMode: () => void;
@@ -21,31 +21,15 @@ interface Props {
   // 正文倾向(生成参数,WritePanel 持有)
   genTendency: Tendency;
   onTendencyChange: (t: Tendency) => void;
-  // 行内重写框(每章快捷入口;中栏 act=revise 卡是当前章的提升版)
-  reviseFor: number | null;
-  reviseText: string;
-  proseActions: EditorAction[];
-  onToggleRevise: (n: number) => void;
-  onReviseTextChange: (text: string) => void;
-  onReviseSubmit: (n: number) => void;
-  onReviseCancel: () => void;
-  // 人工审核通过(仅 pending_review 章显示)
-  approving: number | null;
-  onApprove: (n: number) => void;
-  // quarantined 放行(仅被拦截章显示行内[放行],与[通过]同位)
-  releasing: number | null;
-  onRelease: (n: number) => void;
   onOpen: (n: number) => void;
-  onOpenReader: (n: number) => void;
-  onGenerate: (n: number) => void;
+  // 头部「关闭」(抽屉本身也可 Esc/点遮罩关,见 CatalogDrawer)
+  onClose: () => void;
 }
 
 export default function ChapterRail({
-  pid, outlines, chapters, genJob,
+  outlines, chapters, genJob,
   queueMode, queuePicked, onToggleQueueMode, onToggleQueuePick, onPickNextBatch, onStartQueue,
-  genTendency, onTendencyChange,
-  reviseFor, reviseText, proseActions, onToggleRevise, onReviseTextChange, onReviseSubmit, onReviseCancel,
-  approving, onApprove, releasing, onRelease, onOpen, onOpenReader, onGenerate,
+  genTendency, onTendencyChange, onOpen, onClose,
 }: Props) {
   const byNum = new Map(chapters.map((c) => [c.chapter_number, c]));
   // 正文倾向选择器展开态(纯视图态,留在本组件)
@@ -69,13 +53,14 @@ export default function ChapterRail({
   return (
     <div className="card card-compact">
       <div className="card-head mb-2">
-        <h3 className="grow">章节</h3>
+        <h3 className="grow">目录</h3>
         <button className="btn-sm" onClick={onToggleQueueMode}>
           {queueMode ? "取消连写" : "连写多章"}
         </button>
         <button className="btn-sm" onClick={() => setShowTendency(!showTendency)}>
           {showTendency ? "收起" : "正文倾向"}
         </button>
+        <button className="btn-sm" title="关闭目录(Esc)" onClick={onClose}>关闭</button>
       </div>
       {showTendency && (
         <div className="mb-3">
@@ -107,37 +92,17 @@ export default function ChapterRail({
       {shownOutlines.map((o) => {
         const ch = byNum.get(o.chapter_number);
         const generating = genJob?.num === o.chapter_number;
-        const genBlocked = !!genJob;
-        const genHint = generating
-          ? "本章任务进行中"
-          : `第 ${genJob?.num} 章任务进行中,完成后可继续操作`;
         return (
           <ChapterListItem
             key={o.chapter_number}
-            pid={pid}
             outline={o}
             chapter={ch}
             queueMode={queueMode}
             queuePicked={queuePicked.has(o.chapter_number)}
             generating={generating}
-            genBlocked={genBlocked}
-            genHint={genHint}
             genStage={genJob?.stage ?? ""}
-            reviseOpen={reviseFor === o.chapter_number}
-            reviseText={reviseText}
-            proseActions={proseActions}
-            approving={approving === o.chapter_number}
-            onApprove={() => onApprove(o.chapter_number)}
-            releasing={releasing === o.chapter_number}
-            onRelease={() => onRelease(o.chapter_number)}
-            onOpen={() => onOpen(o.chapter_number)}
-            onOpenReader={() => onOpenReader(o.chapter_number)}
             onToggleQueue={(checked) => onToggleQueuePick(o.chapter_number, checked)}
-            onToggleRevise={() => onToggleRevise(o.chapter_number)}
-            onReviseTextChange={onReviseTextChange}
-            onGenerate={() => onGenerate(o.chapter_number)}
-            onReviseSubmit={() => onReviseSubmit(o.chapter_number)}
-            onReviseCancel={onReviseCancel}
+            onOpen={() => onOpen(o.chapter_number)}
           />
         );
       })}

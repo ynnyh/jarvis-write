@@ -1,120 +1,45 @@
-// 章节列表单行:状态徽标、生成/重写按钮、行内重写意见区(编辑器抽自 write/ReviseEditor)
-import { ChapterBrief, EditorAction, Outline } from "../../api";
+// 目录行(「正文即界面」P1 瘦身版):章号/标题/状态徽标/连写 checkbox/生成中 spinner。
+// 行内操作(生成/阅读/通过/放行/行内重写框)全部删除——点行=打开该章(未写的章也可选中,
+// 打开后由正文区空态大卡承担「让 AI 写这一章」)。
+import { ChapterBrief, Outline } from "../../api";
 import { STATUS_BADGE, STATUS_CN } from "../../components/Reader";
-import ReviseEditor from "../write/ReviseEditor";
 
 interface Props {
-  pid: number;
   outline: Outline;
   chapter: ChapterBrief | undefined;
+  // 连写勾选(已写好且未过期的章禁勾,与旧章节轨一致)
   queueMode: boolean;
   queuePicked: boolean;
   generating: boolean;
-  genBlocked: boolean;
-  genHint: string;
   genStage: string;
-  reviseOpen: boolean;
-  reviseText: string;
-  proseActions: EditorAction[];
-  // 人工审核通过(docs/08 §5.5):仅 pending_review 章显示行内「通过」按钮
-  approving: boolean;
-  onApprove: () => void;
-  // quarantined 放行入口上浮:仅被拦截章显示行内「放行」按钮(与「通过」同位)
-  releasing: boolean;
-  onRelease: () => void;
-  onOpen: () => void;
-  onOpenReader: () => void;
   onToggleQueue: (checked: boolean) => void;
-  onToggleRevise: () => void;
-  onReviseTextChange: (text: string) => void;
-  onGenerate: () => void;
-  onReviseSubmit: () => void;
-  onReviseCancel: () => void;
+  onOpen: () => void;
 }
 
 export default function ChapterListItem({
-  pid, outline: o, chapter: ch, queueMode, queuePicked, generating, genBlocked,
-  genHint, genStage, reviseOpen, reviseText, proseActions, approving, onApprove,
-  releasing, onRelease,
-  onOpen, onOpenReader, onToggleQueue, onToggleRevise,
-  onReviseTextChange, onGenerate, onReviseSubmit, onReviseCancel,
+  outline: o, chapter: ch, queueMode, queuePicked, generating, genStage,
+  onToggleQueue, onOpen,
 }: Props) {
   const st = ch?.status ?? "empty";
   return (
-    <>
-      <div className="fact-line fact-row">
-        {queueMode && (
-          <input type="checkbox" className="queue-check"
-            checked={queuePicked}
-            disabled={!!ch && !ch.is_stale}
-            title={ch && !ch.is_stale ? "已写好的章不用排队" : undefined}
-            onChange={(e) => onToggleQueue(e.target.checked)} />
-        )}
-        {ch ? (
-          <button type="button" className="fact-title linkish" onClick={onOpen}>
-            <b>第{o.chapter_number}章</b> {o.title}
-            <span className={"badge " + (ch.is_stale ? "err" : STATUS_BADGE[st] ?? "")}>
-              {ch.is_stale ? "大纲已变" : STATUS_CN[st] ?? st}
-            </span>
-            <span className="muted"> {ch.word_count}字</span>
-            {generating && (
-              <span className="gen-stage"><span className="spin" />{genStage}</span>
-            )}
-          </button>
-        ) : (
-          <span className="fact-title">
-            <b>第{o.chapter_number}章</b> {o.title}
-            <span className={"badge " + (STATUS_BADGE[st] ?? "")}>
-              {STATUS_CN[st] ?? st}
-            </span>
-            {generating && (
-              <span className="gen-stage"><span className="spin" />{genStage}</span>
-            )}
-          </span>
-        )}
-        {ch && st === "pending_review" && (
-          <button className="btn-sm" disabled={approving}
-            title="人工审核通过:确认本章可定稿,批准后状态变为「已审」"
-            onClick={onApprove}>
-            {approving && <span className="spin spin-sm" />}通过
-          </button>
-        )}
-        {ch && st === "quarantined" && (
-          <button className="btn-sm danger" disabled={releasing || genBlocked}
-            title={genBlocked ? genHint : "放行:忽略全部致命矛盾,补走圣经/摘要链路,状态回「待审」"}
-            onClick={onRelease}>
-            {releasing && <span className="spin spin-sm" />}放行
-          </button>
-        )}
-        {ch && (
-          <button className="btn-sm" onClick={onOpenReader}>阅读</button>
-        )}
-        <button className="btn-sm"
-          title={genBlocked ? genHint : (ch ? "重写前旧版会自动存快照,可回退" : undefined)}
-          disabled={genBlocked}
-          onClick={() => {
-            if (ch) onToggleRevise();
-            else onGenerate();
-          }}>
-          {ch ? "重写" : "生成"}
-        </button>
-      </div>
-      {reviseOpen && (
-        <div className="fact-line">
-          <ReviseEditor
-            pid={pid}
-            chapterNumber={o.chapter_number}
-            isStale={!!ch?.is_stale}
-            text={reviseText}
-            proseActions={proseActions}
-            genBlocked={genBlocked}
-            genHint={genHint}
-            onTextChange={onReviseTextChange}
-            onSubmit={onReviseSubmit}
-            onCancel={onReviseCancel}
-          />
-        </div>
+    <div className="fact-line fact-row">
+      {queueMode && (
+        <input type="checkbox" className="queue-check"
+          checked={queuePicked}
+          disabled={!!ch && !ch.is_stale}
+          title={ch && !ch.is_stale ? "已写好的章不用排队" : undefined}
+          onChange={(e) => onToggleQueue(e.target.checked)} />
       )}
-    </>
+      <button type="button" className="fact-title linkish" onClick={onOpen}>
+        <b>第{o.chapter_number}章</b> {o.title}
+        <span className={"badge " + (ch?.is_stale ? "err" : STATUS_BADGE[st] ?? "")}>
+          {ch?.is_stale ? "大纲已变" : STATUS_CN[st] ?? st}
+        </span>
+        {ch && <span className="muted"> {ch.word_count}字</span>}
+        {generating && (
+          <span className="gen-stage"><span className="spin" />{genStage}</span>
+        )}
+      </button>
+    </div>
   );
 }

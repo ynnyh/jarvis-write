@@ -1,5 +1,5 @@
 // 主编评分卡(write 区 act=review):从原 EditorialPanel review 页签拆出。
-// 「按此重写/全部意见转为重写指令」改为就地打开 act=revise 卡并预填(不再跳步/走 localStorage)。
+// 「按此重写/全部意见转为重写指令」P2 起改为打开 AI 窄栏 revise 通道并预填意见文本。
 import { useEffect, useState } from "react";
 import { api, ChapterReview, ReviewSuggestion } from "../../api";
 import { useJob } from "../../ui/useJob";
@@ -11,7 +11,7 @@ const SCORE_LABEL: Record<string, string> = {
 interface Props {
   pid: number;
   chapterNum: number;
-  // 把建议打包成重写指令,交给 write 区的重写卡(预填意见文本)
+  // 把建议打包成重写指令文本,交给 write 区的 AI 窄栏(预填意见文本)
   onRevise: (text: string) => void;
 }
 
@@ -98,7 +98,7 @@ export default function ReviewCard({ pid, chapterNum, onRevise }: Props) {
                 <div key={i} className="review-sug">
                   <div className="rs-head">
                     <b>{i + 1}. {s.issue}</b>
-                    <button className="btn-sm" title="带着这条意见打开重写卡"
+                    <button className="btn-sm" title="带着这条意见打开 AI 栏梳理"
                       onClick={() => onRevise(sugText([s]))}>→ 按此重写</button>
                   </div>
                   {s.evidence && <blockquote className="rs-quote">"{s.evidence}"</blockquote>}

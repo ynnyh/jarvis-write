@@ -1,6 +1,6 @@
 // 项目工作台:三区信息架构(开书 setup / 写作 write / 全书 book)+ 设置 settings + 只读 read。
 // 区进 URL(/project/:id/:step,step 为区名);setup 子步 ?step=、book 页签 ?tab=、
-// 当前章 ?ch=、write 区动作卡 ?act=、参考抽屉 ?ctx= 全部进 URL,刷新/后退/分享不丢位置。
+// 当前章 ?ch=、write 区动作卡 ?act= 全部进 URL,刷新/后退/分享不丢位置(?ctx= 已随参考抽屉废除)。
 // 旧八步链接(inspire/arch/outline/write/polish/refresh/board/publish)一律 <Navigate replace> 重定向。
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -73,8 +73,8 @@ const GUIDES = {
     done: "章节蓝图生成完毕即可开始「写作」。",
   },
   write: {
-    what: "逐章生成正文:左侧章节轨选章,中栏读写;顶部阶段条按章节状态给出下一步主动作(生成/通过/放行/写下一章),重写/润色/校对/评分收在「更多动作」里,连写在章节轨头部。",
-    ai: "AI 按蓝图写正文并维护一致性;不满意可带反馈重写,旧版会留快照可回退;评分/校对结果可一键转重写指令。",
+    what: "逐章生成正文,主场就是正文本身:选中段落就地「改这段/手改」,读到多处问题边批注边一次改;右侧常驻 AI 窄栏梳理意见后整章优化或重写。章首「交稿单」一句话报告自检(校对/与设定有无冲突)并给出「通过/放行」,校对/评分/历史版本收在「更多」;目录(Ctrl+B/点章题)选章,连写在目录里。",
+    ai: "AI 按蓝图写正文并维护一致性;改动一律 diff 逐条验收、旧版留快照可回退;校对/评分结果可一键带进验收流修复。",
     done: "定稿的章节会计入总字数,可随时在「全书」查看全书状态。",
   },
   overview: {
@@ -89,7 +89,7 @@ const GUIDES = {
   },
   audit: {
     what: "全书体检:跨章矛盾扫描、世界观规则扫描、契约批量补提与审核报告聚合。",
-    ai: "LLM 逐章对照圣经/契约/硬规则体检正文,问题按来源落进各章审核报告(写作区右侧「审核」处理)。",
+    ai: "LLM 逐章对照圣经/契约/硬规则体检正文,问题按来源落进各章审核报告(在写作区各章交稿单/审核报告里处理)。",
     done: "可选步骤,建议每写完一卷后跑一次。",
   },
   refresh: {
