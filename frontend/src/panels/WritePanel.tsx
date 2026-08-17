@@ -7,9 +7,9 @@
 // 两个对话通道;③整章优化结果在正文区顶部出 PolishCompareCard 对照;④整章重生成走
 // generate 链路。整章重写卡(ReviseCard)/润色工作台(PolishPanel)/研讨(ReviseChat)已退场。
 // 「当前章」以 URL ch 参数为唯一来源(useChapterContext),正文走 qk.chapter 共享缓存。
-// 未拆技术债(勿再挂"下一期拆"的空头支票):act= 校对/评分两张动作卡、GenResultCard、
-// 版本对比、全屏 Reader 仍内联于此,本组件仍是全区状态中枢(job 轮询/多章同步并发/
-// 版本对比/连写队列)。拆分属独立重构、风险集中在状态中枢,不在本轮「正文即界面」范围,单独排期。
+// 状态逻辑已按域拆到 write/use*.ts(useImmersive/useReader/useChapterVersions/useConsistencySync/
+// useChapterGeneration:沉浸/阅读器/版本对比/多章同步并发/生成连写队列),壳回归编排+布局;
+// 仍内联的是纯 UI:act= 校对/评分两张动作卡、GenResultCard、版本对比与全屏 Reader。
 // 移动端:m-topbar(←/章题/阅读)+ 左右滑切章 + act 卡全屏 sheet。
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TouchEvent } from "react";
