@@ -28,14 +28,21 @@ from app.llm.factory import (
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
-# 各协议默认 base_url / 模型,前端「添加配置」预填与占位用
+# 各协议默认 base_url / 模型,前端「添加配置」预填与占位用。
+# openai-compatible 是主力通用卡,占位给最常见的 OpenAI 端点作示例(实际由用户
+# 或前端快捷预设改成中转站/DeepSeek/Kimi/本地 Ollama 等);deepseek/openai 是其别名。
 _PRESETS = {
-    "deepseek": {"base_url": "https://api.deepseek.com", "model": "deepseek-chat"},
-    "openai": {"base_url": "https://api.openai.com/v1", "model": "gpt-4o"},
+    "openai-compatible": {"base_url": "https://api.openai.com/v1", "model": "gpt-4o"},
+    "anthropic": {
+        "base_url": "https://api.anthropic.com",
+        "model": "claude-sonnet-4-20250514",
+    },
     "gemini": {
         "base_url": "https://generativelanguage.googleapis.com/v1beta",
         "model": "gemini-2.0-flash",
     },
+    "deepseek": {"base_url": "https://api.deepseek.com", "model": "deepseek-chat"},
+    "openai": {"base_url": "https://api.openai.com/v1", "model": "gpt-4o"},
 }
 
 
@@ -65,7 +72,7 @@ class ProviderConfigOut(BaseModel):
 
 class ProviderConfigIn(BaseModel):
     name: str = ""
-    interface_format: str = "openai"
+    interface_format: str = "openai-compatible"
     api_key: str | None = Field(
         default=None, description="留空/不传 = 不改动已存的 key(仅更新时)"
     )

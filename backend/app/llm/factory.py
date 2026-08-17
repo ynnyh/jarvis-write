@@ -23,17 +23,25 @@ from fastapi import HTTPException
 from app.config import get_settings
 
 from .base import LLMAdapter
+from .openai_compatible import OpenAICompatibleAdapter
 from .deepseek import DeepSeekAdapter
 from .openai import OpenAIAdapter
 from .gemini import GeminiAdapter
+from .anthropic import AnthropicAdapter
 
 logger = logging.getLogger("jarvis-write.llm")
 
-# interface_format -> 适配器类
+# interface_format -> 适配器类。三个 wire 协议大类 + 两个带预填的别名:
+# - openai-compatible:主力通用卡(OpenAI/DeepSeek/Kimi/通义/中转站/本地 Ollama…);
+# - anthropic / gemini:各自的原生协议;
+# - deepseek / openai:openai-compatible 的别名(存量配置沿用,行为完全等同),
+#   保留是为了历史数据零迁移与前端快捷预设,不应再引导用户新建。
 _REGISTRY: dict[str, type[LLMAdapter]] = {
+    "openai-compatible": OpenAICompatibleAdapter,
+    "anthropic": AnthropicAdapter,
+    "gemini": GeminiAdapter,
     "deepseek": DeepSeekAdapter,
     "openai": OpenAIAdapter,
-    "gemini": GeminiAdapter,
 }
 
 

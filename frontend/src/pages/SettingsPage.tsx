@@ -24,29 +24,60 @@ import { getCloseToTrayPref, setCloseToTrayPref } from "../ui/CloseGuard";
 import { toast } from "../ui/Toaster";
 import { confirmDialog } from "../ui/ConfirmDialog";
 
-// 协议预设:展示名、一句话说明、默认 base_url/model(与后端 settings.py 的 _PRESETS 一致)
-interface InterfacePreset {
+// 模型接入(cc-switch 风格):后端有三类 wire 协议——openai-compatible / anthropic /
+// gemini,存库的 interface_format 用这三个大类之一;deepseek/openai 是 openai-compatible
+// 的历史别名,只在回显存量配置时并入通用卡。
+
+// 协议大类:新建配置只在这三类里选。desc/baseUrl/model 与后端 settings.py 的 _PRESETS 对齐。
+interface ProtocolCategory {
   key: string; label: string; desc: string; baseUrl: string; model: string;
 }
-const INTERFACE_PRESETS: InterfacePreset[] = [
+const PROTOCOL_CATEGORIES: ProtocolCategory[] = [
   {
-    key: "deepseek", label: "DeepSeek",
-    desc: "DeepSeek 官方 API。也可用中转站,改 Base URL 即可。",
-    baseUrl: "https://api.deepseek.com", model: "deepseek-chat",
-  },
-  {
-    key: "openai", label: "OpenAI 兼容",
-    desc: "OpenAI 官方及兼容中转站——用中转站(如 token 站、API 超市)就选这张卡,填中转地址和中转里的模型名。",
+    key: "openai-compatible", label: "OpenAI 兼容",
+    desc: "最通用的一张卡:OpenAI 官方、各类中转站(token 站 / API 超市)、本地 Ollama,以及卖 DeepSeek / Kimi / 通义 / GLM 等模型的服务——只要是 OpenAI /chat/completions 协议都选它,填对 Base URL 和模型名即可。",
     baseUrl: "https://api.openai.com/v1", model: "gpt-4o",
   },
   {
+    key: "anthropic", label: "Anthropic (Claude)",
+    desc: "Claude 原生 Messages API。用官方或支持 Anthropic 协议的渠道选它;卖 Claude 的 OpenAI 兼容中转站请改用「OpenAI 兼容」卡。",
+    baseUrl: "https://api.anthropic.com", model: "claude-sonnet-4-20250514",
+  },
+  {
     key: "gemini", label: "Gemini",
-    desc: "仅 Google 官方原生 API。卖 Gemini 模型的中转站请走 OpenAI 兼容卡。",
+    desc: "仅 Google 官方原生 API。卖 Gemini 模型的中转站请走「OpenAI 兼容」卡。",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-2.0-flash",
   },
 ];
-const PRESET_BY_KEY: Record<string, InterfacePreset> = Object.fromEntries(
-  INTERFACE_PRESETS.map((p) => [p.key, p]));
+const CATEGORY_BY_KEY: Record<string, ProtocolCategory> = Object.fromEntries(
+  PROTOCOL_CATEGORIES.map((c) => [c.key, c]));
+
+// 快捷预设:点一下把「大类 + Base URL + 模型名」一并填好(纯前端便利,存库仍是大类 key)。
+// 用户通常只需再填 API Key;想接别的厂商,选对应大类手填地址即可。
+interface QuickPreset { label: string; category: string; baseUrl: string; model: string; }
+const QUICK_PRESETS: QuickPreset[] = [
+  { label: "DeepSeek", category: "openai-compatible", baseUrl: "https://api.deepseek.com", model: "deepseek-chat" },
+  { label: "OpenAI", category: "openai-compatible", baseUrl: "https://api.openai.com/v1", model: "gpt-4o" },
+  { label: "Kimi", category: "openai-compatible", baseUrl: "https://api.moonshot.cn/v1", model: "moonshot-v1-8k" },
+  { label: "通义千问", category: "openai-compatible", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
+  { label: "智谱 GLM", category: "openai-compatible", baseUrl: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-plus" },
+  { label: "Claude", category: "anthropic", baseUrl: "https://api.anthropic.com", model: "claude-sonnet-4-20250514" },
+  { label: "Gemini", category: "gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-2.0-flash" },
+];
+
+// 徽标文案:覆盖所有可能存库的 interface_format(含历史别名),让存量配置也显示合理标签。
+const FORMAT_LABEL: Record<string, string> = {
+  "openai-compatible": "OpenAI 兼容",
+  anthropic: "Anthropic (Claude)",
+  gemini: "Gemini",
+  deepseek: "OpenAI 兼容",
+  openai: "OpenAI 兼容",
+};
+
+// 历史别名归一到大类 key:存量 deepseek/openai 配置在表单里并入「OpenAI 兼容」大类。
+function normalizeCategory(fmt: string): string {
+  return fmt === "deepseek" || fmt === "openai" ? "openai-compatible" : fmt;
+}
 
 // 偏好:启动时自动检查更新(仅桌面有意义)。默认开。
 const AUTO_CHECK_KEY = "jarvis_auto_check_update";
@@ -574,7 +605,7 @@ function ProviderRow({ p, onChanged, onEdit }: {
 }) {
   const [busy, setBusy] = useState(false);
   const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const preset = PRESET_BY_KEY[p.interface_format];
+  const cat = CATEGORY_BY_KEY[normalizeCategory(p.interface_format)];
 
   async function test() {
     setBusy(true); setTestMsg(null);
@@ -639,7 +670,7 @@ function ProviderRow({ p, onChanged, onEdit }: {
     <div className="provider-row">
       <div className="card-head">
         <h3>{p.name}</h3>
-        <span className="badge">{preset?.label || p.interface_format}</span>
+        <span className="badge">{FORMAT_LABEL[p.interface_format] || p.interface_format}</span>
         <span className={`badge ${p.has_key ? "ok" : "err"}`}>
           {p.has_key ? "已配置" : "未配置"}
         </span>
@@ -647,10 +678,10 @@ function ProviderRow({ p, onChanged, onEdit }: {
         {p.is_default_fast && <span className="badge">快档</span>}
       </div>
       <p className="provider-desc">
-        {preset?.desc || ""}
+        {cat?.desc || ""}
         {p.has_key && ` Key:${p.api_key_masked}。`}
         {p.base_url || p.model
-          ? ` ${p.base_url || preset?.baseUrl || ""} · ${p.model || preset?.model || ""}`
+          ? ` ${p.base_url || cat?.baseUrl || ""} · ${p.model || cat?.model || ""}`
           : ""}
         {(p.timeout > 0 || p.max_tokens > 0) &&
           ` · 超时 ${p.timeout > 0 ? `${p.timeout}s` : "跟随全局"} · max_tokens ${p.max_tokens > 0 ? p.max_tokens : "跟随全局"}`}
@@ -684,7 +715,7 @@ function ProviderRow({ p, onChanged, onEdit }: {
 function ProviderForm({ editing, onSaved, onCancel }: {
   editing?: ProviderConfigOut; onSaved: () => void; onCancel: () => void;
 }) {
-  const [preset, setPreset] = useState(editing?.interface_format || "deepseek");
+  const [category, setCategory] = useState(normalizeCategory(editing?.interface_format || "openai-compatible"));
   const [name, setName] = useState(editing?.name || "");
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState(editing?.base_url || "");
@@ -693,7 +724,7 @@ function ProviderForm({ editing, onSaved, onCancel }: {
   const [maxTokens, setMaxTokens] = useState(String(editing?.max_tokens ?? 0));
   const [busy, setBusy] = useState(false);
 
-  const cur = PRESET_BY_KEY[preset];
+  const cur = CATEGORY_BY_KEY[category];
   const canSubmit = !busy && (editing ? true : !!apiKey.trim());
 
   async function save() {
@@ -701,7 +732,7 @@ function ProviderForm({ editing, onSaved, onCancel }: {
     try {
       const body = {
         name: name.trim(),
-        interface_format: preset,
+        interface_format: category,
         api_key: apiKey.trim() || null,
         base_url: baseUrl.trim(),
         model: model.trim(),
@@ -723,12 +754,25 @@ function ProviderForm({ editing, onSaved, onCancel }: {
         <h3>{editing ? `编辑「${editing.name}」` : "添加配置"}</h3>
       </div>
 
-      <label className="fl">协议</label>
+      <label className="fl">快捷预设</label>
       <div className="chips">
-        {INTERFACE_PRESETS.map((o) => (
+        {QUICK_PRESETS.map((q) => (
+          <button key={q.label} type="button" className="chip"
+            onClick={() => { setCategory(q.category); setBaseUrl(q.baseUrl); setModel(q.model); }}>
+            {q.label}
+          </button>
+        ))}
+      </div>
+      <div className="fld-hint" style={{ marginTop: 6 }}>
+        点一下自动选好协议并填入官方 Base URL / 模型名,通常你只需再填 API Key。
+      </div>
+
+      <label className="fl" style={{ marginTop: 12 }}>协议</label>
+      <div className="chips">
+        {PROTOCOL_CATEGORIES.map((o) => (
           <button key={o.key} type="button"
-            className={"chip" + (preset === o.key ? " on" : "")}
-            onClick={() => setPreset(o.key)}>
+            className={"chip" + (category === o.key ? " on" : "")}
+            onClick={() => setCategory(o.key)}>
             {o.label}
           </button>
         ))}

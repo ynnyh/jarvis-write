@@ -313,12 +313,14 @@ export interface PolishResult {
 export interface RevisePair {
   para_idx: number; old: string; new: string; notes: string | null; ok: boolean;
 }
-export interface ProviderState { deepseek: boolean; openai: boolean; gemini: boolean; }
+// 各协议是否已配置可用 key。键为 interface_format(openai-compatible / anthropic /
+// gemini / deepseek / openai…),随后端 _REGISTRY 动态扩展,故用 Record 不写死字段。
+export type ProviderState = Record<string, boolean>;
 // 模型设置(cc-switch 风格):每用户多套命名配置,回显 key 打码与协议默认值
 export interface ProviderConfigOut {
   id: number;
   name: string;
-  interface_format: string; // deepseek | openai | gemini
+  interface_format: string; // openai-compatible | anthropic | gemini | deepseek | openai
   api_key_masked: string;
   has_key: boolean;
   base_url: string;

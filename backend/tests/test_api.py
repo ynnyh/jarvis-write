@@ -375,6 +375,89 @@ def test_create_adapter_empty_key_raises_400(client):
         raise AssertionError("空 key 应抛 HTTPException(400)")
 
 
+# ---------- 模型接入大类扩展(cc-switch:三大类 + 两别名) ----------
+
+
+def _add_provider(client: TestClient, headers: dict, **fields) -> dict:
+    """走 API 存一套配置,返回响应体。默认给全必填字段,可用 kw 覆盖。"""
+    body = {"api_key": "sk-test", "base_url": "", "model": "m", **fields}
+    r = client.post("/api/settings/providers", headers=headers, json=body)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_provider_status_covers_all_protocols(client):
+    """status.providers 覆盖三大类 + 两别名共 5 键(前端据此渲染协议清单)。"""
+    headers = _auth(_register(client, "proto_all")["token"])
+    r = client.get("/api/settings/providers/status", headers=headers)
+    assert r.status_code == 200, r.text
+    assert set(r.json()["providers"]) == {
+        "openai-compatible", "anthropic", "gemini", "deepseek", "openai",
+    }
+
+
+def test_anthropic_native_config_resolves_and_builds(client):
+    """anthropic 原生协议:能存、被选默认、造出 AnthropicAdapter。"""
+    from app.llm.anthropic import AnthropicAdapter
+    from app.llm.factory import create_llm_adapter, resolve_default_provider
+
+    headers = _auth(_register(client, "anthropic_native")["token"])
+    _add_provider(
+        client, headers,
+        interface_format="anthropic", name="Claude",
+        api_key="sk-ant", base_url="https://api.anthropic.com",
+        model="claude-sonnet-4-20250514",
+    )
+    assert client.get(
+        "/api/settings/providers/status", headers=headers
+    ).json()["providers"]["anthropic"] is True
+
+    assert _with_uid(client, headers, resolve_default_provider) == "anthropic"
+    adapter = _with_uid(client, headers, lambda: create_llm_adapter("anthropic"))
+    assert isinstance(adapter, AnthropicAdapter)
+    assert adapter.interface_format == "anthropic"
+    assert adapter.api_key == "sk-ant"
+
+
+def test_openai_compatible_config_resolves_and_builds(client):
+    """通用卡 openai-compatible:能存、被选默认、造出 OpenAICompatibleAdapter 本尊
+    (而非 deepseek/openai 子类)。"""
+    from app.llm.factory import create_llm_adapter, resolve_default_provider
+    from app.llm.openai_compatible import OpenAICompatibleAdapter
+
+    headers = _auth(_register(client, "oai_compat")["token"])
+    _add_provider(
+        client, headers,
+        interface_format="openai-compatible", name="中转站A",
+        api_key="sk-relay", base_url="https://relay.example.com/v1",
+        model="gpt-4o-mini",
+    )
+    assert client.get(
+        "/api/settings/providers/status", headers=headers
+    ).json()["providers"]["openai-compatible"] is True
+
+    assert _with_uid(
+        client, headers, resolve_default_provider
+    ) == "openai-compatible"
+    adapter = _with_uid(
+        client, headers, lambda: create_llm_adapter("openai-compatible")
+    )
+    assert type(adapter) is OpenAICompatibleAdapter
+    assert adapter.base_url == "https://relay.example.com/v1"
+
+
+def test_reject_unknown_interface_format(client):
+    """未知协议名保存被拒(设置页白名单校验)→ 400 未知协议。"""
+    headers = _auth(_register(client, "bad_fmt")["token"])
+    r = client.post(
+        "/api/settings/providers",
+        headers=headers,
+        json={"interface_format": "grok-native", "api_key": "sk-x"},
+    )
+    assert r.status_code == 400
+    assert "未知协议" in r.json()["detail"]
+
+
 # ---------- 后台管理(阶段 9) ----------
 
 

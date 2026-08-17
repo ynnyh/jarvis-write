@@ -47,7 +47,12 @@ class Settings(BaseSettings):
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     gemini_model: str = "gemini-2.0-flash"
 
-    default_provider: Literal["deepseek", "openai", "gemini"] = "deepseek"
+    # Anthropic (Claude)
+    anthropic_api_key: str = ""
+    anthropic_base_url: str = "https://api.anthropic.com"
+    anthropic_model: str = "claude-sonnet-4-20250514"
+
+    default_provider: Literal["deepseek", "openai", "gemini", "anthropic"] = "deepseek"
 
     database_url: str = "sqlite:///./jarvis_write.db"
 
@@ -79,19 +84,26 @@ class Settings(BaseSettings):
 
     def provider(self, name: str) -> EnvProviderConfig:
         name = name.lower()
-        if name == "deepseek":
-            return EnvProviderConfig(
+        groups = {
+            "deepseek": (
                 self.deepseek_api_key, self.deepseek_base_url, self.deepseek_model
-            )
-        if name == "openai":
-            return EnvProviderConfig(
+            ),
+            "openai": (
                 self.openai_api_key, self.openai_base_url, self.openai_model
-            )
-        if name == "gemini":
-            return EnvProviderConfig(
+            ),
+            "gemini": (
                 self.gemini_api_key, self.gemini_base_url, self.gemini_model
-            )
-        raise ValueError(f"未知的 provider: {name}")
+            ),
+            "anthropic": (
+                self.anthropic_api_key, self.anthropic_base_url, self.anthropic_model
+            ),
+        }
+        if name in groups:
+            return EnvProviderConfig(*groups[name])
+        # 通用协议卡(openai-compatible 等)无专属 .env 兜底:返回空配置,交由
+        # 数据库里的命名配置提供 key/base_url/model。不再 raise——否则
+        # available_providers / resolve_provider_config 遍历新协议时会炸。
+        return EnvProviderConfig("", "", "")
 
     @property
     def is_local(self) -> bool:
