@@ -21,6 +21,33 @@ struct Backend(Mutex<Option<Child>>);
 // 桥不通(前端没调成)则原生框兜底,保证任何情况下都能收到更新提示。
 struct FrontendActive(AtomicBool);
 
+// 下载互斥:原生框(启动兜底)与设置页可能同时触发下载(实测撞车:用户在原生框
+// 点了「立即更新」,又在设置页点「下载并安装」)。两路并发各持一个 downloaded
+// 计数器,交错推 update://progress,前端进度条来回跳——即用户看到的"闪烁"。
+// compare_exchange 抢锁,抢不到的一路让位;DownloadRelease 用 Drop 保证任何
+// 退出路径(含 Err 提前返回)都释放锁。
+struct DownloadBusy(AtomicBool);
+
+fn try_begin_download(handle: &tauri::AppHandle) -> Option<DownloadRelease> {
+    handle
+        .state::<DownloadBusy>()
+        .0
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .ok()?;
+    Some(DownloadRelease(handle.clone()))
+}
+
+struct DownloadRelease(tauri::AppHandle);
+
+impl Drop for DownloadRelease {
+    fn drop(&mut self) {
+        self.0
+            .state::<DownloadBusy>()
+            .0
+            .store(false, Ordering::SeqCst);
+    }
+}
+
 // 关闭守卫:前端 CloseGuard 组件挂载后调 enable_close_guard 置 enabled=true,
 // 此后点 X 不再直接销毁窗口,而是拦下并发 close://requested 事件交前端决定
 // (有任务弹确认框 / 按偏好进托盘 / 直接关,见 frontend/src/ui/CloseGuard.tsx)。
@@ -528,6 +555,13 @@ async fn check_update(handle: tauri::AppHandle) -> Result<UpdateInfo, String> {
 // 安装前杀后端,避开 NSIS 覆盖 resources 下后端文件时的 Windows 文件锁。
 #[tauri::command]
 async fn download_and_install_update(handle: tauri::AppHandle) -> Result<(), String> {
+    // 与原生框路径抢同一把下载锁:抢不到说明另一路已在下,直接友好报错,
+    // 进度事件仍由在下的那路推,前端进度条照常动(不会再来回跳)。
+    let Some(_release) = try_begin_download(&handle) else {
+        ulog(&handle, "前端下载让位:另一路下载已在进行中");
+        return Err("已有更新下载在进行中,请稍候".to_string());
+    };
+
     let update = check_with_fallback(&handle)
         .await
         .map_err(|e| format!("检查更新失败:{e}"))?
@@ -701,6 +735,7 @@ pub fn run() {
         ])
         .manage(Backend(Mutex::new(None)))
         .manage(FrontendActive(AtomicBool::new(false)))
+        .manage(DownloadBusy(AtomicBool::new(false)))
         .manage(CloseGuard {
             enabled: AtomicBool::new(false),
             approved: AtomicBool::new(false),
@@ -837,6 +872,15 @@ async fn check_for_update(handle: tauri::AppHandle) {
 
     let version = update.version.clone();
     let notes = update.body.clone().unwrap_or_default();
+
+    // 再确认一次前端是否已接管:检查本身要走网络,8 秒兜底到点时的判定可能已过期
+    // (实测同一秒「前端未接管,走原生框」与「前端触发检查更新」并发)。若已接管,
+    // 原生框整个让位——设置页的更新卡片已能完成全流程,弹原生框只会造成双入口。
+    if handle.state::<FrontendActive>().0.load(Ordering::SeqCst) {
+        ulog(&handle, &format!("发现新版本 v{version},但前端已接管,原生框让位"));
+        return;
+    }
+
     ulog(&handle, &format!("发现新版本 v{version},弹窗询问用户"));
     let msg = if notes.trim().is_empty() {
         format!("发现新版本 v{version}，是否立即更新？")
@@ -859,7 +903,21 @@ async fn check_for_update(handle: tauri::AppHandle) {
                 return;
             }
             let h = dialog_handle.clone();
+            // 用户点「立即更新」时前端可能已接管(原生框与设置页双入口撞车),
+            // 让位给前端:它的更新卡片同样能一键下载,且进度条 UI 更完整。
+            if h.state::<FrontendActive>().0.load(Ordering::SeqCst) {
+                ulog(&h, "原生框下载让位:前端已接管更新 UI");
+                return;
+            }
+            // 与前端路径互斥:另一路若已在下载,这路直接退出,避免双计数器
+            // 交错推 update://progress 导致进度条来回跳(闪烁)。
+            // 锁必须在 spawn 的任务里获取:_release 靠 Drop 释放,拿到任务外
+            // 会在回调同步结束时立刻还锁,等于没锁。
             tauri::async_runtime::spawn(async move {
+                let Some(_release) = try_begin_download(&h) else {
+                    ulog(&h, "原生框下载让位:另一路下载已在进行中");
+                    return;
+                };
                 ulog(&h, "开始下载更新…");
                 match download_with_fallback(&h, &update).await {
                     Ok(bytes) => {

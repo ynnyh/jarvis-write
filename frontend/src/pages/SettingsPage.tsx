@@ -145,9 +145,13 @@ function AboutUpdateCard() {
 
   async function doDownload() {
     setStage("downloading"); setProgress({ done: 0, total: 0 });
-    // 订阅进度
+    // 订阅进度。单调防御:正常事件递增;旧版本曾有两路下载并发、双计数器交错
+    // 推送导致进度条来回跳(闪烁)。Rust 侧已加下载互斥,这里再兜一层——回退
+    // 超过 1MB 的事件视为异源计数直接忽略(仅放行下载重开时的近 0 起点)。
     unlistenRef.current = await onUpdateProgress((done, total) =>
-      setProgress({ done, total }));
+      setProgress((prev) =>
+        done < prev.done && done > 1024 * 1024 ? prev : { done, total },
+      ));
     try {
       await downloadAndInstallUpdate();
       unlistenRef.current?.();
