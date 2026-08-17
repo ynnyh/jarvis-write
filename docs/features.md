@@ -71,13 +71,13 @@ Tauri 壳 + 冻结后端，安装包开箱即用、免登录单机运行、数�
 
 不做两份代码：同一套组件按断点退化。进来就是当前章正文，底部栏（写 / 读 / 参考 / 设置）+ 右下悬浮按钮（点按执行当前最该做的动作，长按展开动作扇），左右滑动切章，参考与结果以全屏面板弹出。
 
-<p>
-  <img src="./assets/screenshots/mobile-01.jpg" width="160">
-  <img src="./assets/screenshots/mobile-02.jpg" width="160">
-  <img src="./assets/screenshots/mobile-03.jpg" width="160">
-  <img src="./assets/screenshots/mobile-04.jpg" width="160">
-  <img src="./assets/screenshots/mobile-05.jpg" width="160">
-</p>
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:14px;max-width:780px;margin:16px 0;">
+  <img src="./assets/screenshots/mobile-01.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
+  <img src="./assets/screenshots/mobile-02.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
+  <img src="./assets/screenshots/mobile-03.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
+  <img src="./assets/screenshots/mobile-04.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
+  <img src="./assets/screenshots/mobile-05.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
+</div>
 <p><i>移动端截图（界面持续迭代中）</i></p>
 
 ## 多用户与自部署

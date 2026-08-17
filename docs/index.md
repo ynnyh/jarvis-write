@@ -60,19 +60,17 @@ features:
 
 手机浏览器打开即用：进来就是当前章正文，底部栏 + 悬浮动作按钮，左右滑动切章，参考与结果以全屏面板弹出。
 
-<p>
-  <img src="./assets/screenshots/mobile-01.jpg" width="160">
-  <img src="./assets/screenshots/mobile-02.jpg" width="160">
-  <img src="./assets/screenshots/mobile-03.jpg" width="160">
-  <img src="./assets/screenshots/mobile-04.jpg" width="160">
-  <img src="./assets/screenshots/mobile-05.jpg" width="160">
-</p>
-<p>
-  <img src="./assets/screenshots/mobile-06.jpg" width="160">
-  <img src="./assets/screenshots/mobile-07.jpg" width="160">
-  <img src="./assets/screenshots/mobile-08.jpg" width="160">
-  <img src="./assets/screenshots/mobile-09.jpg" width="160">
-</p>
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;max-width:600px;margin:16px 0;">
+  <img src="./assets/screenshots/mobile-01.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
+  <img src="./assets/screenshots/mobile-02.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
+  <img src="./assets/screenshots/mobile-03.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
+  <img src="./assets/screenshots/mobile-04.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
+  <img src="./assets/screenshots/mobile-05.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
+  <img src="./assets/screenshots/mobile-06.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
+  <img src="./assets/screenshots/mobile-07.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
+  <img src="./assets/screenshots/mobile-08.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
+  <img src="./assets/screenshots/mobile-09.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
+</div>
 <p><i>移动端截图（界面持续迭代中）</i></p>
 
 ## 三种使用方式
