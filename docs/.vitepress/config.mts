@@ -20,6 +20,7 @@ export default defineConfig({
 
     nav: [
       { text: '首页', link: '/' },
+      { text: '功能导览', link: '/features' },
       { text: '设计文档', link: '/00-overview' },
       {
         text: '获取',
@@ -32,6 +33,7 @@ export default defineConfig({
     ],
 
     sidebar: [
+      { text: '功能导览', link: '/features' },
       {
         text: '设计文档',
         items: [
@@ -41,6 +43,14 @@ export default defineConfig({
           { text: '03 · 三大引擎设计', link: '/03-engines' },
           { text: '04 · 标签化倾向系统', link: '/04-tag-system' },
           { text: '05 · 分阶段落地路线图', link: '/05-roadmap' },
+        ],
+      },
+      {
+        text: '交互与流程设计',
+        items: [
+          { text: '07 · 交互重构:双端设计与实施规格', link: '/07-交互重构-双端设计与实施规格' },
+          { text: '08 · 章节生产流水线与前后审核体系', link: '/08-章节生产流水线与前后审核体系设计' },
+          { text: '09 · 新建小说向导体验升级', link: '/09-新建小说向导体验升级设计' },
         ],
       },
       {
