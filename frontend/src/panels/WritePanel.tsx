@@ -16,10 +16,10 @@ import type { TouchEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  api, ChapterBrief, ChapterDetail, ChapterVersionBrief,
-  ChapterVersionDetail, GenerateChapterResponse, Outline, PolishResult, RevisePair, Tendency,
+  api, ChapterBrief, ChapterDetail,
+  Outline, PolishResult, RevisePair,
 } from "../api";
-import { pollJob, errMsg } from "../pollJob";
+import { errMsg } from "../pollJob";
 import { qk, useChapter, useChapters, useInvalidateProject } from "../hooks/queries";
 import { useChapterContext } from "../hooks/useChapterContext";
 import { useBreakpoint } from "../hooks/useBreakpoint";
@@ -42,6 +42,11 @@ import PolishCompareCard from "./write/PolishCompareCard";
 import AnnotatedReviseCard from "./write/AnnotatedReviseCard";
 import { Annotation } from "./write/paraEdit";
 import { deriveStage } from "./write/chapterStage";
+import { useImmersive } from "./write/useImmersive";
+import { useReader } from "./write/useReader";
+import { useChapterVersions } from "./write/useChapterVersions";
+import { useConsistencySync } from "./write/useConsistencySync";
+import { useChapterGeneration } from "./write/useChapterGeneration";
 import { useJob } from "../ui/useJob";
 
 interface Props {
@@ -93,23 +98,14 @@ export default function WritePanel({ pid, outlines }: Props) {
 
   // ---- 移动端壳(isMobile 由 useBreakpoint 判定,与 @media (max-width: 767px) 对齐)----
   const { isMobile } = useBreakpoint();
-  // 沉浸模式(F11,class 挂在 write-zone,外层 chrome 由 CSS :has 隐藏)
-  const [immersive, setImmersive] = useState(false);
+  // 沉浸模式(F11/命令面板/菜单):抽到 useImmersive(class 挂 write-zone,开启时 Esc 退出)
+  const { immersive, toggleImmersive } = useImmersive();
   // 目录抽屉(章题按钮/空态引导/Ctrl+B 都可触发,双端同一份 CatalogDrawer)
   const [railOpen, setRailOpen] = useState(false);
   // 左右滑切章的起点坐标(见 write-main 的 touch 处理器)
   const swipeRef = useRef<{ x: number; y: number } | null>(null);
 
-  // 进行中的「生成/重写」任务:阻塞式(顶部横幅 + 锁住章级动作)。
-  const [genJob, setGenJob] = useState<{ num: number; stage: string } | null>(null);
-  // 进行中的「保存后一致性同步」任务:非阻塞轻量角标,按章号并发(多章各自独立收尾,
-  // 互不覆盖清空),不影响阅读/编辑其他章节。key=章号,value=当前阶段文案。
-  const [syncJobs, setSyncJobs] = useState<Map<number, string>>(new Map());
-  // 保存正文后待用户确认是否同步的章号(null=无待确认)。小幅修改可跳过同步。
-  const [pendingSync, setPendingSync] = useState<number | null>(null);
   const [err, setErr] = useState("");
-  const [genResult, setGenResult] = useState<GenerateChapterResponse | null>(null);
-  const [genTendency, setGenTendency] = useState<Tendency>({});
   // AI 窄栏(P2):开合(桌面默认展开/移动默认收起)、外部预填(nonce 触发)、正文选中段、
   // ③整章优化的对照结果(渲染在正文区顶部 PolishCompareCard)
   const [dockCollapsed, setDockCollapsed] = useState(isMobile);
@@ -123,36 +119,33 @@ export default function WritePanel({ pid, outlines }: Props) {
   const [reviseResult, setReviseResult] = useState<RevisePair[] | null>(null);
   // Prose 手改的未保存脏标记(组件内状态,经回调上报):切章前据此弹「丢弃修改」确认
   const proseDirtyRef = useRef(false);
-  // 阅读器(全屏遮罩,共用组件 Reader):当前阅读章节
-  const [reader, setReader] = useState<ChapterDetail | null>(null);
-  const [readerLoading, setReaderLoading] = useState(false);
-  // 正文版本对比:versionsFor=打开历史的章号,versions=该章快照列表,compareVer=选中对比的旧版全文
-  const [versionsFor, setVersionsFor] = useState<number | null>(null);
-  const [versions, setVersions] = useState<ChapterVersionBrief[] | null>(null);
-  const [compareVer, setCompareVer] = useState<ChapterVersionDetail | null>(null);
-  // 连写队列:勾选多章 → 后端一个 job 串行生成(状态在此持有,目录抽屉头部跟随切换)
-  const [queueMode, setQueueMode] = useState(false);
-  const [queuePicked, setQueuePicked] = useState<Set<number>>(new Set());
-  // 组件卸载时中止轮询,防止卸载后继续 setState(生成与同步各用一个,互不覆盖)
-  const abortRef = useRef<AbortController | null>(null);
-  // 同步任务的中止器:按章号存,允许多章并发各自独立中止。
-  const syncAbortRefs = useRef<Map<number, AbortController>>(new Map());
-  useEffect(() => () => {
-    abortRef.current?.abort();
-    syncAbortRefs.current.forEach((c) => c.abort());
-  }, []);
-
-  // 同步角标按章号读写(函数式更新,避免并发覆盖);清除时同时移除中止器。
-  const setSyncStage = useCallback((num: number, stage: string) => {
-    setSyncJobs((m) => new Map(m).set(num, stage));
-  }, []);
-  const clearSync = useCallback((num: number) => {
-    setSyncJobs((m) => { const n = new Map(m); n.delete(num); return n; });
-    syncAbortRefs.current.delete(num);
-  }, []);
+  // 阅读器(全屏遮罩,共用组件 Reader):抽到 useReader(reader 态/翻章派生/openReader)
+  const { reader, readerLoading, setReader, openReader, prevNum, nextNum, readerOutline } =
+    useReader(pid, chapters, outlines, setErr);
 
   // reload 沿用旧调用点:失效 RQ 缓存 → 章节列表与父级顶栏统计一并重拉(消除陈旧)。
   const reload = invalidateProject;
+  // 一致性同步(保存/回退后重抽取+重建下游摘要+向量库):抽到 useConsistencySync。
+  // triggerSync 供回退版本联动(注入下方 useChapterVersions);reconnectSync 供挂载重连遗留同步。
+  const { syncJobs, pendingSync, setPendingSync, triggerSync, reconnectSync } = useConsistencySync(pid);
+  // 正文版本对比(打开历史/选版/回退):抽到 useChapterVersions。回退联动写回+刷新+同步,
+  // 故注入 setCurrent/reload/triggerSync;openVersions 供生成完成后自动弹对比(见 trackGenerate)。
+  const {
+    versionsFor, versions, compareVer,
+    closeVersions, openVersions, selectVersion, restoreVersion,
+  } = useChapterVersions(pid, { setErr, setCurrent, reload, triggerSync });
+  // 章节生成(按蓝图生成/带意见重写/多章连写):抽到 useChapterGeneration。注入 openVersions
+  // (重写完弹对比)/setChapterNum(生成后自动选章)/clearAct 等联动;genBlocked/genHint 因依赖
+  // 当前 chapterNum,留壳做纯派生(见下)。
+  const {
+    genJob, genResult, setGenResult,
+    genTendency, setGenTendency,
+    queueMode, setQueueMode, queuePicked, setQueuePicked,
+    generate, startQueue, pickNextBatch, reconnectGenerate,
+  } = useChapterGeneration(pid, outlines, chapters, {
+    setErr, setCurrent, reload, setChapterNum, chapterNum,
+    openVersions, clearAct: () => setAct(null),
+  });
   // 章节初次加载由 RQ 负责;仅把加载错误透传到面板错误区。
   useEffect(() => {
     if (chaptersQuery.error) setErr(String(chaptersQuery.error));
@@ -189,39 +182,9 @@ export default function WritePanel({ pid, outlines }: Props) {
     let cancelled = false;
     api.runningJobs(pid).then(({ jobs }) => {
       if (cancelled) return;
-      const gen = jobs.find((j) => j.kind.startsWith(`chapter-${pid}-`));
-      if (gen) {
-        const tail = gen.kind.split("-").pop()!;
-        const ctrl = new AbortController();
-        abortRef.current = ctrl;
-        if (tail === "queue") {
-          // 连写队列:通用轮询,完成后刷新列表
-          setGenJob({ num: 0, stage: gen.stage });
-          pollJob(gen.job_id, {
-            signal: ctrl.signal,
-            onStage: (stage) => setGenJob({ num: 0, stage }),
-          }).then(() => reload())
-            .catch(() => reload().catch(() => undefined))
-            .finally(() => { if (!ctrl.signal.aborted) setGenJob(null); });
-        } else {
-          const n = Number(tail);
-          setGenJob({ num: n, stage: gen.stage });
-          trackGenerate(n, gen.job_id, ctrl);
-        }
-      }
-      // 遗留同步任务可能有多章并发,全部接上非阻塞角标(各自独立收尾)
-      jobs.filter((j) => j.kind.startsWith(`re-extract-${pid}-`)).forEach((sync) => {
-        const n = Number(sync.kind.split("-").pop());
-        if (syncAbortRefs.current.has(n)) return; // 已在跟踪,不重复接
-        const ctrl = new AbortController();
-        syncAbortRefs.current.set(n, ctrl);
-        setSyncStage(n, sync.stage);
-        pollJob(sync.job_id, {
-          signal: ctrl.signal,
-          onStage: (stage) => setSyncStage(n, stage),
-        }).catch(() => undefined)
-          .finally(() => { if (!ctrl.signal.aborted) clearSync(n); });
-      });
+      // 生成任务 → 阻塞横幅;同步任务 → 非阻塞角标(各自 hook 按 kind 过滤 + 去重接线,可同时重连)
+      reconnectGenerate(jobs);
+      reconnectSync(jobs);
     }).catch(() => undefined);
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -233,7 +196,7 @@ export default function WritePanel({ pid, outlines }: Props) {
     setErr(""); setGenResult(null); closeVersions();
     setSelectedPara(null); setPolishCompare(null);
     setAnnotations([]); setReviseResult(null);
-  }, [chapterNum]);
+  }, [chapterNum, closeVersions, setGenResult]);
 
   // 章节正文拉取失败透传到面板错误区;未写的章 404 属预期(空态大卡承担引导),不透传
   useEffect(() => {
@@ -244,53 +207,10 @@ export default function WritePanel({ pid, outlines }: Props) {
   const stage = deriveStage({ chapterNum, currentBrief, genJob });
   // 「写下一章」目标:大纲中第一个还没有正文的章(章尾卡/空态大卡共用)
   const nextChapterNum = outlines.find((o) => !byNum.get(o.chapter_number))?.chapter_number ?? null;
-  // 生成完成后自动选章要用「当时的」选章状态做守卫,轮询回调里闭包会过期,故走 ref
-  const chapterNumRef = useRef(chapterNum);
-  useEffect(() => { chapterNumRef.current = chapterNum; }, [chapterNum]);
-
   // 打开 AI 窄栏并预填(P2):命令面板/快捷键/评分卡/状态卡的「梳理意见」入口都汇聚到这里
   function openDock(p: { text?: string; mode?: DockMode }) {
     dockNonceRef.current += 1;
     setDockPrefill({ text: p.text ?? "", mode: p.mode, nonce: dockNonceRef.current });
-  }
-
-  function pickNextBatch() {
-    const unwritten = outlines
-      .filter((o) => !byNum.get(o.chapter_number))
-      .map((o) => o.chapter_number)
-      .slice(0, 5);
-    setQueuePicked(new Set(unwritten));
-  }
-
-  async function startQueue() {
-    const nums = [...queuePicked].sort((a, b) => a - b);
-    if (!nums.length) return;
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    setErr(""); setGenResult(null);
-    setGenJob({ num: nums[0], stage: `队列 ${nums.length} 章:排队中…` });
-    setQueueMode(false); setQueuePicked(new Set());
-    try {
-      const { job_id } = await api.generateQueue(pid, nums, genTendency);
-      await pollJob(job_id, {
-        signal: ctrl.signal,
-        onStage: (stage) => setGenJob({ num: nums[0], stage }),
-      });
-      if (ctrl.signal.aborted) return;
-      await reload();
-    } catch (e) {
-      if (!ctrl.signal.aborted) {
-        const msg = errMsg(e);
-        setErr(msg);
-        // 严格连写模式暂停:引导先去通过被卡住的那一章
-        const paused = /第\s*(\d+)\s*章尚未人工审核通过/.exec(msg);
-        if (paused) {
-          toast.err("连写队列已暂停",
-            `先去目录选中第 ${paused[1]} 章并通过审核,再重新排队(或在「设置」关闭「连写要求上一章审核通过」)`);
-        }
-        await reload().catch(() => undefined);
-      }
-    } finally { if (!ctrl.signal.aborted) setGenJob(null); }
   }
 
   const currentOutline = current
@@ -343,141 +263,8 @@ export default function WritePanel({ pid, outlines }: Props) {
     if (target !== undefined) void open(target);
   }
 
-  // 阅读器:打开/翻章都走这里(tab/偏好由 Reader 内部管理)
-  async function openReader(n: number) {
-    setReaderLoading(true); setErr("");
-    try {
-      setReader(await api.getChapter(pid, n));
-    } catch (e) { setErr(errMsg(e)); } finally { setReaderLoading(false); }
-  }
-
-  // 上一章/下一章:仅限已生成的章节
+  // 已生成章号列表(左右滑切章 + 上/下章动作共用;阅读器翻章在 useReader 内另算)
   const generatedNums = chapters.map((c) => c.chapter_number);
-  const readerIdx = reader ? generatedNums.indexOf(reader.chapter_number) : -1;
-  const prevNum = readerIdx > 0 ? generatedNums[readerIdx - 1] : null;
-  const nextNum = readerIdx >= 0 && readerIdx < generatedNums.length - 1
-    ? generatedNums[readerIdx + 1] : null;
-  const readerOutline = reader
-    ? outlines.find((o) => o.chapter_number === reader.chapter_number)
-    : null;
-
-  // 同步一致性引擎(重抽取 + 重建下游摘要 + 向量库)。非阻塞:仅显示轻量角标,
-  // 用户可继续阅读/编辑其他章节。保存后确认、回退版本、挂载重连共用。
-  async function triggerSync(num: number) {
-    setPendingSync(null);
-    if (syncAbortRefs.current.has(num)) return; // 该章已在同步,不重复起(与后端去重一致)
-    const ctrl = new AbortController();
-    syncAbortRefs.current.set(num, ctrl);
-    setSyncStage(num, "启动同步…");
-    try {
-      const { job_id } = await api.reExtractAsync(pid, num);
-      await pollJob(job_id, {
-        signal: ctrl.signal,
-        onStage: (stage) => setSyncStage(num, stage),
-      });
-      if (!ctrl.signal.aborted) toast.ok(`第 ${num} 章一致性同步完成`);
-    } catch (e) {
-      if (!ctrl.signal.aborted) {
-        const msg = errMsg(e);
-        if (msg.startsWith("任务超时") || msg.startsWith("多次查询")) {
-          toast.err("同步进度查询中断", "任务可能仍在后台运行,稍后刷新可见最新状态");
-        } else {
-          toast.err(`第 ${num} 章同步失败`, msg);
-        }
-      }
-    } finally { if (!ctrl.signal.aborted) clearSync(num); }
-  }
-
-  // 轮询生成任务直至完成并落地结果(发起生成与「切走再回来重连」共用)
-  async function trackGenerate(n: number, jobId: string, ctrl: AbortController) {
-    try {
-      // 轮询任务进度(五段:草稿→定稿→检查→抽取→摘要)
-      const result = await pollJob<GenerateChapterResponse>(jobId, {
-        signal: ctrl.signal,
-        onStage: (stage) => setGenJob({ num: n, stage }),
-      });
-      if (ctrl.signal.aborted) return;
-      setGenResult(result);
-      setCurrent({
-        chapter_number: result.chapter_number, status: result.status,
-        word_count: result.word_count, is_stale: result.is_stale,
-        draft_content: result.draft_content, final_content: result.final_content,
-        outline_version_used: result.outline_version_used,
-      });
-      await reload();
-      // 生成后自动选章(坏味道 #8):当前未选章或选的就是它时把 ch 写进 URL,
-      // 消除"结果卡悬空 + 中栏请选择章节";用户中途切到别的章则不拽回
-      if (chapterNumRef.current === null || chapterNumRef.current === n) setChapterNum(n);
-      // 重写完成:若有旧版快照,自动弹「旧版 vs 新版」对比供选择
-      await openVersions(n, true);
-    } catch (e) {
-      if (!ctrl.signal.aborted) {
-        const msg = errMsg(e);
-        // 轮询中断(超时/网络抖动):任务可能仍在后台运行,刷新列表让用户看到真实进度
-        if (msg.startsWith("任务超时") || msg.startsWith("多次查询")) {
-          setErr(`进度查询中断:${msg}`);
-          await reload().catch(() => undefined);
-        } else {
-          setErr(msg);
-        }
-      }
-    } finally { if (!ctrl.signal.aborted) setGenJob(null); }
-  }
-
-  async function generate(n: number, revision = "") {
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    setErr(""); setGenResult(null);
-    if (revision) setAct(null); // 带着意见重生成:收起动作卡,结果走生成结果卡
-    setGenJob({ num: n, stage: "排队中…" });
-    let jobId: string;
-    try {
-      ({ job_id: jobId } = await api.generateChapterAsync(pid, n, genTendency, revision));
-    } catch (e) {
-      setErr(errMsg(e));
-      setGenJob(null);
-      return;
-    }
-    await trackGenerate(n, jobId, ctrl);
-  }
-
-  function closeVersions() {
-    setVersionsFor(null); setVersions(null); setCompareVer(null);
-  }
-
-  // 打开某章历史版本。auto=true 时(重写刚完成)仅在确有旧版快照时才弹,并自动选中最新一版对比
-  async function openVersions(n: number, auto = false) {
-    setErr("");
-    try {
-      const list = await api.listChapterVersions(pid, n);
-      if (auto && !list.length) return;  // 首次生成无旧版,不打扰
-      setVersions(list); setVersionsFor(n); setCompareVer(null);
-      if (auto && list.length) {
-        setCompareVer(await api.getChapterVersion(pid, n, list[0].id));
-      }
-    } catch (e) { setErr(errMsg(e)); }
-  }
-
-  async function selectVersion(n: number, v: ChapterVersionBrief) {
-    setErr("");
-    try { setCompareVer(await api.getChapterVersion(pid, n, v.id)); }
-    catch (e) { setErr(errMsg(e)); }
-  }
-
-  // 回退到旧版:换回正文 → 自动同步一致性引擎。回退是整段替换(改动大)故不询问,
-  // 但同步本身非阻塞,只显角标,不挡操作。
-  async function restoreVersion(n: number, vid: number) {
-    setErr("");
-    try {
-      const updated = await api.restoreChapterVersion(pid, n, vid);
-      setCurrent(updated);
-      closeVersions();
-      await reload();
-      void triggerSync(n);
-    } catch (e) {
-      setErr(errMsg(e));
-    }
-  }
 
   const genBlocked = !!genJob;
   const genHint = genJob
@@ -516,7 +303,7 @@ export default function WritePanel({ pid, outlines }: Props) {
     },
     // 目录抽屉(Ctrl+B/命令面板「目录」)
     "toggle-rail": () => setRailOpen((v) => !v),
-    immersive: () => setImmersive((v) => !v),
+    immersive: toggleImmersive,
   };
   const actionHandlersRef = useRef(actionHandlers);
   useEffect(() => { actionHandlersRef.current = actionHandlers; });
@@ -525,14 +312,6 @@ export default function WritePanel({ pid, outlines }: Props) {
       registerActionHandler(name, () => actionHandlersRef.current[name]?.()));
     return () => offs.forEach((off) => off());
   }, []);
-
-  // 沉浸模式:Esc 退出(F11/动作「immersive」开合;快捷键监听在 useDesktopHotkeys)
-  useEffect(() => {
-    if (!immersive) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setImmersive(false); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [immersive]);
 
   // 动作卡(act= 进 URL,可刷新/分享):桌面在中栏内联,移动端换全屏 sheet 容器(组件同一份)
   const actCards = (
