@@ -82,3 +82,64 @@ async def _no_lock_across_llm_case() -> None:
 
 def test_extract_and_apply_releases_lock_before_llm():
     asyncio.run(_no_lock_across_llm_case())
+
+
+async def _llm_failure_preserves_facts_case() -> None:
+    """LLM 抽取失败(ask 抛异常)时,本章旧圣经事实必须原样保留。
+
+    老版在 LLM 前就把 purge 提交了,一旦抽取失败,本章旧账即被永久清空且无新值替补
+    (再抽取/重写场景下数据丢失)。修复后改为「预演清账→渲染提示→rollback」,真正的
+    purge 挪到抽取成功之后、与 apply 同一事务;LLM 失败直接返回,旧账毫发无损。
+    """
+    from app.db.base import Base
+    import app.db.models  # noqa: F401
+    from app.db.models import Entity, Fact, Project
+    from app.db.session import SessionLocal, engine
+    from app.engines.consistency import extractor as extractor_mod
+
+    Base.metadata.create_all(engine)
+
+    setup = SessionLocal()
+    proj = Project(title="orig")
+    setup.add(proj)
+    setup.flush()
+    pid = proj.id
+    ent = Entity(project_id=pid, entity_type="character", name="林晚")
+    setup.add(ent)
+    setup.flush()
+    setup.add(Fact(
+        project_id=pid, entity_id=ent.id, fact_type="state",
+        content="左手截肢", valid_from=5, valid_until=None, source_chapter=5,
+    ))
+    setup.commit()
+    setup.close()
+
+    class _FailingAdapter:
+        async def ask(self, prompt: str, system: str | None = None) -> str:
+            raise RuntimeError("模拟 LLM 超时/网络失败")
+
+    sa = SessionLocal()
+    with patch.object(
+        extractor_mod, "get_adapter_for", return_value=_FailingAdapter()
+    ):
+        result = await extractor_mod.extract_and_apply(sa, pid, 5, "第五章重写正文……")
+    sa.close()
+
+    assert result == {}, "LLM 失败应返回空统计"
+
+    check = SessionLocal()
+    survived = [
+        f.content
+        for f in check.query(Fact).filter(
+            Fact.project_id == pid, Fact.source_chapter == 5
+        )
+    ]
+    check.close()
+    assert survived == ["左手截肢"], (
+        f"LLM 抽取失败后第 5 章旧事实应原样保留,实际={survived} —— "
+        "说明预演清账没有回滚,数据丢失(purge 抢在 LLM 前落盘)"
+    )
+
+
+def test_extract_llm_failure_preserves_existing_facts():
+    asyncio.run(_llm_failure_preserves_facts_case())

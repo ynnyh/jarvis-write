@@ -28,7 +28,6 @@ from app.db.models import (
     Project,
     Relationship,
 )
-from app.engines.consistency import BibleService
 from app.engines.consistency.extractor import extract_and_apply
 from app.llm.router import Task, get_adapter_for
 from app.prompts.chapter import COMPRESS_REWRITE_PROMPT, SPLIT_POINT_PROMPT
@@ -287,7 +286,18 @@ async def _find_split_point(full_text: str, target: int) -> dict | None:
         raw = raw.strip()
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-        return json.loads(raw)
+        data = json.loads(raw)
+        # 防御:LLM 可能吐出合法 JSON 但结构不对(非 dict / 缺断点索引 / 索引非整数)。
+        # 调用方直接 data["split_paragraph_index"] 会 KeyError/TypeError 穿透到生成流程,
+        # 把已生成+已审校的整章带崩丢失 —— 结构不合规即视为拆点失败,回退保留原文。
+        idx = data.get("split_paragraph_index") if isinstance(data, dict) else None
+        if not isinstance(idx, int) or isinstance(idx, bool):
+            logger.warning(
+                "拆章断点结构非法(split_paragraph_index 非整数),保留原文;原文前120字: %s",
+                raw[:120],
+            )
+            return None
+        return data
     except Exception:  # noqa: BLE001
         logger.exception("拆章断点 LLM 调用/解析失败")
         return None
@@ -393,12 +403,11 @@ async def _resync_bible_after_split(
     text_a: str,
     text_b: str,
 ) -> None:
-    """拆章后重建故事圣经:purge 原章 → 对两半分别抽取。"""
+    """拆章后重建故事圣经:对两半分别抽取(purge 由 extract_and_apply 内部安全处理)。"""
     try:
-        bible = BibleService(db, project.id)
-        bible.purge_chapter_extraction(chapter_a)
-        db.flush()
-
+        # 不再在此显式 purge chapter_a:extract_and_apply 内部会「预演清账→回滚→
+        # 抽取成功才真正 purge+apply」,自带幂等与失败保护。此处再 purge 一次不仅冗余,
+        # 还会在 extract 入口 commit 处把「清空 chapter_a」抢先落盘,重开数据丢失窗口。
         await extract_and_apply(db, project.id, chapter_a, text_a)
         db.flush()
         await extract_and_apply(db, project.id, chapter_b, text_b)
@@ -406,6 +415,7 @@ async def _resync_bible_after_split(
         logger.info("拆章圣经重同步完成:第 %d、%d 章", chapter_a, chapter_b)
     except Exception:  # noqa: BLE001 — 圣经同步失败不阻塞拆章
         logger.exception("拆章后圣经重同步失败(不影响正文)")
+        db.rollback()  # 丢掉半截抽取脏写,别把未提交的写带回调用方事务(与摘要重建一致)
 
 
 # ---------------------------------------------------------------------------

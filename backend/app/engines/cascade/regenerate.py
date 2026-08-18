@@ -75,6 +75,9 @@ async def cascade_regenerate(
             reason=reasons.get(n, "上游剧情变更"),
             style_directives=style_block,
         )
+        # LLM 前提交:释放 source/邻章读快照,别拿它横跨 LLM 调用 —— 否则回写时
+        # 以过期快照升级写锁,WAL 下直接 database is locked(不吃 busy_timeout)。
+        db.commit()
         raw = await adapter.ask(prompt)
         parsed = parse_blueprint(raw)
         target = next((c for c in parsed if c.get("chapter_number") == n), None)
@@ -115,8 +118,10 @@ async def cascade_regenerate(
             ch.is_stale = True
             ch.status = "stale"
             stale.append(n)
+        # 每章写完即提交:与生成/抽取纪律一致,写事务短、不把多章攒到末尾一把梭。
+        db.commit()
 
-    db.flush()
+    db.commit()  # 收尾:空循环/全跳过时也释放初始读快照,保持自洽
     logger.info(
         "级联重生成完成: 源第%d章, 更新%s, 失配%s", source_chapter, updated, stale
     )

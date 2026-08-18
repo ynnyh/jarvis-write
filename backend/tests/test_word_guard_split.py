@@ -151,3 +151,49 @@ async def _split_case() -> None:
 
 def test_split_chapter_no_duplicate_window():
     asyncio.run(_split_case())
+
+
+async def _malformed_split_json_case() -> None:
+    """LLM 返回合法 JSON 但结构不对时,_find_split_point 必须返回 None(走保留原文分支)。
+
+    缺 split_paragraph_index / 非 dict / 索引非整数等,调用方直接下标取值会
+    KeyError/TypeError 穿透到生成流程,把已生成+已审校的整章带崩丢失。
+    """
+    from app.engines.pipeline import word_guard as wg
+
+    class _PayloadAdapter:
+        def __init__(self, payload: str) -> None:
+            self.payload = payload
+
+        async def ask(self, prompt: str, system: str | None = None) -> str:
+            return self.payload
+
+    bad_payloads = [
+        '{"chapter_a_title": "x"}',         # dict 缺断点键
+        "[1, 2, 3]",                         # 非 dict(列表)
+        '"just a string"',                  # 非 dict(字符串)
+        "42",                                # 非 dict(数字)
+        '{"split_paragraph_index": "3"}',   # 索引是字符串
+        '{"split_paragraph_index": null}',  # 索引是 null
+        '{"split_paragraph_index": 1.5}',   # 索引是浮点
+        "not json at all {{{",              # 根本不是 JSON
+    ]
+    for payload in bad_payloads:
+        with patch.object(wg, "get_adapter_for", return_value=_PayloadAdapter(payload)):
+            got = await wg._find_split_point("一些正文内容", 300)
+        assert got is None, f"畸形断点应返回 None,payload={payload!r} 却得到 {got!r}"
+
+    # 合法结构:原样返回 dict
+    with patch.object(
+        wg,
+        "get_adapter_for",
+        return_value=_PayloadAdapter('{"split_paragraph_index": 2, "reason": "ok"}'),
+    ):
+        got = await wg._find_split_point("一些正文内容", 300)
+    assert isinstance(got, dict) and got["split_paragraph_index"] == 2, (
+        f"合法断点 JSON 应原样返回,实际={got!r}"
+    )
+
+
+def test_find_split_point_rejects_malformed_json():
+    asyncio.run(_malformed_split_json_case())
