@@ -20,6 +20,8 @@ from app.prompts.consistency import EXTRACTION_PROMPT
 
 logger = logging.getLogger("jarvis-write.extractor")
 
+_MAX_OPEN_FS = 40  # 抽取提示里最多列出的未回收伏笔数(取最早埋设,防长篇膨胀)
+
 
 def parse_llm_json(text: str) -> dict:
     """宽容解析 LLM 输出的 JSON:剥 markdown 围栏、截取首尾大括号。"""
@@ -78,10 +80,13 @@ async def extract_and_apply(
     bible.purge_chapter_extraction(chapter_number)
     scheduler.purge_chapter_ops(chapter_number)
     active_facts = bible.hard_constraints_block(chapter_number)
+    _open = scheduler.open_foreshadowings()
     open_fs = "\n".join(
         f"- {f.description}(第{f.chapter_planted}章埋设)"
-        for f in scheduler.open_foreshadowings()
+        for f in _open[:_MAX_OPEN_FS]
     ) or "(暂无)"
+    if len(_open) > _MAX_OPEN_FS:
+        open_fs += f"\n- …(另有 {len(_open) - _MAX_OPEN_FS} 条未回收伏笔未列出)"
     prompt = EXTRACTION_PROMPT.format(
         known_entities=known_entities,
         active_facts=active_facts,

@@ -24,6 +24,20 @@ DIMS = ("plot", "prose", "pacing", "character")
 CONTINUITY_DIM = "continuity"
 
 
+def _clamp_score(v) -> int:
+    """把 LLM 给的单维分数宽容转成 0(缺失/非法)或 1-10 的整数。
+
+    LLM 可能返回 8 / "8" / 8.5 / "优秀" / None / 越界值 —— 非数字或缺失记 0
+    (前端显示"—");有效数字钳到 1-10(过小/负数→1,过大→10);明确 0 分同样记 0。
+    绝不让 int()/float() 的 ValueError 穿透、带崩整个审校。
+    """
+    try:
+        n = int(float(str(v).strip()))
+    except (ValueError, TypeError, OverflowError):
+        return 0
+    return max(1, min(10, n)) if n != 0 else 0
+
+
 def judge_passed(scores: dict, threshold: int) -> bool:
     """四维均 >= threshold 才算达标;缺维度(0 分)视为不达标。
 
@@ -45,11 +59,8 @@ async def review_chapter(content: str, outline_block: str) -> dict:
     raw = await get_adapter_for(Task.CONSISTENCY).ask(prompt)
     data = parse_llm_json(raw)
     scores = data.get("scores") or {}
-    # 分数钳制到 1-10 整数,缺维度补 0(前端显示"—")
-    clean = {
-        k: max(1, min(10, int(scores.get(k) or 0))) if scores.get(k) else 0
-        for k in DIMS
-    }
+    # 分数钳制到 1-10 整数,缺维度/非法值补 0(前端显示"—")
+    clean = {k: _clamp_score(scores.get(k)) for k in DIMS}
     # 建议:结构化 {evidence, issue, fix};evidence 必须在正文里逐字存在(防举证幻觉),
     # 找不到的置空但保留建议本身。兼容模型退化输出纯字符串的情况。达标时可为空数组。
     suggestions = []

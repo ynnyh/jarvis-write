@@ -28,7 +28,7 @@ from app.engines.refresh import (
     light_refresh_chapter,
     seed_style_memo,
 )
-from app.jobs import create_job, fail_job, finish_job, list_running, update_stage
+from app.jobs import create_job, fail_job, finish_job, list_running, normalize_job_error, update_stage
 
 logger = logging.getLogger("jarvis-write.refresh")
 
@@ -84,6 +84,11 @@ async def backfill_beats_async(
     nums = req.chapter_numbers or _all_outline_numbers(db, project_id)
     if not nums:
         raise HTTPException(status_code=400, detail="没有可回填的大纲,请先生成蓝图。")
+    # 与所有章节写任务(生成/队列/同步/翻新)互斥:回填写 outline.beats,与重度
+    # 重写并发会撞 outline 写锁;同名任务已在跑时也借此天然去重(refresh- 前缀涵盖)。
+    busy = _chapter_job_busy(project_id)
+    if busy:
+        raise HTTPException(status_code=409, detail=f"已有章节任务在进行中({busy}),稍后再试。")
     job_id = create_job(f"refresh-{project_id}-beats")
 
     async def work(progress) -> dict:
@@ -108,6 +113,10 @@ async def seed_style_memo_async(
 ):
     """扫已有正文生成初始文风备忘(已有备忘则跳过,不覆盖)。"""
     get_project_or_404(db, project_id)
+    # 与其他章节/翻新任务互斥,并借 refresh- 前缀天然去重(防重复点击起多个扫描 job)。
+    busy = _chapter_job_busy(project_id)
+    if busy:
+        raise HTTPException(status_code=409, detail=f"已有章节任务在进行中({busy}),稍后再试。")
     job_id = create_job(f"refresh-{project_id}-memo")
 
     async def work(progress) -> dict:
@@ -165,7 +174,7 @@ async def light_refresh_async(
                 done.append(n)
             except Exception as exc:  # noqa: BLE001 — 单章失败不中断整批
                 session.rollback()
-                failed.append({"chapter": n, "error": str(exc)[:200]})
+                failed.append({"chapter": n, "error": normalize_job_error(exc)[:200]})
             finally:
                 session.close()
         return {"refreshed": done, "failed": failed, "total": total}
@@ -230,7 +239,7 @@ async def heavy_refresh_async(
                     "total": total,
                     "stopped_at": n,
                     "remaining": nums[i - 1:],
-                    "error": f"第 {n} 章重写失败:{str(exc)[:300]}",
+                    "error": f"第 {n} 章重写失败:{normalize_job_error(exc)[:300]}",
                 }
             finally:
                 session.close()
@@ -259,6 +268,6 @@ def _spawn(job_id: str, work) -> None:
             finish_job(job_id, result)
         except Exception as exc:  # noqa: BLE001
             logger.warning("翻新任务 %s 失败: %s", job_id, exc, exc_info=True)
-            fail_job(job_id, str(exc)[:500])
+            fail_job(job_id, normalize_job_error(exc)[:500])
 
     asyncio.create_task(runner())

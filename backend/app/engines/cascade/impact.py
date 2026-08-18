@@ -19,6 +19,9 @@ from app.prompts.cascade import IMPACT_ANALYSIS_PROMPT
 
 logger = logging.getLogger("jarvis-write.cascade")
 
+_MAX_DOWNSTREAM = 30  # 影响分析最多纳入的下游章数(防长篇 prompt 膨胀)
+_MAX_OPEN_FS = 40     # 最多列出的未回收伏笔数(取最早埋设的,老坑优先)
+
 
 def _previous_snapshot(db: Session, outline: Outline) -> dict:
     """当前版本之前的快照(diff 的"旧"侧)。"""
@@ -61,13 +64,20 @@ async def analyze_impact(
     if not downstream:
         return {"affected": [], "overall": "已是最后一章,无下游", "source_chapter": k}
 
+    # 只把邻近下游若干章交给 LLM:改第 2 章却塞进全书上百章 summary 会撑爆 prompt,
+    # 且影响分析本就是启发式参考,更靠后的波及由用户手动处理。
+    shown = downstream[:_MAX_DOWNSTREAM]
     downstream_text = "\n".join(
         f"第{o.chapter_number}章《{o.title}》:{o.summary}(伏笔操作:{o.foreshadowing})"
-        for o in downstream
+        for o in shown
     )
+    if len(downstream) > _MAX_DOWNSTREAM:
+        downstream_text += (
+            f"\n…(另有 {len(downstream) - _MAX_DOWNSTREAM} 章更靠后,未纳入本次分析)"
+        )
     open_fs = "\n".join(
         f"- {f.description}(埋于第{f.chapter_planted}章)"
-        for f in ForeshadowScheduler(db, project.id).open_foreshadowings()
+        for f in ForeshadowScheduler(db, project.id).open_foreshadowings()[:_MAX_OPEN_FS]
     ) or "(无)"
 
     old = _previous_snapshot(db, outline)
@@ -82,7 +92,8 @@ async def analyze_impact(
     raw = await get_adapter_for(Task.IMPACT).ask(prompt)
     data = parse_llm_json(raw)
 
-    valid_numbers = {o.chapter_number for o in downstream}
+    # 只认给过 LLM 的那些章号(没提供信息的更靠后章,不接受它的判断)
+    valid_numbers = {o.chapter_number for o in shown}
     affected = [
         a
         for a in (data.get("affected") or [])

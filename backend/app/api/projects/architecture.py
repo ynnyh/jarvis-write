@@ -16,7 +16,7 @@ from app.engines.pipeline.architecture import (
     generate_architecture,
     save_architecture,
 )
-from app.jobs import create_job, fail_job, finish_job, list_running, update_stage
+from app.jobs import create_job, fail_job, finish_job, list_running, normalize_job_error, update_stage
 from app.schemas.project import ArchitectureOut, GenerateArchitectureRequest
 
 from ._common import _get_project_or_404
@@ -111,7 +111,7 @@ async def generate_project_architecture_async(
             finish_job(job_id, ArchitectureOut.model_validate(arch).model_dump())
         except Exception as exc:  # noqa: BLE001 — 任务失败进 job 状态
             session.rollback()
-            fail_job(job_id, str(exc)[:500])
+            fail_job(job_id, normalize_job_error(exc)[:500])
         finally:
             session.close()
 

@@ -14,7 +14,7 @@ from app.db.models import Chapter, Outline, Project
 from app.db.session import SessionLocal, get_db
 from app.engines.pipeline.chapter import generate_chapter
 from app.engines.pipeline.handoff import handoff_payload
-from app.jobs import create_job, fail_job, finish_job, list_running, update_stage
+from app.jobs import create_job, fail_job, finish_job, list_running, normalize_job_error, update_stage
 from app.schemas.tendency import Tendency
 
 from ._common import ChapterDetail, _fill_handoff, _flavor_dict, _gate_payload
@@ -140,7 +140,7 @@ async def generate_async(
             })
         except Exception as exc:  # noqa: BLE001 — 任务失败进 job 状态
             session.rollback()
-            fail_job(job_id, str(exc)[:500])
+            fail_job(job_id, normalize_job_error(exc)[:500])
         finally:
             session.close()
 
@@ -245,7 +245,7 @@ async def generate_queue(
                 done = "、".join(str(c["chapter_number"]) for c in completed) or "无"
                 fail_job(
                     job_id,
-                    f"第 {n} 章生成失败:{str(exc)[:300]}(已完成:{done};"
+                    f"第 {n} 章生成失败:{normalize_job_error(exc)[:300]}(已完成:{done};"
                     "后续章节依赖本章摘要,已停止)",
                 )
                 return

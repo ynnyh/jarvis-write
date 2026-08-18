@@ -63,20 +63,53 @@ class ForeshadowScheduler:
         return "\n".join(lines)
 
     def _find_by_description(self, description: str) -> Foreshadowing | None:
+        """按描述定位伏笔(reinforce/payoff 操作要求抄原文,但 LLM 常有细微出入)。
+
+        三级匹配,越往后越宽容,但绝不在歧义时乱猜:
+          1) 精确匹配(SQL 直查命中即返回,免拉全表);
+          2) 去空白后精确(应对空格/换行出入);
+          3) 唯一子串命中才认账(一方包含另一方且描述 >= 8 字);多条命中即视为歧义、
+             不猜 —— 宁可漏配(当作新伏笔/跳过)也不误配到错误的伏笔上。
+        """
         description = description.strip()
         if not description:
             return None
-        for f in (
+        # 1) 精确直查:绝大多数命中走这条,不必拉全表遍历
+        exact = (
+            self.db.query(Foreshadowing)
+            .filter(
+                Foreshadowing.project_id == self.project_id,
+                Foreshadowing.description == description,
+            )
+            .first()
+        )
+        if exact:
+            return exact
+        rows = (
             self.db.query(Foreshadowing)
             .filter(Foreshadowing.project_id == self.project_id)
             .all()
-        ):
-            # 抽取器要求 reinforce/payoff 抄原文;稍作宽容:包含即匹配
-            if f.description == description or (
-                len(description) > 6
-                and (description in f.description or f.description in description)
-            ):
+        )
+        # 2) 去空白后精确
+        norm = "".join(description.split())
+        for f in rows:
+            if "".join((f.description or "").split()) == norm:
                 return f
+        # 3) 唯一子串命中才认账(短描述不做,避免"信"命中一切;多条命中即歧义,不猜)
+        if len(description) >= 8:
+            hits = [
+                f
+                for f in rows
+                if description in (f.description or "")
+                or (f.description or "") in description
+            ]
+            if len(hits) == 1:
+                return hits[0]
+            if len(hits) > 1:
+                logger.info(
+                    "伏笔描述模糊匹配到 %d 条,歧义不猜、跳过:%s",
+                    len(hits), description[:40],
+                )
         return None
 
     def purge_chapter_ops(self, chapter_number: int) -> dict:

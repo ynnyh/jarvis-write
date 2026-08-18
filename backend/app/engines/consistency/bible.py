@@ -18,6 +18,10 @@ from app.db.models import Entity, Fact, KnowledgeState, Relationship
 
 logger = logging.getLogger("jarvis-write.bible")
 
+# 单章硬约束块最多注入的状态事实行数:长篇里同一批角色的历史事实会累积,
+# 无上限会把 prompt 撑爆。critical 永不被砍,仅在总数超限时截 major/minor。
+_MAX_FACT_LINES = 40
+
 
 class BibleService:
     def __init__(self, db: Session, project_id: int):
@@ -127,8 +131,17 @@ class BibleService:
             facts = [f for f in facts if f.entity_id not in retired_ids]
         lines = []
         if facts:
-            # critical 优先,同实体聚合
-            facts.sort(key=lambda f: (f.entity_id, {"critical": 0, "major": 1, "minor": 2}.get(f.importance, 1)))
+            rank = {"critical": 0, "major": 1, "minor": 2}
+            # 先按重要度全局排:超限截断时先砍 minor 再砍 major,critical 永不被砍
+            facts.sort(key=lambda f: rank.get(f.importance, 1))
+            if len(facts) > _MAX_FACT_LINES:
+                logger.info(
+                    "第%d章硬约束事实 %d 条超上限 %d,按重要度截断(critical 优先保留)",
+                    chapter_number, len(facts), _MAX_FACT_LINES,
+                )
+                facts = facts[:_MAX_FACT_LINES]
+            # 展示时再按实体聚合(同一角色的事实排在一起)
+            facts.sort(key=lambda f: (f.entity_id, rank.get(f.importance, 1)))
             for f in facts:
                 mark = "❗" if f.importance == "critical" else "·"
                 lines.append(

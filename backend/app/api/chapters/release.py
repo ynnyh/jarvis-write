@@ -17,7 +17,7 @@ from app.engines.pipeline.chapter import (
     rebuild_summaries_after,
     update_style_memo,
 )
-from app.jobs import create_job, fail_job, finish_job, list_running, update_stage
+from app.jobs import create_job, fail_job, finish_job, list_running, normalize_job_error, update_stage
 
 from ._common import ChapterDetail, _fill_handoff, _get_chapter_or_404
 
@@ -124,7 +124,7 @@ async def gate_release(
             })
         except Exception as exc:  # noqa: BLE001 — 失败整体回滚,保持 quarantined
             session.rollback()
-            fail_job(job_id, str(exc)[:500])
+            fail_job(job_id, normalize_job_error(exc)[:500])
         finally:
             session.close()
 

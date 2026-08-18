@@ -19,6 +19,7 @@ from app.auth import get_current_user
 from app.crypto import encrypt
 from app.db.models import ProviderConfig, User
 from app.db.session import get_db
+from app.jobs import normalize_job_error
 from app.net_guard import assert_public_base_url
 from app.llm.factory import (
     _REGISTRY,
@@ -327,5 +328,5 @@ async def test_provider_config(
         )
     except Exception as exc:  # noqa: BLE001 — 测试接口,错误原样反馈给用户
         return TestResult(
-            ok=False, provider=row.interface_format, error=str(exc)[:500]
+            ok=False, provider=row.interface_format, error=normalize_job_error(exc)[:500]
         )

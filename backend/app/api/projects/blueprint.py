@@ -13,7 +13,7 @@ from app.db.session import SessionLocal, get_db
 from app.engines.pipeline.blueprint import generate_blueprint, save_blueprint
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import render_style_block
-from app.jobs import create_job, fail_job, finish_job, list_running, update_stage
+from app.jobs import create_job, fail_job, finish_job, list_running, normalize_job_error, update_stage
 from app.llm.router import Task, get_adapter_for
 from app.schemas.project import (
     GenerateBlueprintRequest,
@@ -117,7 +117,7 @@ async def generate_project_blueprint_async(
             })
         except Exception as exc:  # noqa: BLE001 — 任务失败进 job 状态
             session.rollback()
-            fail_job(job_id, str(exc)[:500])
+            fail_job(job_id, normalize_job_error(exc)[:500])
         finally:
             session.close()
 
@@ -307,7 +307,7 @@ async def extend_blueprint_async(project_id: int, db: Session = Depends(get_db))
             })
         except Exception as exc:  # noqa: BLE001
             session.rollback()
-            fail_job(job_id, str(exc)[:500])
+            fail_job(job_id, normalize_job_error(exc)[:500])
         finally:
             session.close()
 
