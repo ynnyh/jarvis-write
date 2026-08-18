@@ -11,7 +11,9 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-import app.api.projects as proj_mod
+# absorb/extract 在 style_profile 子模块里查 get_adapter_for,monkeypatch 须打到该
+# 命名空间;_parse_profile_json 仍由包根 re-export(见 projects/__init__.py)。
+import app.api.projects.style_profile as proj_mod
 from app.api.projects import _parse_profile_json
 from app.auth import build_token
 from app.db.models import Architecture, Chapter, Project, User

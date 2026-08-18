@@ -209,7 +209,7 @@ def test_title_suggestion_ok(client):
 
     headers = _setup_user_with_key(client, "title_user")
     with patch(
-        "app.api.projects.create_llm_adapter",
+        "app.api.projects.naming.create_llm_adapter",
         return_value=_TitleAdapter("1. 霓虹深渊\n2. 《芯片猎人》\n- 深渊之下\n\n"),
     ):
         r = client.post(
@@ -243,7 +243,7 @@ def test_title_suggestion_llm_failure(client):
         async def ask(self, prompt, system=None):
             raise RuntimeError("connection refused")
 
-    with patch("app.api.projects.create_llm_adapter", return_value=_BoomAdapter()):
+    with patch("app.api.projects.naming.create_llm_adapter", return_value=_BoomAdapter()):
         r = client.post(
             "/api/projects/title-suggestion",
             headers=headers,
@@ -253,7 +253,7 @@ def test_title_suggestion_llm_failure(client):
     assert "connection refused" in r.json()["detail"]
 
     with patch(
-        "app.api.projects.create_llm_adapter", return_value=_TitleAdapter("\n  \n")
+        "app.api.projects.naming.create_llm_adapter", return_value=_TitleAdapter("\n  \n")
     ):
         r = client.post(
             "/api/projects/title-suggestion",
@@ -1064,7 +1064,7 @@ def test_synopsis_generate_ok(client):
             captured["prompt"] = prompt
             return "  一趟险镖,箱中藏着惊天秘密;落魄镖师从此卷入江湖漩涡。  "
 
-    with patch("app.api.projects.create_llm_adapter", return_value=_SynAdapter()):
+    with patch("app.api.projects.naming.create_llm_adapter", return_value=_SynAdapter()):
         r = client.post(f"/api/projects/{p['id']}/synopsis", headers=headers)
     assert r.status_code == 200, r.text
     assert r.json()["synopsis"] == "一趟险镖,箱中藏着惊天秘密;落魄镖师从此卷入江湖漩涡。"
