@@ -3,8 +3,6 @@
 """章节蓝图:分块生成全书目录(同步/异步)+ 滚动规划(卷纲 / 展开下一卷)+ 目录查询。"""
 from __future__ import annotations
 
-import asyncio
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -13,7 +11,7 @@ from app.db.session import SessionLocal, get_db
 from app.engines.pipeline.blueprint import generate_blueprint, save_blueprint
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import render_style_block
-from app.jobs import create_job, fail_job, finish_job, list_running, normalize_job_error, update_stage
+from app.jobs import create_job, fail_job, finish_job, fire_and_track, list_running, normalize_job_error, update_stage
 from app.llm.router import Task, get_adapter_for
 from app.schemas.project import (
     GenerateBlueprintRequest,
@@ -121,7 +119,7 @@ async def generate_project_blueprint_async(
         finally:
             session.close()
 
-    asyncio.create_task(runner())
+    fire_and_track(runner())
     return {"job_id": job_id}
 
 
@@ -311,7 +309,7 @@ async def extend_blueprint_async(project_id: int, db: Session = Depends(get_db))
         finally:
             session.close()
 
-    asyncio.create_task(runner())
+    fire_and_track(runner())
     return {"job_id": job_id}
 
 

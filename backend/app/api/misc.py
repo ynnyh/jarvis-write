@@ -17,7 +17,7 @@ import zipfile
 from html import escape
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -31,9 +31,9 @@ router = APIRouter(tags=["misc"], dependencies=[Depends(get_current_user)])
 
 
 @router.get("/api/jobs")
-async def my_jobs(all: bool = False):
+async def my_jobs(include_done: bool = Query(False, alias="all")):
     """当前用户的后台任务(全局任务中心数据源)。all=true 时含近期已完成/失败的。"""
-    items = list_for_user(current_user_id.get(), running_only=not all)
+    items = list_for_user(current_user_id.get(), running_only=not include_done)
     return {
         "jobs": [
             {

@@ -28,7 +28,7 @@ from app.engines.refresh import (
     light_refresh_chapter,
     seed_style_memo,
 )
-from app.jobs import create_job, fail_job, finish_job, list_running, normalize_job_error, update_stage
+from app.jobs import create_job, fail_job, finish_job, fire_and_track, list_running, normalize_job_error, update_stage
 
 logger = logging.getLogger("jarvis-write.refresh")
 
@@ -260,7 +260,6 @@ def _spawn(job_id: str, work) -> None:
 
     与 jobs.spawn_job 等价,但复用外部已 create_job 的 job_id(便于返回后立即可轮询)。
     """
-    import asyncio
 
     async def runner() -> None:
         try:
@@ -270,4 +269,4 @@ def _spawn(job_id: str, work) -> None:
             logger.warning("翻新任务 %s 失败: %s", job_id, exc, exc_info=True)
             fail_job(job_id, normalize_job_error(exc)[:500])
 
-    asyncio.create_task(runner())
+    fire_and_track(runner())

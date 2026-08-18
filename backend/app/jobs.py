@@ -11,7 +11,7 @@ import asyncio
 import logging
 import threading
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -173,6 +173,19 @@ def normalize_job_error(exc: Exception) -> str:
     return msg
 
 
+# 后台任务强引用保持:事件循环对 create_task 的返回值只持弱引用,任务对象被 GC
+# 回收会导致运行中的后台任务被静默取消(见官方 asyncio.create_task 警告)。存进
+# 模块级 set、完成时用回调移除,确保任务活到跑完。
+_bg_tasks: set[asyncio.Task[Any]] = set()
+
+
+def fire_and_track(coro: Coroutine[Any, Any, Any]) -> None:
+    """起后台任务并保留强引用(防 create_task 的任务被 GC 中途回收)。"""
+    task = asyncio.create_task(coro)
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+
+
 def spawn_job(kind: str, work: Callable[[Callable[[str], None]], Awaitable[Any]]) -> str:
     """通用异步任务封装:建 job → 后台跑 work(progress) → 结果/异常落 job。"""
     job_id = create_job(kind)
@@ -185,7 +198,7 @@ def spawn_job(kind: str, work: Callable[[Callable[[str], None]], Awaitable[Any]]
             logger.warning("任务 %s(%s) 失败: %s", job_id, kind, exc, exc_info=True)
             fail_job(job_id, normalize_job_error(exc)[:500])
 
-    asyncio.create_task(runner())
+    fire_and_track(runner())
     return job_id
 
 

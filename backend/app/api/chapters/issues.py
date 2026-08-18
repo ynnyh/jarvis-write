@@ -3,8 +3,6 @@
 """一致性门禁:问题清单、状态流转、按问题修订。"""
 from __future__ import annotations
 
-import asyncio
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -14,7 +12,7 @@ from app.db.models import ChapterIssue, Project
 from app.db.session import SessionLocal, get_db
 from app.engines.pipeline.chapter import generate_chapter
 from app.engines.pipeline.handoff import handoff_payload
-from app.jobs import create_job, fail_job, finish_job, list_running, normalize_job_error, update_stage
+from app.jobs import create_job, fail_job, finish_job, fire_and_track, list_running, normalize_job_error, update_stage
 
 from ._common import _flavor_dict, _gate_payload, _get_chapter_or_404
 
@@ -191,5 +189,5 @@ async def apply_issue_revision(
         finally:
             session.close()
 
-    asyncio.create_task(runner())
+    fire_and_track(runner())
     return {"job_id": job_id}

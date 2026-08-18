@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_project_or_404
 from app.db.models import Chapter, Project
 from app.db.session import SessionLocal, get_db
-from app.jobs import create_job, fail_job, finish_job, list_running, normalize_job_error, update_stage
+from app.jobs import create_job, fail_job, finish_job, fire_and_track, list_running, normalize_job_error, update_stage
 
 from ._common import _db_locked, _get_chapter_or_404
 
@@ -86,7 +86,7 @@ async def re_extract_async(
             finally:
                 session.close()
 
-    asyncio.create_task(runner())
+    fire_and_track(runner())
     return {"job_id": job_id}
 
 
@@ -189,5 +189,5 @@ async def contract_reextract_async(
         finally:
             session.close()
 
-    asyncio.create_task(runner())
+    fire_and_track(runner())
     return {"job_id": job_id}

@@ -3,8 +3,6 @@
 """章节生成:单章生成(同步/异步)与连写队列。"""
 from __future__ import annotations
 
-import asyncio
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -14,7 +12,7 @@ from app.db.models import Chapter, Outline, Project
 from app.db.session import SessionLocal, get_db
 from app.engines.pipeline.chapter import generate_chapter
 from app.engines.pipeline.handoff import handoff_payload
-from app.jobs import create_job, fail_job, finish_job, list_running, normalize_job_error, update_stage
+from app.jobs import create_job, fail_job, finish_job, fire_and_track, list_running, normalize_job_error, update_stage
 from app.schemas.tendency import Tendency
 
 from ._common import ChapterDetail, _fill_handoff, _flavor_dict, _gate_payload
@@ -144,7 +142,7 @@ async def generate_async(
         finally:
             session.close()
 
-    asyncio.create_task(runner())
+    fire_and_track(runner())
     return {"job_id": job_id}
 
 
@@ -253,5 +251,5 @@ async def generate_queue(
                 session.close()
         finish_job(job_id, {"completed": completed, "total": total})
 
-    asyncio.create_task(runner())
+    fire_and_track(runner())
     return {"job_id": job_id}

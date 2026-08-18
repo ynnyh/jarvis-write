@@ -3,8 +3,6 @@
 """人工审核通过与 quarantined 放行(补走被跳过的章后链路)。"""
 from __future__ import annotations
 
-import asyncio
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -17,7 +15,7 @@ from app.engines.pipeline.chapter import (
     rebuild_summaries_after,
     update_style_memo,
 )
-from app.jobs import create_job, fail_job, finish_job, list_running, normalize_job_error, update_stage
+from app.jobs import create_job, fail_job, finish_job, fire_and_track, list_running, normalize_job_error, update_stage
 
 from ._common import ChapterDetail, _fill_handoff, _get_chapter_or_404
 
@@ -128,5 +126,5 @@ async def gate_release(
         finally:
             session.close()
 
-    asyncio.create_task(runner())
+    fire_and_track(runner())
     return {"job_id": job_id}

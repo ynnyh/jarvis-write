@@ -145,7 +145,7 @@ async def apply_chapter_polish(
 
 
 @router.post("/api/projects/{project_id}/polish/segment", response_model=PolishResult)
-async def polish_segment_inget_project_or_404(
+async def polish_segment_in_project(
     project_id: int, req: SegmentPolishRequest, db: Session = Depends(get_db)
 ):
     """润色选段(带项目全局倾向)。"""

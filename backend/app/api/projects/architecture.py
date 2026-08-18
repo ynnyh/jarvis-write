@@ -3,8 +3,6 @@
 """顶层架构:雪花四步生成(同步/异步)、手动编辑、多轮研讨。"""
 from __future__ import annotations
 
-import asyncio
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -16,7 +14,7 @@ from app.engines.pipeline.architecture import (
     generate_architecture,
     save_architecture,
 )
-from app.jobs import create_job, fail_job, finish_job, list_running, normalize_job_error, update_stage
+from app.jobs import create_job, fail_job, finish_job, fire_and_track, list_running, normalize_job_error, update_stage
 from app.schemas.project import ArchitectureOut, GenerateArchitectureRequest
 
 from ._common import _get_project_or_404
@@ -115,7 +113,7 @@ async def generate_project_architecture_async(
         finally:
             session.close()
 
-    asyncio.create_task(runner())
+    fire_and_track(runner())
     return {"job_id": job_id}
 
 
