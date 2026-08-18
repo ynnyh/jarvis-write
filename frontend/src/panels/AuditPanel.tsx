@@ -2,6 +2,7 @@
 // 从原 EditorialPanel audit 页签拆出;世界观硬规则编辑已搬去 settings 区(ProjectSettingsPanel)。
 import { useEffect, useState } from "react";
 import { api, AuditReport, Project } from "../api";
+import { errMsg } from "../pollJob";
 import { useJob } from "../ui/useJob";
 
 interface Props { pid: number; project: Project; }
@@ -29,7 +30,7 @@ export default function AuditPanel({ pid, project }: Props) {
 
   useEffect(() => {
     if (!audit) {
-      api.auditReport(pid).then(setAudit).catch((e) => setErr(String(e)));
+      api.auditReport(pid).then(setAudit).catch((e) => setErr(errMsg(e)));
     }
   }, [audit, pid]);
 
@@ -41,7 +42,7 @@ export default function AuditPanel({ pid, project }: Props) {
         scanned: number; with_issues: number[]; total_issues: number; total_blockers: number;
       }>(() => api.diagAsync(pid), { kind: `diag-${pid}` });
       if (r) { setDiagResult(r); setAudit(null); }
-    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
   }
 
   // 规则扫描:LLM 逐章对照世界观硬规则体检正文,问题以「规则」落各章审核报告
@@ -52,7 +53,7 @@ export default function AuditPanel({ pid, project }: Props) {
         scanned: number; with_issues: number[]; total_issues: number; total_blockers: number;
       }>(() => api.ruleScanAsync(pid), { kind: `rule-scan-${pid}` });
       if (r) { setScanResult(r); setAudit(null); }
-    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
   }
 
   // 老书批量补契约:缺有效契约的章逐章重提;完成后刷新聚合报告(缺契约数变)
@@ -63,7 +64,7 @@ export default function AuditPanel({ pid, project }: Props) {
         () => api.contractsBackfillAsync(pid), { kind: `contract-backfill-${pid}` },
       );
       if (r) { setBackfillResult(r); setAudit(null); }
-    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
   }
 
   return (

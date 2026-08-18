@@ -5,6 +5,7 @@ import { api, ProviderConfigOut } from "../../api";
 import { toast } from "../../ui/Toaster";
 import { confirmDialog } from "../../ui/ConfirmDialog";
 import { CATEGORY_BY_KEY, FORMAT_LABEL, normalizeCategory } from "./providerCatalog";
+import { errMsg } from "../../pollJob";
 
 export function ProviderRow({ p, onChanged, onEdit }: {
   p: ProviderConfigOut; onChanged: () => void; onEdit: () => void;
@@ -20,7 +21,7 @@ export function ProviderRow({ p, onChanged, onEdit }: {
       if (r.ok) setTestMsg({ ok: true, text: `✓ 连通(${r.model}):${r.reply}` });
       else setTestMsg({ ok: false, text: `✗ 连接失败:${r.error}` });
     } catch (e) {
-      setTestMsg({ ok: false, text: `✗ ${e instanceof Error ? e.message : String(e)}` });
+      setTestMsg({ ok: false, text: `✗ ${errMsg(e)}` });
     } finally { setBusy(false); }
   }
 
@@ -48,7 +49,7 @@ export function ProviderRow({ p, onChanged, onEdit }: {
       }
       if (r.deleted) { toast.ok("已删除"); onChanged(); }
     } catch (e) {
-      toast.err("删除失败", e instanceof Error ? e.message : String(e));
+      toast.err("删除失败", errMsg(e));
     } finally { setBusy(false); }
   }
 
@@ -68,7 +69,7 @@ export function ProviderRow({ p, onChanged, onEdit }: {
       toast.ok(flag === "is_default" ? `「${p.name}」已设为默认` : `「${p.name}」已设为快档`);
       onChanged();
     } catch (e) {
-      toast.err("设置失败", e instanceof Error ? e.message : String(e));
+      toast.err("设置失败", errMsg(e));
     } finally { setBusy(false); }
   }
 

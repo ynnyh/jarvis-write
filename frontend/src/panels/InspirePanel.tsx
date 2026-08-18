@@ -8,6 +8,7 @@ import {
 import TendencySelector from "../components/TendencySelector";
 import { useJob } from "../ui/useJob";
 import { confirmDialog } from "../ui/ConfirmDialog";
+import { errMsg } from "../pollJob";
 import type { SetupStep } from "../pages/ProjectPage";
 
 interface Props { project: Project; onChanged: () => Promise<void>; onGotoStep?: (step: SetupStep) => void; }
@@ -101,7 +102,7 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
         { kind: "inspire", onStage: (s) => setBusy(`${s}…`) },
       );
       if (r) setIdeas(r.ideas);
-    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
   }
 
   function pickIdea(c: Concept) {
@@ -120,7 +121,7 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
         { kind: "inspire-refine" },
       );
       if (r) setRefinePreview({ concept: r.concept, changed: r.changed, note: r.note });
-    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
   }
 
   function acceptRefine() {
@@ -158,7 +159,7 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
       // 对话记录落库(失败不打扰,下轮再存)
       api.patchProject(project.id, { chat_log: finalLog }).catch(() => undefined);
     } catch (e) {
-      setErr(String(e));
+      setErr(errMsg(e));
       setChatLog(nextLog);  // 回退到用户发言,允许重发
     } finally { setBusy(""); }
   }
@@ -176,7 +177,7 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
       await onChanged();
       setConceptDirty(false); // 已落库,手改不再算"未保存"
       flash("已定为本书概念,主题已同步。下一步:去「架构」按此概念生成顶层设计。");
-    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
   }
 
   // ---------- 简介 ----------
@@ -191,7 +192,7 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
         setSynopsis(r.synopsis);
         setSynMsg("简介已生成,可继续修改,点「保存简介」写入项目。");
       }
-    } catch (e) { setSynErr(String(e)); } finally { setSynBusy(""); }
+    } catch (e) { setSynErr(errMsg(e)); } finally { setSynBusy(""); }
   }
   async function saveSynopsis() {
     setSynBusy("保存…"); setSynErr(""); setSynMsg("");
@@ -199,7 +200,7 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
       await api.patchProject(project.id, { synopsis });
       await onChanged();
       setSynMsg("简介已保存。");
-    } catch (e) { setSynErr(String(e)); } finally { setSynBusy(""); }
+    } catch (e) { setSynErr(errMsg(e)); } finally { setSynBusy(""); }
   }
 
   return (

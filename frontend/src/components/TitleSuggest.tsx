@@ -2,6 +2,7 @@
 // 主题为空也可用:后端会按类型/自由发挥盲出候选
 import { useEffect, useRef, useState } from "react";
 import { api, Concept } from "../api";
+import { errMsg } from "../pollJob";
 
 interface Props {
   topic: string;                  // 主题/灵感(可空)
@@ -35,7 +36,7 @@ export default function TitleSuggest({ topic, genre, concept, onPick }: Props) {
       setTitles(r.titles);
       setOpen(true);
     } catch (e) {
-      setErr(String(e));
+      setErr(errMsg(e));
     } finally {
       setBusy(false);
     }

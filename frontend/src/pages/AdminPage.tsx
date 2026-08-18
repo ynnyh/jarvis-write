@@ -1,6 +1,7 @@
 // 后台管理页(仅管理员):用户列表 + 多邀请码管理
 import { useCallback, useEffect, useState } from "react";
 import { api, AdminUser, InviteCodeItem } from "../api";
+import { errMsg } from "../pollJob";
 
 // 8 位易读随机串(去掉易混淆的 0/O/1/I),中间加连字符
 function randomCode(): string {
@@ -35,10 +36,10 @@ export default function AdminPage() {
       .then(setUsers)
       .catch((e) => {
         // 非管理员访问:接口 403,直接展示无权限
-        if (String(e).includes("403") || String(e).includes("管理员")) {
+        if (errMsg(e).includes("403") || errMsg(e).includes("管理员")) {
           setForbidden(true);
         } else {
-          setErr(String(e));
+          setErr(errMsg(e));
         }
       });
     api.adminListInviteCodes()
@@ -66,7 +67,7 @@ export default function AdminPage() {
       setMsg(`邀请码 ${code} 已创建`);
       load();
     } catch (e) {
-      setErr(String(e));
+      setErr(errMsg(e));
     } finally {
       setBusy(false);
     }
@@ -79,7 +80,7 @@ export default function AdminPage() {
       setMsg(c.is_active ? `已停用 ${c.code}` : `已启用 ${c.code}`);
       load();
     } catch (e) {
-      setErr(String(e));
+      setErr(errMsg(e));
     } finally {
       setBusy(false);
     }
@@ -93,7 +94,7 @@ export default function AdminPage() {
       setMsg(`已删除邀请码 ${c.code}`);
       load();
     } catch (e) {
-      setErr(String(e));
+      setErr(errMsg(e));
     } finally {
       setBusy(false);
     }
@@ -111,7 +112,7 @@ export default function AdminPage() {
       setResettingId(null); setNewPassword("");
       setMsg("密码已重置");
     } catch (e) {
-      setErr(String(e));
+      setErr(errMsg(e));
     } finally {
       setBusy(false);
     }
@@ -124,7 +125,7 @@ export default function AdminPage() {
       setMsg(u.is_active ? `已禁用 ${u.username}` : `已启用 ${u.username}`);
       load();
     } catch (e) {
-      setErr(String(e));
+      setErr(errMsg(e));
     } finally {
       setBusy(false);
     }
@@ -138,7 +139,7 @@ export default function AdminPage() {
       setMsg(`已删除用户 ${u.username} 及其全部项目`);
       load();
     } catch (e) {
-      setErr(String(e));
+      setErr(errMsg(e));
     } finally {
       setBusy(false);
     }

@@ -7,6 +7,7 @@
 import { useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { api } from "../api";
+import { errMsg } from "../pollJob";
 
 interface Props { onUnlocked: () => void; }
 
@@ -29,7 +30,7 @@ export default function LockScreen({ onUnlocked }: Props) {
       await api.appLockUnlock(password);
       onUnlocked();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(errMsg(e));
       setPassword("");
     } finally {
       setBusy(false);
@@ -44,7 +45,7 @@ export default function LockScreen({ onUnlocked }: Props) {
       // 锁已移除:直接视为解锁进入,体验最顺(数据未动,无需再确认)
       onUnlocked();
     } catch (e) {
-      setResetErr(e instanceof Error ? e.message : String(e));
+      setResetErr(errMsg(e));
     } finally {
       setResetBusy(false);
     }

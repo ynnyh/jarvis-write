@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, BibleSnapshot, FactOut } from "../../api";
 import { IMP_BADGE, Props } from "./shared";
+import { errMsg } from "../../pollJob";
 
 export default function BibleBoard({ pid, outlines }: Props) {
   const maxCh = outlines.length ? Math.max(...outlines.map((o) => o.chapter_number)) : 1;
@@ -13,7 +14,7 @@ export default function BibleBoard({ pid, outlines }: Props) {
 
   const reload = useCallback(async (ch: number) => {
     setErr("");
-    try { setBible(await api.bible(pid, ch)); } catch (e) { setErr(String(e)); }
+    try { setBible(await api.bible(pid, ch)); } catch (e) { setErr(errMsg(e)); }
   }, [pid]);
 
   useEffect(() => { reload(atChapter); }, [reload, atChapter]);

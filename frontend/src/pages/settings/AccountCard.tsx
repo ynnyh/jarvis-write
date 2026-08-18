@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../../api";
 import { toast } from "../../ui/Toaster";
+import { errMsg } from "../../pollJob";
 
 export function AccountCard() {
   // null=尚未探测到运行模式(先不渲染,避免桌面版闪一下)
@@ -34,7 +35,7 @@ export function AccountCard() {
       toast.ok("密码已修改", "下次登录请使用新密码");
       setOldPw(""); setNewPw(""); setConfirmPw("");
     } catch (e) {
-      toast.err("修改失败", e instanceof Error ? e.message : String(e));
+      toast.err("修改失败", errMsg(e));
     } finally {
       setBusy(false);
     }

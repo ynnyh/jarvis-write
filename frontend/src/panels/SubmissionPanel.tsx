@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { AnthemPackage, api, CoverPackage, downloadFile, Project, SubmissionPackage } from "../api";
 import { useJob } from "../ui/useJob";
 import { toast } from "../ui/Toaster";
+import { errMsg } from "../pollJob";
 
 interface Props { pid: number; project: Project; }
 
@@ -103,7 +104,7 @@ export default function SubmissionPanel({ pid, project }: Props) {
         commit({ pkg: r, title: r.titles[0] ?? "", hook: r.hooks[0] ?? "" });
         toast.ok("投稿包已生成", "按需挑选/微调后,逐项复制即可");
       }
-    } catch (e) { setErr(String(e)); } finally { setBusy(""); setStage(""); }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); setStage(""); }
   }
 
   const EXPORTS: { kind: string; label: string; path: string; ext: string }[] = [
@@ -116,7 +117,7 @@ export default function SubmissionPanel({ pid, project }: Props) {
   async function doExport(path: string, ext: string) {
     try {
       await downloadFile(`/api/projects/${pid}/${path}`, `${project.title || pid}.${ext}`);
-    } catch (e) { toast.err("导出失败", String(e)); }
+    } catch (e) { toast.err("导出失败", errMsg(e)); }
   }
 
   function addTag() {
@@ -315,7 +316,7 @@ function CoverCard({ pid }: { pid: number }) {
         { kind: `cover-${pid}`, onStage: setStage },
       );
       if (r) { commit(r); toast.ok("封面提示词已生成", "复制到即梦 / Midjourney 生成封面即可"); }
-    } catch (e) { setErr(String(e)); } finally { setBusy(false); setStage(""); }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); setStage(""); }
   }
 
   return (
@@ -387,7 +388,7 @@ function AnthemCard({ pid }: { pid: number }) {
         { kind: `anthem-${pid}`, onStage: setStage },
       );
       if (r) { commit(r); toast.ok("主题曲已生成", "把风格标签和歌词分别粘进 Suno 即可"); }
-    } catch (e) { setErr(String(e)); } finally { setBusy(false); setStage(""); }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); setStage(""); }
   }
 
   return (

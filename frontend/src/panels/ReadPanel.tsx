@@ -31,7 +31,7 @@ export default function ReadPanel({ pid, outlines }: Props) {
         qc.invalidateQueries({ queryKey: qk.chapter(pid, p.ch) });
       }
     })
-      .then((u) => { if (!cancelled) unlisten = u; })
+      .then((u) => { if (cancelled) u(); else unlisten = u; })
       .catch(() => {});
     return () => { cancelled = true; unlisten?.(); };
   }, [pid, chapterNum, qc]);

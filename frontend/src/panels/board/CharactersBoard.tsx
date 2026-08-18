@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, CharacterCard, CharactersOut } from "../../api";
 import { FACT_PREVIEW, IMP_BADGE } from "./shared";
+import { errMsg } from "../../pollJob";
 
 export default function CharactersBoard({ pid }: { pid: number }) {
   const [data, setData] = useState<CharactersOut | null>(null);
@@ -18,14 +19,14 @@ export default function CharactersBoard({ pid }: { pid: number }) {
 
   const reload = useCallback(async () => {
     setErr("");
-    try { setData(await api.characters(pid)); } catch (e) { setErr(String(e)); }
+    try { setData(await api.characters(pid)); } catch (e) { setErr(errMsg(e)); }
   }, [pid]);
 
   useEffect(() => { reload(); }, [reload]);
 
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true); setErr("");
-    try { await fn(); await reload(); } catch (e) { setErr(String(e)); } finally { setBusy(false); }
+    try { await fn(); await reload(); } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
   };
 
   const save = () => {

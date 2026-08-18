@@ -4,6 +4,7 @@ import { useState } from "react";
 import { api, ProviderConfigOut } from "../../api";
 import { toast } from "../../ui/Toaster";
 import { CATEGORY_BY_KEY, normalizeCategory, PROTOCOL_CATEGORIES, QUICK_PRESETS } from "./providerCatalog";
+import { errMsg } from "../../pollJob";
 
 export function ProviderForm({ editing, onSaved, onCancel }: {
   editing?: ProviderConfigOut; onSaved: () => void; onCancel: () => void;
@@ -37,7 +38,7 @@ export function ProviderForm({ editing, onSaved, onCancel }: {
       toast.ok(editing ? `「${body.name || editing.name}」已保存` : "配置已添加");
       onSaved();
     } catch (e) {
-      toast.err("保存失败", e instanceof Error ? e.message : String(e));
+      toast.err("保存失败", errMsg(e));
     } finally { setBusy(false); }
   }
 

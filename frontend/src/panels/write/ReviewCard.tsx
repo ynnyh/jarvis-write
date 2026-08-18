@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, ChapterReview, ReviewSuggestion } from "../../api";
 import { useJob } from "../../ui/useJob";
+import { errMsg } from "../../pollJob";
 
 const SCORE_LABEL: Record<string, string> = {
   plot: "情节", prose: "文笔", pacing: "节奏", character: "人物", continuity: "连续性",
@@ -40,7 +41,7 @@ export default function ReviewCard({ pid, chapterNum, onRevise }: Props) {
         { kind: `review-${pid}-${chapterNum}` },
       );
       if (r) setReview(r);
-    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
   }
 
   // 建议 → 重写指令文本(与旧 EditorialPanel 交接格式一致,上限 500 字)

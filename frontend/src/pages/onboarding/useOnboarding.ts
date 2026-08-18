@@ -7,7 +7,7 @@ import {
   EMPTY_CONCEPT, Project, RefineResult, Tendency,
 } from "../../api";
 import { useJob } from "../../ui/useJob";
-import { pollJob } from "../../pollJob";
+import { pollJob, errMsg } from "../../pollJob";
 import { toast } from "../../ui/Toaster";
 import { confirmDialog } from "../../ui/ConfirmDialog";
 import { conceptSig, titleSig as calcTitleSig } from "../wizSig";
@@ -92,6 +92,8 @@ export function useOnboarding() {
   const sparkText = spark.trim() || project?.topic?.trim() || "";
 
   // ---------- 建草稿 / 载入(含 localStorage 恢复) ----------
+  // 只建一次草稿:StrictMode/重渲染下 effect 可能重入,无守卫会静默建出多个空项目
+  const createdRef = useRef(false);
   useEffect(() => {
     if (pid !== null) {
       api.getProject(pid).then((p) => {
@@ -109,13 +111,15 @@ export function useOnboarding() {
         if (!stepParam) {
           nav(`/new/${pid}/${p.setup_state ? parseStep(p.setup_state) : "idea"}`, { replace: true });
         }
-      }).catch((e) => setErr(String(e)));
+      }).catch((e) => setErr(errMsg(e)));
       return;
     }
-    // /new 无 id:静默创建草稿项目,replace 进第一步
+    // /new 无 id:静默创建草稿项目,replace 进第一步(createdRef 防重复建)
+    if (createdRef.current) return;
+    createdRef.current = true;
     api.createProject({ title: "未命名新书", setup_state: "idea" })
       .then((p) => nav(`/new/${p.id}/idea`, { replace: true }))
-      .catch((e) => setErr(String(e)));
+      .catch((e) => { createdRef.current = false; setErr(errMsg(e)); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pid]);
 
@@ -209,7 +213,7 @@ export function useOnboarding() {
         ...(conceptIsEmpty(r.concept) ? {} : { concept: r.concept }),
       });
     } catch (e) {
-      setErr(String(e));
+      setErr(errMsg(e));
       await patch({ chat_log: log }).catch(() => undefined);
     } finally { setBusy(""); }
   }
@@ -228,7 +232,7 @@ export function useOnboarding() {
         { kind: "inspire" },
       );
       if (r) { setIdeas(r.ideas); setIdeaSig(sig); }
-    } catch (e) { setErr(String(e)); setIdeas([]); }
+    } catch (e) { setErr(errMsg(e)); setIdeas([]); }
   }
 
   // 进概念屏自动生成一批(有缓存候选则不重复生成)
@@ -250,7 +254,7 @@ export function useOnboarding() {
         const r = await runJob<RefineResult>(
           () => api.refineConceptAsync(concept, f, tendency), { kind: "inspire" });
         if (r) { setIdeas([r.concept]); setIdeaSig(sig); }
-      } catch (e) { setErr(String(e)); setIdeas([]); }
+      } catch (e) { setErr(errMsg(e)); setIdeas([]); }
     } else {
       await brainstorm(f);
     }
@@ -262,13 +266,13 @@ export function useOnboarding() {
     try {
       await patch({ concept: c });
       toast.ok("已选定故事概念", "进入工作台后还能继续打磨");
-    } catch (e) { setErr(String(e)); }
+    } catch (e) { setErr(errMsg(e)); }
     flyTo("concept", c.logline || "已选定概念", "genre");
   }
 
   async function saveCustomConcept() {
     if (conceptIsEmpty(customConcept)) { setErr("至少填一个字段再保存"); return; }
-    try { await patch({ concept: customConcept }); } catch (e) { setErr(String(e)); return; }
+    try { await patch({ concept: customConcept }); } catch (e) { setErr(errMsg(e)); return; }
     setCustomOpen(false);
     flyTo("concept", customConcept.logline || "手写概念", "genre");
   }
@@ -321,7 +325,7 @@ export function useOnboarding() {
       );
       setTitleIdeas(r.titles);
       setTitleSig(sig);
-    } catch (e) { setErr(String(e)); setTitleIdeas([]); } finally { setTitleBusy(false); }
+    } catch (e) { setErr(errMsg(e)); setTitleIdeas([]); } finally { setTitleBusy(false); }
   }
 
   async function pickTitle(t: string) {
@@ -330,7 +334,7 @@ export function useOnboarding() {
     if (pickedKey) return;
     setPickedKey(v);
     setTitleInput(v);
-    try { await patch({ title: v }); } catch (e) { setErr(String(e)); }
+    try { await patch({ title: v }); } catch (e) { setErr(errMsg(e)); }
     flyTo("title", v, "scale");
   }
 
@@ -357,7 +361,7 @@ export function useOnboarding() {
         set({ status: "done", stage: "", error: "" });
         if (kind === "arch") void runBp();
       })
-      .catch((e) => set({ status: "err", stage: "", error: String(e) }));
+      .catch((e) => set({ status: "err", stage: "", error: errMsg(e) }));
   }
 
   async function runArch() {
@@ -372,7 +376,7 @@ export function useOnboarding() {
       setArch({ status: "done", stage: "", error: "" });
       void runBp();
     } catch (e) {
-      setArch({ status: "err", stage: "", error: String(e) });
+      setArch({ status: "err", stage: "", error: errMsg(e) });
     }
   }
 
@@ -387,7 +391,7 @@ export function useOnboarding() {
       if (r === null) return;
       setBp({ status: "done", stage: "", error: "" });
     } catch (e) {
-      setBp({ status: "err", stage: "", error: String(e) });
+      setBp({ status: "err", stage: "", error: errMsg(e) });
     }
   }
 
@@ -451,7 +455,7 @@ export function useOnboarding() {
       }
       toast.ok("已放弃创建");
       nav("/");
-    } catch (e) { setErr(String(e)); }
+    } catch (e) { setErr(errMsg(e)); }
   }
 
   return {

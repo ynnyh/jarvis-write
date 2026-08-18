@@ -6,6 +6,7 @@ import TitleSuggest from "../components/TitleSuggest";
 import { confirmDialog } from "../ui/ConfirmDialog";
 import EmptyState from "../ui/EmptyState";
 import { toast } from "../ui/Toaster";
+import { errMsg } from "../pollJob";
 
 // 项目状态英文值 → 中文徽标(未知值原样兜底)
 const PROJECT_STATUS_CN: Record<string, string> = { draft: "草稿", writing: "连载中" };
@@ -21,7 +22,7 @@ export default function ProjectsPage() {
   const [editTitle, setEditTitle] = useState("");
 
   useEffect(() => {
-    api.listProjects().then(setProjects).catch((e) => setErr(String(e)));
+    api.listProjects().then(setProjects).catch((e) => setErr(errMsg(e)));
   }, []);
 
   function startRename(p: Project) {
@@ -38,7 +39,7 @@ export default function ProjectsPage() {
       setProjects((ps) => ps.map((p) => (p.id === id ? updated : p)));
       setEditingId(null);
     } catch (e) {
-      setErr(String(e));
+      setErr(errMsg(e));
     } finally {
       setBusy(false);
     }
@@ -61,7 +62,7 @@ export default function ProjectsPage() {
       setProjects((ps) => ps.filter((x) => x.id !== p.id));
       toast.ok(`已删除《${p.title}》`);
     } catch (e) {
-      toast.err("删除失败", String(e));
+      toast.err("删除失败", errMsg(e));
     } finally {
       setBusy(false);
     }

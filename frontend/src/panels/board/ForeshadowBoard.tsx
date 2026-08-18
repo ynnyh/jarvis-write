@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { api, ForeshadowOut } from "../../api";
 import { FS_CN, Props } from "./shared";
+import { errMsg } from "../../pollJob";
 
 export default function ForeshadowBoard({ pid, outlines }: Props) {
   const maxCh = outlines.length ? Math.max(...outlines.map((o) => o.chapter_number)) : 1;
@@ -13,7 +14,7 @@ export default function ForeshadowBoard({ pid, outlines }: Props) {
 
   const reload = async () => {
     setErr("");
-    try { setForeshadows(await api.foreshadowings(pid, maxCh)); } catch (e) { setErr(String(e)); }
+    try { setForeshadows(await api.foreshadowings(pid, maxCh)); } catch (e) { setErr(errMsg(e)); }
   };
   useEffect(() => { reload(); /* eslint-disable-line react-hooks/exhaustive-deps */ }, [pid, maxCh]);
 
@@ -23,7 +24,7 @@ export default function ForeshadowBoard({ pid, outlines }: Props) {
       await api.patchForeshadow(pid, fid, patch);
       setEditExpect(null);
       await reload();
-    } catch (e) { setErr(String(e)); }
+    } catch (e) { setErr(errMsg(e)); }
   }
 
   const open = foreshadows.filter((f) => f.status === "planted" || f.status === "reinforced");

@@ -13,6 +13,7 @@ import { setThemePref } from "../theme";
 import { isDesktop, onMenuAction, openReadWindow } from "../desktop";
 import { downloadFile } from "../api";
 import { toast } from "../ui/Toaster";
+import { errMsg } from "../pollJob";
 import InspirePanel from "../panels/InspirePanel";
 import ArchPanel from "../panels/ArchPanel";
 import OutlinePanel from "../panels/OutlinePanel";
@@ -198,7 +199,7 @@ export default function ProjectPage() {
       }
       void openReadWindow(pid, ch)
         .then((ok) => { if (!ok) toast.info("对照阅读窗仅在桌面客户端可用"); })
-        .catch((e) => toast.err("打开阅读窗失败", String(e)));
+        .catch((e) => toast.err("打开阅读窗失败", errMsg(e)));
     },
   };
   const globalHandlersRef = useRef(globalHandlers);
@@ -312,7 +313,7 @@ export default function ProjectPage() {
   // 头部快捷导出:走鉴权下载(普通 <a> 不带 token 会 401)
   function exportBook(path: string, ext: string) {
     downloadFile(`/api/projects/${pid}/${path}`, `${project?.title || pid}.${ext}`)
-      .catch((e) => toast.err("导出失败", String(e)));
+      .catch((e) => toast.err("导出失败", errMsg(e)));
   }
 
   // 当前区/子位置的引导内容(setup 三个子步 + write + book 部分页签)

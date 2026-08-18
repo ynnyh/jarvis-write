@@ -100,7 +100,7 @@ export function AboutUpdateCard() {
       body: "应用会关闭并重新打开。未保存的操作请先处理。",
       confirmText: "立即重启",
     });
-    if (ok) restartApp().catch((e) => toast.err("重启失败", String(e)));
+    if (ok) restartApp().catch((e) => toast.err("重启失败", e instanceof Error ? e.message : String(e)));
   }
 
   const pct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : null;

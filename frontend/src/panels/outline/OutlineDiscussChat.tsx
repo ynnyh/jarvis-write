@@ -3,6 +3,7 @@
 // 与正文重写研讨(ReviseChat)同构,复用 rd-*/arch-directive/rp-* 样式。
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../api";
+import { errMsg } from "../../pollJob";
 
 interface Proposal {
   new_title: string | null;
@@ -49,7 +50,7 @@ export default function OutlineDiscussChat({ pid, n, title, summary, onApply }: 
       // 失败回退刚发出的那条,方便重发
       setMsgs((m) => m.slice(0, -1));
       setInput(text);
-      setErr(String(e));
+      setErr(errMsg(e));
     } finally { setBusy(false); }
   }
 
@@ -59,7 +60,7 @@ export default function OutlineDiscussChat({ pid, n, title, summary, onApply }: 
     try {
       await onApply(proposal);
     } catch (e) {
-      setErr(String(e));
+      setErr(errMsg(e));
       setApplying(false);
     }
   }

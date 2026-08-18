@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ChapterBrief, ChapterDetail, Outline, Project } from "../api";
 import Reader, { ReaderTocItem } from "./Reader";
+import { errMsg } from "../pollJob";
 
 interface Props {
   pid: number;
@@ -52,7 +53,7 @@ export default function BookReader({ pid, project, outlines, chapters, onClose }
     savePos(posKey, { chapter: n, scroll });
     setLoading(true); setErr("");
     try { setChapter(await api.getChapter(pid, n)); }
-    catch (e) { setErr(String(e)); }
+    catch (e) { setErr(errMsg(e)); }
     finally { setLoading(false); }
   }, [pid, posKey]);
 

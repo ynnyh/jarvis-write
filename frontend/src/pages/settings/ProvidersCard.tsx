@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api, ProviderConfigOut } from "../../api";
 import { ProviderForm } from "./ProviderForm";
 import { ProviderRow } from "./ProviderRow";
+import { errMsg } from "../../pollJob";
 
 export function ProvidersCard() {
   const [list, setList] = useState<ProviderConfigOut[] | null>(null);
@@ -14,7 +15,7 @@ export function ProvidersCard() {
 
   async function load() {
     try { setList(await api.listProviders()); }
-    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    catch (e) { setErr(errMsg(e)); }
   }
   useEffect(() => { void load(); }, []);
 

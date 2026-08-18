@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { api, OverviewChapter, OverviewOut, TimelineItem } from "../../api";
 import { FS_CN } from "./shared";
+import { errMsg } from "../../pollJob";
 
 // 格子状态:生成中 > 失配(is_stale 或版本不一致) > 已定稿/草稿/未生成
 function cellState(c: OverviewChapter): string {
@@ -51,7 +52,7 @@ export default function OverviewBoard({ pid, onGotoChapter }: { pid: number; onG
   useEffect(() => {
     (async () => {
       setErr("");
-      try { setData(await api.overview(pid)); } catch (e) { setErr(String(e)); }
+      try { setData(await api.overview(pid)); } catch (e) { setErr(errMsg(e)); }
     })();
     api.timeline(pid)
       .then((r) => setTimeline(r.items))

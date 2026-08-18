@@ -3,7 +3,7 @@
 // 组件只负责渲染,状态与逻辑集中在此 hook(行为与拆分前逐字一致)。
 import { useEffect, useRef, useState } from "react";
 import { api, ChapterDetail, EditorAction } from "../../api";
-import { pollJob } from "../../pollJob";
+import { pollJob, errMsg } from "../../pollJob";
 import { nthParaSpan, splitParas } from "./paragraphs";
 import { loadReaderPrefs, READER_PREFS_KEY, ReaderPrefs } from "./prefs";
 
@@ -182,7 +182,7 @@ export function useReaderState({
       );
       setPolished(r.polished);
     } catch (e) {
-      setPolishErr(e instanceof Error ? e.message : String(e));
+      setPolishErr(errMsg(e));
     } finally { setPolishing(false); }
   }
 
@@ -211,7 +211,7 @@ export function useReaderState({
       setSelPara(null);
       if (askSync) setPendingSyncNum(polishCtx.chapterNumber);
     } catch (e) {
-      setPolishErr(e instanceof Error ? e.message : String(e));
+      setPolishErr(errMsg(e));
     } finally { setApplying(false); }
   }
 
@@ -258,7 +258,7 @@ export function useReaderState({
       // 失败时回退刚发出的那条,方便用户重发
       setDiscussMsgs((m) => m.slice(0, -1));
       setDiscussInput(text);
-      setDiscussErr(e instanceof Error ? e.message : String(e));
+      setDiscussErr(errMsg(e));
     } finally { setDiscussing(false); }
   }
 

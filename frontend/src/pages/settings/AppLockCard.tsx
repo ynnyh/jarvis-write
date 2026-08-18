@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../../api";
 import { toast } from "../../ui/Toaster";
+import { errMsg } from "../../pollJob";
 
 export function AppLockCard() {
   // null=非 local 模式或尚未探测到(不渲染)
@@ -38,7 +39,7 @@ export function AppLockCard() {
       setHasLock(true);
       setOldPw(""); setNewPw(""); setConfirmPw("");
     } catch (e) {
-      toast.err(hasLock ? "修改失败" : "设置失败", e instanceof Error ? e.message : String(e));
+      toast.err(hasLock ? "修改失败" : "设置失败", errMsg(e));
     } finally {
       setBusy(false);
     }
@@ -54,7 +55,7 @@ export function AppLockCard() {
       setHasLock(false);
       setRemovePw("");
     } catch (e) {
-      toast.err("移除失败", e instanceof Error ? e.message : String(e));
+      toast.err("移除失败", errMsg(e));
     } finally {
       setBusy(false);
     }

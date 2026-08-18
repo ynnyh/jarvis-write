@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api, ProofIssue, ProofreadSnapshot } from "../../api";
 import { useJob } from "../../ui/useJob";
 import { toast } from "../../ui/Toaster";
+import { errMsg } from "../../pollJob";
 
 const ISSUE_TYPE: Record<string, string> = {
   typo: "错字", grammar: "语病", punct: "标点", dup: "重复",
@@ -48,7 +49,7 @@ export default function ProofreadCard({ pid, chapterNum }: Props) {
         setIssues(r.issues);
         setPicked(new Set(r.issues.map((_, i) => i)));
       }
-    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
   }
 
   // 「修复所选」:只应用勾选的条目;修完后台同步一致性引擎(不阻塞)
@@ -64,7 +65,7 @@ export default function ProofreadCard({ pid, chapterNum }: Props) {
         r.failed.length ? `${r.failed.length} 处未找到原文(可能已改动)` : undefined);
       setIssues(null); setPicked(new Set());
       api.reExtractAsync(pid, chapterNum).catch(() => undefined);
-    } catch (e) { setErr(String(e)); } finally { setBusy(""); }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
   }
 
   return (
