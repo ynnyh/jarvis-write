@@ -13,8 +13,6 @@ export const qk = {
   // 单章正文:写作/编辑部/润色共享同一缓存,章号来自 URL(见 useChapterContext)
   chapter: (pid: number, ch: number) => ["chapter", pid, ch] as const,
   cards: (pid: number) => ["cards", pid] as const,
-  // 全部项目级数据(用于一次性 invalidate)
-  all: (pid: number) => ["project", pid] as const, // prefix match 会命中 project/architecture/outlines/chapters
 };
 
 // =============== Data Hooks ===============

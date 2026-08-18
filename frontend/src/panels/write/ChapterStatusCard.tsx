@@ -90,7 +90,7 @@ export default function ChapterStatusCard({
     return () => { cancelled = true; };
   }, [stage, pid, n]);
 
-  // 历史模式合成生成响应(照抄旧 RefDrawer.tsx 的 reviewReportResult 那套):
+  // 历史模式合成生成响应(沿用原参考抽屉的 reviewReportResult 合成逻辑):
   // 门禁态由 status 推导,问题清单由卡片内自取,主审分用快照
   const reviewReportResult: GenerateChapterResponse | null =
     stage === "blocked" ? {

@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ChapterDetail, EditorAction } from "../../api";
 import { pollJob, errMsg } from "../../pollJob";
+import { useDiscussChat } from "../../hooks/useDiscussChat";
 import { nthParaSpan, splitParas } from "./paragraphs";
 import { loadReaderPrefs, READER_PREFS_KEY, ReaderPrefs } from "./prefs";
 
@@ -65,15 +66,29 @@ export function useReaderState({
   const [syncNum, setSyncNum] = useState<number | null>(null);
   const [syncStage, setSyncStage] = useState("");
 
+  // 当前正文 / 段落切分 / 选中段:研讨请求要带选段原文,故须在 useDiscussChat 之前算好。
+  const curText = chapter
+    ? (tab === "final" ? chapter.final_content || chapter.draft_content : chapter.draft_content)
+    : "";
+  const paras = curText ? splitParas(curText) : [];
+  const selText = selPara != null && selPara < paras.length ? paras[selPara] : null;
+
   // ---- 段落对话状态(选中段 → 问 AI:可解释、可给改写建议) ----
   const [discussOpen, setDiscussOpen] = useState(false);
-  const [discussMsgs, setDiscussMsgs] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
-  const [discussInput, setDiscussInput] = useState("");
-  const [discussing, setDiscussing] = useState(false);
-  const [discussErr, setDiscussErr] = useState("");
   // 最近一条 AI 回复携带的改写建议(null=纯解释);采用即走 applyReplacement
   const [suggestion, setSuggestion] = useState<string | null>(null);
   const discussLogRef = useRef<HTMLDivElement>(null);
+  // 单通道研讨循环抽到 useDiscussChat:call 带选段原文请求,并补回复兜底文案;
+  // onReply 取出改写建议,onSendStart 发送前先清掉上一条。选段/上下文守卫在下方 sendDiscuss 包装里。
+  const {
+    msgs: discussMsgs, input: discussInput, setInput: setDiscussInput,
+    busy: discussing, err: discussErr,
+    send: runDiscuss, reset: resetDiscuss,
+  } = useDiscussChat<{ reply: string; suggestion: string | null }>(
+    (next) => api.discussFragment(polishCtx!.pid, polishCtx!.chapterNumber, next, selText!)
+      .then((r) => ({ ...r, reply: r.reply || "(见下方改写建议)" })),
+    { onReply: (r) => setSuggestion(r.suggestion), onSendStart: () => setSuggestion(null) },
+  );
 
   const closePolish = () => {
     setPolishOpen(false);
@@ -84,9 +99,7 @@ export function useReaderState({
 
   const closeDiscuss = () => {
     setDiscussOpen(false);
-    setDiscussMsgs([]);
-    setDiscussInput("");
-    setDiscussErr("");
+    resetDiscuss();
     setSuggestion(null);
   };
 
@@ -165,11 +178,6 @@ export function useReaderState({
     }, 500);
   };
 
-  const curText = chapter
-    ? (tab === "final" ? chapter.final_content || chapter.draft_content : chapter.draft_content)
-    : "";
-  const paras = curText ? splitParas(curText) : [];
-  const selText = selPara != null && selPara < paras.length ? paras[selPara] : null;
   // 只在定稿 tab 且有定稿正文时允许点选润色(替换目标是 final_content)
   const polishEnabled = !!polishCtx && tab === "final" && !!chapter?.final_content;
 
@@ -240,27 +248,12 @@ export function useReaderState({
     }
   }
 
-  // 段落对话:发一句 → 追加到历史 → 请求 AI(带选段原文,后端自动补上下文)。
-  // AI 回复可能携带改写建议(suggestion),浮出「采用此改写」按钮。
-  async function sendDiscuss() {
+  // 段落对话:先守卫「有选段 + 有上下文」,再走 useDiscussChat 的乐观发送循环。
+  // 请求带选段原文(后端自动补上下文);回复可能携带改写建议(suggestion),浮出「采用此改写」。
+  const sendDiscuss = () => {
     if (!polishCtx || selText == null) return;
-    const text = discussInput.trim();
-    if (!text || discussing) return;
-    const next = [...discussMsgs, { role: "user" as const, content: text }];
-    setDiscussMsgs(next);
-    setDiscussInput("");
-    setDiscussing(true); setDiscussErr(""); setSuggestion(null);
-    try {
-      const r = await api.discussFragment(polishCtx.pid, polishCtx.chapterNumber, next, selText);
-      setDiscussMsgs((m) => [...m, { role: "assistant", content: r.reply || "(见下方改写建议)" }]);
-      setSuggestion(r.suggestion);
-    } catch (e) {
-      // 失败时回退刚发出的那条,方便用户重发
-      setDiscussMsgs((m) => m.slice(0, -1));
-      setDiscussInput(text);
-      setDiscussErr(errMsg(e));
-    } finally { setDiscussing(false); }
-  }
+    void runDiscuss();
+  };
 
   // 采用对话里的改写建议:走与润色相同的替换+同步链路(改了文字→不问同步)。
   async function adoptSuggestion() {

@@ -7,6 +7,8 @@ import TendencySelector from "../components/TendencySelector";
 import CardsPanel from "./CardsPanel";
 import { confirmDialog } from "../ui/ConfirmDialog";
 import { toast } from "../ui/Toaster";
+import { useJobReconnect } from "../hooks/useJobReconnect";
+import { useDiscussChat } from "../hooks/useDiscussChat";
 
 interface Props { project: Project; arch: Architecture | null; onChanged: () => Promise<void>; hasContent?: boolean; }
 
@@ -36,40 +38,32 @@ export default function ArchPanel({ project, arch, onChanged, hasContent }: Prop
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  // 挂载时查有没有还在跑的架构生成(切走页面再回来的场景),有则接回轮询
-  // 显示进度,而不是装作没事(与 WritePanel 的 runningJobs 重连同一模式)。
-  useEffect(() => {
-    let cancelled = false;
-    api.runningJobs(project.id).then(({ jobs }) => {
-      if (cancelled) return;
-      const gen = jobs.find((j) => j.kind === `architecture-${project.id}`);
-      if (!gen) return;
-      const ctrl = new AbortController();
-      abortRef.current = ctrl;
-      setBusy(`架构生成中:${gen.stage}`);
-      pollJob(gen.job_id, {
-        signal: ctrl.signal,
-        onStage: (stage) => setBusy(`架构生成中:${stage}`),
-      }).then(async () => {
-        if (ctrl.signal.aborted) return;
-        await onChanged();
-        setMsg("架构已生成。下一步:去「大纲」生成章节蓝图。");
-      }).catch((e) => {
-        if (!ctrl.signal.aborted) setErr(errMsg(e));
-      }).finally(() => { if (!ctrl.signal.aborted) setBusy(""); });
-    }).catch(() => undefined);
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.id]);
+  // 挂载时接回还在跑的架构生成(切走页面再回来),显示进度而非装作没事(抽到 useJobReconnect)。
+  useJobReconnect({
+    pid: project.id,
+    kind: `architecture-${project.id}`,
+    busyPrefix: "架构生成中:",
+    abortRef,
+    setBusy,
+    setErr,
+    onDone: async () => {
+      await onChanged();
+      setMsg("架构已生成。下一步:去「大纲」生成章节蓝图。");
+    },
+  });
 
   // ---- 架构研讨对话状态(聊清不满意在哪 → 蒸馏出额外要求 → 按此重新生成) ----
   const [discussOpen, setDiscussOpen] = useState(false);
-  const [discussMsgs, setDiscussMsgs] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
-  const [discussInput, setDiscussInput] = useState("");
-  const [discussing, setDiscussing] = useState(false);
-  const [discussErr, setDiscussErr] = useState("");
   const [directive, setDirective] = useState(""); // AI 蒸馏出的额外要求
   const discussLogRef = useRef<HTMLDivElement>(null);
+  // 单通道研讨循环(乐观发送/失败回退)抽到 useDiscussChat;回复里带回蒸馏出的 directive
+  const {
+    msgs: discussMsgs, input: discussInput, setInput: setDiscussInput,
+    busy: discussing, err: discussErr, send: sendDiscuss,
+  } = useDiscussChat(
+    (next) => api.discussArchitecture(project.id, next),
+    { onReply: (r) => setDirective(r.directive || "") },
+  );
 
   // ---- 创作偏好档案(贯穿全书,注入所有生成环节) ----
   const [profile, setProfile] = useState<StyleProfile>({ style: "", taboos: "", audience: "", other: "" });
@@ -142,26 +136,6 @@ export default function ArchPanel({ project, arch, onChanged, hasContent }: Prop
     } catch (e) {
       if (!ctrl.signal.aborted) setErr(errMsg(e));
     } finally { if (!ctrl.signal.aborted) setBusy(""); }
-  }
-
-  // 架构研讨:发一句 → AI 顺着聊 + 后台蒸馏出「额外要求」(directive)
-  async function sendDiscuss() {
-    const text = discussInput.trim();
-    if (!text || discussing) return;
-    const next = [...discussMsgs, { role: "user" as const, content: text }];
-    setDiscussMsgs(next);
-    setDiscussInput("");
-    setDiscussing(true); setDiscussErr("");
-    try {
-      const r = await api.discussArchitecture(project.id, next);
-      setDiscussMsgs((m) => [...m, { role: "assistant", content: r.reply }]);
-      setDirective(r.directive || "");
-    } catch (e) {
-      // 失败回退刚发出的那条,方便重发
-      setDiscussMsgs((m) => m.slice(0, -1));
-      setDiscussInput(text);
-      setDiscussErr(errMsg(e));
-    } finally { setDiscussing(false); }
   }
 
   async function save() {

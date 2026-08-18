@@ -136,7 +136,7 @@ export default function AiDock({
       }
       if (collapsedRef.current) setHasNew(true);
     } catch (e) {
-      // 失败回退刚发出的那条,方便重发(同 ReviseChat 模式)
+      // 失败回退刚发出的那条,方便重发
       setMsgs((m) => m.slice(0, -1));
       setInput(text);
       setErr(errMsg(e));

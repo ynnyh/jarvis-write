@@ -5,6 +5,7 @@ import { pollJob, errMsg } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
 import { confirmDialog } from "../ui/ConfirmDialog";
 import { useJob } from "../ui/useJob";
+import { useJobReconnect } from "../hooks/useJobReconnect";
 import type { GotoTarget } from "../pages/ProjectPage";
 import DirectivePanel from "./outline/DirectivePanel";
 import OutlineDiscussChat from "./outline/OutlineDiscussChat";
@@ -54,33 +55,21 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  // 挂载时查有没有还在跑的蓝图生成(切走页面再回来的场景),有则接回轮询
-  // 显示进度,而不是装作没事(与 WritePanel 的 runningJobs 重连同一模式;
-  // 生成与「展开下一卷」后端共用 blueprint-<pid> kind,重连接法一致)。
-  useEffect(() => {
-    let cancelled = false;
-    api.runningJobs(pid).then(({ jobs }) => {
-      if (cancelled) return;
-      const gen = jobs.find((j) => j.kind === `blueprint-${pid}`);
-      if (!gen) return;
-      const ctrl = new AbortController();
-      abortRef.current = ctrl;
-      setBusy(`蓝图生成中:${gen.stage}`);
-      pollJob<{ outlines: Outline[] }>(gen.job_id, {
-        signal: ctrl.signal,
-        onStage: (stage) => setBusy(`蓝图生成中:${stage}`),
-      }).then(async (r) => {
-        if (ctrl.signal.aborted) return;
-        await onChanged();
-        setShowGen(false);
-        setGenDone(r.outlines.length);
-      }).catch((e) => {
-        if (!ctrl.signal.aborted) setErr(errMsg(e));
-      }).finally(() => { if (!ctrl.signal.aborted) setBusy(""); });
-    }).catch(() => undefined);
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pid]);
+  // 挂载时接回还在跑的蓝图生成(切走再回来);生成与「展开下一卷」后端共用
+  // blueprint-<pid> kind,重连接法一致(通用重连逻辑抽到 useJobReconnect)。
+  useJobReconnect<{ outlines: Outline[] }>({
+    pid,
+    kind: `blueprint-${pid}`,
+    busyPrefix: "蓝图生成中:",
+    abortRef,
+    setBusy,
+    setErr,
+    onDone: async (r) => {
+      await onChanged();
+      setShowGen(false);
+      setGenDone(r.outlines.length);
+    },
+  });
 
   function toggleExpand(n: number) {
     const s = new Set(expanded);

@@ -1,9 +1,10 @@
 // 单章大纲研讨:和 AI 聊清"这章大纲哪里不对",蒸馏出改写提案(新标题+新简述),
 // 确认后走修改指令的 apply 链路落库(版本化 + 正文标失配)。
-// 与正文重写研讨(ReviseChat)同构,复用 rd-*/arch-directive/rp-* 样式。
+// 研讨对话循环与架构研讨 / 段落研讨共用 useDiscussChat,复用 rd-*/arch-directive/rp-* 样式。
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../api";
 import { errMsg } from "../../pollJob";
+import { useDiscussChat } from "../../hooks/useDiscussChat";
 
 interface Proposal {
   new_title: string | null;
@@ -22,37 +23,21 @@ interface Props {
 }
 
 export default function OutlineDiscussChat({ pid, n, title, summary, onApply }: Props) {
-  const [msgs, setMsgs] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
-  const [input, setInput] = useState("");
-  const [busy, setBusy] = useState(false);
   const [applying, setApplying] = useState(false);
-  const [err, setErr] = useState("");
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
+  // 单通道研讨循环抽到 useDiscussChat;回复里带回 AI 整理出的改写提案(proposal)
+  const {
+    msgs, input, setInput, busy, err, setErr, send,
+  } = useDiscussChat(
+    (next) => api.discussOutline(pid, n, next),
+    { onReply: (r) => { if (r.proposal) setProposal(r.proposal); } },
+  );
 
   // 对话流自动滚到底
   useEffect(() => {
     logRef.current?.scrollTo(0, logRef.current.scrollHeight);
   }, [msgs, busy]);
-
-  async function send() {
-    const text = input.trim();
-    if (!text || busy) return;
-    const next = [...msgs, { role: "user" as const, content: text }];
-    setMsgs(next);
-    setInput("");
-    setBusy(true); setErr("");
-    try {
-      const r = await api.discussOutline(pid, n, next);
-      setMsgs((m) => [...m, { role: "assistant", content: r.reply }]);
-      if (r.proposal) setProposal(r.proposal);
-    } catch (e) {
-      // 失败回退刚发出的那条,方便重发
-      setMsgs((m) => m.slice(0, -1));
-      setInput(text);
-      setErr(errMsg(e));
-    } finally { setBusy(false); }
-  }
 
   async function apply() {
     if (!proposal || applying) return;
