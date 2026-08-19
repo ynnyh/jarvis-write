@@ -97,3 +97,18 @@ def test_report_to_dict_json_friendly():
     assert set(d) == {"score", "summary", "total_chars", "categories", "hits", "metrics"}
     assert isinstance(d["hits"], list)
     assert d["hits"][0]["category"]
+
+
+# ---------- advice_block:把统计指标翻成"能照着动手"的改写指令(去味闭环用) ----------
+def test_advice_block_translates_metrics_to_instructions():
+    advice = ai_flavor_report(AI_SAMPLE).advice_block()
+    assert advice, "AI 样文应给出节奏/结构诊断"
+    assert "节奏与结构诊断" in advice
+    # AI_SAMPLE 有节拍器句组 + 段尾总结,应翻成可照做的指令
+    assert "等长" in advice or "字数都差不多" in advice        # metronome
+    assert "总结" in advice or "点题" in advice or "升华" in advice  # tail_summary
+
+
+def test_advice_block_empty_for_clean_text():
+    # CLEAN_SAMPLE 的 score == 0 → penalty == 0 → 无任何统计问题 → advice 为空
+    assert ai_flavor_report(CLEAN_SAMPLE).advice_block() == ""

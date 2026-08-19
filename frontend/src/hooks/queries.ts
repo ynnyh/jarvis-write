@@ -13,6 +13,8 @@ export const qk = {
   // 单章正文:写作/编辑部/润色共享同一缓存,章号来自 URL(见 useChapterContext)
   chapter: (pid: number, ch: number) => ["chapter", pid, ch] as const,
   cards: (pid: number) => ["cards", pid] as const,
+  // 故事圣经人物(正文实体高亮/hover 卡复用;随一致性同步刷新)
+  characters: (pid: number) => ["characters", pid] as const,
 };
 
 // =============== Data Hooks ===============
@@ -87,6 +89,17 @@ export function useCardMutations(pid: number) {
   return { create, update, remove };
 }
 
+// =============== 故事圣经人物(正文实体链接) ===============
+
+/** 全书人物(名+别名+简介+关键事实),供正文实体高亮与 hover 卡使用。
+ *  取数失败吞掉返空数组:实体链接是阅读增强,拉不到不该在正文区弹红字报错,退化为无高亮即可。 */
+export function useCharacters(pid: number) {
+  return useQuery({
+    queryKey: qk.characters(pid),
+    queryFn: () => api.characters(pid).then((r) => r.characters).catch(() => []),
+  });
+}
+
 // =============== Invalidation Helper ===============
 
 /** 返回一个函数,调用后刷新该项目的所有缓存数据(替代旧的 reload 回调)。 */
@@ -98,6 +111,7 @@ export function useInvalidateProject(pid: number) {
       qc.invalidateQueries({ queryKey: ["architecture", pid] }),
       qc.invalidateQueries({ queryKey: ["outlines", pid] }),
       qc.invalidateQueries({ queryKey: ["chapters", pid] }),
+      qc.invalidateQueries({ queryKey: ["characters", pid] }),
     ]);
   };
 }

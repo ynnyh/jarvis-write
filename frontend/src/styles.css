@@ -1398,6 +1398,23 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 }
 .reader-polish-panel input { width: 100%; }
 .rp-chips { margin-top: 8px; }
+/* 工具行:润色/描写/扩写/脑暴,置于工作台顶部,底部细线与下方输入/结果区分隔 */
+.rp-tools {
+  margin: 0 0 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+/* 脑暴点子列表:紧凑项目符号,长列表内部滚动不撑高弹层 */
+.rp-ideas {
+  margin: 0;
+  padding-left: 20px;
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  color: var(--text-1);
+  max-height: 46vh;
+  overflow-y: auto;
+}
+.rp-ideas li { margin: 4px 0; }
 .rp-actions { display: flex; gap: 8px; margin-top: 14px; }
 .rp-actions button { margin-left: 0; }
 .rp-err { margin-top: 10px; }
@@ -1537,9 +1554,15 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
   .concept-grid { grid-template-columns: 1fr; gap: 10px 0; }
   .concept-field { flex-direction: column; gap: 2px; }
   .cf-label { text-align: left; min-width: 0; }
-  /* card-head 按钮行:窄屏按钮不挤压;标题占位收紧,按钮可自然换行 */
+  /* card-head / 文本行头部:窄屏下标题(或状态句)独占一行,右侧按钮整体换到下一行。
+     根因:.grow{min-width:0} 让中文文本能收缩到 1 字宽,同行有按钮时被压成逐字竖排。
+     只作用于「文本型」元素(h2/h3/b/span.grow 与 card-head 裸标题);
+     b/span 加 :not(:empty) 排除空 spacer(如 OnboardingFlow 的 <span class="grow"/>
+     右推占位),div.grow 本就不匹配这些选择器,布局不受影响。 */
   .card-head { gap: 8px 10px; }
   .card-head button { flex-shrink: 0; }
+  .card-head > h2, .card-head > h3,
+  h2.grow, h3.grow, b.grow:not(:empty), span.grow:not(:empty) { flex-basis: 100%; }
   /* 架构研讨对话:窄屏给更高的可视区 */
   .arch-discuss .rd-log { max-height: 60vh; }
   /* 宽表格:保持 table 布局(表头/内容列对齐),滚动交给 .tbl-wrap 容器 */
@@ -2429,6 +2452,47 @@ html, body { max-width: 100%; overflow-x: hidden; }
   font-size: 15px;
   font-family: var(--font-serif);
 }
+/* ---------- 章尾续写(ghost text):AI 顺着本章续一段,灰字预览,Tab 接受追加 ---------- */
+.prose-tail { margin-top: 18px; }
+/* 召唤按钮:虚线柔边、减淡文字,低调待在章尾,不与正文抢视线 */
+.prose-continue { color: var(--text-2); border-style: dashed; }
+.prose-ghost-wrap { margin-top: 4px; }
+/* 续出的灰字:与正文同字体/行高,颜色减淡 + 左侧虚线竖条,一眼可辨「这是草稿、未定」 */
+.prose-ghost {
+  font-family: var(--font-serif);
+  line-height: 1.9;
+  font-size: 15px;
+  white-space: pre-wrap;
+  color: var(--text-3);
+  padding-left: 12px;
+  border-left: 2px dashed var(--line-strong);
+}
+/* ---------- 正文实体链接(故事圣经人物,对标 Codex) ---------- */
+/* 命中处只加虚线下划线,不铺底色,保持正文清爽;cursor:help 暗示悬浮有信息 */
+.entity-link {
+  border-bottom: 1px dashed var(--brand);
+  cursor: help;
+}
+.entity-link.retired { border-bottom-color: var(--line-strong); opacity: 0.7; }
+/* hover 浮出的人物卡:贴高亮词下沿,复用气泡的表面/描边/阴影语言 */
+.entity-pop {
+  position: absolute;
+  z-index: 5;
+  max-width: 320px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 10px 12px;
+}
+.entity-card-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.entity-card-name { font-size: 15px; }
+.entity-card.retired .entity-card-name { text-decoration: line-through; }
+.entity-card-aliases { font-size: var(--fs-sm); margin-bottom: 4px; }
+.entity-card-profile { font-size: var(--fs-sm); line-height: 1.6; margin-bottom: 6px; }
+.entity-card-facts { margin: 0 0 4px; padding-left: 18px; font-size: var(--fs-sm); line-height: 1.6; }
+.entity-card-facts li { margin: 2px 0; }
+.entity-card-more, .entity-card-chapters { font-size: var(--fs-sm); }
 /* 原文/润色后两栏对照(字符基调沿用校对卡的 .diff-old/.diff-new;窄屏上下,见底部媒体查询) */
 .para-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .para-compare-col { min-width: 0; }
@@ -2452,6 +2516,55 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .catalog-drawer { box-shadow: var(--shadow-lg); }
 @media (min-width: 768px) {
   .catalog-drawer { width: 320px; }
+}
+
+/* ---------- 故事地图覆盖层(Tier 3):可召唤的全书脉络纵览,居中大面板 ---------- */
+.story-map-overlay { z-index: 900; display: flex; align-items: flex-start; justify-content: center; }
+.story-map {
+  margin-top: 8vh;
+  width: min(760px, 92vw);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.story-map-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.story-map-filter {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: var(--fs-sm); color: var(--text-2);
+  cursor: pointer; white-space: nowrap;
+}
+.story-map-empty { padding: 28px 16px; text-align: center; }
+.story-map-list { overflow-y: auto; padding: 6px; }
+/* 每章一行整行可点(跳章):悬浮描边,当前章 .on 常亮;覆写 button 的定高/nowrap */
+.story-map-row {
+  display: block; width: 100%; height: auto;
+  text-align: left; white-space: normal;
+  background: transparent; border: 1px solid transparent;
+  border-radius: var(--r-md);
+  padding: 8px 10px; margin: 2px 0;
+}
+.story-map-row:hover:not(:disabled) { background: var(--surface-2); }
+.story-map-row.on { border-color: var(--brand); background: var(--surface-2); }
+.smr-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 3px; }
+.smr-num { font-weight: 600; color: var(--text-2); font-size: var(--fs-sm); }
+.smr-title { font-weight: 600; }
+.smr-summary { color: var(--text-2); font-size: var(--fs-sm); line-height: 1.6; }
+.smr-fore {
+  color: var(--brand); font-size: var(--fs-sm);
+  margin-top: 3px; padding-left: 8px;
+  border-left: 2px solid var(--brand);
+}
+@media (max-width: 767px) {
+  .story-map { margin-top: 0; width: 100vw; max-height: 100vh; height: 100%; border-radius: 0; border: none; }
 }
 
 /* ==========================================================================
@@ -2590,6 +2703,16 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .revise-notes { margin-top: 6px; }
 
 /* ③④整章优化对照卡(PolishCompareCard)的逐段 diff 视图 */
+/* 整章优化「应用」冲突条:优化期间正文被手改过、后端返回 409 时浮出,显性提示不静默覆盖 */
+.polish-conflict {
+  border: 1px solid var(--warn-line);
+  background: var(--warn-weak);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--warn);
+}
+.polish-conflict .hint { color: var(--text-2); }
+
 .polish-diff {
   max-height: 60vh; overflow-y: auto;
   border: 1px solid var(--line);

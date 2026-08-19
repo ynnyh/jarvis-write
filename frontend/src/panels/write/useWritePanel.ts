@@ -81,6 +81,8 @@ export function useWritePanel({ pid, outlines }: UseWritePanelArgs) {
   const { immersive, toggleImmersive } = useImmersive();
   // 目录抽屉(章题按钮/空态引导/Ctrl+B 都可触发,双端同一份 CatalogDrawer)
   const [railOpen, setRailOpen] = useState(false);
+  // 故事地图覆盖层(Ctrl+M/命令面板/章首入口唤出,Tier 3:全书脉络纵览+跳章)
+  const [mapOpen, setMapOpen] = useState(false);
   // 左右滑切章的起点坐标(见 write-main 的 touch 处理器)
   const swipeRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -282,6 +284,8 @@ export function useWritePanel({ pid, outlines }: UseWritePanelArgs) {
     },
     // 目录抽屉(Ctrl+B/命令面板「目录」)
     "toggle-rail": () => setRailOpen((v) => !v),
+    // 故事地图(Ctrl+M/命令面板「地图」):全书脉络纵览
+    "toggle-map": () => setMapOpen((v) => !v),
     immersive: toggleImmersive,
   };
   const actionHandlersRef = useRef(actionHandlers);
@@ -299,7 +303,7 @@ export function useWritePanel({ pid, outlines }: UseWritePanelArgs) {
     // act= 动作卡
     act, setAct, openDock,
     // 环境 / 壳 / 滑动切章
-    isMobile, immersive, railOpen, setRailOpen, onMainTouchStart, onMainTouchEnd,
+    isMobile, immersive, railOpen, setRailOpen, mapOpen, setMapOpen, onMainTouchStart, onMainTouchEnd,
     // 顶部错误 & 派生
     err, stage, nextChapterNum, genBlocked, genHint,
     // 本地 UI 态:AI 窄栏 / 选段 / 对照 / 批注 / 脏标记

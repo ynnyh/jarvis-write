@@ -1,7 +1,7 @@
 // 架构工作区:雪花四步产出,四块均可手动编辑,也可整体重生成
 // 对生成的架构不满意时,开「架构研讨」和 AI 聊清楚想法 → 蒸馏成额外要求 → 按此重新生成
 import { useEffect, useRef, useState } from "react";
-import { api, Architecture, Project, StyleProfile, Tendency } from "../api";
+import { api, Architecture, Project, StyleProfile, Tendency, VoiceCapsule } from "../api";
 import { pollJob, errMsg } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
 import CardsPanel from "./CardsPanel";
@@ -66,10 +66,12 @@ export default function ArchPanel({ project, arch, onChanged, hasContent }: Prop
   );
 
   // ---- 创作偏好档案(贯穿全书,注入所有生成环节) ----
-  const [profile, setProfile] = useState<StyleProfile>({ style: "", taboos: "", audience: "", other: "" });
+  const [profile, setProfile] = useState<StyleProfile>({ style: "", taboos: "", audience: "", other: "", voice_key: "", voice_sample: "" });
   const [profileDirty, setProfileDirty] = useState(false);
   const [profileBusy, setProfileBusy] = useState("");
   const [extracting, setExtracting] = useState(false);
+  const [capsules, setCapsules] = useState<VoiceCapsule[]>([]); // 名家/预设文风胶囊下拉选项
+  const [voiceExtracting, setVoiceExtracting] = useState(false); // 从已认可章节提取范本中
   // 老书首次进本页:档案为空但有内容时自动提炼一次(只触发一次,避免反复跑)
   const autoExtractRef = useRef(false);
 
@@ -100,6 +102,15 @@ export default function ArchPanel({ project, arch, onChanged, hasContent }: Prop
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id, hasContent]);
+
+  // 载入名家/预设文风胶囊(下拉选项)
+  useEffect(() => {
+    let cancelled = false;
+    api.listVoiceCapsules(project.id)
+      .then((r) => { if (!cancelled) setCapsules(r.capsules); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [project.id]);
 
   // 对话流自动滚到底
   useEffect(() => {
@@ -194,6 +205,21 @@ export default function ArchPanel({ project, arch, onChanged, hasContent }: Prop
     } finally { setExtracting(false); }
   }
 
+  // 从已认可章节提取一段代表性正文当文风范本(不经 LLM;后端直接落库启用)
+  async function extractVoice() {
+    if (voiceExtracting) return;
+    if (!(await confirmOverwriteProfile())) return;
+    setVoiceExtracting(true);
+    try {
+      const p = await api.extractVoiceSample(project.id);
+      setProfile(p); setProfileDirty(false);
+      toast.ok("已从已认可章节提取文风范本", "后续生成与「AI 味自愈」都会参照这段笔法");
+    } catch (e) { toast.err("提取失败", errMsg(e)); }
+    finally { setVoiceExtracting(false); }
+  }
+
+  const selectedCapsule = capsules.find((c) => c.key === profile.voice_key);
+
   return (
     <>
       <div className="card">
@@ -258,6 +284,51 @@ export default function ArchPanel({ project, arch, onChanged, hasContent }: Prop
           ))}
         </div>
         {profileBusy && <div className="muted mt-2">{profileBusy}</div>}
+      </div>
+
+      {/* 文风范本:去 AI 腔的「正向锚」——给生成/自愈一个具体的模仿对象 */}
+      <div className="card">
+        <div className="card-head">
+          <h3 className="grow">文风范本 <span className="hint">· 去 AI 腔的正向锚</span></h3>
+          {hasContent && (
+            <button disabled={voiceExtracting || !!profileBusy} onClick={extractVoice}
+              title="从已认可章节取一段代表性正文当范本,让生成/自愈学你认可的笔法">
+              {voiceExtracting && <span className="spin" />}从已认可章节提取
+            </button>
+          )}
+          {profileDirty && (
+            <button className="primary" disabled={!!profileBusy || extracting} onClick={saveProfile}>
+              {profileBusy && <span className="spin" />}保存
+            </button>
+          )}
+        </div>
+        <div className="card-desc">
+          给生成和「AI 味自愈」一个具体的模仿对象,是去 AI 腔最有效的一招。可选一位名家/预设笔法,或贴一段你欣赏的范文,或从已认可章节自动提取。范本只影响语感笔法,不改动剧情。
+        </div>
+        <div className="profile-field mt-3">
+          <label className="fl">名家 / 预设笔法</label>
+          <select value={profile.voice_key}
+            onChange={(e) => { setProfile({ ...profile, voice_key: e.target.value }); setProfileDirty(true); }}>
+            <option value="">不指定(用通用去味规则)</option>
+            {capsules.map((c) => (
+              <option key={c.key} value={c.key}>{c.name}</option>
+            ))}
+          </select>
+          {selectedCapsule && (
+            <div className="muted mt-1">
+              <span className="badge">风格参考 · 非原作节选</span> {selectedCapsule.directive}
+            </div>
+          )}
+        </div>
+        <div className="profile-field mt-3">
+          <label className="fl">文风范文</label>
+          <textarea rows={4}
+            placeholder="贴一段你欣赏的文字当范本,或用右上角「从已认可章节提取」自动填入…"
+            value={profile.voice_sample}
+            onChange={(e) => { setProfile({ ...profile, voice_sample: e.target.value }); setProfileDirty(true); }} />
+          <div className="muted mt-1">{(profile.voice_sample || "").length}/1200 字,超出保存时自动截断</div>
+        </div>
+        {voiceExtracting && <div className="muted mt-2"><span className="spin" />正在从已认可章节提取范本…</div>}
       </div>
 
       {/* 手法卡紧跟偏好档案:两者都是整书级约束,档案管「写什么」,手法卡管「怎么写」 */}

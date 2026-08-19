@@ -21,6 +21,7 @@ from app.db.models import Chapter, Project
 from app.db.session import get_db
 from app.llm.router import Task, get_adapter_for
 from app.prompts.profile import PROFILE_ABSORB_PROMPT, PROFILE_EXTRACT_PROMPT
+from app.prompts.style_capsules import capsule_choices, get_capsule
 
 from ._common import _get_project_or_404
 
@@ -28,23 +29,48 @@ router = APIRouter()
 
 logger = logging.getLogger("jarvis-write.api")
 _PROFILE_FIELDS = ("style", "taboos", "audience", "other")
+# 文风锚字段(与上面 4 个档案文本字段平级,同存 _profile 子字典,但不参与 LLM 反向
+# 提炼——absorb/extract 只动 4 个档案字段;voice 由作者手选名家/预设,或从已认可章节
+# 提取样本设定)。voice_key = 名家/预设胶囊 key;voice_sample = 作者范文/提取的正文样本。
+_VOICE_FIELDS = ("voice_key", "voice_sample")
+_ALL_PROFILE_FIELDS = _PROFILE_FIELDS + _VOICE_FIELDS
+_MAX_VOICE_SAMPLE = 1200  # 与 style_capsules._MAX_SAMPLE_CHARS 对齐,存时即截断
 
 
 def _read_profile(project: Project) -> dict:
     profile = (project.global_tendency or {}).get("_profile") or {}
-    return {k: str(profile.get(k) or "") for k in _PROFILE_FIELDS}
+    if not isinstance(profile, dict):
+        profile = {}
+    return {k: str(profile.get(k) or "") for k in _ALL_PROFILE_FIELDS}
 
 
-def _write_profile(project: Project, profile: dict) -> dict:
-    """合并写回 global_tendency._profile(保留其余倾向标签),返回规范化后的档案。"""
-    cleaned = {k: str(profile.get(k) or "").strip() for k in _PROFILE_FIELDS}
+def _write_profile(project: Project, updates: dict) -> dict:
+    """把 updates 合并写回 global_tendency._profile:updates 里出现的键覆盖,其余键
+    (未同时编辑的字段,如另一批 voice / 档案文本)保留,互不冲掉;_profile 之外的
+    倾向标签也保留。返回补全为全部字段的规范化档案。
+
+    合并(而非整段替换)是关键:absorb/extract 只提炼 4 个档案字段,若整段替换会把
+    作者设的 voice 冲掉;反之作者改 voice 也不能抹掉已提炼的档案。
+    """
+    existing = (project.global_tendency or {}).get("_profile") or {}
+    if not isinstance(existing, dict):
+        existing = {}
+    merged = dict(existing)
+    for k in _ALL_PROFILE_FIELDS:
+        if k in updates:
+            v = str(updates.get(k) or "").strip()
+            if k == "voice_sample":
+                v = v[:_MAX_VOICE_SAMPLE]  # 范本存时即截断,防 DB 存超长
+            merged[k] = v
+    # 只保留已知且非空的字段;全空则删 _profile 键(注入时该块整体省略)
+    cleaned = {k: merged[k] for k in _ALL_PROFILE_FIELDS if str(merged.get(k) or "").strip()}
     tendency = dict(project.global_tendency or {})
-    if any(cleaned.values()):
+    if cleaned:
         tendency["_profile"] = cleaned
     else:
-        tendency.pop("_profile", None)  # 全空则去掉键,注入时该块整体省略
+        tendency.pop("_profile", None)
     project.global_tendency = tendency
-    return cleaned
+    return {k: str(cleaned.get(k) or "") for k in _ALL_PROFILE_FIELDS}
 
 
 def _parse_profile_json(raw: str) -> dict:
@@ -68,6 +94,8 @@ class StyleProfileOut(BaseModel):
     taboos: str = ""
     audience: str = ""
     other: str = ""
+    voice_key: str = ""      # 选中的名家/预设文风胶囊 key(空=未选)
+    voice_sample: str = ""   # 作者自备 / 从已认可章节提取的文风范本正文
 
 
 @router.get("/{project_id}/style-profile", response_model=StyleProfileOut)
@@ -82,6 +110,8 @@ class StyleProfileUpdate(BaseModel):
     taboos: str | None = None
     audience: str | None = None
     other: str | None = None
+    voice_key: str | None = None
+    voice_sample: str | None = None
 
 
 @router.put("/{project_id}/style-profile", response_model=StyleProfileOut)
@@ -90,6 +120,9 @@ async def update_style_profile(
 ):
     """保存创作偏好档案:传了的字段(含空串)覆盖,未传的沿用现值。"""
     project = _get_project_or_404(db, project_id)
+    # voice_key 只接受已知胶囊 key(或空串=清除);非法值直接拒绝,不静默存脏数据
+    if req.voice_key and get_capsule(req.voice_key) is None:
+        raise HTTPException(status_code=400, detail=f"未知的文风预设:{req.voice_key}")
     current = _read_profile(project)
     for k, v in req.model_dump().items():
         if v is not None:
@@ -206,3 +239,68 @@ async def extract_style_profile(project_id: int, db: Session = Depends(get_db)):
     cleaned = _write_profile(project, extracted)
     db.commit()
     return StyleProfileOut(**cleaned)
+
+
+# =============== 文风范本(去 AI 味「正向锚定」的两个来源:名家胶囊 / 已认可章节)===============
+_VOICE_SAMPLE_PER_CHAPTER = 600  # 每章取开头多少字
+_VOICE_SAMPLE_CHAPTERS = 3       # 最多取几章(取靠后的已认可章,笔法更成熟)
+
+
+def _build_voice_sample(db: Session, project: Project) -> str:
+    """从已认可(approved)章节取代表性正文,拼成文风范本。
+
+    直接取正文原文、不经 LLM:作者已认可 = 作者品味的锚,原文最保真,也避免 LLM
+    二次加工反倒引入 AI 味。取靠后的若干章、各取开头一段,拼到上限。
+    """
+    chapters = (
+        db.query(Chapter)
+        .filter(
+            Chapter.project_id == project.id,
+            Chapter.status == "approved",
+            Chapter.final_content != "",
+        )
+        .order_by(Chapter.chapter_number.desc())
+        .limit(_VOICE_SAMPLE_CHAPTERS)
+        .all()
+    )
+    parts: list[str] = []
+    total = 0
+    for ch in reversed(chapters):  # 恢复章号升序,读起来顺
+        text = (ch.final_content or "").strip()
+        if not text:
+            continue
+        seg = text[:_VOICE_SAMPLE_PER_CHAPTER]
+        parts.append(seg)
+        total += len(seg)
+        if total >= _MAX_VOICE_SAMPLE:
+            break
+    return "\n\n".join(parts)[:_MAX_VOICE_SAMPLE]
+
+
+@router.post("/{project_id}/style-profile/extract-voice", response_model=StyleProfileOut)
+async def extract_voice_sample(project_id: int, db: Session = Depends(get_db)):
+    """从已认可章节提取一段代表性正文,存为文风范本(voice_sample)。
+
+    文风「正向锚」里最贴合本书的一种:让后续生成 / 去味重写学「作者已认可章节的
+    笔法」。直接取正文原文(不经 LLM);提取后作者可在档案里手动微调。
+    """
+    project = _get_project_or_404(db, project_id)
+    sample = _build_voice_sample(db, project)
+    if not sample:
+        raise HTTPException(status_code=400, detail="还没有已认可的章节,先认可几章再来提取")
+    current = _read_profile(project)
+    current["voice_sample"] = sample
+    cleaned = _write_profile(project, current)
+    db.commit()
+    return StyleProfileOut(**cleaned)
+
+
+@router.get("/{project_id}/style-profile/voice-capsules")
+async def list_voice_capsules(project_id: int, db: Session = Depends(get_db)):
+    """名家/预设文风胶囊列表,供前端下拉选择。
+
+    只回 key/name/directive,不含 sample 正文(前端选择即可)。均为「风格参考·非
+    原作节选」——sample 一律本项目自撰的仿写,不含任何在世作家的原作文字。
+    """
+    _get_project_or_404(db, project_id)
+    return {"capsules": capsule_choices()}

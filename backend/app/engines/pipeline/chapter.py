@@ -28,7 +28,7 @@ from app.engines.consistency.preflight import preflight_chapter
 from app.engines.consistency.repetition import avoid_block
 from app.engines.pipeline.handoff import extract_handoff_contract, load_handoff_block
 from app.engines.polish import ai_flavor_report
-from app.engines.polish.polisher import _flavor_hits_block
+from app.engines.polish.polisher import _flavor_hits_block, deai_self_heal
 from app.engines.editorial import (
     apply_proofread_fixes,
     build_revision_directive,
@@ -39,8 +39,9 @@ from app.engines.editorial import (
     store_review_snapshot,
 )
 from app.engines.tendency import assemble_tendency
-from app.engines.tendency.assembler import render_style_block
+from app.engines.tendency.assembler import _PROFILE_KEY, render_style_block
 from app.engines.tendency.cards import render_cards_block
+from app.prompts.style_capsules import pairwise_examples_block, render_voice_block
 from app.llm.base import LLMMessage
 from app.llm.router import Task, get_adapter_for
 from app.prompts.chapter import (
@@ -410,6 +411,16 @@ async def generate_chapter(
     style_block += render_cards_block(
         db.query(WritingCard).filter(WritingCard.project_id == project.id).all()
     )
+    # 文风范本(去 AI 味的「正向锚定」,治本项):作者在创作偏好档案里选的名家/预设
+    # 胶囊 + 自备范文,渲染成「学这种笔法」的正样本追加进 style_block(草稿/定稿/去味
+    # 重写全生效)。只靠负向禁令,模型会退回「全网文平均」腔调——恰恰最 AI;给正样本
+    # 锚定「该像什么」才治本。存 global_tendency[_profile] 的 voice_key/voice_sample。
+    _profile = (project.global_tendency or {}).get(_PROFILE_KEY) or {}
+    if isinstance(_profile, dict):
+        style_block += render_voice_block(
+            str(_profile.get("voice_key") or ""),
+            str(_profile.get("voice_sample") or ""),
+        )
 
     rolling = _rolling_summary(db, project.id, chapter_number)
     recent = _recent_tail(db, project.id, chapter_number)
@@ -504,7 +515,9 @@ async def generate_chapter(
             rolling_summary=rolling,
             draft_text=d,
             flavor_hits=flavor_hits,
-            style_directives=style_block,
+            # 定稿额外注入「AI 腔→人话」配对反例(给 pattern 比给 rule 有效);草稿不注入
+            # 以控 token(草稿还没成文,无从对照,正向锚 voice 已在 style_block 里够用)
+            style_directives=style_block + pairwise_examples_block(),
         )
         f = _strip_meta(await get_adapter_for(Task.FINALIZE).ask(finalize_prompt))
         return d, f
@@ -589,6 +602,21 @@ async def generate_chapter(
         db, project, chapter_number, outline, final, style_block, report=_report
     )
     final = guard_result.final_text
+
+    # ---- AI 味自愈闭环:定稿终版体检,超标则定向去味重写(带安全阀) ----
+    # 摆在字数守卫之后(最后一道文字加工):守卫的压缩本身是又一次 LLM 重写,可能重新
+    # 引入套话——把去味放最后,既能修守卫引入的 AI 腔,又不会被守卫回炉抵消。安全阀在
+    # deai_self_heal 内:未降分/篇幅越界/空输出一律丢弃回退,绝不落一版比守卫后更差的
+    # 正文;干净文本(score≤门槛)直接短路、不调 LLM。style_block 带正向锚+配对反例。
+    _report("5/6 AI 味自愈")
+    final, _deai_before, _deai_after = await deai_self_heal(
+        final, style_block, progress=_report
+    )
+    if _deai_after.score < _deai_before.score:
+        logger.info(
+            "第 %d 章 AI 味自愈:%.1f → %.1f",
+            chapter_number, _deai_before.score, _deai_after.score,
+        )
 
     # ---- 落库 ----
     # 先结束生成期间一直开着的读事务:期间用量记录等已在别的连接提交,

@@ -1,7 +1,7 @@
 // hooks/useDesktopHotkeys.ts — 桌面快捷键(仅 !isMobile 时启用,见 ProjectPage)。
 // 所有键位统一经 dispatchAction 分发,与 Ctrl+K 命令面板、Tauri 菜单同一入口(ui/actions.ts):
 //   Ctrl+Enter 生成本章   Ctrl+[ / Ctrl+] 上一章/下一章(已生成章范围内)
-//   Ctrl+B 开合目录抽屉   F11 沉浸模式   Ctrl+K 命令面板
+//   Ctrl+B 开合目录抽屉   Ctrl+M 故事地图   F11 沉浸模式   Ctrl+K 命令面板
 // (Ctrl+S 只拦浏览器「另存为」:整章编辑态已删,无保存动作;Ctrl+\ 随参考抽屉一起废除)
 // 输入控件(input/textarea/select/可编辑元素)聚焦时不拦,例外:Ctrl+Enter 照拦。
 import { useEffect } from "react";
@@ -53,6 +53,10 @@ export function useDesktopHotkeys(opts: { enabled: boolean; paletteOpen: boolean
       }
       if (mod && e.key.toLowerCase() === "b") {
         if (dispatchAction("toggle-rail")) e.preventDefault();
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "m") {
+        if (dispatchAction("toggle-map")) e.preventDefault();
         return;
       }
       if (e.key === "F11") {

@@ -23,10 +23,12 @@ from app.db.models import Chapter, Outline, WritingCard
 from app.db.session import get_db
 from app.engines.polish import (
     ai_flavor_report,
+    craft_fragment,
     discuss_fragment,
     polish_fragment,
     polish_text,
 )
+from app.engines.tendency.assembler import voice_block_of
 from app.jobs import list_running, spawn_job
 from app.schemas.tendency import Tendency
 
@@ -55,6 +57,11 @@ class PolishResult(BaseModel):
 
 class ApplyPolishRequest(BaseModel):
     polished_text: str = Field(min_length=1)
+    # 乐观并发:发起整章优化那一刻的正文基线。整章优化耗时数分钟,其间用户可能在正文里
+    # 手改了某段(写进 final_content)。若不校验就整章覆盖,会静默吞掉这些手改。
+    # 传了 base_content 且当前定稿已与之不一致 → 返回 409,由前端显性处理(重选/强制)。
+    # None = 不校验(用户已在冲突提示里确认强制覆盖)。
+    base_content: str | None = None
 
 
 class FlavorRequest(BaseModel):
@@ -133,9 +140,26 @@ async def polish_chapter_async(
 async def apply_chapter_polish(
     project_id: int, n: int, req: ApplyPolishRequest, db: Session = Depends(get_db)
 ):
-    """把润色稿写回定稿(用户确认后)。"""
+    """把润色稿写回定稿(用户确认后)。
+
+    带 base_content 时做乐观并发校验:整章优化耗时数分钟,其间用户可能手改了正文,
+    此时整章覆盖会静默吞掉手改 → 返回 409,由前端提示「放弃重来」或用户显式强制覆盖
+    (强制时旧内容已随下方 snapshot_chapter 存入版本历史,可回退,不会真丢)。
+    """
     get_project_or_404(db, project_id)
     ch = _chapter(db, project_id, n)
+    if (
+        req.base_content is not None
+        and (ch.final_content or "").strip() != req.base_content.strip()
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "正文在优化期间被改动过(可能你手改了某段)。为避免覆盖这些改动,"
+                "请「放弃这版」后重新优化;若确认要用这版覆盖,可选择强制应用"
+                "(被覆盖的内容已存入版本历史,可回退)。"
+            ),
+        )
     # 覆盖前留一版:润色不满意可回退到润色前
     snapshot_chapter(db, ch, source="polished")
     ch.final_content = req.polished_text.strip()
@@ -209,7 +233,7 @@ async def polish_chapter_fragment(
 ):
     """润色章节中的单个段落(阅读器点选):注入本章蓝图摘要作上下文,
     只改文笔不改情节,遵循用户润色方向。不落库,由前端确认后替换。"""
-    get_project_or_404(db, project_id)
+    project = get_project_or_404(db, project_id)
     ch = (
         db.query(Chapter)
         .filter(Chapter.project_id == project_id, Chapter.chapter_number == n)
@@ -234,11 +258,76 @@ async def polish_chapter_fragment(
     )
     try:
         result = await polish_fragment(
-            fragment, req.direction, outline.summary if outline else ""
+            fragment,
+            req.direction,
+            outline.summary if outline else "",
+            voice_block=voice_block_of(project.global_tendency),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return FragmentPolishResult(**result)
+
+
+# ---------- 阅读/写作中的选区 craft 微工具(描写/扩写/头脑风暴) ----------
+
+
+class FragmentCraftRequest(BaseModel):
+    fragment: str = ""
+    mode: str = Field(default="describe")  # describe / expand / brainstorm
+    note: str = Field(default="", max_length=200)  # 作者补充要求(可空)
+
+
+class FragmentCraftResult(BaseModel):
+    mode: str
+    rewrite: str | None = None  # describe/expand:改写后片段(走 diff 替换)
+    ideas: list[str] | None = None  # brainstorm:点子列表(不改正文)
+    notes: str | None = None
+
+
+@router.post(
+    "/api/projects/{project_id}/chapters/{n}/craft-fragment",
+    response_model=FragmentCraftResult,
+)
+async def craft_chapter_fragment(
+    project_id: int, n: int, req: FragmentCraftRequest, db: Session = Depends(get_db)
+):
+    """对章节中选中的片段做 craft 微工具处理(描写/扩写/头脑风暴):注入本章蓝图摘要作上下文。
+    describe/expand 返回改写稿(前端 diff 后确认替换,与润色同一写回链路),brainstorm 返回点子列表。
+    不落库。"""
+    project = get_project_or_404(db, project_id)
+    ch = (
+        db.query(Chapter)
+        .filter(Chapter.project_id == project_id, Chapter.chapter_number == n)
+        .first()
+    )
+    if ch is None:
+        raise HTTPException(status_code=404, detail=f"第 {n} 章尚未生成")
+
+    fragment = req.fragment.strip()
+    if not fragment:
+        raise HTTPException(status_code=400, detail="待处理片段不能为空")
+    if len(fragment) > _MAX_FRAGMENT_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"片段最长 {_MAX_FRAGMENT_CHARS} 字,当前 {len(fragment)} 字",
+        )
+
+    outline = (
+        db.query(Outline)
+        .filter(Outline.project_id == project_id, Outline.chapter_number == n)
+        .first()
+    )
+    try:
+        result = await craft_fragment(
+            fragment,
+            req.mode,
+            req.note,
+            outline.summary if outline else "",
+            voice_block=voice_block_of(project.global_tendency),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return FragmentCraftResult(**result)
 
 
 # ---------- 阅读中就选段与 AI 对话(可解释 / 可给改写建议) ----------

@@ -17,6 +17,7 @@ from app.llm.base import (
     LLMAdapter,
     LLMMessage,
     LLMResponse,
+    UpstreamError,
     check_upstream,
     with_retries,
 )
@@ -70,7 +71,21 @@ class GeminiAdapter(LLMAdapter):
                 hint="Gemini 卡仅支持 Google 原生协议;中转站(含卖 Gemini 模型的)请改用 OpenAI 卡",
             )
 
-        parts = data["candidates"][0]["content"]["parts"]
+        # 空 candidates:Gemini 触发内容安全过滤(promptFeedback.blockReason)或
+        # 渠道异常时会返回 200 + 空 candidates。裸 data["candidates"][0] 会抛
+        # IndexError「list index out of range」,这里转成可读的上游错误。
+        candidates = data.get("candidates") or []
+        if not candidates:
+            feedback = data.get("promptFeedback") or {}
+            reason = feedback.get("blockReason") or "无输出"
+            raise UpstreamError(
+                f"Gemini 未返回内容(原因: {reason}),可能触发内容安全过滤或渠道异常,"
+                "请重试或到「设置」更换模型",
+                status=resp.status_code,
+                retryable=True,
+            )
+        content = candidates[0].get("content") or {}
+        parts = content.get("parts") or []
         text = "".join(p.get("text", "") for p in parts)
         usage = data.get("usageMetadata", {})
         return LLMResponse(

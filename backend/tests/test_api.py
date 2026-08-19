@@ -897,6 +897,177 @@ def test_polish_fragment_not_owner_404(client):
     assert r.status_code == 404
 
 
+# ---------- 选区 craft 微工具(craft-fragment:描写/扩写/头脑风暴) ----------
+
+
+def test_craft_fragment_describe_ok(client):
+    """describe:返回 rewrite(供 diff 替换);prompt 注入蓝图摘要与补充要求。"""
+    from unittest.mock import patch
+
+    headers = _auth(_register(client, "craft_desc")["token"])
+    p = _create_chapter_with_content(client, headers, "描写书")
+
+    captured: dict = {}
+
+    class _CaptureAdapter:
+        async def ask(self, prompt, system=None):
+            captured["prompt"] = prompt
+            return "他迈步跨过高大的城门,青砖在脚下发出闷响。"
+
+    with patch("app.engines.polish.polisher.get_adapter_for", return_value=_CaptureAdapter()):
+        r = client.post(
+            f"/api/projects/{p['id']}/chapters/1/craft-fragment",
+            headers=headers,
+            json={"fragment": "他走进了城门。", "mode": "describe", "note": "多点听觉"},
+        )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["mode"] == "describe"
+    assert body["rewrite"] == "他迈步跨过高大的城门,青砖在脚下发出闷响。"
+    assert body["ideas"] is None
+    assert "主角进城" in captured["prompt"]  # 本章蓝图摘要注入
+    assert "多点听觉" in captured["prompt"]  # 补充要求注入
+    assert "不推进新剧情" in captured["prompt"]  # craft 专属约束
+
+
+def test_craft_fragment_brainstorm_ok(client):
+    """brainstorm:返回 ideas 列表,rewrite 为空。"""
+    from unittest.mock import patch
+
+    headers = _auth(_register(client, "craft_brain")["token"])
+    p = _create_chapter_with_content(client, headers, "脑暴书")
+
+    class _Adapter:
+        async def ask(self, prompt, system=None):
+            return "- 守卫认出他\n- 城内飘来血腥味"
+
+    with patch("app.engines.polish.polisher.get_adapter_for", return_value=_Adapter()):
+        r = client.post(
+            f"/api/projects/{p['id']}/chapters/1/craft-fragment",
+            headers=headers,
+            json={"fragment": "他走进了城门。", "mode": "brainstorm"},
+        )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["mode"] == "brainstorm"
+    assert body["rewrite"] is None
+    assert body["ideas"] == ["守卫认出他", "城内飘来血腥味"]
+
+
+def test_craft_fragment_bad_input(client):
+    """空片段 / 未知模式 → 400;章节不存在 → 404。"""
+    headers = _auth(_register(client, "craft_bad")["token"])
+    p = _create_chapter_with_content(client, headers, "craft 边界书")
+
+    r = client.post(
+        f"/api/projects/{p['id']}/chapters/1/craft-fragment",
+        headers=headers,
+        json={"fragment": "   ", "mode": "describe"},
+    )
+    assert r.status_code == 400
+
+    r = client.post(
+        f"/api/projects/{p['id']}/chapters/1/craft-fragment",
+        headers=headers,
+        json={"fragment": "一段正文", "mode": "translate"},
+    )
+    assert r.status_code == 400
+
+    r = client.post(
+        f"/api/projects/{p['id']}/chapters/99/craft-fragment",
+        headers=headers,
+        json={"fragment": "一段正文", "mode": "describe"},
+    )
+    assert r.status_code == 404
+
+
+def test_craft_fragment_not_owner_404(client):
+    """非 owner 对他人项目片段做 craft → 404(不泄露存在性)。"""
+    a = _auth(_register(client, "craft_a")["token"])
+    b = _auth(_register(client, "craft_b")["token"])
+    p = _create_chapter_with_content(client, a, "别人的 craft 书")
+
+    r = client.post(
+        f"/api/projects/{p['id']}/chapters/1/craft-fragment",
+        headers=b,
+        json={"fragment": "他走进了城门。", "mode": "describe"},
+    )
+    assert r.status_code == 404
+
+
+# ---------- 章尾续写(continue:ghost text) ----------
+
+
+def test_continue_chapter_ok(client):
+    """mock LLM:续写返回 continuation;prompt 注入本章蓝图与已写正文尾部。"""
+    from unittest.mock import patch
+
+    headers = _auth(_register(client, "cont_user")["token"])
+    p = _create_chapter_with_content(client, headers, "续写书")
+
+    captured: dict = {}
+
+    class _CaptureAdapter:
+        async def ask(self, prompt, system=None):
+            captured["prompt"] = prompt
+            return "他警惕地环顾四周,握紧了腰间的刀。"
+
+    with patch("app.engines.pipeline.continuation.get_adapter_for", return_value=_CaptureAdapter()):
+        r = client.post(
+            f"/api/projects/{p['id']}/chapters/1/continue",
+            headers=headers,
+            json={"note": "紧张一些"},
+        )
+    assert r.status_code == 200, r.text
+    assert r.json()["continuation"] == "他警惕地环顾四周,握紧了腰间的刀。"
+    assert "主角进城" in captured["prompt"]     # 本章蓝图摘要注入
+    assert "他走进了城门。" in captured["prompt"]  # 已写正文尾部注入
+    assert "紧张一些" in captured["prompt"]     # 作者额外要求注入
+
+
+def test_continue_chapter_empty_content_400(client):
+    """本章无正文 → 400;章节不存在 → 404。"""
+    from app.db.models import Chapter
+    from app.db.session import SessionLocal
+
+    headers = _auth(_register(client, "cont_empty")["token"])
+    p = _create_project(client, headers, "空正文续写书")
+    db = SessionLocal()
+    try:
+        db.add(Chapter(project_id=p["id"], chapter_number=1, final_content="", status="pending_review"))
+        db.commit()
+    finally:
+        db.close()
+
+    r = client.post(
+        f"/api/projects/{p['id']}/chapters/1/continue",
+        headers=headers,
+        json={"note": ""},
+    )
+    assert r.status_code == 400
+
+    r = client.post(
+        f"/api/projects/{p['id']}/chapters/99/continue",
+        headers=headers,
+        json={"note": ""},
+    )
+    assert r.status_code == 404
+
+
+def test_continue_chapter_not_owner_404(client):
+    """非 owner 续写他人章节 → 404(不泄露存在性)。"""
+    a = _auth(_register(client, "cont_a")["token"])
+    b = _auth(_register(client, "cont_b")["token"])
+    p = _create_chapter_with_content(client, a, "别人的续写书")
+
+    r = client.post(
+        f"/api/projects/{p['id']}/chapters/1/continue",
+        headers=b,
+        json={"note": ""},
+    )
+    assert r.status_code == 404
+
+
 # ---------- 阅读中段落对话(discuss) ----------
 
 

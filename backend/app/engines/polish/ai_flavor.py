@@ -142,6 +142,39 @@ class FlavorReport:
             "metrics": self.metrics,
         }
 
+    def advice_block(self) -> str:
+        """把统计指标翻成"能照着动手"的改写指令,供去味定向重写 prompt。
+
+        与 hits(命中句)互补:hits 说"哪句是套话",advice 说"节奏/结构上
+        该怎么调"。无统计问题时返回空串(prompt 里该块整体省略)。
+        """
+        m = self.metrics
+        tips: list[str] = []
+        if m.get("burstiness_flag"):
+            tips.append(
+                f"句子长度过于均匀(节奏变异 σ/μ={m.get('burstiness')},偏低,像节拍器)。"
+                "挑几句砍短到 5-8 字、或把两句并成一句长的,做出明显的长短交错。"
+            )
+        if m.get("metronome_groups"):
+            tips.append(
+                f"有 {m['metronome_groups']} 组连续等长的句子;拆开、合并或调换语序,"
+                "别让相邻几句字数都差不多。"
+            )
+        if m.get("tail_summary_count"):
+            tips.append(
+                f"有 {m['tail_summary_count']} 处段尾在总结/点题/升华;删掉这类收尾,"
+                "改用一个具体动作、细节或一句对话收束。"
+            )
+        if m.get("para_uniform"):
+            tips.append(
+                "段落长度太整齐;让长短段错落——该展开的场景写长,过渡转折处用一两句的短段顿一下。"
+            )
+        if m.get("repeats"):
+            tips.append(f"检出 {len(m['repeats'])} 处较长的重复表述;删去重复,只留最有力的一次。")
+        if not tips:
+            return ""
+        return "【节奏与结构诊断(逐条落实)】\n" + "\n".join(f"- {t}" for t in tips) + "\n"
+
 
 # =============== 内部:句子/段落切分 ===============
 

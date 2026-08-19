@@ -30,6 +30,7 @@ const ACTION_ENTRIES: ActionEntry[] = [
   { words: ["连写", "队列"], label: "连写队列", action: "queue" },
   { words: ["沉浸"], label: "沉浸模式", action: "immersive", sub: "F11" },
   { words: ["目录", "章节"], label: "开合目录抽屉", action: "toggle-rail", sub: "Ctrl+B" },
+  { words: ["地图", "脉络", "规划", "大纲"], label: "故事地图(全书脉络)", action: "toggle-map", sub: "Ctrl+M" },
   { words: ["阅读", "对照"], label: "打开对照阅读窗", action: "open-read-window" },
   { words: ["开书"], label: "去开书区", action: "goto-setup" },
   { words: ["写作"], label: "去写作区", action: "goto-write" },

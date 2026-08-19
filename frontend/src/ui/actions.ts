@@ -11,7 +11,7 @@ export type AppAction =
   // toggle-ref 已随参考抽屉废除——「正文即界面」P1,见 docs/10 §8)
   | "generate" | "revise" | "polish" | "proofread" | "review"
   | "versions" | "queue"
-  | "prev-chapter" | "next-chapter" | "toggle-rail" | "immersive"
+  | "prev-chapter" | "next-chapter" | "toggle-rail" | "toggle-map" | "immersive"
   // 全局(由 ProjectPage 注册)
   | "command-palette" | "open-read-window"
   | "goto-setup" | "goto-write" | "goto-book" | "goto-settings" | "goto-help"
@@ -21,7 +21,7 @@ export type AppAction =
 const ALL_ACTIONS: AppAction[] = [
   "generate", "revise", "polish", "proofread", "review",
   "versions", "queue",
-  "prev-chapter", "next-chapter", "toggle-rail", "immersive",
+  "prev-chapter", "next-chapter", "toggle-rail", "toggle-map", "immersive",
   "command-palette", "open-read-window",
   "goto-setup", "goto-write", "goto-book", "goto-settings", "goto-help",
   "theme-light", "theme-dark", "theme-auto",

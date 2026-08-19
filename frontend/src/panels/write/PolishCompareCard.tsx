@@ -5,7 +5,7 @@
 // 与原 PolishPanel 一致:应用只写回定稿,不自动同步一致性引擎(润色锁情节、不动情节)。
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { api, flavorTitle, PolishResult } from "../../api";
+import { ApiError, api, flavorTitle, PolishResult } from "../../api";
 import { qk, useInvalidateProject } from "../../hooks/queries";
 import { errMsg } from "../../pollJob";
 import { diffParagraphs } from "./charDiff";
@@ -33,18 +33,23 @@ export default function PolishCompareCard({
   const [showDiff, setShowDiff] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  // 应用时后端并发校验:正文在优化期间被手改过 → 409,置此标记浮出显性冲突条(而非静默覆盖/当普通报错)
+  const [conflict, setConflict] = useState(false);
 
-  async function apply() {
-    setBusy(true); setErr("");
+  // force=false:带优化基线 original 让后端做并发校验;force=true:用户已在冲突条确认,跳过校验强制覆盖
+  async function apply(force = false) {
+    setBusy(true); setErr(""); setConflict(false);
     try {
-      await api.applyPolish(pid, chapterNum, polishedDraft);
+      await api.applyPolish(pid, chapterNum, polishedDraft, force ? undefined : original);
       await Promise.all([
         qc.invalidateQueries({ queryKey: qk.chapter(pid, chapterNum) }),
         invalidateProject(),
       ]);
       onApplied();
     } catch (e) {
-      setErr(errMsg(e));
+      // 409 = 正文在优化期间被别处改动:不静默覆盖,浮出显性冲突处理条让用户抉择
+      if (e instanceof ApiError && e.status === 409) setConflict(true);
+      else setErr(errMsg(e));
     } finally { setBusy(false); }
   }
 
@@ -99,17 +104,35 @@ export default function PolishCompareCard({
           </div>
         </div>
       )}
-      <div className="actions mt-3">
-        <button className="primary"
-          disabled={busy || !!result.violations.length || !polishedDraft.trim()}
-          onClick={apply}>
-          {busy && <span className="spin" />}应用(写回第{chapterNum}章定稿)
-        </button>
-        <button disabled={busy} onClick={onDiscard}>放弃这版</button>
-        {!!result.violations.length && (
-          <span className="msg-err">有事实违规,不允许直接应用,请重新润色</span>
-        )}
-      </div>
+      {conflict ? (
+        <div className="polish-conflict mt-3">
+          <b>⚠ 正文在优化期间被改动过</b>
+          <div className="hint mt-1">
+            你在等待优化时手改了这一章正文。直接应用会覆盖那些手改。建议「放弃这版」后基于最新正文重新优化;
+            若确认要用这版覆盖,被覆盖的内容会存入版本历史,可随时回退。
+          </div>
+          <div className="actions mt-2">
+            <button className="primary" disabled={busy} onClick={onDiscard}>
+              放弃这版,重新优化(推荐)
+            </button>
+            <button className="danger" disabled={busy} onClick={() => apply(true)}>
+              {busy && <span className="spin" />}仍用这版覆盖
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="actions mt-3">
+          <button className="primary"
+            disabled={busy || !!result.violations.length || !polishedDraft.trim()}
+            onClick={() => apply()}>
+            {busy && <span className="spin" />}应用(写回第{chapterNum}章定稿)
+          </button>
+          <button disabled={busy} onClick={onDiscard}>放弃这版</button>
+          {!!result.violations.length && (
+            <span className="msg-err">有事实违规,不允许直接应用,请重新润色</span>
+          )}
+        </div>
+      )}
       {err && <div className="msg-err mt-2">{err}</div>}
     </div>
   );

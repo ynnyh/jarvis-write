@@ -18,6 +18,7 @@ import GenResultCard from "./chapters/GenResultCard";
 import VersionCompare from "./chapters/VersionCompare";
 import ChapterRail from "./write/ChapterRail";
 import CatalogDrawer from "./write/CatalogDrawer";
+import StoryMapOverlay from "./write/StoryMapOverlay";
 import Prose from "./write/Prose";
 import ChapterStatusCard from "./write/ChapterStatusCard";
 import NextChapterCard from "./write/NextChapterCard";
@@ -40,7 +41,7 @@ export default function WritePanel({ pid, outlines }: Props) {
     // act= 动作卡
     act, setAct, openDock,
     // 环境 / 壳 / 滑动切章
-    isMobile, immersive, railOpen, setRailOpen, onMainTouchStart, onMainTouchEnd,
+    isMobile, immersive, railOpen, setRailOpen, mapOpen, setMapOpen, onMainTouchStart, onMainTouchEnd,
     // 顶部错误 & 派生
     err, stage, nextChapterNum, genBlocked, genHint,
     // 本地 UI 态:AI 窄栏 / 选段 / 对照 / 批注 / 脏标记
@@ -226,6 +227,8 @@ export default function WritePanel({ pid, outlines }: Props) {
                 <div className="meta-line">
                   伏笔:{currentOutline.foreshadowing || "无"}
                 </div>
+                <button className="btn-sm mt-1" onClick={() => setMapOpen(true)}
+                  title="打开故事地图,纵览全书脉络与伏笔(Ctrl+M)">看全书脉络 →</button>
               </details>
             )}
 
@@ -368,6 +371,17 @@ export default function WritePanel({ pid, outlines }: Props) {
             onClose={() => setRailOpen(false)}
           />
         </CatalogDrawer>
+      )}
+
+      {/* ---- 故事地图覆盖层(Ctrl+M/命令面板/章首入口):全书脉络纵览,点章即跳并关本层 ---- */}
+      {mapOpen && (
+        <StoryMapOverlay
+          outlines={outlines}
+          chapters={chapters}
+          currentNum={chapterNum}
+          onOpen={(n) => { setMapOpen(false); void openFromRail(n); }}
+          onClose={() => setMapOpen(false)}
+        />
       )}
 
       {(reader || readerLoading) && (

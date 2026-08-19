@@ -118,7 +118,8 @@ def test_get_profile_empty_by_default(client, seeded):
     r = client.get(f"/api/projects/{pid}/style-profile",
                    headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
-    assert r.json() == {"style": "", "taboos": "", "audience": "", "other": ""}
+    assert r.json() == {"style": "", "taboos": "", "audience": "", "other": "",
+                        "voice_key": "", "voice_sample": ""}
 
 
 def test_put_then_get_profile(client, seeded):
@@ -265,3 +266,58 @@ def test_extract_llm_failure_502(client, seeded_with_content, monkeypatch):
     p = db.query(Project).filter(Project.id == pid).first()
     assert "_profile" not in (p.global_tendency or {})
     db.close()
+
+
+# ---------- 文风范本:voice_key(名家胶囊)/ voice_sample(已认可章节提取)----------
+def test_put_voice_key_valid_and_readback(client, seeded):
+    token, pid = seeded
+    h = {"Authorization": f"Bearer {token}"}
+    r = client.put(f"/api/projects/{pid}/style-profile", json={"voice_key": "yuhua"}, headers=h)
+    assert r.status_code == 200
+    assert r.json()["voice_key"] == "yuhua"
+    assert client.get(f"/api/projects/{pid}/style-profile", headers=h).json()["voice_key"] == "yuhua"
+
+
+def test_put_voice_key_invalid_400(client, seeded):
+    token, pid = seeded
+    r = client.put(f"/api/projects/{pid}/style-profile",
+                   json={"voice_key": "no-such-master"},
+                   headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 400
+
+
+def test_voice_and_profile_do_not_clobber_each_other(client, seeded):
+    """端到端合并语义:设 voice 后改档案文风,voice 不丢(反向也成立)。"""
+    token, pid = seeded
+    h = {"Authorization": f"Bearer {token}"}
+    client.put(f"/api/projects/{pid}/style-profile", json={"voice_key": "luxun"}, headers=h)
+    client.put(f"/api/projects/{pid}/style-profile", json={"style": "冷峻"}, headers=h)
+    body = client.get(f"/api/projects/{pid}/style-profile", headers=h).json()
+    assert body["voice_key"] == "luxun"  # 改档案没冲掉 voice
+    assert body["style"] == "冷峻"
+
+
+def test_extract_voice_from_approved_chapters(client, seeded_with_content):
+    token, pid = seeded_with_content
+    r = client.post(f"/api/projects/{pid}/style-profile/extract-voice",
+                    headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200
+    sample = r.json()["voice_sample"]
+    assert sample and "他站在巷口" in sample  # 取到了已认可章正文原文
+
+
+def test_extract_voice_no_approved_chapter_400(client, seeded):
+    token, pid = seeded  # 无任何章节
+    r = client.post(f"/api/projects/{pid}/style-profile/extract-voice",
+                    headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 400
+
+
+def test_voice_capsules_list(client, seeded):
+    token, pid = seeded
+    r = client.get(f"/api/projects/{pid}/style-profile/voice-capsules",
+                   headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200
+    caps = r.json()["capsules"]
+    assert any(c["key"] == "yuhua" for c in caps)
+    assert all(set(c) == {"key", "name", "directive"} for c in caps)  # 不泄露 sample

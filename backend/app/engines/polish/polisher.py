@@ -16,26 +16,30 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.polish.ai_flavor import FlavorReport, ai_flavor_report
 from app.engines.tendency import assemble_tendency
-from app.engines.tendency.assembler import render_style_block
+from app.engines.tendency.assembler import render_style_block, voice_block_of
 from app.engines.tendency.cards import render_cards_block
 from app.llm.base import LLMAdapter, LLMMessage
 from app.llm.router import Task, get_adapter_for
 from app.prompts.polish import (
     _DEAI_RULES,
     _OUTPUT_CONTRACT,
+    CRAFT_MODES,
+    DEAI_REWRITE_PROMPT,
     DISCUSS_CHAPTER_SYSTEM_PROMPT,
     DISCUSS_SUGGESTION_MARK,
     DISCUSS_SYSTEM_PROMPT,
     FACT_LOCK_PROMPT,
     FACT_VERIFY_PROMPT,
+    FRAGMENT_CRAFT_PROMPT,
     FRAGMENT_POLISH_PROMPT,
     POLISH_PROMPT,
 )
+from app.prompts.style_capsules import pairwise_examples_block
 from app.schemas.tendency import Tendency
 
 logger = logging.getLogger("jarvis-write.polish")
@@ -43,6 +47,12 @@ logger = logging.getLogger("jarvis-write.polish")
 _MAX_POLISH_CHARS = 12000
 _MAX_FRAGMENT_CHARS = 2000
 _MAX_HITS_IN_PROMPT = 10  # 贴进 prompt 的命中点上限,防 token 膨胀
+
+# AI 味自愈门槛:定稿终版 score 超过此值触发定向去味重写。score = 每千字加权命中 +
+# 统计罚分,干净文本通常 <5,套话偏多或有节奏/结构问题会到 6+。实测可调。
+DEAI_GATE_SCORE = 6.0
+# 自愈重写的安全阀:重写稿相对原文的篇幅比,越界(缩水/膨胀过多)视为跑偏并丢弃
+_DEAI_LEN_LO, _DEAI_LEN_HI = 0.75, 1.25
 
 
 def _flavor_hits_block(report: FlavorReport) -> str:
@@ -54,6 +64,76 @@ def _flavor_hits_block(report: FlavorReport) -> str:
         sent = h.sentence if len(h.sentence) <= 60 else h.sentence[:60] + "……"
         lines.append(f"- [{h.category}] 命中「{h.phrase}」:{sent}")
     return "\n".join(lines)
+
+
+def _strip_rewrite_meta(raw: str) -> str:
+    """去掉模型可能加的 markdown 围栏与首尾空白(定向重写只要正文)。"""
+    s = (raw or "").strip()
+    s = re.sub(r"^```[a-zA-Z]*\s*", "", s)
+    s = re.sub(r"\s*```$", "", s)
+    return s.strip()
+
+
+async def deai_rewrite(text: str, report: FlavorReport, style_block: str = "") -> str:
+    """定向去味重写:把命中句 + 统计诊断(advice)+ 配对反例 + 文风范本喂给强模型,
+    只改问题处、其余原样,直接返回去味后的完整正文。走 Task.FINALIZE。"""
+    prompt = DEAI_REWRITE_PROMPT.format(
+        flavor_hits=_flavor_hits_block(report),
+        advice_block=report.advice_block(),
+        pairwise=pairwise_examples_block(),
+        style_directives=style_block,
+        draft_text=text,
+    )
+    raw = await get_adapter_for(Task.FINALIZE).ask(prompt)
+    return _strip_rewrite_meta(raw)
+
+
+async def deai_self_heal(
+    text: str,
+    style_block: str = "",
+    threshold: float = DEAI_GATE_SCORE,
+    max_rounds: int = 2,
+    progress: Callable[[str], None] | None = None,
+) -> tuple[str, FlavorReport, FlavorReport]:
+    """AI 味自愈闭环:体检 → 超标定向重写 → 复测 → 限轮收敛。
+
+    返回 (最终正文, 初检报告, 末检报告)。带安全阀,只在"确实改好了"时才采纳:
+    - 重写调用异常 / 输出为空 → 丢弃本轮,保留当前最好版本
+    - 篇幅越界(缩水或膨胀超阈值)→ 视为跑偏,丢弃本轮
+    - score 未下降 → 没改好,丢弃本轮
+    任一轮丢弃即停(不硬撑),绝不返回比原文更差的版本。
+    """
+    before = ai_flavor_report(text)
+    if before.score <= threshold:
+        return text, before, before
+
+    best_text, best_report = text, before
+    for i in range(max_rounds):
+        if progress:
+            try:
+                progress(f"AI 味自愈(第 {i + 1} 轮,当前 {best_report.score:.1f})")
+            except Exception:  # noqa: BLE001 — 进度上报绝不影响主流程
+                pass
+        try:
+            rewritten = await deai_rewrite(best_text, best_report, style_block)
+        except Exception:  # noqa: BLE001 — LLM 失败不该毁掉已定稿的正文
+            logger.warning("去味重写调用失败,保留当前版本", exc_info=True)
+            break
+        if not rewritten:
+            break
+        ratio = len(rewritten) / max(len(best_text), 1)
+        if not (_DEAI_LEN_LO <= ratio <= _DEAI_LEN_HI):
+            logger.info("去味重写篇幅越界(比例 %.2f),丢弃本轮", ratio)
+            break
+        after = ai_flavor_report(rewritten)
+        if after.score >= best_report.score:
+            logger.info("去味重写未降分(%.1f→%.1f),丢弃本轮", best_report.score, after.score)
+            break
+        best_text, best_report = rewritten, after
+        logger.info("去味重写第 %d 轮:score → %.1f", i + 1, best_report.score)
+        if best_report.score <= threshold:
+            break
+    return best_text, before, best_report
 
 
 def _split_polish_output(raw: str) -> tuple[str, str | None]:
@@ -70,11 +150,13 @@ async def polish_fragment(
     fragment: str,
     direction: str = "",
     chapter_summary: str = "",
+    voice_block: str = "",
 ) -> dict:
     """润色阅读时点选的单个段落(轻量单次调用,带用户润色方向)。
 
     与 polish_text 的事实锁定三段式不同,片段很短,直接靠 prompt 铁律
     约束"只改文笔不改情节",省去事实抽取/校验两轮调用。
+    voice_block:文风范本(去 AI 味正向锚,API 层从创作偏好档案取;引擎侧默认空)。
     返回 {polished, notes};notes 为两段式输出的诊断部分(可为 None)。
     """
     fragment = fragment.strip()
@@ -91,6 +173,7 @@ async def polish_fragment(
             direction=direction.strip() or "整体更自然流畅",
             flavor_hits=_flavor_hits_block(ai_flavor_report(fragment)),
             fragment=fragment,
+            voice_block=voice_block,
             output_contract=_OUTPUT_CONTRACT,
         )
     )
@@ -98,6 +181,66 @@ async def polish_fragment(
     if not polished:
         raise ValueError("模型未返回润色结果,请重试")
     return {"polished": polished, "notes": diagnosis}
+
+
+_IDEA_BULLET_RE = re.compile(r"^(?:[-*•]\s*|\d+[.、)]\s*)")
+
+
+def _parse_ideas(raw: str) -> list[str]:
+    """把 brainstorm 的逐行点子解析成列表:去行首「- 」「1. 」「1、」等标记,去空行,最多 6 条。
+    模型没分行(整段)时退化为单条,前端仍可展示。"""
+    ideas: list[str] = []
+    for line in raw.splitlines():
+        s = _IDEA_BULLET_RE.sub("", line.strip()).strip()
+        if s:
+            ideas.append(s)
+    return ideas[:6] if ideas else [raw.strip()]
+
+
+async def craft_fragment(
+    fragment: str,
+    mode: str,
+    note: str = "",
+    chapter_summary: str = "",
+    voice_block: str = "",
+) -> dict:
+    """选区 craft 微工具(阅读/写作时对选中片段的单次调用):
+    - describe/expand:在"不推进新剧情、不新增事件/人物"的前提下补描写 / 扩篇幅,
+      返回 {rewrite} 走前端 diff→接受→子串写回(与润色同一替换链路);
+    - brainstorm:围绕这段给 3-5 条点子,返回 {ideas},不改正文。
+    voice_block:文风范本(去 AI 味正向锚);仅 describe/expand 注入(brainstorm 不改正文)。
+    返回 {mode, rewrite, ideas, notes}(rewrite/ideas 按模式二选一,另一个为 None)。
+    """
+    fragment = fragment.strip()
+    if not fragment:
+        raise ValueError("待处理片段为空")
+    if len(fragment) > _MAX_FRAGMENT_CHARS:
+        raise ValueError(
+            f"片段最长 {_MAX_FRAGMENT_CHARS} 字,当前 {len(fragment)} 字"
+        )
+    spec = CRAFT_MODES.get(mode)
+    if spec is None:
+        raise ValueError(f"未知的 craft 模式:{mode}")
+
+    raw = await get_adapter_for(Task.POLISH).ask(
+        FRAGMENT_CRAFT_PROMPT.format(
+            intro=spec["intro"],
+            chapter_summary=chapter_summary.strip() or "(无)",
+            note=note.strip() or "(无)",
+            fragment=fragment,
+            rules=spec["rules"],
+            # describe/expand 追加去 AI 腔规则 + 文风范本(新增文字也要干净、也要对味);
+            # brainstorm 不改正文,两者都不注入
+            deai_rules=("\n" + _DEAI_RULES + voice_block) if mode != "brainstorm" else "",
+            contract=spec["contract"],
+        )
+    )
+    raw = (raw or "").strip()
+    if not raw:
+        raise ValueError("模型未返回结果,请重试")
+    if mode == "brainstorm":
+        return {"mode": mode, "rewrite": None, "ideas": _parse_ideas(raw), "notes": None}
+    return {"mode": mode, "rewrite": raw, "ideas": None, "notes": None}
 
 
 async def polish_text(
@@ -128,6 +271,8 @@ async def polish_text(
     # 写作手法卡:作者为本书启用的写法技巧,追加到风格约束块(同 style_memo 套路,
     # 不新增模板占位符)。手法卡是软约束,润色铁律与情节事实仍优先。
     style_block += render_cards_block(cards)
+    # 文风范本(去 AI 味正向锚):档案里选的名家/预设 + 范文,润色时也照此语感改
+    style_block += voice_block_of(global_tendency)
 
     # ---- 0. AI 味检测(纯规则,零成本):命中点供定点改写,报告供前后对比 ----
     before = ai_flavor_report(text)

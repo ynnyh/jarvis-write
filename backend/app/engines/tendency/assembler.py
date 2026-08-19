@@ -131,3 +131,22 @@ def render_style_block(assembled: AssembledTendency) -> str:
     if assembled.directives_text:
         blocks.append(f"【本次写作倾向】\n{assembled.directives_text}\n")
     return "\n".join(blocks)
+
+
+def voice_block_of(global_tendency: Tendency | None) -> str:
+    """从创作偏好档案取文风范本(voice),渲染成注入 prompt 的「文风范本」正向锚块。
+
+    voice 是去 AI 味的正向锚(名家/预设胶囊 + 作者范文 / 已认可章节提取),存在
+    global_tendency[_PROFILE_KEY] 的 voice_key/voice_sample。它不在 _PROFILE_LABELS
+    里(不参与 assemble_tendency 的档案块),需由各正文生成入口(定稿/润色/片段/续写)
+    在 style_block 之外单独追加,故单列此 helper。两者皆空 → 返回 ""(该块整体省略)。
+    """
+    profile = (global_tendency or {}).get(_PROFILE_KEY) or {}
+    if not isinstance(profile, dict):
+        return ""
+    from app.prompts.style_capsules import render_voice_block
+
+    return render_voice_block(
+        str(profile.get("voice_key") or ""),
+        str(profile.get("voice_sample") or ""),
+    )

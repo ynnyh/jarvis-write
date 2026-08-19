@@ -86,7 +86,20 @@ class OpenAICompatibleAdapter(LLMAdapter):
                 hint="确认 Base URL 含 /v1 且渠道支持 OpenAI 协议",
             )
 
-        choice = data["choices"][0]["message"].get("content") or ""
+        # 200 + 合法 JSON 但 choices 为空:中转站渠道抽风/额度耗尽/被内容过滤时高发
+        # (无 error 字段,check_upstream 会放行)。裸 data["choices"][0] 会抛
+        # IndexError「list index out of range」污染上层,这里转成可读、可重试的上游错误。
+        choices = data.get("choices") or []
+        if not choices:
+            raise UpstreamError(
+                "上游返回了空的 choices(渠道无输出,可能是该中转渠道抽风、额度耗尽"
+                "或被内容过滤)。系统会自动重试,多次失败请到「设置」更换渠道",
+                status=resp.status_code,
+                retryable=True,
+            )
+        message = choices[0].get("message") or {}
+        # 兼容极少数只回 text(legacy completion 形态)的渠道;content 为空交给 ask() 重试
+        choice = message.get("content") or choices[0].get("text") or ""
         usage = data.get("usage", {})
         return LLMResponse(
             content=choice,
@@ -131,10 +144,10 @@ class OpenAICompatibleAdapter(LLMAdapter):
                         chunk = json.loads(payload)
                     except json.JSONDecodeError:
                         continue
-                    delta = (
-                        chunk.get("choices", [{}])[0]
-                        .get("delta", {})
-                        .get("content")
-                    )
+                    # 尾包/心跳包可能带空 choices(仅 usage);裸 [0] 会抛 IndexError,跳过即可
+                    choices = chunk.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = (choices[0].get("delta") or {}).get("content")
                     if delta:
                         yield delta

@@ -12,6 +12,17 @@ export const token = {
 let onUnauthorized: (() => void) | null = null;
 export function setUnauthorizedHandler(fn: () => void) { onUnauthorized = fn; }
 
+/** 带 HTTP 状态码的 API 错误:调用方可据 status 分流(如 409 冲突需显性处理,而非当普通报错)。
+ *  仍是 Error 子类——errMsg 照常取 message,现有 `e instanceof Error` 判断不受影响。 */
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 30000): Promise<T> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -36,7 +47,7 @@ async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 
         const j = await res.json();
         detail = j.detail ?? JSON.stringify(j);
       } catch { /* ignore */ }
-      throw new Error(detail);
+      throw new ApiError(res.status, detail);
     }
     return (await res.json()) as T;
   } finally {
@@ -93,6 +104,16 @@ export interface StyleProfile {
   taboos: string;   // 禁忌/避雷
   audience: string; // 读者定位
   other: string;    // 其他创作主张
+  voice_key: string;    // 名家/预设文风胶囊 key(空=未选);去 AI 味的正向锚
+  voice_sample: string; // 作者自备范文 / 从已认可章节提取的文风范本正文
+}
+
+// 名家/预设文风胶囊(去 AI 味的正向锚)。sample 一律本项目自撰仿写,非原作节选,
+// 故列表接口不返回 sample——前端只按 name/directive 展示与选择。
+export interface VoiceCapsule {
+  key: string;
+  name: string;
+  directive: string;
 }
 
 // 写作手法卡:本书自己的手法库,勾选启用即拼成一块注入生成/润色/重写
@@ -309,6 +330,14 @@ export interface PolishResult {
   polished: string; locked_facts: string[]; violations: Record<string, string>[];
   flavor_before: FlavorInfo; flavor_after: FlavorInfo;
 }
+/** 选区 craft 微工具结果:describe/expand 走 rewrite(diff 替换),brainstorm 走 ideas(点子列表) */
+export type CraftMode = "describe" | "expand" | "brainstorm";
+export interface CraftResult {
+  mode: CraftMode;
+  rewrite: string | null;
+  ideas: string[] | null;
+  notes: string | null;
+}
 /** ②档多处批注改(revise-annotated-async job)返回的逐段旧/新对:ok=false 时 new 空、notes 载失败原因 */
 export interface RevisePair {
   para_idx: number; old: string; new: string; notes: string | null; ok: boolean;
@@ -498,6 +527,11 @@ export const api = {
     req<StyleProfile>("POST", `/api/projects/${id}/style-profile/absorb`, { directive }, LLM_TIMEOUT),
   extractStyleProfile: (id: number) =>
     req<StyleProfile>("POST", `/api/projects/${id}/style-profile/extract`, undefined, LLM_TIMEOUT),
+  // 文风范本(去 AI 味正向锚):列名家/预设胶囊、从已认可章节提取范本(后者不经 LLM)
+  listVoiceCapsules: (id: number) =>
+    req<{ capsules: VoiceCapsule[] }>("GET", `/api/projects/${id}/style-profile/voice-capsules`),
+  extractVoiceSample: (id: number) =>
+    req<StyleProfile>("POST", `/api/projects/${id}/style-profile/extract-voice`),
   renameProject: (id: number, title: string) =>
     req<Project>("PATCH", `/api/projects/${id}`, { title }),
   deleteProject: (id: number) =>
@@ -691,13 +725,24 @@ export const api = {
 
   polishChapter: (pid: number, n: number, tendency: Tendency) =>
     req<PolishResult>("POST", `/api/projects/${pid}/polish/chapter/${n}`, { tendency }, LLM_TIMEOUT),
-  applyPolish: (pid: number, n: number, polished_text: string) =>
-    req<{ status: string }>("POST", `/api/projects/${pid}/polish/chapter/${n}/apply`, { polished_text }),
+  applyPolish: (pid: number, n: number, polished_text: string, base_content?: string) =>
+    req<{ status: string }>("POST", `/api/projects/${pid}/polish/chapter/${n}/apply`,
+      // 传 base_content=优化基线 → 后端乐观并发校验(正文优化期间被手改过则 409);
+      // 不传 = 用户在冲突提示里确认强制覆盖(旧内容后端已存版本历史)。
+      base_content === undefined ? { polished_text } : { polished_text, base_content }),
   polishSegment: (pid: number, text: string, tendency: Tendency) =>
     req<PolishResult>("POST", `/api/projects/${pid}/polish/segment`, { text, tendency }, LLM_TIMEOUT),
   polishFragment: (pid: number, n: number, fragment: string, direction: string) =>
     req<{ polished: string; notes: string | null }>(
       "POST", `/api/projects/${pid}/chapters/${n}/polish-fragment`, { fragment, direction }, LLM_TIMEOUT),
+  // 选区 craft 微工具:describe/expand 返回 rewrite(diff 替换),brainstorm 返回 ideas(点子)
+  craftFragment: (pid: number, n: number, fragment: string, mode: CraftMode, note = "") =>
+    req<CraftResult>(
+      "POST", `/api/projects/${pid}/chapters/${n}/craft-fragment`, { fragment, mode, note }, LLM_TIMEOUT),
+  // 章尾续写(ghost text):顺着已写正文续一个自然段,Tab 接受后作为新段落追加
+  continueChapter: (pid: number, n: number, note = "") =>
+    req<{ continuation: string }>(
+      "POST", `/api/projects/${pid}/chapters/${n}/continue`, { note }, LLM_TIMEOUT),
   // 就选中段落与 AI 多轮对话:可解释、可给改写建议(suggestion 非空时可一键采用);
   // target 置空 = 整章自由问答(只答不改,后端走 DISCUSS_CHAPTER prompt)
   discussFragment: (pid: number, n: number, messages: { role: string; content: string }[], target = "") =>
