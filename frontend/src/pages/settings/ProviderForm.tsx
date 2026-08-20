@@ -33,9 +33,16 @@ export function ProviderForm({ editing, onSaved, onCancel }: {
         timeout: Math.max(0, parseInt(timeout_, 10) || 0),
         max_tokens: Math.max(0, parseInt(maxTokens, 10) || 0),
       };
-      if (editing) await api.updateProvider(editing.id, body);
-      else await api.createProvider(body);
+      const saved = editing
+        ? await api.updateProvider(editing.id, body)
+        : await api.createProvider(body);
       toast.ok(editing ? `「${body.name || editing.name}」已保存` : "配置已添加");
+      if (saved.cloudflare) {
+        toast.info(
+          "该渠道套了 Cloudflare CDN",
+          "国内网络直连可能间歇性连接失败,长文生成比单次测试更容易撞上;若频繁报「上游连续 3 次调用失败」,建议换直连渠道。",
+        );
+      }
       onSaved();
     } catch (e) {
       toast.err("保存失败", errMsg(e));

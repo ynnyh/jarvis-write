@@ -99,6 +99,30 @@ def test_exhausted_attempts_raise_readable_error():
     assert a.calls == ["once", "stream", "stream"]
 
 
+def test_exhausted_with_silent_net_error_still_readable():
+    """空消息网络异常(httpx 在 Windows/anyio 下 str 为 '',实测 DNS 失败即此形态)
+    也要在"最后错误"里给出可读翻译,不能留一片空白。"""
+    a = _ScriptedAdapter(
+        [httpx.ConnectError("")],
+        stream_script=[httpx.ConnectError(""), httpx.ConnectError("")],
+    )
+    with pytest.raises(UpstreamError) as exc:
+        _run(a)
+    msg = str(exc.value)
+    assert "网络连接失败" in msg
+    # 不能以空白的"最后错误: "结尾
+    assert not msg.endswith("最后错误: ")
+
+
+def test_exhausted_with_silent_timeout_translated():
+    a = _ScriptedAdapter(
+        [httpx.ReadTimeout("")],
+        stream_script=[httpx.ReadTimeout(""), httpx.ReadTimeout("")],
+    )
+    with pytest.raises(UpstreamError, match="网络超时"):
+        _run(a)
+
+
 # ---------- check_upstream 的 52x 专属文案 ----------
 
 def test_524_message_explains_cdn_timeout_not_base_url():

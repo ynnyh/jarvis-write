@@ -11,14 +11,14 @@ export function ProviderRow({ p, onChanged, onEdit }: {
   p: ProviderConfigOut; onChanged: () => void; onEdit: () => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [testMsg, setTestMsg] = useState<{ ok: boolean; warn?: string[]; text: string } | null>(null);
   const cat = CATEGORY_BY_KEY[normalizeCategory(p.interface_format)];
 
   async function test() {
     setBusy(true); setTestMsg(null);
     try {
       const r = await api.testProvider(p.id);
-      if (r.ok) setTestMsg({ ok: true, text: `✓ 连通(${r.model}):${r.reply}` });
+      if (r.ok) setTestMsg({ ok: true, warn: r.warnings, text: `✓ 连通(${r.model}):${r.reply}` });
       else setTestMsg({ ok: false, text: `✗ 连接失败:${r.error}` });
     } catch (e) {
       setTestMsg({ ok: false, text: `✗ ${errMsg(e)}` });
@@ -94,6 +94,14 @@ export function ProviderRow({ p, onChanged, onEdit }: {
           ` · 超时 ${p.timeout > 0 ? `${p.timeout}s` : "跟随全局"} · max_tokens ${p.max_tokens > 0 ? p.max_tokens : "跟随全局"}`}
       </p>
 
+      {p.cloudflare && (
+        <div className="cf-warn">
+          ⓘ 该渠道套了 Cloudflare CDN:国内网络直连可能出现间歇性连接失败,
+          长文生成(耗时数十分钟、多次调用)比单次「测试连接」更容易撞上。
+          若频繁报「上游连续 3 次调用失败」,建议换非 CDN 直连渠道。
+        </div>
+      )}
+
       <div className="provider-actions">
         <button className="btn-sm" onClick={onEdit} disabled={busy}>编辑</button>
         <button className="btn-sm" onClick={test} disabled={busy}>测试连接</button>
@@ -111,7 +119,12 @@ export function ProviderRow({ p, onChanged, onEdit }: {
       </div>
 
       {testMsg && (
-        <div className={`test-line ${testMsg.ok ? "ok" : "err"}`}>{testMsg.text}</div>
+        <>
+          <div className={`test-line ${testMsg.ok ? "ok" : "err"}`}>{testMsg.text}</div>
+          {testMsg.warn?.map((w) => (
+            <div key={w} className="test-line warn">⚠ {w}</div>
+          ))}
+        </>
       )}
     </div>
   );

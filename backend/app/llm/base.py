@@ -95,6 +95,27 @@ def check_upstream(resp: httpx.Response, *, hint: str = "") -> dict:
     return data
 
 
+def _describe_exc(exc: Exception) -> str:
+    """给重试耗尽后的"最后错误"一个可读描述。
+
+    httpx 网络异常在 Windows/anyio 下常是空消息(DNS 失败/连接被重置实测 str 为 ''),
+    直接拼进"最后错误: "会一片空白,用户无从判断;按异常类型翻译成中文。
+    """
+    msg = str(exc).strip()
+    if msg:
+        return msg
+    if isinstance(exc, httpx.ConnectTimeout):
+        return "网络连接超时"
+    if isinstance(exc, httpx.ConnectError):
+        return (
+            "网络连接失败/被重置(本机断网、DNS 故障,或该渠道套 CDN 在当前网络下"
+            "间歇性不通——若反复出现请更换渠道)"
+        )
+    if isinstance(exc, httpx.TimeoutException):
+        return "网络超时"
+    return type(exc).__name__
+
+
 async def with_retries(call, *, attempts: int = 3, base_delay: float = 2.0, on_retry=None):
     """瞬时错误退避重试:retryable 的 UpstreamError / 网络超时连接错误。
 
@@ -118,7 +139,8 @@ async def with_retries(call, *, attempts: int = 3, base_delay: float = 2.0, on_r
                 on_retry(last)
             await asyncio.sleep(base_delay * (2**attempt))
     raise UpstreamError(
-        f"上游连续 {attempts} 次调用失败,最后错误: {last}", retryable=True
+        f"上游连续 {attempts} 次调用失败,最后错误: {_describe_exc(last)}",
+        retryable=True,
     ) from last
 Role = Literal["system", "user", "assistant"]
 

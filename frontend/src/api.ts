@@ -360,6 +360,7 @@ export interface ProviderConfigOut {
   is_default_fast: boolean;
   default_base_url: string;
   default_model: string;
+  cloudflare: boolean; // base_url 套了 CF CDN,国内直连常见间歇性失败(黄条提醒用)
 }
 // 新增/更新配置:api_key 留空/不传 = 不改动已存 key(仅更新);
 // is_default/is_default_fast 传 true 时后端会清掉该用户其他配置的同名标记(全用户唯一)
@@ -423,6 +424,7 @@ export interface CoverPackage { covers: CoverPrompt[]; }
 // 主题曲提示词(Suno):英文风格标签 + 中文对照 + 结构化中文歌词
 export interface AnthemPackage {
   song_title: string;
+  music_desc: string;
   style_tags: string;
   style_cn: string;
   lyrics: string;
@@ -506,9 +508,10 @@ export const api = {
   deleteProvider: (id: number, confirmed = false) =>
     req<{ deleted: boolean; needs_confirm?: boolean; reason?: string }>(
       "DELETE", `/api/settings/providers/${id}${confirmed ? "?confirmed=true" : ""}`),
+  // CF 渠道测试通过后会追加 2 次稳定性快测(间隔 2s),最多约 3 分钟,超时给足
   testProvider: (id: number) =>
-    req<{ ok: boolean; provider: string; model?: string; reply?: string; error?: string }>(
-      "POST", `/api/settings/providers/${id}/test`, undefined, 60000),
+    req<{ ok: boolean; provider: string; model?: string; reply?: string; error?: string; warnings?: string[] }>(
+      "POST", `/api/settings/providers/${id}/test`, undefined, 200000),
   suggestTitle: (topic: string, genre: string, concept?: Concept | null) =>
     req<{ titles: string[] }>("POST", "/api/projects/title-suggestion",
       { topic, genre, concept: concept ?? null }, 60000),

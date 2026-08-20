@@ -11,6 +11,8 @@ GET    /api/settings/providers/status          是否已配置任一可用模型
 """
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -20,7 +22,7 @@ from app.crypto import encrypt
 from app.db.models import ProviderConfig, User
 from app.db.session import get_db
 from app.jobs import normalize_job_error
-from app.net_guard import assert_public_base_url
+from app.net_guard import assert_public_base_url, is_cloudflare_hosted
 from app.llm.factory import (
     _REGISTRY,
     available_providers,
@@ -69,6 +71,8 @@ class ProviderConfigOut(BaseModel):
     is_default_fast: bool
     default_base_url: str
     default_model: str
+    # base_url 套了 Cloudflare CDN(国内直连常见间歇性失败,前端据此显示提醒条)
+    cloudflare: bool = False
 
 
 class ProviderConfigIn(BaseModel):
@@ -85,7 +89,7 @@ class ProviderConfigIn(BaseModel):
     is_default_fast: bool | None = None
 
 
-def _out(row: ProviderConfig, plain_key: str) -> ProviderConfigOut:
+def _out(row: ProviderConfig, plain_key: str, *, cloudflare: bool = False) -> ProviderConfigOut:
     preset = _PRESETS.get(row.interface_format, {"base_url": "", "model": ""})
     return ProviderConfigOut(
         id=row.id,
@@ -101,6 +105,18 @@ def _out(row: ProviderConfig, plain_key: str) -> ProviderConfigOut:
         is_default_fast=row.is_default_fast,
         default_base_url=preset["base_url"],
         default_model=preset["model"],
+        cloudflare=cloudflare,
+    )
+
+
+async def _cf_flags(rows: list[ProviderConfig]) -> list[bool]:
+    """并行判定各行 base_url 是否套 CF(内部有 DNS,丢线程池防阻塞事件循环)。"""
+    if not rows:
+        return []
+    return list(
+        await asyncio.gather(
+            *(asyncio.to_thread(is_cloudflare_hosted, r.base_url) for r in rows)
+        )
     )
 
 
@@ -166,6 +182,8 @@ class TestResult(BaseModel):
     model: str = ""
     reply: str = ""
     error: str = ""
+    # 风险提示(不改变 ok):如"渠道套了 Cloudflare CDN""探测到间歇性连接失败"
+    warnings: list[str] = Field(default_factory=list)
 
 
 @router.get("/providers", response_model=list[ProviderConfigOut])
@@ -180,7 +198,11 @@ async def list_provider_configs(
         .order_by(ProviderConfig.id)
         .all()
     )
-    return [_out(r, decrypt(r.api_key)) for r in rows]
+    flags = await _cf_flags(rows)
+    return [
+        _out(r, decrypt(r.api_key), cloudflare=cf)
+        for r, cf in zip(rows, flags)
+    ]
 
 
 @router.post("/providers", response_model=ProviderConfigOut)
@@ -220,7 +242,8 @@ async def create_provider_config(
     db.commit()
     from app.crypto import decrypt
 
-    return _out(row, decrypt(row.api_key))
+    cf = await asyncio.to_thread(is_cloudflare_hosted, row.base_url)
+    return _out(row, decrypt(row.api_key), cloudflare=cf)
 
 
 @router.put("/providers/{config_id}", response_model=ProviderConfigOut)
@@ -248,7 +271,8 @@ async def update_provider_config(
     db.commit()
     from app.crypto import decrypt
 
-    return _out(row, decrypt(row.api_key))
+    cf = await asyncio.to_thread(is_cloudflare_hosted, row.base_url)
+    return _out(row, decrypt(row.api_key), cloudflare=cf)
 
 
 class DeleteResult(BaseModel):
@@ -305,7 +329,13 @@ async def test_provider_config(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """用该配置实际调一次模型(设置页的「测试连接」按钮)。"""
+    """用该配置实际调一次模型(设置页的「测试连接」按钮)。
+
+    单次成功只代表"点击那一刻通"。套 CF CDN 的渠道在国内直连下常见分钟级
+    间歇故障,正式生成一章要打十几次调用、战线几十分钟,几乎必撞窗口——
+    所以对这类渠道在测试通过后再快测两次(间隔 2s),探出链路是否抖动,
+    结果放 warnings(不改变 ok,由前端黄条提示)。
+    """
     row = _get_row(db, user, config_id)
 
     from app.crypto import decrypt
@@ -320,13 +350,34 @@ async def test_provider_config(
         resp = await adapter.complete(
             adapter.to_messages("请回复:连接成功")
         )
-        return TestResult(
-            ok=True,
-            provider=row.interface_format,
-            model=resp.model,
-            reply=resp.content[:200],
-        )
     except Exception as exc:  # noqa: BLE001 — 测试接口,错误原样反馈给用户
         return TestResult(
             ok=False, provider=row.interface_format, error=normalize_job_error(exc)[:500]
         )
+
+    warnings: list[str] = []
+    if await asyncio.to_thread(is_cloudflare_hosted, row.base_url):
+        warnings.append(
+            "该渠道套了 Cloudflare CDN,国内网络直连可能出现间歇性连接失败;"
+            "生成长文(需多次调用、耗时数十分钟)比单次测试更容易撞上,"
+            "若频繁报「上游连续 3 次调用失败」建议换直连渠道"
+        )
+        flaky = 0
+        for _ in range(2):
+            await asyncio.sleep(2)
+            try:
+                await adapter.complete(adapter.to_messages("ping"))
+            except Exception:  # noqa: BLE001 — 探测失败只计数,不影响 ok
+                flaky += 1
+        if flaky:
+            warnings.append(
+                f"稳定性探测:3 次探测中 {1 + flaky} 次失败,该渠道链路当前不稳,"
+                "长任务大概率中途断掉,建议暂不用它跑正式生成"
+            )
+    return TestResult(
+        ok=True,
+        provider=row.interface_format,
+        model=resp.model,
+        reply=resp.content[:200],
+        warnings=warnings,
+    )

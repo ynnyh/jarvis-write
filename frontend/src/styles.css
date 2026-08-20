@@ -2187,6 +2187,14 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .test-line { margin-top: var(--sp-3); font-size: var(--fs-sm); padding: 8px 12px; border-radius: var(--r-sm); line-height: 1.6; }
 .test-line.ok { background: var(--ok-weak); color: var(--ok); }
 .test-line.err { background: var(--err-weak); color: var(--err); }
+.test-line.warn { background: var(--warn-weak); color: var(--warn); }
+
+/* CF CDN 渠道的风险提醒条(配置卡片内,只提醒不阻断) */
+.cf-warn {
+  margin: 0 0 var(--sp-3); padding: 8px 12px; border-radius: var(--r-sm);
+  font-size: var(--fs-xs); line-height: 1.6;
+  background: var(--warn-weak); color: var(--warn); border: 1px solid var(--warn-line);
+}
 
 /* ---------- 创作起步流升级:进度条 / 候选卡 / 确认墙 / 流水线 ---------- */
 

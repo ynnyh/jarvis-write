@@ -4,13 +4,14 @@
 
 单元测试用字面 IP(getaddrinfo 对字面 IP 不发 DNS,不依赖网络);
 接口测试验证保存配置这一入口确实挡住内网 base_url。
+另:Cloudflare CDN 检测(提示用,不拦截)——同样只用字面 IP,不发 DNS。
 """
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.net_guard import assert_public_base_url
+from app.net_guard import assert_public_base_url, is_cloudflare_hosted, is_cloudflare_ip
 
 INVITE = "test-invite"
 
@@ -70,3 +71,56 @@ def test_save_provider_rejects_internal_base_url(client):
     )
     assert r.status_code == 400
     assert "内网" in r.json()["detail"]
+
+
+# ---------- Cloudflare CDN 检测(提示用,不拦截) ----------
+
+
+@pytest.mark.parametrize(
+    "ip",
+    [
+        "104.21.23.114",   # CF 常用边缘段
+        "172.67.210.209",  # CF 常用边缘段
+        "188.114.97.1",    # 188.114.96.0/20
+        "2606:4700:3030::ac43:d2d1",  # CF IPv6
+    ],
+)
+def test_cf_ip_detected(ip):
+    assert is_cloudflare_ip(ip) is True
+
+
+@pytest.mark.parametrize("ip", ["8.8.8.8", "113.31.106.41", "1.2.3.4", "not-an-ip"])
+def test_non_cf_ip_not_detected(ip):
+    assert is_cloudflare_ip(ip) is False
+
+
+def test_cf_hosted_with_literal_ip_url():
+    # 字面 IP 不发 DNS,稳定可测
+    assert is_cloudflare_hosted("https://104.21.23.114/v1") is True
+    assert is_cloudflare_hosted("https://8.8.8.8/v1") is False
+
+
+@pytest.mark.parametrize("url", ["", "   ", "not a url"])
+def test_cf_hosted_empty_or_invalid_url_is_false(url):
+    # 检测是尽力而为的提示,解析不了绝不报错
+    assert is_cloudflare_hosted(url) is False
+
+
+def test_provider_list_marks_cloudflare(client):
+    """接口层:套 CF 的配置在列表/保存响应里带 cloudflare=True(存量配置提醒)。"""
+    headers = _auth_headers(client, "cf_user")
+    r = client.post(
+        "/api/settings/providers",
+        headers=headers,
+        json={
+            "interface_format": "openai-compatible",
+            "api_key": "sk-x",
+            "base_url": "https://104.21.23.114/v1",  # 字面 CF IP,不发 DNS
+            "model": "m",
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["cloudflare"] is True
+
+    lst = client.get("/api/settings/providers", headers=headers).json()
+    assert [c["cloudflare"] for c in lst] == [True]
