@@ -82,6 +82,7 @@ def _normalize_anthem(data: dict) -> dict:
     """裁剪主题曲输出:各字段限长。"""
     return {
         "song_title": _clip(data.get("song_title"), 40),
+        "music_desc": _clip(data.get("music_desc"), 800),
         "style_tags": _clip(data.get("style_tags"), 400),
         "style_cn": _clip(data.get("style_cn"), 400),
         "lyrics": _clip(data.get("lyrics"), 3000),
@@ -100,11 +101,11 @@ async def generate_anthem(project_id: int, db: Session = Depends(get_db)):
             return {"job_id": jid}
 
     prompt = ANTHEM_PROMPT.format(**_build_context_blocks(db, project))
-    # 歌词 + 逐条中文对照,输出额度比默认略宽
-    adapter = create_llm_adapter(resolve_default_provider(), max_tokens=3000, timeout=180)
+    # 中文音乐描述 + 歌词 + 逐条中文对照,输出额度比默认略宽
+    adapter = create_llm_adapter(resolve_default_provider(), max_tokens=3500, timeout=180)
 
     async def work(progress):
-        progress("AI 正在创作主题曲(Suno 风格标签 + 中文歌词)")
+        progress("AI 正在创作主题曲(音乐描述 + 歌词 + 风格标签)")
         raw = await adapter.ask(prompt)
         return _normalize_anthem(parse_llm_json(raw))
 

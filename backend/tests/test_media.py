@@ -85,6 +85,7 @@ _COVER_REPLY = {
 
 _ANTHEM_REPLY = {
     "song_title": "风雪镖歌",
+    "music_desc": "一首苍凉又带着孤勇的国风影视感歌曲,沙哑男声克制地低吟,古筝起手,副歌弦乐铺满、鼓点推进,像风雪里独行的镖师,适合作片尾曲。",
     "style_tags": "cinematic, guzheng folk, heroic, male vocal, driving beat",
     "style_cn": "cinematic=影视感;guzheng folk=古筝民乐;heroic=英雄气概;male vocal=男声;driving beat=推进感鼓点。在其它软件选'影视原声/史诗'类曲风即可。",
     "lyrics": "[Verse 1]\n风雪压弯了刀\n[Chorus]\n镖旗不倒",
@@ -118,7 +119,7 @@ def test_cover_generate_full_flow(client):
 
 
 def test_anthem_generate_full_flow(client):
-    """主题曲异步生成:job 完成、四字段结构正确。"""
+    """主题曲异步生成:job 完成、各字段结构正确(含 music_desc)。"""
     headers = _auth(client, "anthem_user")
     p = _create_project(client, headers, "主题曲书")
     _set_topic(client, headers, p["id"])
@@ -132,6 +133,7 @@ def test_anthem_generate_full_flow(client):
     assert job["kind"] == f"anthem-{p['id']}"
     res = job["result"]
     assert res["song_title"] == "风雪镖歌"
+    assert "沙哑男声" in res["music_desc"]
     assert "guzheng folk" in res["style_tags"]
     assert "古筝民乐" in res["style_cn"]
     assert "[Chorus]" in res["lyrics"]

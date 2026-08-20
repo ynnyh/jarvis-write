@@ -387,22 +387,22 @@ function AnthemCard({ pid }: { pid: number }) {
         () => api.generateAnthemAsync(pid),
         { kind: `anthem-${pid}`, onStage: setStage },
       );
-      if (r) { commit(r); toast.ok("主题曲已生成", "把风格标签和歌词分别粘进 Suno 即可"); }
+      if (r) { commit(r); toast.ok("主题曲已生成", "描述式工具粘「音乐描述」,Suno 粘标签 + 歌词"); }
     } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); setStage(""); }
   }
 
   return (
     <div className="card">
       <div className="card-head">
-        <h3 className="grow">主题曲提示词(Suno)</h3>
+        <h3 className="grow">主题曲提示词</h3>
         <button className="primary" disabled={busy} onClick={generate}>
           {pkg ? "重新生成" : "AI 生成主题曲"}
         </button>
       </div>
       <p className="card-desc">
-        为本书量身写一首主题曲:英文风格标签(附逐条中文对照)+ 结构化中文歌词。
-        到 Suno 把「风格标签」填 Style、「歌词」填 Lyrics 即可生成;用妙音、Mureka 等其它软件时,
-        照着「风格中文对照」选相近曲风就行。
+        为本书量身写一首主题曲,一份物料两类工具通用:「音乐描述」是一整段中文,直接粘进快乐虾米、海绵音乐等
+        「描述式」工具的框;「风格标签」(英文 + 中文对照)给 Suno、Udio 等「标签式」工具;歌词两边通用。
+        描述里已写明曲风 / 情绪 / 人声 / 配器 / 节奏——想纯音乐就在工具里开「纯音乐」,想让 AI 代写词就开「智能歌词」。
       </p>
       {busy && (
         <div className="gen-banner"><span className="spin" /><span className="gen-banner-text">{stage || "AI 正在作词谱曲…"}</span></div>
@@ -415,18 +415,30 @@ function AnthemCard({ pid }: { pid: number }) {
             <div className="card-head mb-2"><span className="muted">歌名</span><CopyBtn text={pkg.song_title} /></div>
             <input type="text" value={pkg.song_title} onChange={(e) => patch("song_title", e.target.value)} />
           </div>
+
+          {/* 描述式工具(快乐虾米 / 海绵音乐 / 天工):一整段中文描述,直接粘进描述框 */}
           <div className="media-field">
-            <div className="card-head mb-2"><span className="muted">风格标签(填进 Suno 的 Style of Music)</span><CopyBtn text={pkg.style_tags} /></div>
+            <div className="card-head mb-2"><span className="muted">音乐描述 · 描述式工具(快乐虾米 / 海绵音乐等)</span><CopyBtn text={pkg.music_desc ?? ""} /></div>
+            <textarea rows={6} value={pkg.music_desc ?? ""} onChange={(e) => patch("music_desc", e.target.value)} />
+            <p className="hint">整段粘进「描述你想创作的音乐」框。想要唱词就开「智能歌词」或把下面的歌词贴进去;想要纯音乐就打开「纯音乐」开关。</p>
+          </div>
+
+          {/* 歌词:两类工具共用 */}
+          <div className="media-field">
+            <div className="card-head mb-2"><span className="muted">歌词 · 通用(自定义歌词处 / Suno 的 Lyrics)</span><CopyBtn text={pkg.lyrics} /></div>
+            <textarea rows={12} value={pkg.lyrics} onChange={(e) => patch("lyrics", e.target.value)} />
+          </div>
+
+          {/* 标签式工具(Suno / Udio):英文风格标签 + 中文对照 */}
+          <div className="media-field">
+            <div className="card-head mb-2"><span className="muted">风格标签 · 标签式工具(填进 Suno 的 Style of Music)</span><CopyBtn text={pkg.style_tags} /></div>
             <textarea rows={2} value={pkg.style_tags} onChange={(e) => patch("style_tags", e.target.value)} />
           </div>
           <div className="media-field">
             <div className="card-head mb-2"><span className="muted">风格中文对照(在其它软件照着选曲风)</span><CopyBtn text={pkg.style_cn ?? ""} /></div>
             <textarea rows={2} value={pkg.style_cn ?? ""} onChange={(e) => patch("style_cn", e.target.value)} />
           </div>
-          <div className="media-field">
-            <div className="card-head mb-2"><span className="muted">歌词(填进 Suno 的 Lyrics)</span><CopyBtn text={pkg.lyrics} /></div>
-            <textarea rows={12} value={pkg.lyrics} onChange={(e) => patch("lyrics", e.target.value)} />
-          </div>
+
           {pkg.vibe && <p className="hint">{pkg.vibe}</p>}
         </>
       )}
