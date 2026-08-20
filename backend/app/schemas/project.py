@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.schemas.concept import Concept
+from app.schemas.dna import StoryDNA
 from app.schemas.tendency import Tendency
 
 
@@ -20,6 +21,8 @@ class ProjectCreate(BaseModel):
     global_tendency: Tendency = Field(default_factory=dict)
     # 新建向导第一步选定的结构化概念(可空;传入则落库并把 topic 同步为 logline)
     concept: Concept | None = None
+    # 坐标卡捏出的故事 DNA / 本书基因(可空;定味道锚,治题材/口味漂移)
+    dna: StoryDNA | None = None
     # 起步流:创建草稿项目时标记停在哪步(idea/tone/title/scale/launch);不传=直接完成
     setup_state: str | None = Field(default=None, max_length=20)
 
@@ -42,6 +45,7 @@ class ProjectOut(BaseModel):
     queue_require_approved: bool = False
     global_tendency: dict[str, Any]
     concept: Concept | None = None
+    dna: StoryDNA | None = None
     synopsis: str | None = None
     setup_state: str | None = None
     chat_log: list[Any] | None = None

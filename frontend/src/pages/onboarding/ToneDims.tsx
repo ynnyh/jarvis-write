@@ -9,7 +9,7 @@ export function ToneDims({ tendency, onSet }: {
   const [dims, setDims] = useState<Dimension[]>([]);
   useEffect(() => {
     api.tendencyCatalog("outline").then((cat) => {
-      setDims(cat.dimensions.filter((d) => ["pace", "structure", "tone"].includes(d.key)));
+      setDims(cat.dimensions.filter((d) => ["pace", "structure", "tone", "elements"].includes(d.key)));
     }).catch(() => undefined);
   }, []);
   return (

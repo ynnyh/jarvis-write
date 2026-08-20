@@ -46,6 +46,11 @@ class Project(Base, TimestampMixin):
     # 六字段 JSON,喂养架构生成的核心种子;可空(老项目只有 topic 一句话)。
     # 见 app/schemas/concept.py。topic 保留为 logline 的镜像,下游 title/简介仍读 topic。
     concept: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # 故事 DNA(创作坐标 / 本书基因):概念之上的「定味道」锚,治题材/口味漂移。
+    # comps 参照系 / mode 题材模式 / axes 味道轴 / must·must_not 必须有·绝不能有 /
+    # vibe 自备范本 / capsule 蒸馏基因。贯穿概念→脊柱→正文强位注入 + 双向治漂门。
+    # 见 app/schemas/dna.py。可空(老项目无 DNA,生成回落到题材边界软约束)。
+    dna: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     # 书籍简介(网文风格 150-300 字,可 AI 生成也可手改);老库由迁移补列
     synopsis: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 起步流进度:创建即建草稿,记录停在哪一步(idea/tone/title/scale/launch);

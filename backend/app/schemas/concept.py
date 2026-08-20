@@ -19,6 +19,7 @@ CONCEPT_FIELDS: tuple[tuple[str, str], ...] = (
     ("protagonist", "主角"),
     ("conflict", "核心冲突"),
     ("setting", "世界/背景"),
+    ("sell", "一句话卖点"),
 )
 
 
@@ -31,6 +32,7 @@ class Concept(BaseModel):
     protagonist: str = Field(default="", description="主角:身份/目标/困境")
     conflict: str = Field(default="", description="核心冲突/对立面")
     setting: str = Field(default="", description="世界/背景/基调")
+    sell: str = Field(default="", description="一句话卖点:勾起读者点击欲的安利句")
 
     def is_empty(self) -> bool:
         """六字段全空视为无概念(等价于没填)。"""

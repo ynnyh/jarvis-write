@@ -19,7 +19,7 @@ def test_catalog():
     catalog = get_catalog()
     assert set(catalog) == {"outline", "chapter", "polish"}
     outline_dims = {d["key"] for d in get_node_catalog("outline")["dimensions"]}
-    assert outline_dims == {"genre", "pace", "structure", "tone", "length_style"}
+    assert outline_dims == {"genre", "pace", "structure", "tone", "length_style", "elements"}
 
 
 # ---------- 拼装器 ----------

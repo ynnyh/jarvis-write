@@ -36,6 +36,7 @@ from app.auth import current_user_id, get_current_user
 from app.db.models import Project
 from app.db.session import get_db
 from app.schemas.concept import Concept
+from app.schemas.dna import StoryDNA
 from app.schemas.project import ProjectCreate, ProjectOut
 
 from . import architecture, blueprint, naming, style_profile
@@ -64,16 +65,20 @@ router.include_router(blueprint.router)
 @router.post("", response_model=ProjectOut)
 async def create_project(req: ProjectCreate, db: Session = Depends(get_db)) -> Project:
     concept_dict = None
+    dna_dict = None
     topic = req.topic
     if req.concept is not None and not req.concept.is_empty():
         concept_dict = req.concept.model_dump()
         if not topic.strip() and req.concept.logline.strip():
             topic = req.concept.logline.strip()
+    if req.dna is not None and not req.dna.is_empty():
+        dna_dict = req.dna.model_dump()
     project = Project(
         user_id=current_user_id.get(),
         title=req.title,
         topic=topic,
         concept=concept_dict,
+        dna=dna_dict,
         setup_state=req.setup_state,
         genre=req.genre,
         target_chapters=req.target_chapters,
@@ -143,6 +148,8 @@ class ProjectPatch(BaseModel):
     queue_require_approved: bool | None = None
     global_tendency: dict | None = None
     concept: Concept | None = None
+    # 故事 DNA / 本书基因(坐标卡产出):整段覆盖式保存,走通用 setattr 落 JSON 列
+    dna: StoryDNA | None = None
     synopsis: str | None = None
     # 起步流进度:传 "" 表示起步完成(落库为 NULL)
     setup_state: str | None = None

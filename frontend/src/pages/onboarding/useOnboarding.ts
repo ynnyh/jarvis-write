@@ -46,6 +46,7 @@ export function useOnboarding() {
 
   // 概念屏
   const [ideas, setIdeas] = useState<Concept[] | null>(null);
+  const [comparison, setComparison] = useState("");
   const [ideaSig, setIdeaSig] = useState<string | null>(null); // 候选生成时的输入签名
   const [customOpen, setCustomOpen] = useState(false);
   const [customConcept, setCustomConcept] = useState<Concept>({ ...EMPTY_CONCEPT });
@@ -206,7 +207,7 @@ export function useOnboarding() {
     setProject({ ...project, chat_log: log });
     setBusy("策划思考中…"); setErr("");
     try {
-      const r = await api.chatConcept(log, conceptIsEmpty(concept) ? null : concept, tendency);
+      const r = await api.chatConcept(log, conceptIsEmpty(concept) ? null : concept, tendency, project?.dna ?? null);
       const newLog: ChatTurn[] = [...log, { role: "assistant", content: r.reply }];
       await patch({
         chat_log: newLog,
@@ -226,12 +227,12 @@ export function useOnboarding() {
     const sig = conceptSig(base, tendency); // 与实际生成入参一致
     setErr(""); setIdeas(null);
     try {
-      const r = await runJob<{ ideas: Concept[] }>(
+      const r = await runJob<{ ideas: Concept[]; comparison?: string }>(
         () => api.inspireAsync(
-          feedback ? `${base}\n补充要求:${feedback}` : base, tendency, 4),
+          feedback ? `${base}\n补充要求:${feedback}` : base, tendency, 4, project?.dna ?? null),
         { kind: "inspire" },
       );
-      if (r) { setIdeas(r.ideas); setIdeaSig(sig); }
+      if (r) { setIdeas(r.ideas); setComparison(r.comparison ?? ""); setIdeaSig(sig); }
     } catch (e) { setErr(errMsg(e)); setIdeas([]); }
   }
 
@@ -252,7 +253,7 @@ export function useOnboarding() {
       setErr(""); setIdeas(null);
       try {
         const r = await runJob<RefineResult>(
-          () => api.refineConceptAsync(concept, f, tendency), { kind: "inspire" });
+          () => api.refineConceptAsync(concept, f, tendency, project?.dna ?? null), { kind: "inspire" });
         if (r) { setIdeas([r.concept]); setIdeaSig(sig); }
       } catch (e) { setErr(errMsg(e)); setIdeas([]); }
     } else {
@@ -465,7 +466,7 @@ export function useOnboarding() {
     concept, tendency, sparkText, allGenreChips, shownSuggests,
     // 各屏 state
     spark, entry, genreDim, pickedGenreCard, chatInput, busy,
-    ideas, ideaSig, customOpen, customConcept,
+    ideas, comparison, ideaSig, customOpen, customConcept,
     inferBusy, customGenre,
     titleIdeas, titleSig, titleBusy, titleInput,
     chapters, words, advOpen,

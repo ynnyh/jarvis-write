@@ -121,6 +121,23 @@ def _add_concept_column() -> None:
             logger.info("迁移:projects 补 concept 列")
 
 
+def _add_dna_column() -> None:
+    """给 projects 表补 dna 列(故事 DNA / 本书基因 JSON,幂等)。
+
+    SQLite 的 JSON 底层是 TEXT;存量项目该列为 NULL,由灵感工坊坐标卡逐步填充,
+    生成在 dna 为空时回落到题材边界软约束(向后兼容)。见 app/schemas/dna.py。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "projects" not in insp.get_table_names():
+            return  # create_all 会新建,无需补列
+        if not _column_exists("projects", "dna"):
+            conn.execute(
+                text("ALTER TABLE projects ADD COLUMN dna JSON")
+            )
+            logger.info("迁移:projects 补 dna 列")
+
+
 def _add_setup_columns() -> None:
     """给 projects 表补 setup_state / chat_log 列(起步流 + 对话落库,幂等)。
 
@@ -470,6 +487,7 @@ def run_migrations() -> None:
     _add_is_active_column()
     _add_synopsis_column()
     _add_concept_column()
+    _add_dna_column()
     _add_setup_columns()
     _add_retired_column()
     _add_word_guard_columns()

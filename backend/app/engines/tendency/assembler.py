@@ -150,3 +150,54 @@ def voice_block_of(global_tendency: Tendency | None) -> str:
         str(profile.get("voice_key") or ""),
         str(profile.get("voice_sample") or ""),
     )
+
+
+def dna_block_of(dna: object) -> str:
+    """把故事 DNA(本书基因)渲染成注入 Prompt 的『味道锚』强位块。
+
+    这是正文层 voice_block_of 在「故事味道」维度的对应物,专治题材/口味漂移。内容三段:
+    ① 本书基因(StoryDNA.render:参照/模式/味道轴/必须有/绝不能有/基调/自备 vibe)
+    ② 选中的味道锚胶囊(directive + 原创示范;GIGO 修法:注入胶囊而非书名)
+    ③ 题材「跑偏→对味」配对反例;现实向额外显式列出禁忌套路元素(与 engines/drift
+       硬门同口径,并减去用户在「必须有」里明确点名要的,避免自相矛盾)。
+
+    与 voice_block_of 同套路:由各生成入口(灵感/脊柱/架构)在 style_block 之外单独
+    追加,不占模板占位符(避免 format 只改一处导致 KeyError)。dna 空/None → 返回 ""。
+    """
+    from app.schemas.dna import StoryDNA, coerce_dna
+
+    if dna is None:
+        return ""
+    story = dna if isinstance(dna, StoryDNA) else coerce_dna(dna)
+    if story.is_empty():
+        return ""
+
+    from app.prompts.dna_capsules import genre_pairwise_block, render_dna_capsule_block
+
+    parts: list[str] = []
+    basis = story.render()
+    if basis:
+        parts.append(
+            "【本书基因(味道锚·最高优先级:全程按这个『味道』发挥,越界即视为跑偏)】\n"
+            + basis
+        )
+    cap = render_dna_capsule_block(story.taste_key).strip()
+    if cap:
+        parts.append(cap)
+    if story.mode:
+        # 现实向等硬门模式:显式列出禁忌套路(与 drift 硬门同口径,减去用户明确要的)
+        from app.engines.drift.contracts import _opted_in, forbidden_for_mode
+
+        opt_in = tuple(m for m in story.must if (m or "").strip())
+        labels = [
+            e.label for e in forbidden_for_mode(story.mode) if not _opted_in(e.label, opt_in)
+        ]
+        if labels:
+            parts.append(
+                f"【本作定为{story.mode_label()},以下网文套路元素一律不得出现"
+                f"(除非用户明确要求)】:{'、'.join(labels)}"
+            )
+    pw = genre_pairwise_block(story.mode).strip()
+    if pw:
+        parts.append(pw)
+    return "\n" + "\n\n".join(parts) + "\n" if parts else ""

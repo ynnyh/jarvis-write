@@ -139,6 +139,8 @@ export interface Project {
   queue_require_approved?: boolean;
   global_tendency: Tendency; status: string;
   concept?: Concept | null;
+  // 故事 DNA / 本书基因(坐标卡产出):定味道锚,治题材/口味漂移;驱动生成注入 + 题材硬门
+  dna?: StoryDNA | null;
   synopsis?: string | null;
   // 起步流:非空 = 创建未完成,值为停留步骤(idea/tone/title/scale/launch)
   setup_state?: string | null;
@@ -377,10 +379,11 @@ export interface ProviderConfigIn {
 }
 export interface AuthResult { token: string; username: string; is_admin: boolean; }
 export interface Me { id: number; username: string; is_admin: boolean; }
-/** 结构化故事概念(灵感工坊产出)。六字段全可空,渐进成形。 */
+/** 结构化故事概念(灵感工坊产出)。七字段全可空,渐进成形。 */
 export interface Concept {
   logline: string; hook: string; twist: string;
   protagonist: string; conflict: string; setting: string;
+  sell: string;
 }
 /** 概念字段的展示顺序与中文标签(与后端 CONCEPT_FIELDS 一致) */
 export const CONCEPT_FIELDS: { key: keyof Concept; label: string; hint: string }[] = [
@@ -390,17 +393,62 @@ export const CONCEPT_FIELDS: { key: keyof Concept; label: string; hint: string }
   { key: "protagonist", label: "主角", hint: "身份 / 目标 / 困境" },
   { key: "conflict", label: "核心冲突", hint: "主要对立面" },
   { key: "setting", label: "世界·背景", hint: "时代 / 场景 / 基调" },
+  { key: "sell", label: "一句话卖点", hint: "勾起读者点击欲的安利句" },
 ];
 export const EMPTY_CONCEPT: Concept = {
   logline: "", hook: "", twist: "", protagonist: "", conflict: "", setting: "",
+  sell: "",
 };
-/** 六字段是否全空 */
+/** 七字段是否全空 */
 export function conceptIsEmpty(c: Concept | null | undefined): boolean {
   return !c || CONCEPT_FIELDS.every((f) => !(c[f.key] ?? "").trim());
 }
 export interface RefineResult { concept: Concept; changed: (keyof Concept)[]; note: string; }
 export interface ChatTurn { role: "user" | "assistant"; content: string; }
 export interface ChatResult { reply: string; concept: Concept; }
+
+// ---------- 故事 DNA / 本书基因(创作坐标) ----------
+/** 概念之上的「定味道」锚:治「选了青春校园却生成觉醒异能」的题材漂移。全字段可空,渐进捏成。
+ *  与后端 app/schemas/dna.py 对齐;驱动生成强位注入 + 双向治漂门(越线自动毙+重生)。 */
+export interface StoryDNA {
+  comps: string;                 // 参照系:像《X》/《X》遇上《Y》(只指路,不搬内容)
+  mode: string;                  // 题材模式:"" 未定 | realistic 现实向 | fantasy 幻想向 | mixed 混合向
+  axes: Record<string, string>;  // 味道轴:轴 key → 位置标签(如 pace:"慢")
+  must: string[];                // 必须有的看点(兼作硬门 opt_in:明确要=不算越界)
+  must_not: string[];            // 绝不能有的元素(禁忌,喂给硬门)
+  vibe: string;                  // 自备 vibe 范本(只描述味道,非原作节选)
+  taste_key: string;             // 选中的味道锚胶囊 key(见后端 dna_capsules)
+  capsule: string;               // 蒸馏出的『本书基因』整块文本
+}
+export const EMPTY_DNA: StoryDNA = {
+  comps: "", mode: "", axes: {}, must: [], must_not: [], vibe: "", taste_key: "", capsule: "",
+};
+/** DNA 是否所有维度都没表态(与后端 StoryDNA.is_empty 同口径) */
+export function dnaIsEmpty(d: StoryDNA | null | undefined): boolean {
+  if (!d) return true;
+  return !(
+    d.comps?.trim() || d.mode?.trim() || d.vibe?.trim() || d.taste_key?.trim() || d.capsule?.trim() ||
+    Object.values(d.axes || {}).some((v) => (v ?? "").trim()) ||
+    (d.must || []).some((x) => (x ?? "").trim()) ||
+    (d.must_not || []).some((x) => (x ?? "").trim())
+  );
+}
+/** 味道锚胶囊选项(GET /inspire/dna/options 的 capsules 项;不含 sample 正文) */
+export interface DnaCapsuleChoice {
+  key: string; name: string; comps_hint: string; mode: string;
+  directive: string; axes: Record<string, string>;
+}
+/** 坐标卡静态选项:味道锚胶囊 / 题材模式 / 味道轴 / 各模式会拦的套路(与硬门同口径) */
+export interface DnaOptions {
+  capsules: DnaCapsuleChoice[];
+  modes: { key: string; label: string }[];
+  axes: { key: string; label: string; left: string; right: string }[];
+  forbidden_by_mode: Record<string, string[]>;
+}
+/** 品味镜:把坐标卡蒸馏成一段人话 + 矛盾检测 + 该模式会拦的套路(生成前先照镜子) */
+export interface MirrorResult {
+  basis: string; reflection: string; contradictions: string[]; forbidden: string[];
+}
 /** 投稿包:对齐知乎等平台投稿表单字段(标题/频道/时空/标签/金句/简介/封面提示词) */
 export interface SubmissionPackage {
   titles: string[];
@@ -549,10 +597,10 @@ export const api = {
       "GET", `/api/jobs${all ? "?all=true" : ""}`),
 
   // ---- 异步 job 版长任务(返回 job_id,配合 pollJob/任务中心) ----
-  inspireAsync: (spark: string, tendency: Tendency, count = 4) =>
-    req<{ job_id: string }>("POST", "/api/inspire/async", { spark, tendency, count }),
-  refineConceptAsync: (concept: Concept, directive: string, tendency: Tendency = {}) =>
-    req<{ job_id: string }>("POST", "/api/inspire/refine-async", { concept, directive, tendency }),
+  inspireAsync: (spark: string, tendency: Tendency, count = 4, dna: StoryDNA | null = null) =>
+    req<{ job_id: string }>("POST", "/api/inspire/async", { spark, tendency, count, dna }),
+  refineConceptAsync: (concept: Concept, directive: string, tendency: Tendency = {}, dna: StoryDNA | null = null) =>
+    req<{ job_id: string }>("POST", "/api/inspire/refine-async", { concept, directive, tendency, dna }),
   polishChapterAsync: (pid: number, n: number, tendency: Tendency, directive = "") =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/polish/chapter/${n}/async`, { tendency, directive }),
   polishSegmentAsync: (pid: number, text: string, tendency: Tendency) =>
@@ -570,12 +618,17 @@ export const api = {
   generateAnthemAsync: (pid: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/anthem/generate`, {}),
 
-  inspire: (spark: string, tendency: Tendency, count = 4) =>
-    req<{ ideas: Concept[] }>("POST", "/api/inspire", { spark, tendency, count }, LLM_TIMEOUT),
-  refineConcept: (concept: Concept, directive: string, tendency: Tendency = {}) =>
-    req<RefineResult>("POST", "/api/inspire/refine", { concept, directive, tendency }, LLM_TIMEOUT),
-  chatConcept: (messages: ChatTurn[], concept: Concept | null, tendency: Tendency = {}) =>
-    req<ChatResult>("POST", "/api/inspire/chat", { messages, concept, tendency }, LLM_TIMEOUT),
+  inspire: (spark: string, tendency: Tendency, count = 4, dna: StoryDNA | null = null) =>
+    req<{ ideas: Concept[] }>("POST", "/api/inspire", { spark, tendency, count, dna }, LLM_TIMEOUT),
+  refineConcept: (concept: Concept, directive: string, tendency: Tendency = {}, dna: StoryDNA | null = null) =>
+    req<RefineResult>("POST", "/api/inspire/refine", { concept, directive, tendency, dna }, LLM_TIMEOUT),
+  chatConcept: (messages: ChatTurn[], concept: Concept | null, tendency: Tendency = {}, dna: StoryDNA | null = null) =>
+    req<ChatResult>("POST", "/api/inspire/chat", { messages, concept, tendency, dna }, LLM_TIMEOUT),
+  // 坐标卡静态选项(味道锚/模式/味道轴/各模式禁忌)
+  dnaOptions: () => req<DnaOptions>("GET", "/api/inspire/dna/options"),
+  // 品味镜:坐标卡 → 一段人话复述 + 矛盾检测 + 会拦的套路(生成前照镜子,先核对再烧 token)
+  dnaMirror: (dna: StoryDNA, spark = "") =>
+    req<MirrorResult>("POST", "/api/inspire/dna/mirror", { dna, spark }, 60000),
   generateSynopsis: (id: number) =>
     req<{ synopsis: string }>("POST", `/api/projects/${id}/synopsis`, {}, LLM_TIMEOUT),
   patchArchitecture: (id: number, patch: Partial<Architecture>) =>

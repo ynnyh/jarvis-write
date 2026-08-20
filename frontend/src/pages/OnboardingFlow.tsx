@@ -27,7 +27,7 @@ export default function OnboardingFlow() {
     concept, tendency, sparkText, allGenreChips, shownSuggests,
     // 各屏 state
     spark, entry, genreDim, pickedGenreCard, chatInput, busy,
-    ideas, ideaSig, customOpen, customConcept,
+    ideas, comparison, ideaSig, customOpen, customConcept,
     inferBusy, customGenre,
     titleIdeas, titleSig, titleBusy, titleInput,
     chapters, words, advOpen,
@@ -249,6 +249,12 @@ export default function OnboardingFlow() {
                             <button className="btn-sm" onClick={() => setIdeaSig(curIdeaSig)}>仍用这批</button>
                           </div>
                         )}
+                        {comparison && ideas && ideas.length > 0 && (
+                          <div className="card card-info mt-2">
+                            <b>这几个方案怎么选</b>
+                            <div className="card-desc mt-1">{comparison}</div>
+                          </div>
+                        )}
                         <CandidateCards
                           items={ideas} skeletonCount={4} keyOf={conceptKey}
                           layoutIdPrefix="concept" pickedKey={pickedKey}
@@ -358,7 +364,7 @@ export default function OnboardingFlow() {
                   <div className="card">
                     <h2>想要什么样的阅读手感?</h2>
                     <div className="card-desc">
-                      节奏 / 结构 / 基调,可不选,AI 会均衡处理;进了工作台也能随时调。
+                      节奏 / 结构 / 基调,可不选,AI 会均衡处理;想叠加的剧情元素(暗恋、双向奔赴、逆袭…)也可在这里勾选。进了工作台也能随时调。
                     </div>
                     {genreDim ? (
                       <div className="mt-2"><ToneDims tendency={tendency} onSet={setDim} /></div>
