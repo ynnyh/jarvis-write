@@ -41,13 +41,16 @@ OUTLINE_EDITABLE_FIELDS = (
 
 # 动了这些字段 → 疑似 major,交 LLM 精判
 _PLOT_FIELDS = {
-    "title",
     "summary",
     "foreshadowing",
     "plot_twist_level",
     "characters_involved",
     "chapter_purpose",
 }
+
+# 纯展示性元数据:标题不进正文,改了也不需要重写正文
+# → 单独改这些字段不触发 major / 不标正文失配 / 不做下游影响分析
+_COSMETIC_FIELDS = {"title"}
 
 
 def outline_to_dict(o: Outline) -> dict[str, Any]:
@@ -67,8 +70,12 @@ def _persist_version(
     content_hash: str,
     change_type: str,
     change_summary: str,
+    mark_stale: bool = True,
 ) -> bool:
-    """落库:升版本 + 存快照 + 本章已有正文 → 失配标记。返回 own_chapter_stale。"""
+    """落库:升版本 + 存快照 + 本章已有正文 → 失配标记。返回 own_chapter_stale。
+
+    mark_stale=False:纯展示性改动(如只改标题)不影响正文,不标失配。
+    """
     outline.content_hash = content_hash
     outline.current_version += 1
     db.add(
@@ -91,7 +98,7 @@ def _persist_version(
         )
         .first()
     )
-    if ch:
+    if ch and mark_stale:
         ch.is_stale = True
         ch.status = "stale"
         own_stale = True
@@ -161,8 +168,12 @@ async def apply_outline_edit(
     changed = [f for f in OUTLINE_EDITABLE_FIELDS if old.get(f) != new.get(f)]
 
     # ---- 分级:规则粗筛 ----
+    # 只动了纯展示性字段(标题)→ 不影响正文:直接 minor,不跑精判、不标失配、不做影响分析
+    cosmetic_only = bool(changed) and set(changed) <= _COSMETIC_FIELDS
     suspect_major = bool(set(changed) & _PLOT_FIELDS)
     change_type, change_summary = "minor", f"修改了 {'、'.join(changed)}"
+    if cosmetic_only:
+        change_summary = "仅修改了标题(不影响正文)"
 
     # ---- LLM 精判(仅疑似 major 时) ----
     if suspect_major:
@@ -184,7 +195,10 @@ async def apply_outline_edit(
             logger.warning("改动精判失败,保守按 major 处理: %s", exc)
             change_type = "major"
 
-    own_stale = _persist_version(db, outline, new, new_hash, change_type, change_summary)
+    own_stale = _persist_version(
+        db, outline, new, new_hash, change_type, change_summary,
+        mark_stale=not cosmetic_only,
+    )
     logger.info(
         "大纲编辑: 第%d章 v%d [%s] %s",
         outline.chapter_number, outline.current_version, change_type, change_summary,

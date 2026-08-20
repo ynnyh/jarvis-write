@@ -27,6 +27,7 @@ from app.engines.cascade import (
 )
 from app.engines.common import chapter_architecture_brief
 from app.engines.outline_discuss import discuss_outline
+from app.engines.outline_retitle import suggest_chapter_titles
 from app.jobs import list_running, spawn_job
 from app.schemas.project import OutlineOut
 from app.schemas.tendency import Tendency
@@ -220,6 +221,40 @@ async def discuss(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return OutlineDiscussResponse(**result)
+
+
+# ---------- 章节标题润色(AI 换个更合适的标题)----------
+
+
+class RetitleRequest(BaseModel):
+    directive: str = ""
+
+
+class RetitleResponse(BaseModel):
+    titles: list[str]
+
+
+@router.post("/{chapter_number}/retitle", response_model=RetitleResponse)
+async def retitle(
+    project_id: int,
+    chapter_number: int,
+    req: RetitleRequest,
+    db: Session = Depends(get_db),
+):
+    """基于本章大纲生成若干候选标题(不落库)。作者选定后走 PUT 只改 title。"""
+    project = get_project_or_404(db, project_id)
+    outline = _outline(db, project_id, chapter_number)
+    try:
+        titles = await suggest_chapter_titles(
+            chapter_number=chapter_number,
+            architecture_brief=chapter_architecture_brief(project),
+            outline_block=_outline_block(outline),
+            current_title=outline.title,
+            directive=req.directive,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RetitleResponse(titles=titles)
 
 
 @router.post("/{chapter_number}/impact", response_model=ImpactReport)

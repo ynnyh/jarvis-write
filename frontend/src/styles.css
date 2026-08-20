@@ -2517,6 +2517,27 @@ html, body { max-width: 100%; overflow-x: hidden; }
 /* 章首蓝图卡:<details> 默认收起一行 */
 .blueprint-card summary { cursor: pointer; }
 
+/* 章节名称一键改名(章首,手动改 + 「让 AI 换个不夸张的」候选) */
+.title-edit { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; font-size: var(--fs-sm); }
+.title-edit-label { color: var(--text-2); }
+.title-edit-cur { font-weight: 600; }
+.title-edit-open {
+  flex-direction: column; align-items: stretch; gap: 8px;
+  padding: 10px 12px; border: 1px solid var(--line);
+  border-radius: var(--r-sm); background: var(--surface-2);
+}
+.title-edit-row { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.title-edit-input { flex: 1 1 200px; min-width: 0; }
+.title-edit-hint { flex: 1 1 auto; }
+.title-edit-err { margin: 0; }
+.title-edit-cands { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.title-cand {
+  height: var(--ctl-h-sm); padding: 0 12px; font-size: var(--fs-sm);
+  border-radius: 999px; border: 1px solid var(--brand-line);
+  background: var(--brand-weak); color: var(--brand); cursor: pointer;
+}
+.title-cand:hover:not(:disabled) { background: var(--brand); color: #fff; border-color: var(--brand); }
+
 /* 章尾下一章卡 */
 .next-chapter { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 

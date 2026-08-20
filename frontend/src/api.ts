@@ -668,6 +668,9 @@ export const api = {
   discussOutline: (pid: number, n: number, messages: { role: string; content: string }[]) =>
     req<{ reply: string; proposal: { new_title: string | null; new_summary: string; change_reason: string } | null }>(
       "POST", `/api/projects/${pid}/outlines/${n}/discuss`, { messages }, LLM_TIMEOUT),
+  // 章节标题润色:基于本章大纲让 AI 给几个候选标题(不落库),作者选定后走 editOutline 只改 title
+  retitleChapter: (pid: number, n: number, directive = "") =>
+    req<{ titles: string[] }>("POST", `/api/projects/${pid}/outlines/${n}/retitle`, { directive }, LLM_TIMEOUT),
 
   listChapters: (pid: number) => req<ChapterBrief[]>("GET", `/api/projects/${pid}/chapters`),
   getChapter: (pid: number, n: number) => req<ChapterDetail>("GET", `/api/projects/${pid}/chapters/${n}`),

@@ -180,3 +180,31 @@ OUTLINE_DISCUSS_DISTILL_PROMPT = """\
 严格按 JSON 输出(不要 markdown 围栏,不要解释):
 {{"new_title": "新标题或 null", "new_summary": "改写后的本章简述", "change_reason": "改动说明"}}
 """
+
+# =============== 6. 章节标题润色(生成候选,供作者挑选;不落库)===============
+# 作者觉得现有章节标题不合适(如太夸张 / 标题党),让 AI 基于本章大纲给几个候选。
+# 纯展示性改动:选定后走 editOutline 只改 title,不影响正文(见 differ._COSMETIC_FIELDS)。
+CHAPTER_RETITLE_PROMPT = """\
+你是小说编辑,为第{chapter_number}章重拟章节标题,给作者几个候选挑选。
+
+【小说架构简报】
+{architecture_brief}
+
+【本章大纲】
+{outline_block}
+
+【当前标题】
+{current_title}
+
+【作者的要求】
+{directive}
+
+要求:
+- 给出 {count} 个风格各异的候选标题,都要贴合本章大纲的实际内容,不能剧透关键反转或结局
+- 克制、准确、有文学质感;不做标题党,不堆砌形容词,不浮夸煽情,不用感叹号
+- 每个标题简洁(建议 4-12 字,最多 15 字),像正经出版长篇小说的目录
+- 优先满足作者的要求;不要与"当前标题"雷同
+
+严格按 JSON 输出(不要 markdown 围栏,不要解释):
+{{"titles": ["候选标题1", "候选标题2", "..."]}}
+"""

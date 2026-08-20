@@ -27,6 +27,7 @@ import ProofreadCard from "./write/ProofreadCard";
 import AiDock from "./write/AiDock";
 import PolishCompareCard from "./write/PolishCompareCard";
 import AnnotatedReviseCard from "./write/AnnotatedReviseCard";
+import ChapterTitleEdit from "./write/ChapterTitleEdit";
 import { useWritePanel, ACT_TITLE } from "./write/useWritePanel";
 
 interface Props {
@@ -240,6 +241,14 @@ export default function WritePanel({ pid, outlines }: Props) {
                   {currentBrief?.is_stale && <span className="badge err">大纲已变</span>}
                 </div>
               </div>
+              {currentOutline && (
+                <ChapterTitleEdit
+                  pid={pid}
+                  chapterNumber={currentOutline.chapter_number}
+                  title={currentOutline.title}
+                  onRenamed={() => { void reload(); }}
+                />
+              )}
               {pendingSync === current.chapter_number && (
                 <div className="sync-ask mb-2">
                   <span className="sync-ask-text">
@@ -292,6 +301,16 @@ export default function WritePanel({ pid, outlines }: Props) {
               <div className="muted mt-1">这章还没写。</div>
               {activeOutline && (
                 <div className="muted mt-1">{activeOutline.summary}</div>
+              )}
+              {activeOutline && (
+                <div className="mt-2">
+                  <ChapterTitleEdit
+                    pid={pid}
+                    chapterNumber={activeOutline.chapter_number}
+                    title={activeOutline.title}
+                    onRenamed={() => { void reload(); }}
+                  />
+                </div>
               )}
               <div className="mt-2">
                 <button className="primary" disabled={genBlocked}
