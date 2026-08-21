@@ -21,6 +21,7 @@ CONTRACT = {
     "in_story_time": "第三日 深夜",
     "location": "破庙内",
     "scene_continues": False,
+    "ambient": "破庙内一片死寂,连虫鸣鸟叫都没有,只有夜风穿过断梁的呜咽",
     "characters": [
         {
             "name": "沈墨",
@@ -107,18 +108,21 @@ def test_validate_contract_normalizes():
     assert c["in_story_time"] == "第三日 深夜"
     assert c["location"] == "破庙内"
     assert c["scene_continues"] is False
+    assert c["ambient"] == "破庙内一片死寂,连虫鸣鸟叫都没有,只有夜风穿过断梁的呜咽"
     assert c["characters"][0]["doing"] == "刚入睡"
     assert c["time_jump_hint"] == "next_morning"
 
-    # 缺 time_jump_hint → "none";characters 非 list → 空
+    # 缺 time_jump_hint → "none";characters 非 list → 空;缺 ambient → None
     c2 = validate_contract({"location": "渡口", "characters": "沈墨"})
     assert c2["time_jump_hint"] == "none"
     assert c2["characters"] == []
+    assert c2["ambient"] is None
 
-    # 三项核心全空 → 无价值,视为失败
+    # 三项核心全空 → 无价值,视为失败(ambient 只是补充,单有环境不足以成契约)
     assert validate_contract({"characters": []}) is None
     assert validate_contract({}) is None
     assert validate_contract({"characters": [{"name": ""}]}) is None
+    assert validate_contract({"ambient": "下着瓢泼大雨"}) is None
 
 
 # ---------- 提取落库:成功 ----------
@@ -204,6 +208,10 @@ def test_load_handoff_block_injects_when_contract_fresh():
     assert "刚入睡" in block
     assert "庙外脚步声未查明" in block
     assert "next_morning" in block
+    # 环境氛围锚注入 + 反翻转提示(治"上一章无鸟、下一章被鸟叫醒"跨章穿帮)
+    assert "连虫鸣鸟叫都没有" in block
+    assert "章末环境氛围" in block
+    assert "别无缘由地翻转" in block
     # 文案须明确"开头衔接必须与之吻合"
     assert "必须与之吻合" in block
 
@@ -315,6 +323,7 @@ def test_generate_extracts_and_next_chapter_injects():
     assert "章末交接契约" in ch2_draft_prompt
     assert "刚入睡" in ch2_draft_prompt
     assert "第三日 深夜" in ch2_draft_prompt
+    assert "连虫鸣鸟叫都没有" in ch2_draft_prompt  # 环境氛围锚随契约注入下章
     assert "【最近章节结尾" in ch2_draft_prompt  # recent_tail 依然注入
 
     # 第 2 章自己也落了契约行(生成闭环)

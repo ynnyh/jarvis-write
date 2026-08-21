@@ -74,6 +74,7 @@ def validate_contract(data: dict) -> dict | None:
         "in_story_time": _s(data.get("in_story_time")),
         "location": _s(data.get("location")),
         "scene_continues": bool(data.get("scene_continues")),
+        "ambient": _s(data.get("ambient")),
         "characters": characters,
         "open_threads": [s for s in (_s(x) for x in (threads or [])[:_MAX_OPEN_THREADS]) if s]
         if isinstance(threads, list) else [],
@@ -88,7 +89,8 @@ def format_contract_block(contract: dict, prev_chapter_number: int) -> str:
     """把上一章契约渲染成草稿 prompt 注入文本块。"""
     lines = [
         f"【上一章(第{prev_chapter_number}章)章末交接契约——上一章结尾的结构化状态记录。"
-        "本章开头衔接必须与之吻合:时间、地点、在场人物的身体/情绪/正在做的事不得与之冲突;"
+        "本章开头衔接必须与之吻合:时间、地点、环境氛围(天气/光线/声音)、"
+        "在场人物的身体/情绪/正在做的事不得与之冲突;"
         "如需时间跳跃,开头要自然交代,别让读者觉得状态被凭空重置】"
     ]
     if t := contract.get("in_story_time"):
@@ -99,6 +101,12 @@ def format_contract_block(contract: dict, prev_chapter_number: int) -> str:
         "- 场景延续:" + ("是(本章应紧接上一幕继续)" if contract.get("scene_continues")
                          else "否(可切换场景或时间)")
     )
+    if amb := contract.get("ambient"):
+        lines.append(
+            f"- 章末环境氛围:{amb}"
+            "(紧接同一场景/时段则天气·光线·声音须与此一致;确有时间或场景跳转可自然过渡,"
+            "但别无缘由地翻转——如上一章“没有一只鸟雀”,本章却“被鸟叫吵醒”)"
+        )
     characters = contract.get("characters") or []
     if characters:
         lines.append("- 人物即时状态:")
