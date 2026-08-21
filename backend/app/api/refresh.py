@@ -223,12 +223,37 @@ async def heavy_refresh_async(
             session = SessionLocal()
             try:
                 project = session.get(Project, project_id)
-                await generate_chapter(
+                chapter, issues, *_ = await generate_chapter(
                     session, project, n,
                     progress=lambda s, _n=n, _i=i: progress(f"[{_i}/{total}] 第 {_n} 章:{s}"),
                     revision=directive or None,
                 )
                 session.commit()
+                # 一致性门禁拦截(quarantined):generate_chapter 不抛异常、正常返回,
+                # 但该章未走章后抽取/摘要,与"失败即停"同语义(后续章会踩旧摘要重写)。
+                # 必须停下并如实上报——绝不静默计入 rewritten(那正是"假成功"坑),
+                # 交前端引导去写作页同一张卡处理(按矛盾重写 / 改设定 / 忽略放行)。
+                if chapter.status == "quarantined":
+                    blk = [x for x in issues if x.get("severity") == "blocker"]
+                    desc = ";".join(
+                        (b.get("description") or "")[:60] for b in blk[:3]
+                    ) or "详见该章审核报告"
+                    logger.warning("重度重写:第 %d 章重写后仍被门禁拦截,停止", n)
+                    return {
+                        "rewritten": done,
+                        "total": total,
+                        "stopped_at": n,
+                        # quarantine 分支:该章正文已生成(只是被拦),用户会去写作页就地处理它
+                        #(按矛盾重写 / 改设定 / 忽略放行),故剩余从下一章 nums[i:] 起——不把本章
+                        # 塞回去重跑,否则"忽略放行后续跑又被拦"会成死循环(异常分支才含当前章重试)。
+                        "remaining": nums[i:],
+                        "quarantined": True,
+                        "error": (
+                            f"第 {n} 章重写后与设定有硬矛盾,被拦下了:{desc}。"
+                            f"该章未进圣经/摘要,已停止;去写作页第 {n} 章按提示处理"
+                            f"(让 AI 按矛盾重写 / 去改设定 / 或忽略放行),再回来续跑剩余章。"
+                        ),
+                    }
                 done.append(n)
             except Exception as exc:  # noqa: BLE001 — 断链即停(后续章依赖本章摘要)
                 session.rollback()
@@ -239,6 +264,7 @@ async def heavy_refresh_async(
                     "total": total,
                     "stopped_at": n,
                     "remaining": nums[i - 1:],
+                    "quarantined": False,
                     "error": f"第 {n} 章重写失败:{normalize_job_error(exc)[:300]}",
                 }
             finally:
@@ -248,6 +274,7 @@ async def heavy_refresh_async(
             "total": total,
             "stopped_at": None,
             "remaining": [],
+            "quarantined": False,
             "error": None,
         }
 

@@ -6,8 +6,9 @@
 //     的一句话只用「校对 + 冲突」两项组合,这是相对 §5 示例的一处有意取舍。
 // 三态:
 //   review  → 「第 N 章写好了——{校对结论},和设定没冲突。」+ 有小错时[查看并修复]+ [通过审核]。
-//   blocked → 「第 N 章写好了,但有 X 处和设定冲突,等你拍板。」+ [查看审核报告](展开 GenResultCard
-//     historical,按建议修订在卡内)+ [放行](confirmAndReleaseGate 已含确认);另有校对小错时给校对子行。
+//   blocked → 统一处理卡 GateResolve(一句话说清最要紧的那条硬矛盾 + 三个人话按钮:让 AI 按这条重写 /
+//     去改设定 / 就这样忽略继续;另有「改好设定了?重新检查」)+ 折叠的[查看完整审核报告](GenResultCard
+//     historical);另有校对小错时给校对子行。放行/重检/按建议修订等全部收进 GateResolve,不再散落。
 //   is_stale → 徽标「大纲已变,建议重写」+ [和 AI 梳理](打开 AI 窄栏 revise 通道)。
 // 无事不打扰:approved 且无 stale 时不渲染交稿单。校对「按建议修复」→ 复用 ProofreadCard(act=proofread)
 // 的逐条 diff + 修复流(§5:把校对问题带进 diff 验收流)。
@@ -20,6 +21,7 @@ import {
 } from "../../api";
 import { qk } from "../../hooks/queries";
 import { confirmDialog } from "../../ui/ConfirmDialog";
+import GateResolve from "../chapters/GateResolve";
 import GenResultCard from "../chapters/GenResultCard";
 import type { ChapterStage } from "./chapterStage";
 
@@ -34,7 +36,6 @@ interface Props {
   genBlocked: boolean;
   genHint: string;
   onApprove: () => Promise<void> | void;
-  onRelease: () => Promise<void> | void;
   onAct: (act: Act) => void;
   onVersions: () => void;
   // 审核报告卡内操作(修订/放行)后:父级刷新章节列表与正文缓存
@@ -43,7 +44,7 @@ interface Props {
 
 export default function ChapterStatusCard({
   pid, stage, currentBrief, current, genBlocked, genHint,
-  onApprove, onRelease, onAct, onVersions, onChanged,
+  onApprove, onAct, onVersions, onChanged,
 }: Props) {
   const qc = useQueryClient();
   const n = current.chapter_number;
@@ -51,10 +52,8 @@ export default function ChapterStatusCard({
   const [reviewSnap, setReviewSnap] = useState<ChapterReview | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [approving, setApproving] = useState(false);
-  const [releasing, setReleasing] = useState(false);
-  // 交稿单自检信号(现有信号,不新增 job):校对快照 + blocked 时的冲突条数
+  // 交稿单自检信号(现有信号,不新增 job):校对快照(blocked 冲突条数由 GateResolve 自取)
   const [proof, setProof] = useState<ProofreadSnapshot | null>(null);
-  const [conflictCount, setConflictCount] = useState(0);
   const stale = !!currentBrief?.is_stale;
 
   useEffect(() => {
@@ -78,17 +77,8 @@ export default function ChapterStatusCard({
     return () => { cancelled = true; };
   }, [stage, pid, n]);
 
-  // blocked 冲突条数(现有信号,GET /issues 中仍 open 的条目;拉取失败回落 0 → 文案不带数字)
-  useEffect(() => {
-    if (stage !== "blocked") { setConflictCount(0); return; }
-    let cancelled = false;
-    api.listChapterIssues(pid, n)
-      .then((issues) => {
-        if (!cancelled) setConflictCount(issues.filter((i) => i.status === "open").length);
-      })
-      .catch(() => { if (!cancelled) setConflictCount(0); });
-    return () => { cancelled = true; };
-  }, [stage, pid, n]);
+  // blocked 冲突详情与三个处理动作(放行/重检/按建议重写)统一收进 GateResolve 自取自管,
+  // 此处不再单算 conflictCount。
 
   // 历史模式合成生成响应(沿用原参考抽屉的 reviewReportResult 合成逻辑):
   // 门禁态由 status 推导,问题清单由卡片内自取,主审分用快照
@@ -120,11 +110,7 @@ export default function ChapterStatusCard({
     try { await onApprove(); } finally { setApproving(false); }
   }
 
-  // 「放行」走父级 releaseChapter(confirmAndReleaseGate 已含确认)
-  async function releaseWithBusy() {
-    setReleasing(true);
-    try { await onRelease(); } finally { setReleasing(false); }
-  }
+  // 「放行/重检/按这条重写」统一收进 GateResolve(见下 blocked 分支),本组件不再单独持有放行态
 
   // 校对一句话结论:没问题 / 已修掉 M 处 / 还有 N 处待修(proof 为 null=正文改过,不出结论)
   const proofLine = proof
@@ -144,19 +130,15 @@ export default function ChapterStatusCard({
           + (stage === "blocked" ? " card-warn" : stage === "review" ? " card-info" : "")}>
           {stage === "blocked" && (
             <>
-              <div className="chapter-status-line">
-                <b className="grow">
-                  第 {n} 章写好了,但{conflictCount > 0 ? `有 ${conflictCount} 处` : ""}和设定冲突,等你拍板。
-                </b>
-                <button className="btn-sm" onClick={() => setReportOpen((v) => !v)}>
-                  {reportOpen ? "收起审核报告" : "查看审核报告"}
-                </button>
-                <button className="danger btn-sm" disabled={releasing || genBlocked}
-                  title={genBlocked ? genHint : "忽略全部致命矛盾,补走圣经/摘要链路,状态回「待审」"}
-                  onClick={releaseWithBusy}>
-                  {releasing && <span className="spin spin-sm" />}放行
-                </button>
-              </div>
+              {/* 统一处理卡:一句话说清最要紧的硬矛盾 + 三个人话按钮(自取 issues,措辞零漂移) */}
+              <GateResolve
+                pid={pid}
+                n={n}
+                genBlocked={genBlocked}
+                genHint={genHint}
+                onChanged={onChanged}
+                onRewriteFallback={() => onAct("revise")}
+              />
               {proofHasIssues && (
                 <div className="chapter-status-line chapter-status-sub">
                   <span className="muted grow">{proofLine}</span>
@@ -164,6 +146,12 @@ export default function ChapterStatusCard({
                     onClick={() => onAct("proofread")}>查看并修复</button>
                 </div>
               )}
+              {/* 完整审核报告收进折叠:默认只看 GateResolve;要看五维评分/全部问题清单再展开 */}
+              <div className="chapter-status-sub">
+                <button className="linkish" onClick={() => setReportOpen((v) => !v)}>
+                  {reportOpen ? "收起完整审核报告" : "查看完整审核报告(五维评分 / 全部问题清单)"}
+                </button>
+              </div>
               {reportOpen && reviewReportResult && (
                 <GenResultCard
                   pid={pid}

@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_project_or_404
-from app.db.models import Chapter, Project
+from app.db.models import Chapter, ChapterIssue, Project
 from app.db.session import SessionLocal, get_db
 from app.jobs import create_job, fail_job, finish_job, fire_and_track, list_running, normalize_job_error, update_stage
 
@@ -98,8 +98,12 @@ async def contract_reextract_async(
 
     场景:契约提取错了会导致本章门禁误报(对照的是上一章契约)或下一章
     衔接错位(注入的是本章契约)。重提两章契约后按当前正文重跑一致性检查,
-    gate 来源问题清单幂等重建。只更新清单,不改章节状态:quarantined 章
-    重检干净后仍需「放行」补走圣经/摘要链路(或重写)。
+    gate 来源问题清单幂等重建。
+
+    自动放行:若本章原为 quarantined,重检后已无致命矛盾(常见于用户去故事
+    圣经改掉了冲突设定),直接补走此前被跳过的章后链路(圣经抽取 / 文风备忘 /
+    下游摘要)并回到「待审」,免去用户再单独理解「放行」。结果带 auto_released
+    供前端提示。仍有致命矛盾则只更新清单、维持 quarantined(交前端引导继续处理)。
     """
     get_project_or_404(db, project_id)
     ch = _get_chapter_or_404(db, project_id, chapter_number)
@@ -121,12 +125,18 @@ async def contract_reextract_async(
     job_id = create_job(f"contract-{project_id}-{chapter_number}")
 
     async def runner() -> None:
+        from app.engines.common import get_outline
         from app.engines.consistency.checker import (
             blockers_of,
             check_chapter,
             persist_issues,
         )
-        from app.engines.pipeline.chapter import _rolling_summary
+        from app.engines.pipeline.chapter import (
+            _rolling_summary,
+            apply_chapter_tail,
+            rebuild_summaries_after,
+            update_style_memo,
+        )
         from app.engines.pipeline.handoff import (
             extract_handoff_contract,
             handoff_payload,
@@ -176,12 +186,40 @@ async def contract_reextract_async(
             )
             persist_issues(session, ch2, issues, source="gate", text=content)
             session.commit()
+            # 重检干净(0 致命矛盾)且原本被拦截 → 自动补走被跳过的章后链路并回到「待审」,
+            # 免去用户再单独理解「放行 / 契约重提」。open 的非致命问题一并转 ignored
+            # (与 gate-release 同语义)。任一步抛错 → 外层 except 整体回滚、维持 quarantined。
+            blocker_list = blockers_of(issues)
+            auto_released = False
+            if not blocker_list and ch2.status == "quarantined":
+                project = session.get(Project, project_id)
+                session.query(ChapterIssue).filter(
+                    ChapterIssue.chapter_id == ch2.id,
+                    ChapterIssue.status == "open",
+                ).update({"status": "ignored"}, synchronize_session=False)
+                ch2.status = "pending_review"
+                session.commit()
+                update_stage(job_id, "设定已无冲突,自动补走圣经/摘要(自动放行)")
+                outline = get_outline(session, project_id, chapter_number)
+                await apply_chapter_tail(
+                    session, project, ch2, chapter_number, content,
+                    outline.title if outline else "",
+                    report=lambda s: update_stage(job_id, f"自动放行 {s}"),
+                )
+                await update_style_memo(session, project, chapter_number, content)
+                await rebuild_summaries_after(
+                    session, project, chapter_number,
+                    progress=lambda s: update_stage(job_id, f"自动放行 {s}"),
+                )
+                session.commit()
+                auto_released = True
             handoff = handoff_payload(session, ch2)
             finish_job(job_id, {
                 "contract_status": handoff["status"],
                 "contract_error": handoff["error"],
                 "issues": len(issues),
-                "blockers": len(blockers_of(issues)),
+                "blockers": len(blocker_list),
+                "auto_released": auto_released,
             })
         except Exception as exc:  # noqa: BLE001 — 任务失败进 job 状态
             session.rollback()

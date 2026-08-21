@@ -911,6 +911,15 @@ button.head { height: auto; margin-left: 0; padding: 0; border: 0; background: n
 
 /* ---------- 章节审核面板(GenResultCard):门禁横幅与可操作问题清单 ---------- */
 .gate-banner { font-size: var(--fs-sm); }
+/* 「章被拦了怎么办」统一处理卡(GateResolve):章首交稿单 / 生成结果卡 / 翻新命中拦截三处复用。
+   quarantine 属硬矛盾,用 err 强调色;卡体常嵌在 card-warn / gate-banner 内,故只加左强调边不铺底。 */
+.gate-resolve { border-left: 3px solid var(--err-line); padding: 2px 0 2px 10px; }
+.gate-resolve-head { font-weight: 600; color: var(--err); font-size: var(--fs-sm); }
+.gate-resolve-what { margin-top: 4px; font-size: var(--fs-md); line-height: 1.6; }
+.gate-resolve-sug { margin-top: 2px; font-size: var(--fs-sm); }
+.gate-resolve-q { margin-top: 8px; font-size: var(--fs-sm); color: var(--text-2); }
+.gate-resolve-actions { display: flex; gap: var(--sp-1); margin-top: 6px; flex-wrap: wrap; }
+.gate-resolve-recheck { display: inline-block; margin-top: 8px; font-size: var(--fs-sm); }
 .issue-head { display: flex; align-items: baseline; gap: var(--sp-1); flex-wrap: wrap; }
 .issue-ev { margin-top: 4px; font-size: var(--fs-xs); }
 .issue-ev summary { cursor: pointer; color: var(--text-2); }

@@ -810,7 +810,8 @@ export const api = {
   // 一致性问题清单(docs/08 §5.7):open/resolved/ignored 各状态,最新在前
   listChapterIssues: (pid: number, n: number) =>
     req<ChapterIssue[]>("GET", `/api/projects/${pid}/chapters/${n}/issues`),
-  // 契约有误一键重提:重提上一章+本章契约并重检本章门禁(gate 清单重建)
+  // 「重新检查」(GateResolve 用;原「契约重提」):重提上一章+本章契约并重检本章门禁(gate 清单重建);
+  // 若本章原为 quarantined 且重检后无 blocker,后端自动放行补圣经/摘要,job 结果带 auto_released:true
   reextractContract: (pid: number, n: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/chapters/${n}/contract-reextract-async`),
   // 单条问题状态流转:open → resolved(已人工改完)/ ignored(确认忽略)

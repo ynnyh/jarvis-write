@@ -1,5 +1,8 @@
 // 生成结果卡片(章节审核面板):字数/AI味、门禁状态、五维审校分、
-// 写前提醒(preflight)与可操作问题清单(按建议修订/人工解决/忽略)
+// 写前提醒(preflight)与可操作问题清单(按建议修订/人工解决/忽略)。
+// 门禁拦截时(仅刚生成完的非历史卡)顶部出统一处理卡 GateResolve(说人话三选一:让 AI 按这条
+// 重写 / 去改设定 / 就这样忽略继续 + 重新检查);历史模式由章首 ChapterStatusCard 的 GateResolve
+// 承接,这里只做完整报告明细,不重复出卡。
 import { useCallback, useEffect, useState } from "react";
 import {
   api, ChapterIssue, flavorTitle, GenerateChapterResponse,
@@ -8,7 +11,7 @@ import { errMsg } from "../../pollJob";
 import { dispatchAction } from "../../ui/actions";
 import { useJob } from "../../ui/useJob";
 import { toast } from "../../ui/Toaster";
-import { confirmAndReleaseGate } from "./releaseGate";
+import GateResolve from "./GateResolve";
 
 // 审校五维分中文标签;旧快照无 continuity 键,Object.entries 遍历天然不渲染该行
 const SCORE_LABEL: Record<string, string> = {
@@ -50,11 +53,8 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, onClo
   // 问题清单:挂载后按章拉取(与生成响应里的 consistency_issues 互补,这份可操作)
   const [issues, setIssues] = useState<ChapterIssue[] | null>(null);
   const [issuesErr, setIssuesErr] = useState("");
-  // 单条问题操作进行中(禁用该条按钮);门禁放行进行中
+  // 单条问题操作进行中(禁用该条按钮)
   const [busyIssue, setBusyIssue] = useState<number | null>(null);
-  const [gateBusy, setGateBusy] = useState(false);
-  // 契约重提进行中(docs/08 §8:契约错了会导致门禁误报/下章衔接错位)
-  const [contractBusy, setContractBusy] = useState(false);
 
   const reloadIssues = useCallback(async () => {
     try {
@@ -110,59 +110,9 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, onClo
     }
   }
 
-  // quarantined 放行:确认忽略全部 blocker → 异步补走圣经/摘要链路,状态回 pending_review
-  // (确认+调用逻辑与 WritePanel.releaseChapter 共用 ./releaseGate)
-  async function releaseGate() {
-    setGateBusy(true);
-    try {
-      const released = await confirmAndReleaseGate({
-        pid, n, blockerCount: result.gate?.blockers?.length ?? 0, run,
-      });
-      if (released) {
-        await reloadIssues();
-        onChanged();
-      }
-    } finally {
-      setGateBusy(false);
-    }
-  }
-
-  // 契约重提:按当前正文重提上一章+本章契约,并重检本章门禁(gate 清单重建)。
-  // quarantined 章重检干净后状态不变,仍需放行(后端语义,结果里只报数字)。
-  async function reextractContract() {
-    setContractBusy(true);
-    try {
-      const res = await run<{
-        contract_status: string; contract_error?: string;
-        issues: number; blockers: number;
-      }>(
-        () => api.reextractContract(pid, n),
-        { kind: `contract-${pid}-${n}` },
-      );
-      if (res) {
-        if (res.contract_status !== "ok") {
-          toast.err("本章契约提取失败", res.contract_error || "已留痕,可稍后重试");
-        } else if (res.blockers > 0) {
-          toast.info("契约已重提,门禁重检仍有硬矛盾",
-            `共 ${res.issues} 个问题(${res.blockers} 个致命),见下方清单`);
-        } else {
-          toast.ok("契约已重提,门禁重检通过",
-            res.issues ? `仍有 ${res.issues} 个非致命问题` : "未发现一致性问题");
-        }
-        await reloadIssues();
-        onChanged();
-      }
-    } catch (e) {
-      toast.err("契约重提失败", errMsg(e));
-    } finally {
-      setContractBusy(false);
-    }
-  }
-
   const gate = result.gate;
   // 历史模式无当次 gate 数据:按章节 status 推导拦截态(blocker 明细在下方问题清单里)
   const quarantined = gate?.status === "quarantined" || result.status === "quarantined";
-  const blockerCount = gate?.blockers?.length ?? 0;
   const warnings = result.preflight?.warnings ?? [];
   const openIssues = (issues ?? []).filter((i) => i.status === "open");
   const doneIssues = (issues ?? []).filter((i) => i.status !== "open");
@@ -194,21 +144,18 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, onClo
         </>
       )}
 
-      {quarantined && (
-        <div className="notice notice-err gate-banner mt-2">
-          <b>门禁拦截:{blockerCount ? `${blockerCount} 个` : "存在"}致命矛盾,本章未进圣经/摘要</b>
-          <div className="mt-1">
-            正文已保存,状态为「被拦截」。建议先按下方问题清单修订或重写;
-            确认矛盾可接受时可放行(忽略全部),放行后进入「待审」。
-          </div>
-          <div className="issue-actions">
-            <button className="danger btn-sm" disabled={gateBusy || genBlocked}
-              title={genBlocked ? genHint : "忽略全部致命矛盾,补走圣经/摘要链路,状态回「待审」"}
-              onClick={releaseGate}>
-              {gateBusy && <span className="spin spin-sm" />}放行(忽略全部)
-            </button>
-            <button className="btn-sm" disabled={gateBusy} onClick={onRewrite}>去重写本章</button>
-          </div>
+      {/* 门禁拦截(仅刚生成完的非历史卡):顶部出统一处理卡,说人话三选一。
+          历史模式由章首 ChapterStatusCard 的 GateResolve 承接,这里不重复出卡。 */}
+      {quarantined && !historical && (
+        <div className="gate-banner mt-2">
+          <GateResolve
+            pid={pid}
+            n={n}
+            genBlocked={genBlocked}
+            genHint={genHint}
+            onChanged={() => { reloadIssues(); onChanged(); }}
+            onRewriteFallback={onRewrite}
+          />
         </div>
       )}
 
@@ -242,12 +189,6 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, onClo
 
       <div className="mt-2">
         <b>问题清单</b>
-        {" "}
-        <button className="btn-sm" disabled={contractBusy}
-          title="契约提取错了会导致本章门禁误报(对照上章契约)或下章衔接错位(注入本章契约)。点此按当前正文重提两章契约并重检本章门禁"
-          onClick={reextractContract}>
-          {contractBusy && <span className="spin spin-sm" />}重新提取契约
-        </button>
         {issues === null && !issuesErr && (
           <span className="muted"> 加载中…</span>
         )}

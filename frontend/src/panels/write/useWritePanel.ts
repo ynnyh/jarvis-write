@@ -17,7 +17,6 @@ import { useBreakpoint } from "../../hooks/useBreakpoint";
 import { AppAction, registerActionHandler } from "../../ui/actions";
 import { toast } from "../../ui/Toaster";
 import { confirmDialog } from "../../ui/ConfirmDialog";
-import { confirmAndReleaseGate } from "../chapters/releaseGate";
 import { DockMode, DockPrefill } from "./AiDock";
 import { Annotation } from "./paraEdit";
 import { deriveStage } from "./chapterStage";
@@ -26,7 +25,6 @@ import { useReader } from "./useReader";
 import { useChapterVersions } from "./useChapterVersions";
 import { useConsistencySync } from "./useConsistencySync";
 import { useChapterGeneration } from "./useChapterGeneration";
-import { useJob } from "../../ui/useJob";
 
 interface UseWritePanelArgs {
   pid: number; outlines: Outline[];
@@ -47,8 +45,6 @@ export const ACT_TITLE: Record<Act, string> = {
 export function useWritePanel({ pid, outlines }: UseWritePanelArgs) {
   const invalidateProject = useInvalidateProject(pid);
   const nav = useNavigate();
-  // 放行/按建议修订等异步长任务的统一入口(进全局任务中心,本地轮询拿结果)
-  const { run } = useJob();
   // 章节列表走 React Query(与父级顶栏统计同一缓存,消除双真相);reload 即失效缓存重拉。
   const chaptersQuery = useChapters(pid);
   const chapters = chaptersQuery.data ?? EMPTY_CHAPTERS;
@@ -144,16 +140,6 @@ export function useWritePanel({ pid, outlines }: UseWritePanelArgs) {
       await reload();
     } catch (e) {
       toast.err("通过审核失败", errMsg(e));
-    }
-  }
-
-  // quarantined 放行(状态卡[放行]按钮;审核报告卡内也有一条,见 GenResultCard):
-  // 确认+调用逻辑在 chapters/releaseGate 共用,完成后刷新列表与打开的正文
-  async function releaseChapter(n: number) {
-    const released = await confirmAndReleaseGate({ pid, n, run });
-    if (released) {
-      await reload();
-      qc.invalidateQueries({ queryKey: qk.chapter(pid, n) });
     }
   }
 
@@ -313,8 +299,8 @@ export function useWritePanel({ pid, outlines }: UseWritePanelArgs) {
     annotations, setAnnotations,
     reviseResult, setReviseResult,
     proseDirtyRef,
-    // 审核 / 放行
-    approve, releaseChapter,
+    // 审核(放行已下沉到 ChapterStatusCard 的 GateResolve,不再从壳导出)
+    approve,
     // useConsistencySync
     syncJobs, pendingSync, setPendingSync, triggerSync,
     // useChapterVersions

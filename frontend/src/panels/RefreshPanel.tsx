@@ -1,6 +1,7 @@
 // 翻新:让已有书按新生成逻辑(节拍/文风备忘/去AI味)重构
 // 四件套:回填节拍 → 初始化文风备忘 → 轻度重润(锁情节) / 重度重写(重跑生成)
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api, ChapterBrief } from "../api";
 import { errMsg } from "../pollJob";
 import { useJob } from "../ui/useJob";
@@ -13,10 +14,13 @@ interface ChapterFailure { chapter: number; error?: string; }
 interface HeavyResult {
   rewritten: number[]; total: number; stopped_at: number | null;
   remaining: number[]; error: string | null;
+  // 重写后仍撞门禁被拦下(区别于上游报错):stopped_at 即被拦章号,引导去写作页统一处理卡处理
+  quarantined?: boolean;
 }
 
 export default function RefreshPanel({ pid }: Props) {
   const { run: runJob } = useJob();
+  const nav = useNavigate();
   const [chapters, setChapters] = useState<ChapterBrief[]>([]);
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState("");
@@ -32,6 +36,8 @@ export default function RefreshPanel({ pid }: Props) {
   // 失败后的一键补救:轻度重润/回填的失败章、重度重写的剩余章(进度后端已按章保存)
   const [lightFailed, setLightFailed] = useState<number[]>([]);
   const [heavyRemaining, setHeavyRemaining] = useState<number[]>([]);
+  // 重度重写命中门禁被拦下的章号(≠上游报错):引导跳写作页用统一处理卡(GateResolve)处理
+  const [heavyBlocked, setHeavyBlocked] = useState<number | null>(null);
 
   function loadChapters() {
     api.listChapters(pid)
@@ -153,7 +159,12 @@ export default function RefreshPanel({ pid }: Props) {
       () => api.refreshHeavy(pid, list, directive.trim()),
       (r) => {
         setHeavyRemaining(r.remaining || []);
-        if (r.error)
+        setHeavyBlocked(r.quarantined ? r.stopped_at : null);
+        if (r.quarantined && r.stopped_at)
+          // 被门禁拦下(非上游报错):正文已写但与设定有硬矛盾,去写作页用统一处理卡处理
+          toast.err(`第 ${r.stopped_at} 章重写后与设定撞了,被拦下`,
+            `已完成 ${r.rewritten.length}/${r.total} 章;点下方「去处理」按提示解决,再回来续跑剩余 ${r.remaining.length} 章`);
+        else if (r.error)
           toast.err(r.error,
             `已完成 ${r.rewritten.length}/${r.total} 章,进度已保存,可续跑剩余 ${r.remaining.length} 章`);
         else
@@ -288,9 +299,17 @@ export default function RefreshPanel({ pid }: Props) {
             与逐章生成互斥,按章号顺序串行。中途失败时已完成的章会保留,可续跑剩余章节。
           </div>
           <button className="btn-sm danger" disabled={!!busy}
-            onClick={() => { setHeavyRemaining([]); runHeavy(nums()); }}>
+            onClick={() => { setHeavyRemaining([]); setHeavyBlocked(null); runHeavy(nums()); }}>
             重度重写{picked.size ? `(${picked.size} 章)` : "(全书)"}
           </button>
+          {/* 被门禁拦下:一键跳写作页那一章,用统一处理卡(让 AI 按矛盾重写 / 去改设定 / 忽略继续) */}
+          {heavyBlocked !== null && !busy && (
+            <button className="btn-sm mt-2"
+              title={`第 ${heavyBlocked} 章重写后仍与设定有硬矛盾,未进圣经/摘要。去写作页按提示处理,再回来续跑剩余章`}
+              onClick={() => nav(`/project/${pid}/write?ch=${heavyBlocked}`)}>
+              去处理第 {heavyBlocked} 章的冲突 →
+            </button>
+          )}
           {heavyRemaining.length > 0 && !busy && (
             <button className="btn-sm danger mt-2"
               onClick={() => runHeavy(heavyRemaining)}>

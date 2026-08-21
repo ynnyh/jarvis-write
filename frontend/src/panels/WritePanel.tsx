@@ -53,8 +53,8 @@ export default function WritePanel({ pid, outlines }: Props) {
     annotations, setAnnotations,
     reviseResult, setReviseResult,
     proseDirtyRef,
-    // 审核 / 放行
-    approve, releaseChapter,
+    // 审核(放行已收进 ChapterStatusCard 内的 GateResolve,壳不再传 onRelease)
+    approve,
     // useConsistencySync
     syncJobs, pendingSync, setPendingSync, triggerSync,
     // useChapterVersions
@@ -220,7 +220,6 @@ export default function WritePanel({ pid, outlines }: Props) {
               genBlocked={genBlocked}
               genHint={genHint}
               onApprove={() => approve(current.chapter_number)}
-              onRelease={() => releaseChapter(current.chapter_number)}
               onAct={(a) => {
                 // P2:重写/整章优化由 AI 窄栏承接;校对/评分仍走 act= 动作卡
                 if (a === "revise") openDock({ mode: "revise" });
