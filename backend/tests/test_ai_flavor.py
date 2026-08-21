@@ -23,6 +23,13 @@ CLEAN_SAMPLE = (
     "他把衣领竖起来,走进雨里,身后的灯一盏一盏灭了。"
 )
 
+# 空洞比喻样文:用户举的"脑内涟漪 + 仿佛有人在远方呼唤"原句 + 无形的手变体
+HOLLOW_SAMPLE = (
+    "大脑里的那道涟漪还在,仿佛有人在很远的地方呼唤他的名字。"
+    "他忽然停住,仿佛有一只无形的手扼住了他的咽喉。"
+    "心底掀起一阵潮水,记忆里有个声音在低语。"
+)
+
 
 def test_ai_sample_scores_much_higher_than_clean():
     r_ai = ai_flavor_report(AI_SAMPLE)
@@ -58,6 +65,33 @@ def test_hits_detail_for_polish_loop():
     # 每条命中都带类别+原句+位置
     for h in r.hits:
         assert h.category and h.sentence and h.start >= 0
+
+
+# ---------- 空洞比喻堆砌:治用户举的"脑内涟漪/仿佛有人呼唤"式无锚点空镜 ----------
+def test_hollow_metaphor_escalated_above_isolated_connective():
+    r = ai_flavor_report(HOLLOW_SAMPLE)
+    cats = r.categories
+    # 高危共现落入独立的重罚类别(1.5),不再只按孤立"仿佛"的 0.6 计
+    assert "空洞比喻堆砌" in cats
+    assert cats["空洞比喻堆砌"]["weight"] == 1.5
+    assert cats["空洞比喻堆砌"]["weight"] > cats["比喻连接词癖"]["weight"]
+    # 用户原句的两种空镜都命中:脑内波动 + 梦呓远方召唤;无形的手变体也命中
+    labels = {h.phrase for h in r.hits if h.category == "空洞比喻堆砌"}
+    assert any("涟漪" in l or "潮水" in l for l in labels)
+    assert any("呼唤" in l for l in labels)
+    assert any("无形" in l for l in labels)
+    # 命中句原文进 hits,供去味重写定点改写
+    hit = next(h for h in r.hits if h.category == "空洞比喻堆砌")
+    assert "涟漪" in hit.sentence or "无形" in hit.sentence or "潮水" in hit.sentence
+
+
+def test_hollow_metaphor_no_false_positive_on_concrete_simile():
+    # 具象、有锚点的比喻不是空洞比喻,不该误伤(白描里的正常比喻)
+    concrete = "他的手像砂纸一样粗糙,攥着那张皱巴巴的车票。锅里的水开了,咕嘟咕嘟顶着盖子。"
+    r = ai_flavor_report(concrete)
+    assert "空洞比喻堆砌" not in r.categories
+    # 干净样文同样不误报
+    assert "空洞比喻堆砌" not in ai_flavor_report(CLEAN_SAMPLE).categories
 
 
 def test_statistical_metrics():
