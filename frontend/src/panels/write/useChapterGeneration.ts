@@ -20,7 +20,7 @@ interface Deps {
   reload: () => Promise<void>;
   setChapterNum: (n: number) => void;
   chapterNum: number | null; // 生成后自动选章的守卫读它(hook 内建 ref 防闭包过期)
-  openVersions: (n: number, auto?: boolean) => Promise<void>;
+  openVersions: (n: number, auto?: boolean) => Promise<boolean>;
   clearAct: () => void; // 带意见重生成时收起动作卡(壳传 () => setAct(null),hook 不依赖 Act 类型)
 }
 
@@ -65,8 +65,13 @@ export function useChapterGeneration(
       // 生成后自动选章(坏味道 #8):当前未选章或选的就是它时把 ch 写进 URL,
       // 消除"结果卡悬空 + 中栏请选择章节";用户中途切到别的章则不拽回
       if (chapterNumRef.current === null || chapterNumRef.current === n) setChapterNum(n);
-      // 重写完成:若有旧版快照,自动弹「旧版 vs 新版」对比供选择
-      await openVersions(n, true);
+      // 重写完成:若有旧版快照,自动弹「旧版 vs 新版」对比供选择,并提示"旧版都留着",
+      // 直接回应用户"重写后第一版还在吗"的担忧(首次生成无旧版 openVersions 返回 false,不提示)
+      const opened = await openVersions(n, true);
+      if (opened) {
+        toast.ok(`第 ${n} 章新版已生成`,
+          "旧版都留着——不满意可在正文顶部「历史版本对比」里回退到任意一版(含最初稿)");
+      }
     } catch (e) {
       if (!ctrl.signal.aborted) {
         const msg = errMsg(e);

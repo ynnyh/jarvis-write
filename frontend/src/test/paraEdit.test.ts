@@ -1,6 +1,6 @@
-// paraEdit 单元测试:段落定点替换(正常替换/重复段落不串位/原文守卫/边界)
+// paraEdit 单元测试:段落定点替换/删除(正常/重复段落不串位/原文守卫/边界)
 import { describe, it, expect } from "vitest";
-import { spliceParagraph, spliceSelectionInParagraph } from "../panels/write/paraEdit";
+import { spliceParagraph, spliceSelectionInParagraph, dropParagraph } from "../panels/write/paraEdit";
 
 const TEXT = "第一段。\n\n第二段。\n\n第三段。";
 
@@ -70,5 +70,36 @@ describe("spliceSelectionInParagraph", () => {
 
   it("段号越界返回 null", () => {
     expect(spliceSelectionInParagraph(SEL, 5, 0, 1, "X", "他很快地跑。")).toBeNull();
+  });
+});
+
+describe("dropParagraph", () => {
+  it("删除中间段,其余段以空行重新拼接", () => {
+    expect(dropParagraph(TEXT, 1)).toBe("第一段。\n\n第三段。");
+  });
+
+  it("删首段/末段都可以", () => {
+    expect(dropParagraph(TEXT, 0)).toBe("第二段。\n\n第三段。");
+    expect(dropParagraph(TEXT, 2)).toBe("第一段。\n\n第二段。");
+  });
+
+  it("重复段落按序号删除,不会删到前一处同文段", () => {
+    const dup = "同一句。\n\n中间。\n\n同一句。";
+    expect(dropParagraph(dup, 2)).toBe("同一句。\n\n中间。");
+    expect(dropParagraph(dup, 0)).toBe("中间。\n\n同一句。");
+  });
+
+  it("expected 与当前原文对不上(正文已被别处改动)时返回 null", () => {
+    expect(dropParagraph(TEXT, 1, "旧的第二段快照")).toBeNull();
+    expect(dropParagraph(TEXT, 1, "第二段。")).toBe("第一段。\n\n第三段。");
+  });
+
+  it("只剩一段时不允许删成空章,返回 null", () => {
+    expect(dropParagraph("唯一的一段。", 0)).toBeNull();
+  });
+
+  it("段号越界返回 null", () => {
+    expect(dropParagraph(TEXT, 3)).toBeNull();
+    expect(dropParagraph(TEXT, -1)).toBeNull();
   });
 });

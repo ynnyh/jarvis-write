@@ -117,27 +117,47 @@ export default function AiDock({
     const text = input.trim();
     if (!text || busy) return;
     const setMsgs = mode === "chat" ? setChatMsgs : setReviseMsgs;
-    const next = [...msgs, { role: "user" as const, content: text }];
-    setMsgs(next);
+    const snapshot = msgs; // 失败回滚基线(发送前的完整历史)
+    // 立即推入用户气泡 + 空的 AI 气泡(占位);token 逐字填进这个空气泡 = 真打字机
+    const next = [...snapshot, { role: "user" as const, content: text }];
+    setMsgs([...next, { role: "assistant" as const, content: "" }]);
     setInput("");
     setBusy(true); setErr("");
+    // 逐字把 delta 追加到最后一个(AI)气泡;防御:末条不是 assistant 就不动
+    const onToken = (delta: string) =>
+      setMsgs((m) => {
+        const last = m[m.length - 1];
+        if (!last || last.role !== "assistant") return m;
+        const copy = m.slice();
+        copy[copy.length - 1] = { ...last, content: last.content + delta };
+        return copy;
+      });
+    // 用权威 reply 收敛最后一个气泡(消除分帧/尾缓冲的细微差异)
+    const settle = (reply: string) =>
+      setMsgs((m) => {
+        const last = m[m.length - 1];
+        if (!last || last.role !== "assistant") return m;
+        const copy = m.slice();
+        copy[copy.length - 1] = { role: "assistant", content: reply };
+        return copy;
+      });
     try {
       if (mode === "chat") {
-        const r = await api.discussFragment(pid, chapterNum, next, selectedPara?.text ?? "");
-        setMsgs((m) => [...m, { role: "assistant", content: r.reply }]);
+        const r = await api.discussFragmentStream(pid, chapterNum, next, selectedPara?.text ?? "", onToken);
+        settle(r.reply);
         // 有选中段且 AI 给了改写 → 浮「采用此改写」块;整章问答(只答不改)不会有 suggestion
         setSuggestion(r.suggestion && selectedPara
           ? { text: r.suggestion, paraIdx: selectedPara.idx, expected: selectedPara.text }
           : null);
       } else {
-        const r = await api.discussRevision(pid, chapterNum, next);
-        setMsgs((m) => [...m, { role: "assistant", content: r.reply }]);
+        const r = await api.discussRevisionStream(pid, chapterNum, next, onToken);
+        settle(r.reply);
         if (r.directive) { setDirective(r.directive); setSuggestedLevel(r.suggested_level); }
       }
       if (collapsedRef.current) setHasNew(true);
     } catch (e) {
-      // 失败回退刚发出的那条,方便重发
-      setMsgs((m) => m.slice(0, -1));
+      // 失败:回滚到发送前(去掉用户气泡 + 空 AI 气泡),回填输入框方便重发
+      setMsgs(snapshot);
       setInput(text);
       setErr(errMsg(e));
     } finally { setBusy(false); }
@@ -276,16 +296,17 @@ export default function AiDock({
               : "说说这章哪里不对,比如:「开头铺垫太长」「主角这里不该哭」「结尾太突然,想留个钩子」— 聊完我整理成修改意见,你选怎么改。"}
           </div>
         )}
-        {msgs.map((m, i) => (
-          <div key={i} className={"rd-msg rd-" + m.role}>
-            <div className="rd-bubble">{m.content}</div>
-          </div>
-        ))}
-        {busy && (
-          <div className="rd-msg rd-assistant">
-            <div className="rd-bubble muted"><span className="spin spin-sm" />编辑正在想…</div>
-          </div>
-        )}
+        {msgs.map((m, i) => {
+          // 空的 AI 气泡 + 仍在忙 = 首个 token 还没到,原地转圈(打字机占位)
+          const waiting = m.role === "assistant" && !m.content && busy;
+          return (
+            <div key={i} className={"rd-msg rd-" + m.role}>
+              <div className={"rd-bubble" + (waiting ? " muted" : "")}>
+                {waiting ? <><span className="spin spin-sm" />编辑正在写…</> : m.content}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {mode === "chat" && suggestion && (

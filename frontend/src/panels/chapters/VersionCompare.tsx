@@ -19,6 +19,9 @@ export default function VersionCompare({
   chapterNumber, versions, compareVer, current, busy,
   onClose, onSelectVersion, onRestore,
 }: Props) {
+  // 版本号最小的那一版 = 最早的快照 = 最初稿(首次生成的原文,在首次重写前被存下)。
+  // 明确标出来,直接回答"重写几次后第一版还在吗"——在,而且能一键回退。
+  const firstVer = versions.length ? Math.min(...versions.map((v) => v.version)) : 0;
   return (
     <div className="card">
       <div className="card-head mb-2">
@@ -32,14 +35,15 @@ export default function VersionCompare({
       ) : (
         <>
           <div className="muted mb-2">
-            选一个旧版和「当前版」左右对照。满意当前版就关掉;想要旧版点「回退」。
+            重写 / 润色 / 手改覆盖掉的旧版都留着(包括最初稿),一版都不会丢。
+            选一个旧版和「当前版」左右对照:满意当前版就关掉,想要哪个旧版点「回退」。
           </div>
           <div className="chips mb-2">
             {versions.map((v) => (
               <button key={v.id} type="button"
                 className={"chip" + (compareVer?.id === v.id ? " on" : "")}
                 onClick={() => onSelectVersion(v)}>
-                v{v.version} · {VERSION_SOURCE_CN[v.source] ?? v.source} · {v.word_count}字
+                v{v.version} · {VERSION_SOURCE_CN[v.source] ?? v.source} · {v.word_count}字{v.version === firstVer ? " · 最初稿" : ""}
               </button>
             ))}
           </div>
@@ -48,7 +52,7 @@ export default function VersionCompare({
               <div className="split mt-2">
                 <div>
                   <div className="fl">
-                    旧版 v{compareVer.version}
+                    旧版 v{compareVer.version}{compareVer.version === firstVer ? "(最初稿)" : ""}
                     ({VERSION_SOURCE_CN[compareVer.source] ?? compareVer.source} · {compareVer.word_count}字)
                   </div>
                   <div className="pane pane-prose prose">

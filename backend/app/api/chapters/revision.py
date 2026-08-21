@@ -4,14 +4,20 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_project_or_404
+from app.api.sse import STREAM_HEADERS, sse_event
 from app.chapter_versions import snapshot_chapter
 from app.db.models import Chapter, Outline
 from app.db.session import get_db
-from app.engines.pipeline.chapter import _rolling_summary, discuss_revision
+from app.engines.pipeline.chapter import (
+    _rolling_summary,
+    discuss_revision,
+    discuss_revision_stream,
+)
 from app.engines.pipeline.continuation import continue_tail
 from app.engines.polish import polish_fragment
 from app.engines.tendency.assembler import voice_block_of
@@ -79,6 +85,54 @@ async def revise_discuss(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ReviseDiscussResponse(**result)
+
+
+@router.post("/{chapter_number}/revise-discuss-stream")
+async def revise_discuss_stream(
+    project_id: int,
+    chapter_number: int,
+    req: ReviseDiscussRequest,
+    db: Session = Depends(get_db),
+):
+    """revise-discuss 的真流式版(SSE 打字机):逐字吐 reply,收尾给 directive + 档位建议。
+
+    校验/取数在请求上下文内完成(缺正文走正常 HTTP 404);进入 LLM 阶段后的错误
+    (对话为空/上游失败)改走 SSE `error` 帧——此时 HTTP 头已 200 发出,无法再改状态码。
+    与同步 revise-discuss 并存:前端优先走流式,老端点保留做回退/测试基线。
+    """
+    get_project_or_404(db, project_id)
+    ch = (
+        db.query(Chapter)
+        .filter(Chapter.project_id == project_id, Chapter.chapter_number == chapter_number)
+        .first()
+    )
+    if ch is None or not ch.final_content.strip():
+        raise HTTPException(status_code=404, detail=f"第 {chapter_number} 章尚无定稿正文,先生成再重写")
+    outline = (
+        db.query(Outline)
+        .filter(Outline.project_id == project_id, Outline.chapter_number == chapter_number)
+        .first()
+    )
+    # 脱离请求上下文前把要用的都拍平成普通值(StreamingResponse 的生成器在响应体阶段才跑)
+    blueprint = _blueprint_block(outline, chapter_number)
+    chapter_block = ch.final_content
+    messages = req.messages
+
+    async def gen():
+        try:
+            async for kind, data in discuss_revision_stream(
+                messages, blueprint_block=blueprint, chapter_block=chapter_block,
+            ):
+                if kind == "token":
+                    yield sse_event("token", {"text": data})
+                else:  # "done"
+                    yield sse_event("done", data)
+        except ValueError as exc:
+            yield sse_event("error", {"detail": str(exc)})
+        except Exception as exc:  # noqa: BLE001
+            yield sse_event("error", {"detail": f"对话失败: {exc}"})
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=STREAM_HEADERS)
 
 
 class AnnotationItem(BaseModel):

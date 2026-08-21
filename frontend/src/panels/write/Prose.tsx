@@ -14,7 +14,7 @@ import { Paragraphs, splitParas } from "../../components/Reader";
 import { useCharacters } from "../../hooks/queries";
 import { emitChapterSaved } from "../../desktop";
 import { errMsg } from "../../pollJob";
-import { applyParaReplacement, applySelectionReplacement, appendParagraph, Annotation } from "./paraEdit";
+import { applyParaReplacement, applySelectionReplacement, appendParagraph, applyParaDeletion, Annotation } from "./paraEdit";
 import { buildEntityIndex, segmentParagraph, entitySummary, isEntitySeg } from "./entityLink";
 import EntityCard from "./EntityCard";
 import { diffChars } from "./charDiff";
@@ -99,6 +99,8 @@ export default function Prose({
   const [note, setNote] = useState("");
   // 替换/保存存盘中(快;不含一致性同步)
   const [applying, setApplying] = useState(false);
+  // 删除本段的二次确认(pick 气泡内联;删段无 diff 可验收,故需一次确认)
+  const [confirmDel, setConfirmDel] = useState(false);
   const [err, setErr] = useState("");
   // 气泡/编辑框的纵向锚点:相对 .prose-wrap 的 top(px),由选中段实测得出
   const [anchorTop, setAnchorTop] = useState<number | null>(null);
@@ -179,7 +181,7 @@ export default function Prose({
     setEditText(""); setNote(""); setErr(""); setAnchorTop(null);
     setTool("polish"); setIdeas(null);
     setGhost(null); setGhosting(false); setGhostErr("");
-    setEntityPop(null); cancelHideEntity();
+    setEntityPop(null); cancelHideEntity(); setConfirmDel(false);
     onSelectChange?.(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chapter.chapter_number]);
@@ -228,7 +230,7 @@ export default function Prose({
     if (s && !s.isCollapsed && s.toString().trim() && proseRef.current?.contains(s.anchorNode)) return;
     if (mode === "edit" && selText !== null && editText !== selText) return; // 手改未保存:先保存/取消,防误点丢稿
     setSelPara(i); setSelRange(null); setMode("pick"); setDirection(""); setPolished(null); setNote(""); setErr("");
-    setTool("polish"); setIdeas(null);
+    setTool("polish"); setIdeas(null); setConfirmDel(false);
     pendingFocusRef.current = true; // 键盘点选后焦点移入气泡「改这段」
     onSelectChange?.({ idx: i, text: paras[i] });
   }
@@ -239,7 +241,7 @@ export default function Prose({
   }
   function clearSelection() {
     setSelPara(null); setSelRange(null); setMode("pick"); setDirection(""); setPolished(null); setNote(""); setErr("");
-    setTool("polish"); setIdeas(null);
+    setTool("polish"); setIdeas(null); setConfirmDel(false);
     onSelectChange?.(null);
   }
 
@@ -325,6 +327,27 @@ export default function Prose({
     const v = editText.trim();
     if (!v || v === selText) { setMode("pick"); return; } // 没改=收起编辑框
     await applyReplacement(v, true);
+  }
+
+  // 删除本段:整段移除后 PUT 写回(edit_content 自动留版本快照,误删可在「历史版本」回退)。
+  // 删段会改变正文事实,保存后问是否同步一致性引擎(与手改同思想)。
+  async function deletePara() {
+    if (selPara === null || selText === null) return;
+    if (paras.length <= 1) { setErr("只剩这一段了,不能删空整章"); setConfirmDel(false); return; }
+    setApplying(true); setErr("");
+    try {
+      const updated = await applyParaDeletion(pid, chapter, selPara, selText);
+      if (updated === null) {
+        setErr("这段的原文已对不上(正文可能已被别处修改),请取消后重新选择");
+        return;
+      }
+      onSaved(updated);
+      void emitChapterSaved(pid, chapter.chapter_number);
+      clearSelection();
+      onSyncAsk(chapter.chapter_number);
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally { setApplying(false); }
   }
 
   // 章尾续写:请求 AI 顺着本章正文续一段(灰字 ghost)。发起时快照正文,接受时守卫。
@@ -417,7 +440,7 @@ export default function Prose({
         <div className={"prose-bubble" + (mode === "edit" ? " prose-bubble-edit" : "")}
           style={{ top: anchorTop }}
           onClick={(e) => e.stopPropagation()}>
-          {mode === "pick" && (
+          {mode === "pick" && !confirmDel && (
             <div className="prose-bubble-actions">
               <button className="btn-sm primary" disabled={genBlocked} ref={firstActionRef}
                 title={genBlocked ? genHint : "说一句就改:润色/描写/扩写/找点子,都不动情节"}
@@ -436,8 +459,29 @@ export default function Prose({
                   🖍 批注
                 </button>
               )}
+              {paras.length > 1 && (
+                <button className="btn-sm"
+                  title="删除这一段(误删可在「历史版本」里回退)"
+                  onClick={() => { setErr(""); setConfirmDel(true); }}>
+                  🗑 删除
+                </button>
+              )}
               <button className="btn-sm" onClick={clearSelection}>取消选择</button>
             </div>
+          )}
+
+          {mode === "pick" && confirmDel && (
+            <>
+              <div className="rp-label">删除第 {selPara + 1} 段?整段移除,误删可在「历史版本」里回退。</div>
+              <div className="rp-actions">
+                <button className="danger btn-sm" disabled={applying} onClick={deletePara}>
+                  {applying && <span className="spin spin-sm" />}
+                  {applying ? "删除中…" : "确认删除"}
+                </button>
+                <button className="btn-sm" disabled={applying}
+                  onClick={() => setConfirmDel(false)}>取消</button>
+              </div>
+            </>
           )}
 
           {mode === "polish" && (

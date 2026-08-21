@@ -11,6 +11,7 @@ from app.db.session import SessionLocal, get_db
 from app.engines.pipeline.blueprint import generate_blueprint, save_blueprint
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import render_style_block
+from app.engines.title_style import resolve_title_directive
 from app.jobs import create_job, fail_job, finish_job, fire_and_track, list_running, normalize_job_error, update_stage
 from app.llm.router import Task, get_adapter_for
 from app.schemas.project import (
@@ -54,6 +55,7 @@ async def generate_project_blueprint(
         number_of_chapters=project.target_chapters,
         tendency=req.tendency,
         global_tendency=project.global_tendency,
+        title_directive=resolve_title_directive(req.title_style, req.title_directive),
     )
     outlines = save_blueprint(db, project, chapters)
     db.commit()
@@ -103,6 +105,7 @@ async def generate_project_blueprint_async(
                 global_tendency=p.global_tendency,
                 progress=lambda s: update_stage(job_id, s),
                 end_chapter=end_chapter,
+                title_directive=resolve_title_directive(req.title_style, req.title_directive),
             )
             update_stage(job_id, "落库中")
             outlines = save_blueprint(session, p, chapters)

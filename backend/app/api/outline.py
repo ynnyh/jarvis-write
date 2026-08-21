@@ -27,7 +27,8 @@ from app.engines.cascade import (
 )
 from app.engines.common import chapter_architecture_brief
 from app.engines.outline_discuss import discuss_outline
-from app.engines.outline_retitle import suggest_chapter_titles
+from app.engines.outline_retitle import suggest_all_chapter_titles, suggest_chapter_titles
+from app.engines.title_style import resolve_title_directive
 from app.jobs import list_running, spawn_job
 from app.schemas.project import OutlineOut
 from app.schemas.tendency import Tendency
@@ -255,6 +256,98 @@ async def retitle(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return RetitleResponse(titles=titles)
+
+
+# ---------- 批量重拟标题(一键换一批,不动剧情)----------
+
+
+class RetitleAllRequest(BaseModel):
+    """directive: 作者自由文本要求;title_style: 预设 key(plain/hook/suspense/poetic)。
+    chapter_numbers 不传=全书;传了只重拟这些章。两者一起由后端 resolve 成一句导向。"""
+
+    directive: str = Field(default="", max_length=500)
+    title_style: str = Field(default="", max_length=20)
+    chapter_numbers: list[int] | None = None
+
+
+class RetitleAllItem(BaseModel):
+    chapter_number: int
+    old_title: str
+    new_title: str
+
+
+class RetitleAllResponse(BaseModel):
+    items: list[RetitleAllItem]
+
+
+class ApplyRetitleItem(BaseModel):
+    chapter_number: int
+    new_title: str = Field(min_length=1, max_length=60)
+
+
+class ApplyRetitleRequest(BaseModel):
+    items: list[ApplyRetitleItem]
+
+
+class ApplyRetitleResponse(BaseModel):
+    updated: list[int]
+    outlines: list[OutlineOut]
+
+
+@router.post("/retitle-all", response_model=RetitleAllResponse)
+async def retitle_all(
+    project_id: int, req: RetitleAllRequest, db: Session = Depends(get_db)
+):
+    """为多章(默认全书)批量重拟标题,返回 old→new 供作者预览挑选。不落库。"""
+    project = get_project_or_404(db, project_id)
+    q = db.query(Outline).filter(Outline.project_id == project_id)
+    if req.chapter_numbers:
+        q = q.filter(Outline.chapter_number.in_(req.chapter_numbers))
+    outlines = q.order_by(Outline.chapter_number).all()
+    if not outlines:
+        raise HTTPException(status_code=404, detail="还没有章节大纲")
+    chapters = [
+        {"chapter_number": o.chapter_number, "title": o.title, "summary": o.summary}
+        for o in outlines
+    ]
+    try:
+        items = await suggest_all_chapter_titles(
+            architecture_brief=chapter_architecture_brief(project),
+            chapters=chapters,
+            directive=resolve_title_directive(req.title_style, req.directive),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RetitleAllResponse(items=[RetitleAllItem(**it) for it in items])
+
+
+@router.post("/retitle-all/apply", response_model=ApplyRetitleResponse)
+async def retitle_all_apply(
+    project_id: int, req: ApplyRetitleRequest, db: Session = Depends(get_db)
+):
+    """把作者确认的一批新标题落库。逐章只改 title(cosmetic,不标正文失配)。"""
+    get_project_or_404(db, project_id)
+    if not req.items:
+        raise HTTPException(status_code=400, detail="没有要应用的标题")
+    updated: list[int] = []
+    for it in req.items:
+        outline = _outline(db, project_id, it.chapter_number)
+        await apply_outline_edit(db, outline, {"title": it.new_title.strip()})
+        updated.append(it.chapter_number)
+    db.commit()
+    outlines = (
+        db.query(Outline)
+        .filter(
+            Outline.project_id == project_id,
+            Outline.chapter_number.in_(updated),
+        )
+        .order_by(Outline.chapter_number)
+        .all()
+    )
+    return ApplyRetitleResponse(
+        updated=updated,
+        outlines=[OutlineOut.model_validate(o, from_attributes=True) for o in outlines],
+    )
 
 
 @router.post("/{chapter_number}/impact", response_model=ImpactReport)

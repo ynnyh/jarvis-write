@@ -24,17 +24,19 @@ export function useChapterVersions(pid: number, deps: Deps) {
     setVersionsFor(null); setVersions(null); setCompareVer(null);
   }, []);
 
-  // 打开某章历史版本。auto=true 时(重写刚完成)仅在确有旧版快照时才弹,并自动选中最新一版对比
-  const openVersions = useCallback(async (n: number, auto = false) => {
+  // 打开某章历史版本。auto=true 时(重写刚完成)仅在确有旧版快照时才弹,并自动选中最新一版对比。
+  // 返回是否真的打开了对比面板(确有旧版=true),供重写完成后决定是否提示"旧版都留着"。
+  const openVersions = useCallback(async (n: number, auto = false): Promise<boolean> => {
     setErr("");
     try {
       const list = await api.listChapterVersions(pid, n);
-      if (auto && !list.length) return;  // 首次生成无旧版,不打扰
+      if (auto && !list.length) return false;  // 首次生成无旧版,不打扰
       setVersions(list); setVersionsFor(n); setCompareVer(null);
       if (auto && list.length) {
         setCompareVer(await api.getChapterVersion(pid, n, list[0].id));
       }
-    } catch (e) { setErr(errMsg(e)); }
+      return true;
+    } catch (e) { setErr(errMsg(e)); return false; }
   }, [pid, setErr]);
 
   const selectVersion = useCallback(async (n: number, v: ChapterVersionBrief) => {

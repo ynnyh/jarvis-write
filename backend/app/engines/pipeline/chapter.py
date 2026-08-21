@@ -25,7 +25,7 @@ from app.engines.consistency.checker import (
 )
 from app.engines.consistency.extractor import extract_and_apply, parse_llm_json
 from app.engines.consistency.preflight import preflight_chapter
-from app.engines.consistency.repetition import avoid_block
+from app.engines.consistency.repetition import avoid_block, dedup_paragraphs
 from app.engines.pipeline.handoff import extract_handoff_contract, load_handoff_block
 from app.engines.polish import ai_flavor_report
 from app.engines.polish.polisher import _flavor_hits_block, deai_self_heal
@@ -618,6 +618,13 @@ async def generate_chapter(
             chapter_number, _deai_before.score, _deai_after.score,
         )
 
+    # ---- 去重段落守卫:删掉模型复读出的整段重复(纯规则零成本,落库前末道加工) ----
+    # 摆在所有 LLM 文字加工(定稿/回炉/守卫压缩/去味重写)之后:上游任一步都可能复读出
+    # 重复段,这里统一兜底。只删不写,不会引入新问题;鲜有的有意呼应靠长度门槛豁免。
+    final, _dup_removed = dedup_paragraphs(final)
+    if _dup_removed:
+        logger.info("第 %d 章去重:删掉 %d 个重复段落", chapter_number, _dup_removed)
+
     # ---- 落库 ----
     # 先结束生成期间一直开着的读事务:期间用量记录等已在别的连接提交,
     # 旧快照直接升级写锁会撞 SQLITE_BUSY;commit 后用新事务写入。
@@ -771,23 +778,73 @@ async def discuss_revision(
         raise ValueError("模型没有回应,请重试")
 
     # ② 蒸馏:把含最新回复的完整对话提炼成「修改意见 + 档位建议」(独立调用,不污染对话)
+    directive, level = await _distill_revision(adapter, turns, reply)
+    return {"reply": reply, "directive": directive, "suggested_level": level}
+
+
+async def _distill_revision(adapter, turns: list[dict], reply: str) -> tuple[str, str | None]:
+    """把含最新回复的完整对话蒸馏成「修改意见 directive + 档位建议 level」。
+
+    独立 ask 调用(不污染对话);蒸馏出"尚无明确意见"时约定回空/短横线,归一化成空串。
+    失败不抛(蒸馏不该阻塞对话本身),返回 ("", None) 让前端中性呈现两个档位选项。
+    同步 discuss_revision 与流式 discuss_revision_stream 共用这一份,行为一致。
+    """
     transcript = _format_revise_transcript(turns, reply)
-    directive = ""
-    level: str | None = None
     try:
         raw = (await adapter.ask(REVISE_DISTILL_PROMPT.format(transcript=transcript))).strip()
-        # 蒸馏出"尚无明确意见"时约定回空/短横线,归一化成空串
         if raw and raw != "-":
             parsed = parse_llm_json(raw)
             if isinstance(parsed.get("directive"), str):
                 # JSON 契约:directive 正文 + level 档位建议(polish=锁情节优化 / regenerate=重生成)
-                directive = parsed["directive"].strip()
                 lv = parsed.get("level")
-                level = lv if lv in ("polish", "regenerate") else None
-            else:
-                # 模型没按 JSON 输出:整段当意见,不给档位建议(前端中性呈现两个选项)
-                directive = raw
+                return parsed["directive"].strip(), (lv if lv in ("polish", "regenerate") else None)
+            # 模型没按 JSON 输出:整段当意见,不给档位建议
+            return raw, None
     except Exception:  # noqa: BLE001 — 蒸馏失败不阻塞对话
         logger.warning("重写研讨蒸馏失败,directive 置空", exc_info=True)
+    return "", None
 
-    return {"reply": reply, "directive": directive, "suggested_level": level}
+
+async def discuss_revision_stream(
+    messages: list[dict],
+    *,
+    blueprint_block: str,
+    chapter_block: str,
+):
+    """流式版 discuss_revision(SSE 打字机):逐字产出 reply,收尾给 directive + 档位建议。
+
+    产出 (kind, payload):
+      ("token", str)  reply 的增量文字
+      ("done", {"reply": str, "directive": str, "suggested_level": str | None})
+    校验/system 构造同 discuss_revision(同步孪生);reply 流式吐完后再做一次(非流式)蒸馏。
+    流式路径不重试空回复、不记账(与 openai_compatible._complete_via_stream 的取舍一致)。
+    """
+    turns = [
+        m for m in messages
+        if m.get("role") in ("user", "assistant") and (m.get("content") or "").strip()
+    ][-_MAX_REVISE_CHAT_TURNS:]
+    if not turns:
+        raise ValueError("请先说点什么")
+    if turns[-1]["role"] != "user":
+        raise ValueError("最后一条应为你的发言")
+
+    adapter = get_adapter_for(Task.DRAFT)
+    system = REVISE_CHAT_SYSTEM_PROMPT.format(
+        blueprint_block=blueprint_block,
+        chapter_block=chapter_block[:_MAX_REVISE_CHAPTER_CHARS] or "(本章还没有正文)",
+    )
+    chat_messages = [LLMMessage(role="system", content=system)] + [
+        LLMMessage(role=m["role"], content=(m["content"] or "").strip()[:_MAX_REVISE_MSG_LEN])
+        for m in turns
+    ]
+    chunks: list[str] = []
+    async for delta in adapter.stream(chat_messages):
+        if not delta:
+            continue
+        chunks.append(delta)
+        yield ("token", delta)
+    reply = "".join(chunks).strip()
+    if not reply:
+        raise ValueError("模型没有回应,请重试")
+    directive, level = await _distill_revision(adapter, turns, reply)
+    yield ("done", {"reply": reply, "directive": directive, "suggested_level": level})

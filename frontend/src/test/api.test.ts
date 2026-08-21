@@ -1,6 +1,6 @@
 // api 客户端单元测试:token 管理、请求头注入、401 处理、错误提取
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { token, setUnauthorizedHandler, api } from "../api";
+import { token, setUnauthorizedHandler, api, createSseDecoder } from "../api";
 
 // 用真实的 localStorage(jsdom 提供)
 beforeEach(() => {
@@ -109,5 +109,122 @@ describe("req 请求行为", () => {
     expect(opts.method).toBe("POST");
     expect(opts.headers["Content-Type"]).toBe("application/json");
     expect(JSON.parse(opts.body)).toEqual({ username: "user", password: "pass" });
+  });
+});
+
+describe("createSseDecoder(SSE 帧解析)", () => {
+  it("单个完整帧:解析 event + data(JSON)", () => {
+    const feed = createSseDecoder();
+    expect(feed('event: token\ndata: {"text":"你好"}\n\n')).toEqual([
+      { event: "token", data: { text: "你好" } },
+    ]);
+  });
+
+  it("跨 chunk 的帧只在补全后吐出一次(网络分块的核心场景)", () => {
+    const feed = createSseDecoder();
+    expect(feed('event: token\ndata: {"text":"A"')).toEqual([]); // 半截,先不吐
+    expect(feed("}\n\n")).toEqual([{ event: "token", data: { text: "A" } }]);
+  });
+
+  it("一次喂入多帧全部解析;非 JSON 的 data 原样保留为字符串", () => {
+    const feed = createSseDecoder();
+    const out = feed('event: token\ndata: {"text":"x"}\n\nevent: note\ndata: hello\n\n');
+    expect(out).toEqual([
+      { event: "token", data: { text: "x" } },
+      { event: "note", data: "hello" },
+    ]);
+  });
+
+  it("CRLF 代理(\\r\\n)也能正确切帧", () => {
+    const feed = createSseDecoder();
+    expect(feed('event: done\r\ndata: {"ok":true}\r\n\r\n')).toEqual([
+      { event: "done", data: { ok: true } },
+    ]);
+  });
+
+  it("无 data 行的注释/心跳帧跳过", () => {
+    const feed = createSseDecoder();
+    expect(feed(": keep-alive\n\n")).toEqual([]);
+  });
+});
+
+// 把字符串分块伪装成 fetch 的 SSE 响应体(res.body.getReader())
+function streamResponse(chunks: string[]) {
+  const enc = new TextEncoder();
+  let i = 0;
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      getReader: () => ({
+        read: async () =>
+          i < chunks.length
+            ? { value: enc.encode(chunks[i++]), done: false }
+            : { value: undefined, done: true },
+      }),
+    },
+  };
+}
+
+describe("流式对话客户端", () => {
+  it("discussFragmentStream:逐帧回调 token,done 收尾出 reply + suggestion", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(streamResponse([
+      'event: token\ndata: {"text":"你好"}\n\n',
+      'event: token\ndata: {"text":",世界"}\n\n',
+      'event: done\ndata: {"reply":"你好,世界","suggestion":"改写版"}\n\n',
+    ]));
+    vi.stubGlobal("fetch", mockFetch);
+
+    const tokens: string[] = [];
+    const r = await api.discussFragmentStream(
+      3, 5, [{ role: "user", content: "hi" }], "原文段", (t) => tokens.push(t));
+
+    expect(tokens.join("")).toBe("你好,世界");
+    expect(r.reply).toBe("你好,世界");
+    expect(r.suggestion).toBe("改写版");
+    // 打到流式端点,body 带 messages + target
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("/api/projects/3/chapters/5/discuss-stream");
+    expect(JSON.parse(opts.body)).toEqual({
+      messages: [{ role: "user", content: "hi" }], target: "原文段",
+    });
+  });
+
+  it("discussRevisionStream:done 出 directive + 档位建议", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse([
+      'event: token\ndata: {"text":"节奏确实拖"}\n\n',
+      'event: done\ndata: {"reply":"节奏确实拖","directive":"开头砍一半","suggested_level":"polish"}\n\n',
+    ])));
+    const r = await api.discussRevisionStream(1, 1, [{ role: "user", content: "拖" }], () => {});
+    expect(r.reply).toBe("节奏确实拖");
+    expect(r.directive).toBe("开头砍一半");
+    expect(r.suggested_level).toBe("polish");
+  });
+
+  it("error 帧 → 抛 ApiError(带后端 detail)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse([
+      'event: error\ndata: {"detail":"请先说点什么"}\n\n',
+    ])));
+    await expect(
+      api.discussFragmentStream(1, 1, [], "", () => {}),
+    ).rejects.toThrow("请先说点什么");
+  });
+
+  it("流未开始的 HTTP 错误(404)→ 抛 ApiError 读 detail", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false, status: 404, json: async () => ({ detail: "第 1 章尚未生成" }),
+    }));
+    await expect(
+      api.discussRevisionStream(1, 1, [{ role: "user", content: "x" }], () => {}),
+    ).rejects.toThrow("第 1 章尚未生成");
+  });
+
+  it("流中断没有 done 帧 → 抛错(不把半截结果当成功)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(streamResponse([
+      'event: token\ndata: {"text":"半截"}\n\n',
+    ])));
+    await expect(
+      api.discussFragmentStream(1, 1, [{ role: "user", content: "x" }], "", () => {}),
+    ).rejects.toThrow("中断");
   });
 });

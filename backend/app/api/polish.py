@@ -13,10 +13,12 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_project_or_404
+from app.api.sse import STREAM_HEADERS, sse_event
 from app.auth import get_current_user
 from app.chapter_versions import snapshot_chapter
 from app.db.models import Chapter, Outline, WritingCard
@@ -25,6 +27,7 @@ from app.engines.polish import (
     ai_flavor_report,
     craft_fragment,
     discuss_fragment,
+    discuss_fragment_stream,
     polish_fragment,
     polish_text,
 )
@@ -413,6 +416,68 @@ async def discuss_chapter_fragment(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"对话失败: {exc}") from exc
     return DiscussResult(**result)
+
+
+@router.post("/api/projects/{project_id}/chapters/{n}/discuss-stream")
+async def discuss_chapter_fragment_stream(
+    project_id: int, n: int, req: DiscussRequest, db: Session = Depends(get_db)
+):
+    """discuss 的真流式版(SSE 打字机):逐字吐 reply,收尾给 suggestion。
+
+    校验/上下文定位在请求上下文内完成(缺章走 HTTP 404、选段超长/对话超长走 400);
+    进入 LLM 阶段后的错误(对话为空/上游失败)改走 SSE `error` 帧——此时 HTTP 头已
+    200 发出,无法再改状态码。与同步 discuss 并存:前端优先走流式,老端点做回退/测试基线。
+    """
+    get_project_or_404(db, project_id)
+    ch = (
+        db.query(Chapter)
+        .filter(Chapter.project_id == project_id, Chapter.chapter_number == n)
+        .first()
+    )
+    if ch is None:
+        raise HTTPException(status_code=404, detail=f"第 {n} 章尚未生成")
+
+    target = req.target.strip()
+    if len(target) > _MAX_FRAGMENT_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"选段最长 {_MAX_FRAGMENT_CHARS} 字,当前 {len(target)} 字",
+        )
+    if len(req.messages) > _MAX_DISCUSS_MESSAGES:
+        raise HTTPException(status_code=400, detail="对话过长,请开新的讨论")
+
+    # 定位选段上下文(前后各一段,仅供模型理解);无选段则跳过。脱离请求上下文前拍平成普通值。
+    before = after = ""
+    source = ch.final_content or ""
+    if target:
+        at = source.find(target)
+        if at >= 0:
+            before = source[:at]
+            after = source[at + len(target):]
+    outline = (
+        db.query(Outline)
+        .filter(Outline.project_id == project_id, Outline.chapter_number == n)
+        .first()
+    )
+    summary = outline.summary if outline else ""
+    messages = [m.model_dump() for m in req.messages]
+
+    async def gen():
+        try:
+            async for kind, data in discuss_fragment_stream(
+                messages, target, chapter_summary=summary,
+                before=before, after=after, chapter_excerpt=source,
+            ):
+                if kind == "token":
+                    yield sse_event("token", {"text": data})
+                else:  # "done"
+                    yield sse_event("done", data)
+        except ValueError as exc:
+            yield sse_event("error", {"detail": str(exc)})
+        except Exception as exc:  # noqa: BLE001
+            yield sse_event("error", {"detail": f"对话失败: {exc}"})
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=STREAM_HEADERS)
 
 
 @router.post("/api/polish/ai-flavor")

@@ -192,3 +192,64 @@ async def _suggest_titles_bad_json_case() -> None:
 
 def test_suggest_titles_bad_json_raises():
     asyncio.run(_suggest_titles_bad_json_case())
+
+
+# ---------------------------------------------------------------------------
+# 5. 容错解析:模型不照约定 {"titles":[...]} 输出时,仍尽力捞出候选(修「改名老失败」)
+#    —— 正文/大纲生成不走 JSON,唯独改名要求严格 JSON,是「老是失败」的高发点。
+# ---------------------------------------------------------------------------
+async def _suggest_titles_tolerant_case() -> None:
+    from app.engines import outline_retitle as rt_mod
+    from app.engines.outline_retitle import suggest_chapter_titles
+
+    # 每种都是真实模型跑偏形态:修复前会 400 或产出垃圾标题,修复后都要捞出干净候选
+    shapes = {
+        "裸数组": '["归乡", "旧信", "雨夜来电"]',
+        "别名键": '{"候选标题": ["归乡", "旧信", "雨夜来电"]}',
+        "键名没照约定": '{"result": ["归乡", "旧信"]}',
+        "推理模型思考里混花括号": '我先想格式 {titles:...},给出:\n{"titles": ["归乡", "旧信"]}',
+        "markdown 裹裸数组": '```json\n["归乡", "旧信"]\n```',
+        "列表项是对象": '{"titles": [{"title": "归乡"}, {"title": "旧信"}]}',
+        "全角引号包裹": '{"titles": ["“归乡”", "「旧信」"]}',
+    }
+    for name, reply in shapes.items():
+        probe = _CountingAdapter(reply)
+        with patch.object(rt_mod, "get_adapter_for", return_value=probe):
+            titles = await suggest_chapter_titles(
+                chapter_number=1, architecture_brief="b",
+                outline_block="o", current_title="惊天逆转",
+            )
+        assert titles and all(isinstance(t, str) for t in titles), name
+        assert "归乡" in titles and "旧信" in titles, f"{name} -> {titles}"
+        # 对象项/全角引号都要清成干净标题,不能残留 {'title' 或 引号
+        assert all("{" not in t and "“" not in t and "「" not in t for t in titles), \
+            f"{name} 未清洗干净 -> {titles}"
+
+
+def test_suggest_titles_tolerant_of_offspec_shapes():
+    asyncio.run(_suggest_titles_tolerant_case())
+
+
+# ---------------------------------------------------------------------------
+# 6. 真·垃圾输入(无任何数组可捞)仍抛 ValueError → 400,不吞成空成功
+# ---------------------------------------------------------------------------
+async def _suggest_titles_true_garbage_case() -> None:
+    from app.engines import outline_retitle as rt_mod
+    from app.engines.outline_retitle import suggest_chapter_titles
+
+    for reply in ("对不起我不会说 JSON", "", "标题就用现在这个挺好的,不用改"):
+        probe = _CountingAdapter(reply)
+        raised = False
+        with patch.object(rt_mod, "get_adapter_for", return_value=probe):
+            try:
+                await suggest_chapter_titles(
+                    chapter_number=1, architecture_brief="b",
+                    outline_block="o", current_title="随便",
+                )
+            except ValueError:
+                raised = True
+        assert raised, f"无可用候选应抛 ValueError,却没抛;reply={reply!r}"
+
+
+def test_suggest_titles_true_garbage_still_raises():
+    asyncio.run(_suggest_titles_true_garbage_case())

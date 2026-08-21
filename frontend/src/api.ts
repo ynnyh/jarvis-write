@@ -55,6 +55,101 @@ async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 
   }
 }
 
+// ---------- SSE 流式(真流式打字机)----------
+// EventSource 不能带 Authorization 头,故用 fetch + ReadableStream 手工解帧。
+export interface SseFrame {
+  event: string;
+  data: unknown; // JSON 解析成功则为对象,失败保留原始字符串
+}
+
+/** SSE 帧解析器(纯函数工厂,跨 chunk 累积):喂入网络分块文本,吐出已完整的帧。
+ *  帧以空行(\n\n)分隔;逐行解析 event: / data:,data 尝试 JSON.parse。
+ *  抽成独立工厂便于单测(不碰 fetch);经 CRLF 代理时 \n 会变 \r\n,统一剥 \r。 */
+export function createSseDecoder(): (chunk: string) => SseFrame[] {
+  let buf = "";
+  return (chunk: string): SseFrame[] => {
+    buf += chunk.replace(/\r/g, "");
+    const frames: SseFrame[] = [];
+    let sep: number;
+    while ((sep = buf.indexOf("\n\n")) >= 0) {
+      const raw = buf.slice(0, sep);
+      buf = buf.slice(sep + 2);
+      let event = "message";
+      const dataLines: string[] = [];
+      for (const line of raw.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
+      }
+      if (!dataLines.length) continue; // 注释/心跳帧,跳过
+      const text = dataLines.join("\n");
+      let data: unknown = text;
+      try { data = JSON.parse(text); } catch { /* 非 JSON 保留原文 */ }
+      frames.push({ event, data });
+    }
+    return frames;
+  };
+}
+
+/** POST 一个 SSE 流,逐帧回调 onFrame。鉴权/401 与 req 对齐;非 2xx(流未开始)抛 ApiError。 */
+async function ssePost(
+  path: string,
+  body: unknown,
+  onFrame: (frame: SseFrame) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const tk = token.get();
+  if (tk) headers["Authorization"] = `Bearer ${tk}`;
+  const res = await fetch(BASE + path, { method: "POST", headers, body: JSON.stringify(body), signal });
+  if (!res.ok || !res.body) {
+    if (res.status === 401) {
+      token.clear();
+      onUnauthorized?.();
+    }
+    let detail = `HTTP ${res.status}`;
+    try {
+      const j = await res.json();
+      detail = j.detail ?? JSON.stringify(j);
+    } catch { /* ignore */ }
+    throw new ApiError(res.status, detail);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  const feed = createSseDecoder();
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    for (const frame of feed(decoder.decode(value, { stream: true }))) onFrame(frame);
+  }
+  for (const frame of feed(decoder.decode())) onFrame(frame); // 冲净残余尾字节
+}
+
+/** 跑一条「AI 对话流」:token 帧喂打字机(onToken),done 帧作为最终结果 resolve,
+ *  error 帧抛 ApiError。done 缺失(流意外中断)也抛错,避免半截结果被当成功。 */
+async function runDiscussStream<T>(
+  path: string,
+  body: unknown,
+  onToken: (text: string) => void,
+  signal?: AbortSignal,
+): Promise<T> {
+  let done: T | null = null;
+  let errDetail: string | null = null;
+  await ssePost(path, body, (frame) => {
+    if (frame.event === "token") {
+      const d = frame.data as { text?: unknown };
+      if (typeof d?.text === "string") onToken(d.text);
+    } else if (frame.event === "done") {
+      done = frame.data as T;
+    } else if (frame.event === "error") {
+      const d = frame.data as { detail?: unknown };
+      errDetail = typeof d?.detail === "string" ? d.detail : "对话失败,请重试";
+    }
+  }, signal);
+  if (errDetail !== null) throw new ApiError(502, errDetail);
+  if (done === null) throw new ApiError(0, "对话意外中断,请重试");
+  return done;
+}
+
 // 鉴权下载:导出接口需要 Bearer token,普通 <a href> 不会带 Authorization 头,
 // 所以用 fetch 拿 blob 再触发浏览器下载。filename 优先取 Content-Disposition。
 export async function downloadFile(path: string, fallbackName: string): Promise<void> {
@@ -281,6 +376,10 @@ export interface DirectivePreview {
   analysis: string; items: DirectiveItem[]; suggest_retire: string[];
 }
 export interface DirectiveApplyResult { updated: number[]; stale_chapters: number[]; }
+// 批量重拟标题(一键换一批,不动剧情):预览项 old→new,应用后返回更新的章号+大纲
+export interface RetitleItem { chapter_number: number; old_title: string; new_title: string; }
+export interface RetitleAllResult { items: RetitleItem[]; }
+export interface ApplyRetitleResult { updated: number[]; outlines: Outline[]; }
 export interface FactOut {
   entity: string; fact_type: string; content: string;
   valid_from: number; valid_until: number | null; importance: string;
@@ -644,8 +743,9 @@ export const api = {
   // 架构研讨:多轮对话聊清不满意在哪 → 蒸馏出「额外要求」directive,拿去重新生成
   discussArchitecture: (id: number, messages: { role: string; content: string }[]) =>
     req<{ reply: string; directive: string }>("POST", `/api/projects/${id}/architecture/discuss`, { messages }, LLM_TIMEOUT),
-  generateBlueprintAsync: (id: number, tendency: Tendency) =>
-    req<{ job_id: string }>("POST", `/api/projects/${id}/blueprint-async`, { tendency }),
+  generateBlueprintAsync: (id: number, tendency: Tendency, titleStyle = "", titleDirective = "") =>
+    req<{ job_id: string }>("POST", `/api/projects/${id}/blueprint-async`,
+      { tendency, title_style: titleStyle, title_directive: titleDirective }),
   // 滚动规划:展开下一卷蓝图(按卷纲+已成文状态)
   extendBlueprintAsync: (id: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${id}/blueprint-extend-async`, {}),
@@ -671,6 +771,13 @@ export const api = {
   // 章节标题润色:基于本章大纲让 AI 给几个候选标题(不落库),作者选定后走 editOutline 只改 title
   retitleChapter: (pid: number, n: number, directive = "") =>
     req<{ titles: string[] }>("POST", `/api/projects/${pid}/outlines/${n}/retitle`, { directive }, LLM_TIMEOUT),
+  // 批量重拟标题(一键换一批,不动剧情):预览 old→new,不落库;chapterNumbers 不传=全书
+  retitleAllChapters: (pid: number, titleStyle = "", directive = "", chapterNumbers?: number[]) =>
+    req<RetitleAllResult>("POST", `/api/projects/${pid}/outlines/retitle-all`,
+      { title_style: titleStyle, directive, chapter_numbers: chapterNumbers ?? null }, LLM_TIMEOUT),
+  // 应用作者确认的一批新标题:逐章只改 title(cosmetic,不标正文失配)
+  applyRetitleAll: (pid: number, items: { chapter_number: number; new_title: string }[]) =>
+    req<ApplyRetitleResult>("POST", `/api/projects/${pid}/outlines/retitle-all/apply`, { items }),
 
   listChapters: (pid: number) => req<ChapterBrief[]>("GET", `/api/projects/${pid}/chapters`),
   getChapter: (pid: number, n: number) => req<ChapterDetail>("GET", `/api/projects/${pid}/chapters/${n}`),
@@ -686,6 +793,15 @@ export const api = {
   // 重写研讨:多轮对话聊清"这章哪里不满意" → 蒸馏出修改意见 directive(+ AI 建议档位)
   discussRevision: (pid: number, n: number, messages: { role: string; content: string }[]) =>
     req<{ reply: string; directive: string; suggested_level: string | null }>("POST", `/api/projects/${pid}/chapters/${n}/revise-discuss`, { messages }, LLM_TIMEOUT),
+  // 重写研讨(真流式打字机):逐字回调 onToken,收尾 resolve 出 {reply, directive, suggested_level}
+  discussRevisionStream: (
+    pid: number, n: number,
+    messages: { role: string; content: string }[],
+    onToken: (text: string) => void,
+    signal?: AbortSignal,
+  ) =>
+    runDiscussStream<{ reply: string; directive: string; suggested_level: string | null }>(
+      `/api/projects/${pid}/chapters/${n}/revise-discuss-stream`, { messages }, onToken, signal),
   editChapterContent: (pid: number, n: number, final_content: string) =>
     req<ChapterDetail>("PUT", `/api/projects/${pid}/chapters/${n}/content`, { final_content }),
   // 人工审核通过(docs/08 §5.5):pending_review → approved;quarantined 时 400
@@ -807,6 +923,16 @@ export const api = {
   discussFragment: (pid: number, n: number, messages: { role: string; content: string }[], target = "") =>
     req<{ reply: string; suggestion: string | null }>(
       "POST", `/api/projects/${pid}/chapters/${n}/discuss`, { messages, target }, LLM_TIMEOUT),
+  // 选段对话(真流式打字机):逐字回调 onToken,收尾 resolve 出 {reply, suggestion}
+  discussFragmentStream: (
+    pid: number, n: number,
+    messages: { role: string; content: string }[],
+    target: string,
+    onToken: (text: string) => void,
+    signal?: AbortSignal,
+  ) =>
+    runDiscussStream<{ reply: string; suggestion: string | null }>(
+      `/api/projects/${pid}/chapters/${n}/discuss-stream`, { messages, target }, onToken, signal),
   aiFlavor: (text: string) =>
     req<FlavorInfo & { hits?: Record<string, unknown>[]; total_chars?: number }>(
       "POST", "/api/polish/ai-flavor", { text }),

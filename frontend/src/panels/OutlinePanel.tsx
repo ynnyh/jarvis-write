@@ -3,11 +3,13 @@ import { useEffect, useRef, useState } from "react";
 import { api, CascadeResult, DirectiveApplyResult, DirectiveItem, DirectivePreview, EditorAction, EditResult, ImpactReport, Outline, Project, Tendency } from "../api";
 import { pollJob, errMsg } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
+import TitleStyleControl, { DEFAULT_TITLE_STYLE, TitleStyle } from "../components/TitleStyleControl";
 import { confirmDialog } from "../ui/ConfirmDialog";
 import { useJob } from "../ui/useJob";
 import { useJobReconnect } from "../hooks/useJobReconnect";
 import type { GotoTarget } from "../pages/ProjectPage";
 import DirectivePanel from "./outline/DirectivePanel";
+import BatchRetitlePanel from "./outline/BatchRetitlePanel";
 import OutlineDiscussChat from "./outline/OutlineDiscussChat";
 import OutlineItem from "./outline/OutlineItem";
 
@@ -25,6 +27,12 @@ type Form = Partial<Outline>;
 export default function OutlinePanel({ pid, project, outlines, hasArch, onChanged, onGotoStep }: Props) {
   const { run: runAsyncJob } = useJob();
   const [genTendency, setGenTendency] = useState<Tendency>({});
+  // Pillar 2:蓝图生成时选章节标题风格(预设档 + 可选自由文本)
+  const [titleStyle, setTitleStyle] = useState<TitleStyle>(DEFAULT_TITLE_STYLE);
+  // Pillar 1:逐章生成进度(后端流式上报「已生成 N/M 章」,解析成进度条)
+  const [genProgress, setGenProgress] = useState<{ done: number; total: number } | null>(null);
+  // Pillar 3:批量重拟标题面板开关
+  const [showBatchRetitle, setShowBatchRetitle] = useState(false);
   const [showGen, setShowGen] = useState(!outlines.length);
   const [showAdv, setShowAdv] = useState(false);
   const [editingNum, setEditingNum] = useState<number | null>(null);
@@ -90,13 +98,17 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
     }
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    setBusy("蓝图生成:排队中…"); setErr("");
+    setBusy("蓝图生成:排队中…"); setErr(""); setGenProgress(null);
     try {
-      const { job_id } = await api.generateBlueprintAsync(pid, genTendency);
-      // 轮询任务进度(按块生成,阶段文案来自后端 stage)
+      const { job_id } = await api.generateBlueprintAsync(pid, genTendency, titleStyle.style, titleStyle.directive);
+      // 轮询任务进度:后端流式上报「已生成 N/M 章」→ 解析成进度条(Pillar 1);其余阶段走文案
       const r = await pollJob<{ outlines: Outline[]; warnings: string[] }>(job_id, {
         signal: ctrl.signal,
-        onStage: (stage) => setBusy(`蓝图生成中:${stage}`),
+        onStage: (stage) => {
+          const m = stage.match(/已生成\s*(\d+)\s*\/\s*(\d+)\s*章/);
+          setGenProgress(m ? { done: +m[1], total: +m[2] } : null);
+          setBusy(`蓝图生成中:${stage}`);
+        },
       });
       if (ctrl.signal.aborted) return;
       if (r.warnings.length) setErr("警告: " + r.warnings.join(";"));
@@ -106,7 +118,7 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
       setGenDone(r.outlines.length);
     } catch (e) {
       if (!ctrl.signal.aborted) setErr(errMsg(e));
-    } finally { if (!ctrl.signal.aborted) setBusy(""); }
+    } finally { if (!ctrl.signal.aborted) { setBusy(""); setGenProgress(null); } }
   }
 
   // 滚动规划:展开下一卷蓝图(卷纲 + 已成文状态)
@@ -275,6 +287,12 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
               修改指令
             </button>
           )}
+          {outlines.length > 0 && (
+            <button onClick={() => setShowBatchRetitle((v) => !v)}
+              title="为全书统一换一批章节标题(只改标题,不动剧情)">
+              换一批标题
+            </button>
+          )}
           <button onClick={() => setShowGen(!showGen)}>
             {outlines.length ? "重新生成蓝图" : "生成蓝图"}
           </button>
@@ -299,6 +317,7 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
             {hasArch && (outlines.length ? (
               <>
                 <TendencySelector node="outline" value={genTendency} onChange={setGenTendency} compact />
+                <TitleStyleControl value={titleStyle} onChange={setTitleStyle} compact />
                 <button className="primary mt-2" disabled={!!busy} onClick={generateBlueprint}>
                   {busy && <span className="spin" />}
                   覆盖并重新生成全部蓝图
@@ -307,6 +326,7 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
             ) : (
               <>
                 <div className="muted">根据架构一次性生成全部章节蓝图,生成后可逐章微调。</div>
+                <TitleStyleControl value={titleStyle} onChange={setTitleStyle} compact />
                 <button className="primary btn-lg mt-2" disabled={!!busy} onClick={generateBlueprint}>
                   {busy && <span className="spin" />}
                   生成章节蓝图
@@ -345,6 +365,29 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
             onClose={closeDirective}
             onGotoStep={onGotoStep}
           />
+        )}
+        {showBatchRetitle && outlines.length > 0 && (
+          <BatchRetitlePanel
+            pid={pid}
+            totalChapters={outlines.length}
+            onApplied={async (msg) => {
+              setShowBatchRetitle(false);
+              setFlash(msg);
+              await onChanged();
+            }}
+            onClose={() => setShowBatchRetitle(false)}
+          />
+        )}
+        {genProgress && (
+          <div className="gen-progress mt-2">
+            <div className="gen-progress-label">已生成 {genProgress.done}/{genProgress.total} 章</div>
+            <div className="gen-progress-bar">
+              <div
+                className="gen-progress-fill"
+                style={{ width: `${Math.round((genProgress.done / Math.max(1, genProgress.total)) * 100)}%` }}
+              />
+            </div>
+          </div>
         )}
         {busy && <div className="muted mt-2"><span className="spin" />{busy}</div>}
         {flash && <div className="msg-ok mt-2">{flash}</div>}

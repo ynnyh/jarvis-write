@@ -105,6 +105,10 @@ class OutlineOut(BaseModel):
 
 class GenerateBlueprintRequest(BaseModel):
     tendency: Tendency = Field(default_factory=dict)
+    # 章节标题风格(Pillar 2):预设 key(plain/hook/suspense/poetic)+ 可选自由文本,
+    # 由后端 resolve_title_directive 解析成一句导向注入蓝图 prompt。空=默认朴素档。
+    title_style: str = Field(default="", max_length=20)
+    title_directive: str = Field(default="", max_length=500)
 
 
 class GenerateBlueprintResponse(BaseModel):

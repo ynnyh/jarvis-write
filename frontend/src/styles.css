@@ -2225,6 +2225,26 @@ html, body { max-width: 100%; overflow-x: hidden; }
   border-radius: var(--r-full);
 }
 
+/* 蓝图逐章生成进度(Pillar 1:后端流式上报「已生成 N/M 章」)——比 wiz 细条更醒目,带文案 */
+.gen-progress { display: grid; gap: 4px; }
+.gen-progress-label {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.gen-progress-bar {
+  height: 6px;
+  background: var(--surface-2);
+  border-radius: var(--r-full);
+  overflow: hidden;
+}
+.gen-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--brand), var(--brand-2));
+  border-radius: var(--r-full);
+  transition: width 0.3s ease;
+}
+
 /* AI 候选卡组:内容逐张落定,skeleton 期间 shimmer 占位 */
 .wiz-cands { display: grid; gap: var(--sp-3); margin-top: var(--sp-3); }
 .wiz-cand {

@@ -29,6 +29,7 @@ import PolishCompareCard from "./write/PolishCompareCard";
 import AnnotatedReviseCard from "./write/AnnotatedReviseCard";
 import ChapterTitleEdit from "./write/ChapterTitleEdit";
 import { useWritePanel, ACT_TITLE } from "./write/useWritePanel";
+import { useScrollOnAppear } from "./write/useScrollOnAppear";
 
 interface Props {
   pid: number; outlines: Outline[];
@@ -67,6 +68,13 @@ export default function WritePanel({ pid, outlines }: Props) {
     // 目录抽屉选章
     openFromRail,
   } = useWritePanel({ pid, outlines });
+
+  // 异步结果卡都插在正文列顶部,而用户此刻常停在章节中部选段/批注——卡片一出现就把它滚进视野,
+  // 免去"改完还得手动往上翻找结果"(用户反馈的交互重灾区:版本对比 / 生成结果 / 整章润色 / 按批注改)。
+  const versionRef = useScrollOnAppear(versionsFor !== null && versions !== null);
+  const genResultRef = useScrollOnAppear(genResult);
+  const polishRef = useScrollOnAppear(polishCompare && current);
+  const reviseRef = useScrollOnAppear(reviseResult && current);
 
   // 动作卡(act= 进 URL,可刷新/分享):桌面在中栏内联,移动端换全屏 sheet 容器(组件同一份)
   const actCards = (
@@ -125,36 +133,40 @@ export default function WritePanel({ pid, outlines }: Props) {
       {/* ---- 主场正文列:状态卡 + 蓝图卡 + 正文(段落气泡)+ 章尾下一章卡(移动端支持左右滑切章) ---- */}
       <div className="write-main" onTouchStart={onMainTouchStart} onTouchEnd={onMainTouchEnd}>
         {versionsFor !== null && versions !== null && (
-          <VersionCompare
-            chapterNumber={versionsFor}
-            versions={versions}
-            compareVer={compareVer}
-            current={current}
-            busy={!!genJob}
-            onClose={closeVersions}
-            onSelectVersion={(v) => selectVersion(versionsFor, v)}
-            onRestore={(vid) => restoreVersion(versionsFor, vid)}
-          />
+          <div ref={versionRef}>
+            <VersionCompare
+              chapterNumber={versionsFor}
+              versions={versions}
+              compareVer={compareVer}
+              current={current}
+              busy={!!genJob}
+              onClose={closeVersions}
+              onSelectVersion={(v) => selectVersion(versionsFor, v)}
+              onRestore={(vid) => restoreVersion(versionsFor, vid)}
+            />
+          </div>
         )}
 
         {genResult && (
-          <GenResultCard
-            pid={pid}
-            result={genResult}
-            genBlocked={genBlocked}
-            genHint={genHint}
-            onClose={() => setGenResult(null)}
-            onChanged={() => {
-              reload();
-              // 修订/放行后同步刷新打开的正文(失效缓存,共享 qk.chapter 自动重拉)
-              qc.invalidateQueries({ queryKey: qk.chapter(pid, genResult.chapter_number) });
-            }}
-            onRewrite={() => {
-              // 「去重写本章」:切到该章并打开 AI 栏梳理修改意见
-              setChapterNum(genResult.chapter_number);
-              openDock({ mode: "revise" });
-            }}
-          />
+          <div ref={genResultRef}>
+            <GenResultCard
+              pid={pid}
+              result={genResult}
+              genBlocked={genBlocked}
+              genHint={genHint}
+              onClose={() => setGenResult(null)}
+              onChanged={() => {
+                reload();
+                // 修订/放行后同步刷新打开的正文(失效缓存,共享 qk.chapter 自动重拉)
+                qc.invalidateQueries({ queryKey: qk.chapter(pid, genResult.chapter_number) });
+              }}
+              onRewrite={() => {
+                // 「去重写本章」:切到该章并打开 AI 栏梳理修改意见
+                setChapterNum(genResult.chapter_number);
+                openDock({ mode: "revise" });
+              }}
+            />
+          </div>
         )}
 
         {/* 「更多」/快捷键打开的动作卡(act= 进 URL);移动端为全屏 sheet */}
@@ -172,25 +184,29 @@ export default function WritePanel({ pid, outlines }: Props) {
 
         {/* AI 栏③整章优化的对照结果(原文/润色稿,可微调后应用) */}
         {polishCompare && current && (
-          <PolishCompareCard
-            pid={pid}
-            chapterNum={current.chapter_number}
-            original={polishCompare.original}
-            result={polishCompare.result}
-            onApplied={() => setPolishCompare(null)}
-            onDiscard={() => setPolishCompare(null)}
-          />
+          <div ref={polishRef}>
+            <PolishCompareCard
+              pid={pid}
+              chapterNum={current.chapter_number}
+              original={polishCompare.original}
+              result={polishCompare.result}
+              onApplied={() => setPolishCompare(null)}
+              onDiscard={() => setPolishCompare(null)}
+            />
+          </div>
         )}
 
         {/* AI 栏②按批注改的验收卡(逐条 diff,接受/拒绝走 paraEdit 快照守卫写回) */}
         {reviseResult && current && (
-          <AnnotatedReviseCard
-            pid={pid}
-            chapter={current}
-            pairs={reviseResult}
-            onSaved={(updated) => { setCurrent(updated); void reload(); }}
-            onClose={() => setReviseResult(null)}
-          />
+          <div ref={reviseRef}>
+            <AnnotatedReviseCard
+              pid={pid}
+              chapter={current}
+              pairs={reviseResult}
+              onSaved={(updated) => { setCurrent(updated); void reload(); }}
+              onClose={() => setReviseResult(null)}
+            />
+          </div>
         )}
 
         {current ? (

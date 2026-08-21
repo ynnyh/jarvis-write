@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -22,6 +23,7 @@ from app.db.models import Outline, OutlineVersion, Project
 from app.engines.pipeline.blueprint_parser import parse_blueprint, validate_blueprint
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import render_style_block
+from app.engines.title_style import DEFAULT_TITLE_DIRECTIVE
 from app.llm.router import Task, get_adapter_for
 from app.prompts import CHAPTER_BLUEPRINT_PROMPT, CHUNKED_BLUEPRINT_PROMPT
 from app.schemas.tendency import Tendency
@@ -41,6 +43,15 @@ _CHUNK_MAX_ATTEMPTS = 3
 
 # 一块解析出的章数低于应有章数的这个比例,视为本块失败需重试。
 _CHUNK_MIN_RATIO = 0.6
+
+# 流式进度用:统计已成形的「第N章」章节头个数。与解析器同源的宽松匹配——
+# 允许行首 markdown 星号/空白 + 全角/半角数字,不要求后面的分隔符已吐出来
+# (章节头一冒出来就算这章"开始生成了")。
+_HEAD_RE = re.compile(r"^\s*\**\s*第\s*\d+\s*章", re.MULTILINE)
+
+
+def _count_heads(text: str) -> int:
+    return len(_HEAD_RE.findall(text))
 
 
 def _outline_content_hash(data: dict[str, Any]) -> str:
@@ -65,6 +76,49 @@ def _outline_content_hash(data: dict[str, Any]) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
+async def _generate_chunk(
+    adapter,
+    prompt: str,
+    *,
+    expected: int,
+    base_done: int,
+    total: int,
+    report,
+) -> str:
+    """生成一块蓝图,流式增量上报「已生成 N/总 章」。返回原始文本(未解析)。
+
+    优先走流式:边收边数章节头,每多出一章就上报一次进度,让用户看到逐章生长,
+    而不是干等一个不透明的批量调用。流式不可用(适配器无 stream / 出错 / 返回空)时,
+    回落到一次性 ask()(带瞬时错误重试 + 空正文翻倍重试 + token 记账)。
+
+    注:流式主路径不记 token 用量(与 _complete_via_stream 一致的取舍——流式拿不到
+    准确 usage,记账允许为 0);回落的 ask() 分支照常记账。
+    base_done=本次规划中之前已完成的章数;total=本次规划总章数(进度分母)。
+    """
+    try:
+        parts: list[str] = []
+        last_reported = -1
+        async for delta in adapter.stream(adapter.to_messages(prompt)):
+            if not delta:
+                continue
+            parts.append(delta)
+            # 节流:章节头必然在行首,只在增量跨行时才扫描,避免每个 token 都全文扫
+            if "\n" not in delta:
+                continue
+            n = _count_heads("".join(parts))
+            done = min(base_done + min(n, expected), total)
+            if done > last_reported:
+                last_reported = done
+                report(f"已生成 {done}/{total} 章")
+        raw = "".join(parts).strip()
+        if raw:
+            return raw
+        logger.warning("蓝图流式返回空,回落一次性调用")
+    except Exception as exc:  # noqa: BLE001 — 流式任何异常都回落,不影响生成
+        logger.warning("蓝图流式失败,回落一次性调用: %s", exc)
+    return await adapter.ask(prompt)
+
+
 async def generate_blueprint(
     *,
     novel_architecture: str,
@@ -75,14 +129,17 @@ async def generate_blueprint(
     start_chapter: int = 1,
     end_chapter: int | None = None,
     previous_tail: str = "",
+    title_directive: str = "",
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """分块生成章节蓝图。返回 (章节 dict 列表, 警告列表)。纯生成,不落库。
 
     滚动规划:传 start_chapter/end_chapter 只生成该区间(展开下一卷);
     previous_tail 为上一卷蓝图尾部文本,保证跨卷衔接。
     number_of_chapters 始终是全书总章数(prompt 里的全局语境)。
-    progress: 可选回调 fn(stage_text),每块生成前/解析后各报一次(异步任务进度用)。
+    progress: 可选回调 fn(stage_text),每块生成前/流式逐章/解析后上报(异步任务进度用)。
+    title_directive: 章节标题风格导向(预设+自由文本已在上游解析);空则回落默认(plain)。
     """
+    title_directive = (title_directive or "").strip() or DEFAULT_TITLE_DIRECTIVE
 
     def _report(stage: str) -> None:
         if progress:
@@ -96,6 +153,7 @@ async def generate_blueprint(
     adapter = get_adapter_for(Task.BLUEPRINT)
 
     last = end_chapter or number_of_chapters
+    run_total = last - start_chapter + 1  # 本次规划的章数,流式进度分母
     all_chapters: list[dict[str, Any]] = []
     all_warnings: list[str] = []
     raw_accumulated = previous_tail
@@ -112,6 +170,7 @@ async def generate_blueprint(
                 novel_architecture=novel_architecture,
                 number_of_chapters=number_of_chapters,
                 style_directives=style_block,
+                title_directive=title_directive,
             )
         else:
             prompt = CHUNKED_BLUEPRINT_PROMPT.format(
@@ -120,6 +179,7 @@ async def generate_blueprint(
                 end_chapter=end,
                 previous_blueprint_tail=raw_accumulated[-_TAIL_CHARS:] or "(首块,无)",
                 style_directives=style_block,
+                title_directive=title_directive,
             )
 
         expected = end - start + 1
@@ -129,7 +189,14 @@ async def generate_blueprint(
         warnings: list[str] = []
         raw = ""
         for attempt in range(1, _CHUNK_MAX_ATTEMPTS + 1):
-            raw = await adapter.ask(prompt)
+            raw = await _generate_chunk(
+                adapter,
+                prompt,
+                expected=expected,
+                base_done=len(all_chapters),
+                total=run_total,
+                report=_report,
+            )
             parsed = parse_blueprint(raw)
             valid, warnings = validate_blueprint(parsed, start, end)
             if len(valid) >= min_ok:

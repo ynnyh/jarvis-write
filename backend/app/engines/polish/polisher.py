@@ -422,6 +422,86 @@ async def discuss_fragment(
     return {"reply": reply, "suggestion": suggestion}
 
 
+async def discuss_fragment_stream(
+    messages: list[dict],
+    target: str,
+    *,
+    chapter_summary: str = "",
+    before: str = "",
+    after: str = "",
+    chapter_excerpt: str = "",
+):
+    """流式版 discuss_fragment(SSE 打字机):逐字产出 reply,末尾给出结构化 suggestion。
+
+    产出 (kind, payload):
+      ("token", str)  reply 的增量文字(【改写建议】标记之后的内容不吐字,归到 suggestion)
+      ("done", {"reply": str, "suggestion": str | None})  权威收尾(前端据此收敛气泡)
+    入参校验与 system 构造同 discuss_fragment(同步孪生);流式路径不重试空回复、不记账
+    (与 openai_compatible._complete_via_stream 的取舍一致:流式拿不到准确用量,可接受)。
+    """
+    target = target.strip()
+    turns = [
+        m for m in messages
+        if m.get("role") in ("user", "assistant") and (m.get("content") or "").strip()
+    ][-_MAX_DISCUSS_TURNS:]
+    if not turns:
+        raise ValueError("请先说点什么")
+    if turns[-1]["role"] != "user":
+        raise ValueError("最后一条应为你的发言")
+
+    if target:
+        system = DISCUSS_SYSTEM_PROMPT.format(
+            chapter_summary=chapter_summary.strip() or "(无)",
+            before=before.strip()[-_MAX_DISCUSS_CONTEXT_CHARS:] or "(无)",
+            target=target,
+            after=after.strip()[:_MAX_DISCUSS_CONTEXT_CHARS] or "(无)",
+            mark=DISCUSS_SUGGESTION_MARK,
+        )
+    else:
+        system = DISCUSS_CHAPTER_SYSTEM_PROMPT.format(
+            chapter_summary=chapter_summary.strip() or "(无)",
+            chapter_excerpt=chapter_excerpt[:_MAX_DISCUSS_CHAPTER_CHARS] or "(本章还没有正文)",
+        )
+    chat_messages = [LLMMessage(role="system", content=system)] + [
+        LLMMessage(role=m["role"], content=(m["content"] or "").strip()[:_MAX_DISCUSS_MSG_LEN])
+        for m in turns
+    ]
+
+    adapter = get_adapter_for(Task.POLISH)
+    # 边收边按【改写建议】切:标记前是 reply(吐字),标记后是改写正文(存起来,不进聊天气泡)。
+    # 未命中标记时,尾部留 len(mark)-1 个字不吐,防标记被拆在两个 chunk 之间而漏字/漏切。
+    mark = DISCUSS_SUGGESTION_MARK
+    full = ""
+    flushed = 0
+    hit = False
+    async for delta in adapter.stream(chat_messages):
+        if not delta:
+            continue
+        full += delta
+        if hit:
+            continue
+        pos = full.find(mark)
+        if pos >= 0:
+            if pos > flushed:
+                yield ("token", full[flushed:pos])
+            flushed = pos
+            hit = True
+        else:
+            safe = len(full) - (len(mark) - 1)
+            if safe > flushed:
+                yield ("token", full[flushed:safe])
+                flushed = safe
+    # 循环结束:未命中标记则把尾缓冲(防拆断留的最后几字)补吐完,让打字机不落尾;
+    # 命中标记则 flushed 之后都是改写正文,归 suggestion,不吐字。
+    if not hit and len(full) > flushed:
+        yield ("token", full[flushed:])
+    # 权威切分收尾:前端据此把逐字拼出的气泡收敛成最终 reply(消除分帧差异)
+    reply, suggestion = _split_discuss_output(full)
+    if not reply and not suggestion:
+        raise ValueError("模型没有回应,请重试")
+    yield ("done", {"reply": reply, "suggestion": suggestion})
+
+
 async def _discuss_complete(adapter: LLMAdapter, messages: list[LLMMessage]) -> str:
     """多轮 complete 的薄封装:带空回复重试 + 用量记账(对齐 ask 的兜底)。"""
     original_max = adapter.max_tokens

@@ -3,7 +3,7 @@
 // 定位复用 Reader 导出的 nthParaSpan(按段落序号而非全文 indexOf,正文有重复段落也不串位);
 // expected 原文快照做守卫:正文已被别处改动时返回 null,不写回脏数据(与 Reader.applyReplacement 同思想)。
 import { api, ChapterDetail } from "../../api";
-import { nthParaSpan } from "../../components/Reader";
+import { nthParaSpan, splitParas } from "../../components/Reader";
 
 /** ②档批注(docs/10 §4):段号 + 原文快照(正文变动后据此判失效)+ 一句话意见。
  *  身份=下标+快照,不引入新 id 体系,多处批注并存靠快照比对兜底失效(与写回守卫同思想)。 */
@@ -58,6 +58,31 @@ export async function applySelectionReplacement(
 ): Promise<ChapterDetail | null> {
   const source = chapter.final_content || chapter.draft_content;
   const next = spliceSelectionInParagraph(source, idx, from, to, replacement, expectedPara);
+  if (next === null) return null;
+  return api.editChapterContent(pid, chapter.chapter_number, next);
+}
+
+/** 删除 source 正文中第 idx 个非空段落,返回拼接后的新全文(与 splitParas 同口径、以空行分隔重拼)。
+ *  段落不存在、传了 expected 而原文已对不上(正文已被别处改动)、或正文只剩这一段时返回 null——
+ *  与其它写回同思想:守卫失效不写脏数据;不允许删成空章(后端 final_content 要求非空,删空会 400)。 */
+export function dropParagraph(
+  source: string, idx: number, expected?: string,
+): string | null {
+  const paras = splitParas(source);
+  if (idx < 0 || idx >= paras.length) return null;
+  if (expected !== undefined && paras[idx] !== expected) return null;
+  if (paras.length <= 1) return null; // 只剩一段:不允许删成空章
+  paras.splice(idx, 1);
+  return paras.join("\n\n");
+}
+
+/** 段落删除写回:dropParagraph 守卫定位 → PUT content 整章写回(edit_content 会自动留版本快照,可回退)。
+ *  返回更新后的章节详情;守卫失败(正文已被别处改动 / 只剩一段)返回 null,由调用方提示。 */
+export async function applyParaDeletion(
+  pid: number, chapter: ChapterDetail, idx: number, expected: string,
+): Promise<ChapterDetail | null> {
+  const source = chapter.final_content || chapter.draft_content;
+  const next = dropParagraph(source, idx, expected);
   if (next === null) return null;
   return api.editChapterContent(pid, chapter.chapter_number, next);
 }
