@@ -125,6 +125,41 @@ def test_validate_contract_normalizes():
     assert validate_contract({"ambient": "下着瓢泼大雨"}) is None
 
 
+# ---------- Phase 2:故事时钟字段归一 + 章末时钟渲染 ----------
+def test_validate_contract_normalizes_story_clock_fields():
+    from app.engines.pipeline.handoff import validate_contract
+
+    # 合法:int / 字符串数字 都归一成 int
+    c = validate_contract(dict(CONTRACT, story_day=3, days_remaining="20"))
+    assert c["story_day"] == 3
+    assert c["days_remaining"] == 20
+    # 脏值 / None → None(不回落 0,让下游区分"无数据"与"第 0 天")
+    c2 = validate_contract(dict(CONTRACT, story_day="不知道", days_remaining=None))
+    assert c2["story_day"] is None
+    assert c2["days_remaining"] is None
+    # 负数 → None
+    assert validate_contract(dict(CONTRACT, story_day=-2))["story_day"] is None
+    # 老契约无这俩键 → None(向后兼容,不误当 0)
+    base = {k: v for k, v in CONTRACT.items() if k not in ("story_day", "days_remaining")}
+    c4 = validate_contract(base)
+    assert c4["story_day"] is None and c4["days_remaining"] is None
+
+
+def test_format_contract_block_renders_clock_line():
+    from app.engines.pipeline.handoff import format_contract_block, validate_contract
+
+    c = validate_contract(dict(CONTRACT, story_day=3, days_remaining=29))
+    block = format_contract_block(c, 1)
+    assert "章末时钟" in block
+    assert "故事第 3 天" in block
+    assert "倒计时剩 29 天" in block
+    # 无时钟字段 → 不出时钟行(向后兼容,老契约块形态不变)
+    base = {k: v for k, v in CONTRACT.items() if k not in ("story_day", "days_remaining")}
+    block2 = format_contract_block(validate_contract(base), 1)
+    assert "章末时钟" not in block2
+
+
+
 # ---------- 提取落库:成功 ----------
 def test_extract_success_writes_row():
     from app.engines.editorial import content_hash

@@ -38,6 +38,20 @@ def _s(value) -> str | None:
     return v or None
 
 
+def _int_or_none(value) -> int | None:
+    """归一整型契约字段(story_day / days_remaining):int/"3"/3.0 → int;
+    None/空/非数字/负数 → None。
+
+    与 canon._coerce_pos_int 的关键区别:这里「缺失是常态」(多数章不带倒计时),
+    脏值回落 None 而非 0——让下游故事时钟算术能区分「无数据」与「第 0 天」,不误报。
+    """
+    try:
+        n = int(float(str(value).strip()))
+    except (TypeError, ValueError):
+        return None
+    return n if n >= 0 else None
+
+
 def validate_contract(data: dict) -> dict | None:
     """结构校验 + 归一化 LLM 提取结果;无效返回 None(视为提取失败)。
 
@@ -72,6 +86,8 @@ def validate_contract(data: dict) -> dict | None:
     threads = data.get("open_threads")
     contract = {
         "in_story_time": _s(data.get("in_story_time")),
+        "story_day": _int_or_none(data.get("story_day")),
+        "days_remaining": _int_or_none(data.get("days_remaining")),
         "location": _s(data.get("location")),
         "scene_continues": bool(data.get("scene_continues")),
         "ambient": _s(data.get("ambient")),
@@ -95,6 +111,18 @@ def format_contract_block(contract: dict, prev_chapter_number: int) -> str:
     ]
     if t := contract.get("in_story_time"):
         lines.append(f"- 剧情时间:{t}")
+    day = contract.get("story_day")
+    rem = contract.get("days_remaining")
+    if day is not None or rem is not None:
+        parts = []
+        if day is not None:
+            parts.append(f"故事第 {day} 天")
+        if rem is not None:
+            parts.append(f"倒计时剩 {rem} 天")
+        lines.append(
+            "- 章末时钟:" + "·".join(parts)
+            + "(本章的时间推进须与此连贯:天数不得倒流,倒计时剩余不得变多或算错)"
+        )
     if loc := contract.get("location"):
         lines.append(f"- 章末地点:{loc}")
     lines.append(

@@ -27,6 +27,7 @@ from app.engines.consistency.extractor import extract_and_apply, parse_llm_json
 from app.engines.consistency.preflight import preflight_chapter
 from app.engines.consistency.repetition import avoid_block, dedup_paragraphs
 from app.engines.pipeline.handoff import extract_handoff_contract, load_handoff_block
+from app.engines.timeline import persist_clock_issues
 from app.engines.polish import ai_flavor_report
 from app.engines.polish.polisher import _flavor_hits_block, deai_self_heal
 from app.engines.editorial import (
@@ -335,6 +336,17 @@ async def apply_chapter_tail(
     await extract_handoff_contract(
         db, chapter, chapter_number, final, get_adapter_for(Task.HANDOFF_EXTRACT)
     )
+
+    # ---- 确定性故事时钟校验(advisory,不阻断):落 source=clock 建议 ----
+    # 放在契约抽取【之后】——此刻本章 story_day 已入库,book_timeline 能看到本章这条,
+    # 才能算牵涉本章的倒计时口径/天数倒流。纯算术、无 LLM;自吞异常 + rollback,
+    # 绝不拖垮章后主链路(对齐 canon 建议的隔离范式)。门禁阻断路径另由 timeline_block
+    # 把权威天数轴喂给 LLM 完成,这里是事后精确补网。
+    try:
+        persist_clock_issues(db, project.id, chapter, final)
+    except Exception as exc:  # noqa: BLE001 — 时钟校验绝不阻塞主流程
+        db.rollback()
+        logger.warning("第 %d 章故事时钟校验失败(已跳过): %s", chapter_number, exc)
     return extraction_stats
 
 
