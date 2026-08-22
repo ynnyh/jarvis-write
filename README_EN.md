@@ -50,6 +50,25 @@ Most AI writing tools stop at "generation." The value of jarvis-write is what co
 - **🎚️ Tag-based tendency system** — style, pacing, and tone are no longer hardcoded in prompts: chips + free-form input + savable presets, applied across outline, prose, and polishing. You stay in control end to end.
 - **🧬 De-AI-flavor · dual anchoring + self-healing** — treats *"reads like an AI wrote it"* as the number-one enemy. A **positive anchor** feeds famous-author / preset style exemplars (Yu Hua, Lu Xun, Wang Zengqi, Jin Yong, Wang Xiaobo, Hemingway… your pick — or feed your own sample, or auto-extract one from chapters you've approved) so the prose has a concrete voice to learn from; a **negative anchor** uses ✗AI-cliché→✓human paired counter-examples to cross out stock phrasing. Every final draft then passes a **quantitative AI-flavor gate** (9 cliché rule classes + sentence-rhythm / paragraph-structure statistics); over the threshold, the text is **rewritten to strip the flavor → re-scored → converged**, and reverted if it didn't actually improve — never shipping a worse version. The positive anchor reaches every entry point: continuation, passage polish, whole-chapter polish. *Famous-author styles are always labeled "style reference, not an excerpt from the original"; exemplars are our own pastiche and contain no copyrighted text.*
 
+## 🎬 Comic-Drama Workshop: turn your finished novel into a comic drama
+
+Beyond writing and editing — the "Book → Comic Drama" tab turns approved chapters into a **complete production bible** for vertical comic-drama short videos, from art direction to trailer. Take it to Jimeng / Kling / Midjourney / CapCut and build the video by the numbers:
+
+```
+① Art direction        ② Asset cards         ③ Episodes          ④ Per-episode line        ⑤ Trailer
+  (you pick; AI        (consistency          (hook +             script → shots →          30-60s mashup:
+   recommends top 3)    anchors: style /      cliffhanger         3-track prompts →         punch open, cuts
+                       character / scene)     per episode)        production pack)          freeze + title card
+```
+
+- **Consistency is the whole game**: style, character, and scene anchors live in asset cards and are **injected verbatim into every shot's prompts** (with an engine-level fallback when the LLM drops one) — the same face never changes, the art style never drifts across a hundred shots
+- **You pick the art direction**: CN-comic painterly / Japanese anime / 3D animation / ink-wash / cyberpunk / live-action — a hard constraint on every prompt (live-action carries an uncanny-valley warning; animated styles are the default recommendation), or let AI recommend the top 3 for your book with reasons
+- **Director knowledge is baked in**: episodes follow short-drama conventions (self-contained conflict + 3-second hook + cliffhanger; a 3,000-word chapter yields ~4-6 episodes); shots carry framing and camera moves; the production pack lists transitions and per-segment music moods — you supply hands, not brains
+- **Production pack**: dubbing script (TTS-friendly text, voice, estimated timing, with mismatch warnings against shot lengths) + edit checklist + **SRT subtitles** that import straight into CapCut/PR
+- **One-click trailer**: mash up the highest-impact shots and taglines into a 30-60s promo — punch open, escalation cuts, cliffhanger freeze, title card
+- **Voice compliance red line**: voice casting describes timbre characteristics and points to **licensed platform voice libraries** — never clone, never name-imitate a real person's voice; confirm commercial licensing before publishing
+- **Same "prompts only" philosophy**: no generation models attached, zero new config — image/video models iterate fast and bill per shot, orchestration and know-how are what we do
+
 ## Key Features
 
 - **Six-step generation pipeline**: seed → character dynamics → worldbuilding → plot architecture → chapter blueprint → chapter prose (built on a mature Snowflake-Method-style prompt system; see Acknowledgments). The chapter blueprint now **grows chapter by chapter**, with live "generated N / M chapters" progress instead of waiting on an opaque batch call
