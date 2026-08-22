@@ -535,6 +535,19 @@ def _add_drama_voice_columns() -> None:
                 logger.info("迁移:drama_character_cards 补 %s 列", col)
 
 
+def _add_drama_style_direction_column() -> None:
+    """漫剧工坊:drama_style_cards 补 direction 列(画风方向,幂等)。"""
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "drama_style_cards" not in insp.get_table_names():
+            return
+        if not _column_exists("drama_style_cards", "direction"):
+            conn.execute(
+                text("ALTER TABLE drama_style_cards ADD COLUMN direction VARCHAR(40) DEFAULT 'auto'")
+            )
+            logger.info("迁移:drama_style_cards 补 direction 列")
+
+
 def run_migrations() -> None:
     """启动时调用。幂等。"""
     _add_user_id_columns()
@@ -555,6 +568,7 @@ def run_migrations() -> None:
     _add_chapter_proofread_snapshot_column()
     _add_queue_require_approved_column()
     _add_drama_voice_columns()
+    _add_drama_style_direction_column()
     _disable_word_guard_default()
     _migrate_finalized_to_approved()
     # 先补加密老表存量明文 key,再拷到新表,保证 provider_configs 落库必为密文

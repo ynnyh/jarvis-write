@@ -63,11 +63,14 @@ from app.engines.drama import (
     generate_trailer,
     generate_voice_cast,
     plan_episodes,
+    recommend_directions,
     render_shot_prompts,
     write_episode_script,
 )
 from app.engines.drama.common import (
+    DRAMA_DIRECTIONS,
     MODE_DESC,
+    VALID_DIRECTIONS,
     VALID_MODES,
     approved_chapter_numbers,
     character_card_dict,
@@ -93,6 +96,11 @@ class StyleCardIn(BaseModel):
     style_en: str = ""
     negative: str = ""
     ratio: str = "9:16"
+    direction: str | None = None
+
+
+class StyleGenIn(BaseModel):
+    direction: str = "auto"
 
 
 class CharacterCardIn(BaseModel):
@@ -165,13 +173,14 @@ def _require_approved(db: Session, project_id: int, action: str) -> None:
 
 @router.get("/meta")
 async def drama_meta(project_id: int, db: Session = Depends(get_db)):
-    """准入门槛数据:已定稿章号(前端用它显示引导/章节范围选择)。"""
+    """准入门槛数据:已定稿章号(前端用它显示引导/章节范围选择)+ 画风方向目录。"""
     get_project_or_404(db, project_id)
     approved = approved_chapter_numbers(db, project_id)
     return {
         "approved_chapters": approved,
         "approved_count": len(approved),
         "modes": [{"key": k, "label": v} for k, v in MODE_DESC.items()],
+        "directions": DRAMA_DIRECTIONS,
     }
 
 
@@ -200,6 +209,10 @@ async def save_style(project_id: int, body: StyleCardIn, db: Session = Depends(g
     if card is None:
         card = DramaStyleCard(project_id=project_id)
         db.add(card)
+    if body.direction is not None:
+        if body.direction not in VALID_DIRECTIONS:
+            raise HTTPException(status_code=400, detail=f"未知画风方向:{body.direction}")
+        card.direction = body.direction
     card.style_name = clip(body.style_name, 60)
     card.style_cn = clip(body.style_cn, 400)
     card.style_en = clip(body.style_en, 400)
@@ -210,10 +223,15 @@ async def save_style(project_id: int, body: StyleCardIn, db: Session = Depends(g
 
 
 @router.post("/style/generate")
-async def generate_style(project_id: int, db: Session = Depends(get_db)):
+async def generate_style(
+    project_id: int, body: StyleGenIn | None = None, db: Session = Depends(get_db)
+):
     project = get_project_or_404(db, project_id)
     if not project.topic.strip():
         raise HTTPException(status_code=400, detail="请先在「概念」确定本书主题,再定美术风格。")
+    direction = (body.direction if body else "") or "auto"
+    if direction not in VALID_DIRECTIONS:
+        raise HTTPException(status_code=400, detail=f"未知画风方向:{direction}")
     kind = f"drama-style-{project_id}"
     if (existing := _existing_job("drama-", kind)):
         return existing
@@ -223,7 +241,27 @@ async def generate_style(project_id: int, db: Session = Depends(get_db)):
 
         with SessionLocal() as session:
             proj = session.get(Project, project_id)
-            return await generate_style_card(session, proj, progress)
+            return await generate_style_card(session, proj, direction, progress)
+
+    return {"job_id": spawn_job(kind, work)}
+
+
+@router.post("/style/recommend-directions")
+async def recommend_directions_ep(project_id: int, db: Session = Depends(get_db)):
+    """按书的题材/基调推荐前 3 个画风方向(带理由,按优先级排序);AI 荐,用户选。"""
+    project = get_project_or_404(db, project_id)
+    if not project.topic.strip():
+        raise HTTPException(status_code=400, detail="请先在「概念」确定本书主题,再推荐方向。")
+    kind = f"drama-dirrec-{project_id}"
+    if (existing := _existing_job("drama-", kind)):
+        return existing
+
+    async def work(progress):
+        from app.db.session import SessionLocal
+
+        with SessionLocal() as session:
+            proj = session.get(Project, project_id)
+            return await recommend_directions(session, proj, progress)
 
     return {"job_id": spawn_job(kind, work)}
 

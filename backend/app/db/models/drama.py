@@ -34,6 +34,10 @@ class DramaStyleCard(Base, TimestampMixin):
         ForeignKey("projects.id", ondelete="CASCADE"), unique=True, index=True
     )
     style_name: Mapped[str] = mapped_column(String(60), default="")
+    # 画风方向(auto/comic_cn/anime_jp/render3d/live/ink_wash/cyber,见 common.DRAMA_DIRECTIONS):
+    # 用户显式选定的艺术方向,风格卡生成时的硬约束——动画系为默认推荐,
+    # 真人写实保留但前端挂「恐怖谷/一致性更难」提示
+    direction: Mapped[str] = mapped_column(String(40), default="auto")
     # 画风锁定段(中文):媒介/笔触/色彩/光影/质感,60-120 字,逐字注入每条分镜提示词
     style_cn: Mapped[str] = mapped_column(Text, default="")
     # 画风锁定段(英文关键词串,MJ/即梦国际版用)

@@ -611,3 +611,67 @@ def test_trailer_generate_and_export(client):
     assert "1\n00:00:00,000 --> 00:00:03,000\n走镖不看路,看人。" in r.text
 
 
+
+
+# ---- 画风方向 + 方向推荐 ----
+
+_STYLE_REPLY = {
+    "style_name": "水墨武侠·电影感",
+    "style_cn": "国风水墨,墨色浓淡相宜,留白构图,侧逆光",
+    "style_en": "ink-wash wuxia, cinematic",
+    "negative": "文字,水印",
+}
+
+_DIRREC_REPLY = {
+    "recommendations": [
+        {"key": "ink_wash", "reason": "武侠+雪夜荒山,水墨最贴"},
+        {"key": "comic_cn", "reason": "备选"},
+        {"key": "nonsense_key", "reason": "应被丢弃"},
+        {"key": "auto", "reason": "auto 不应入选"},
+        {"key": "cyber", "reason": "第三名"},
+    ]
+}
+
+
+def test_style_direction_and_recommend(client):
+    """方向:生成时持久化 + 非法方向 400;推荐:归一化(未知 key/auto 丢弃、限 3、带优先级)。"""
+    headers = _auth(client, "drama_dir")
+    p = _create_project(client, headers, "方向漫剧书")
+    pid = p["id"]
+    r = client.patch(f"/api/projects/{pid}", headers=headers,
+                     json={"topic": "雪夜镖队护送神秘镖箱", "genre": "武侠"})
+    assert r.status_code == 200
+
+    # meta 带方向目录
+    r = client.get(f"/api/projects/{pid}/drama/meta", headers=headers)
+    dirs = r.json()["directions"]
+    assert any(d["key"] == "live" and "恐怖谷" in d["tip"] for d in dirs)
+
+    # 非法方向 → 400
+    r = client.post(f"/api/projects/{pid}/drama/style/generate", headers=headers,
+                    json={"direction": "pixel_art"})
+    assert r.status_code == 400 and "方向" in r.json()["detail"]
+    r = client.put(f"/api/projects/{pid}/drama/style", headers=headers,
+                   json={"style_cn": "x", "direction": "pixel_art"})
+    assert r.status_code == 400
+
+    # 指定方向生成 → 卡上持久化,序列化带 label
+    with patch("app.engines.drama.style.get_adapter_for",
+               return_value=_JsonAdapter(_STYLE_REPLY)):
+        r = client.post(f"/api/projects/{pid}/drama/style/generate", headers=headers,
+                        json={"direction": "ink_wash"})
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    assert job["result"]["direction"] == "ink_wash"
+    assert job["result"]["direction_label"] == "水墨国风"
+
+    # 方向推荐:未知 key 与 auto 被丢,按序号限 3,带优先级
+    with patch("app.engines.drama.style.get_adapter_for",
+               return_value=_JsonAdapter(_DIRREC_REPLY)):
+        r = client.post(f"/api/projects/{pid}/drama/style/recommend-directions", headers=headers)
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    recs = job["result"]["recommendations"]
+    assert [x["key"] for x in recs] == ["ink_wash", "comic_cn", "cyber"]
+    assert [x["priority"] for x in recs] == [1, 2, 3]
+    assert recs[0]["label"] == "水墨国风"

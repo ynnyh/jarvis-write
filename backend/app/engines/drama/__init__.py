@@ -20,7 +20,7 @@ from .production import DramaPackError, build_production_pack
 from .prompt_render import DramaPromptError, render_shot_prompts
 from .script import DramaScriptError, write_episode_script
 from .storyboard import DramaStoryboardError, build_storyboard
-from .style import generate_style_card
+from .style import DramaStyleError, generate_style_card, recommend_directions
 from .trailer import DramaTrailerError, generate_trailer
 from .voice import DramaVoiceError, generate_voice_cast
 
@@ -33,7 +33,9 @@ __all__ = [
     "DramaVoiceError",
     "DramaPackError",
     "DramaTrailerError",
+    "DramaStyleError",
     "generate_style_card",
+    "recommend_directions",
     "generate_character_cards",
     "generate_scene_cards",
     "generate_assets",

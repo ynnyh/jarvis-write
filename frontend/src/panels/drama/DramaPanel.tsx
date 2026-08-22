@@ -7,7 +7,10 @@ import { useCallback, useEffect, useState } from "react";
 import {
   DRAMA_STATUS_CN,
   DramaCharacterCard,
+  DramaDirection,
+  DramaDirectionRec,
   DramaEpisode,
+  DramaMeta,
   DramaProductionPack,
   DramaSceneCard,
   DramaShot,
@@ -45,7 +48,7 @@ function Banner({ stage, text }: { stage: string; text: string }) {
 }
 
 export default function DramaPanel({ pid }: Props) {
-  const [meta, setMeta] = useState<{ approved_chapters: number[] } | null>(null);
+  const [meta, setMeta] = useState<DramaMeta | null>(null);
   const [style, setStyle] = useState<DramaStyleCard | null>(null);
   const [cards, setCards] = useState<DramaCharacterCard[]>([]);
   const [scenes, setScenes] = useState<DramaSceneCard[]>([]);
@@ -112,7 +115,9 @@ export default function DramaPanel({ pid }: Props) {
       <div className="drama-cols">
         {/* 资产侧栏:桌面常驻左侧(sticky),移动端随流单列 */}
         <aside className="drama-rail">
-          <div id="drama-step-style"><StyleSection pid={pid} style={style} onSaved={setStyle} /></div>
+          <div id="drama-step-style">
+            <StyleSection pid={pid} style={style} directions={meta.directions} onSaved={setStyle} />
+          </div>
           <div id="drama-step-assets">
             <AssetsSection pid={pid} cards={cards} scenes={scenes}
               onChanged={(c, s) => { setCards(c); setScenes(s); }} />
@@ -292,32 +297,51 @@ function TrailerSection({ pid, episodes, trailer, onGenerated }: {
 }
 
 // ================= 美术风格卡 =================
-function StyleSection({ pid, style, onSaved }: {
-  pid: number; style: DramaStyleCard | null; onSaved: (s: DramaStyleCard) => void;
+function StyleSection({ pid, style, directions, onSaved }: {
+  pid: number;
+  style: DramaStyleCard | null;
+  directions: DramaDirection[];
+  onSaved: (s: DramaStyleCard) => void;
 }) {
   const { run } = useJob();
   const [busy, setBusy] = useState(false);
+  const [recBusy, setRecBusy] = useState(false);
   const [stage, setStage] = useState("");
   const [err, setErr] = useState("");
   const [draft, setDraft] = useState<DramaStyleCard | null>(style);
+  const [direction, setDirection] = useState(style?.direction || "auto");
+  const [recs, setRecs] = useState<DramaDirectionRec[]>([]);
 
   useEffect(() => { setDraft(style); }, [style]);
+
+  const dirInfo = directions.find((d) => d.key === direction);
 
   async function generate() {
     setBusy(true); setErr(""); setStage("");
     try {
       const r = await run<DramaStyleCard>(
-        () => dramaApi.generateStyle(pid),
+        () => dramaApi.generateStyle(pid, direction),
         { kind: `drama-style-${pid}`, onStage: setStage },
       );
       if (r) { onSaved(r); toast.ok("美术风格已定", "这段画风锁定会注入每一格分镜"); }
     } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); setStage(""); }
   }
 
+  async function recommend() {
+    setRecBusy(true); setErr("");
+    try {
+      const r = await run<{ recommendations: DramaDirectionRec[] }>(
+        () => dramaApi.recommendDirections(pid),
+        { kind: `drama-dirrec-${pid}` },
+      );
+      if (r) setRecs(r.recommendations);
+    } catch (e) { setErr(errMsg(e)); } finally { setRecBusy(false); }
+  }
+
   async function save() {
     if (!draft) return;
     try {
-      const r = await dramaApi.saveStyle(pid, draft);
+      const r = await dramaApi.saveStyle(pid, { ...draft, direction });
       onSaved(r.style);
       toast.ok("风格卡已保存");
     } catch (e) { toast.err("保存失败", errMsg(e)); }
@@ -338,15 +362,48 @@ function StyleSection({ pid, style, onSaved }: {
     <div className="card">
       <div className="card-head">
         <h3 className="grow">① 美术风格卡 <span className="muted">全片画风统一</span></h3>
+        <button className="btn-sm" disabled={recBusy} onClick={recommend}>
+          {recBusy ? "推荐中…" : "AI 荐方向"}
+        </button>
         {style && <button className="btn-sm" onClick={save}>保存修改</button>}
         <button className="primary" disabled={busy} onClick={generate}>
           {style ? "重新生成" : "AI 定美术风格"}
         </button>
       </div>
       <p className="card-desc">
-        按本书类型定一段「画风锁定」(媒介/笔触/色彩/光影),之后每一条分镜提示词都会逐字嵌入这段锚,
-        上百格画面画风不漂移。生成后可直接改字微调。
+        先拍板「画风方向」,再让 AI 在这个方向内定「画风锁定段」——之后每一条分镜提示词都会
+        逐字嵌入这段锚,上百格画面画风不漂移。生成后可直接改字微调。
       </p>
+
+      {/* 方向推荐:AI 荐、用户选,点一下即采用 */}
+      {recs.length > 0 && (
+        <div className="sub-summary">
+          <div className="card-head mb-2"><b>按本书气质推荐</b>
+            <span className="muted">点一条即选中该方向,也可以无视推荐自己挑</span></div>
+          {recs.map((r) => (
+            <button key={r.key} type="button"
+              className={"chip dir-rec" + (direction === r.key ? " on" : "")}
+              onClick={() => setDirection(r.key)}>
+              <b>{r.priority === 1 ? "★ " : ""}{r.label}</b>
+              <span className="muted">{r.reason}</span>
+              {r.tip && <span className="drama-warn-tip">⚠ {r.tip}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* 方向选择 */}
+      <div className="chips board-tabs mb-2">
+        {directions.map((d) => (
+          <button key={d.key} type="button"
+            className={"chip" + (direction === d.key ? " on" : "")}
+            onClick={() => setDirection(d.key)}>
+            {d.label}
+          </button>
+        ))}
+      </div>
+      {dirInfo?.tip && <p className="hint drama-warn-tip">⚠ {dirInfo.tip}</p>}
+
       {busy && <Banner stage={stage} text="AI 正在定全片美术风格…" />}
       {err && <div className="msg-err">{err}</div>}
       {draft && (
@@ -446,6 +503,10 @@ function AssetsSection({ pid, cards, scenes, onChanged }: {
       {cards.length === 0 && !busy && (
         <p className="hint">还没生成。角色来自故事圣经——写了几章、圣经里有角色后即可生成。</p>
       )}
+      <p className="hint drama-compliance">
+        配音合规:请用 TTS 平台的<b>正版音色库</b>;声音受法律保护,<b>切勿克隆他人声音</b>
+        (包括「像某明星/某配音演员」的模仿);商用发布前先确认所选音色的<b>商用授权</b>。
+      </p>
     </div>
   );
 }

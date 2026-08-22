@@ -35,8 +35,17 @@ async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 
 // LLM 长任务(规划/剧本/分镜/提示词)统一超时:与 api.ts 的章节生成对齐
 const LLM_TIMEOUT = 900_000;
 
+// 画风方向(auto/comic_cn/anime_jp/render3d/live/ink_wash/cyber,后端 common.DRAMA_DIRECTIONS)
+export interface DramaDirection {
+  key: string;
+  label: string;
+  directive: string;
+  tip: string;
+}
 export interface DramaStyleCard {
   id: number;
+  direction: string;
+  direction_label: string;
   style_name: string;
   style_cn: string;
   style_en: string;
@@ -99,6 +108,16 @@ export interface DramaMeta {
   approved_chapters: number[];
   approved_count: number;
   modes: { key: string; label: string }[];
+  directions: DramaDirection[];
+}
+
+// 方向推荐:按书的气质荐前 3(带理由与优先级),AI 荐、用户选
+export interface DramaDirectionRec {
+  key: string;
+  label: string;
+  tip: string;
+  reason: string;
+  priority: number;
 }
 
 // 成片包(阶段 2):配音稿 + 剪辑清单
@@ -161,8 +180,12 @@ export const dramaApi = {
     req<{ style: DramaStyleCard | null }>("GET", `/api/projects/${pid}/drama/style`),
   saveStyle: (pid: number, body: Partial<DramaStyleCard>) =>
     req<{ style: DramaStyleCard }>("PUT", `/api/projects/${pid}/drama/style`, body),
-  generateStyle: (pid: number) =>
-    req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/style/generate`, undefined, LLM_TIMEOUT),
+  generateStyle: (pid: number, direction = "auto") =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/style/generate`,
+      { direction }, LLM_TIMEOUT),
+  recommendDirections: (pid: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/style/recommend-directions`,
+      undefined, LLM_TIMEOUT),
 
   getCharacters: (pid: number) =>
     req<{ cards: DramaCharacterCard[]; scenes: DramaSceneCard[] }>(
