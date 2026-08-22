@@ -476,7 +476,7 @@ function AssetsSection({ pid, cards, scenes, onChanged }: {
         <h3 className="grow">② 角色卡与场景卡 <span className="muted">人物一致性</span></h3>
         <button disabled={busy || cards.length === 0} onClick={castVoices}>声线选型</button>
         <button className="primary" disabled={busy} onClick={generate}>
-          {cards.length ? "重新生成(锁定的不动)" : "AI 生成资产卡"}
+          {cards.length ? "重新生成" : "AI 生成资产卡"}
         </button>
       </div>
       <p className="card-desc">

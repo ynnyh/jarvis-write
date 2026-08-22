@@ -3017,9 +3017,9 @@ body:has(.write-zone.immersive) .step-guide { display: none; }
 .drama-cols { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
 .drama-rail { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .drama-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-/* 桌面:侧栏 320px 常驻可滚动,主区自适应;窄屏自动回落单列(顺序天然正确:资产→切集→流水线→预告片) */
+/* 桌面:侧栏 348px 常驻可滚动,主区自适应;窄屏自动回落单列(顺序天然正确:资产→切集→流水线→预告片) */
 @media (min-width: 901px) {
-  .drama-cols { grid-template-columns: 320px minmax(0, 1fr); }
+  .drama-cols { grid-template-columns: 348px minmax(0, 1fr); }
   .drama-rail {
     position: sticky; top: 48px;
     max-height: calc(100vh - 64px); overflow-y: auto;
@@ -3029,6 +3029,27 @@ body:has(.write-zone.immersive) .step-guide { display: none; }
 /* 侧栏内的卡片收紧一点(信息密度高于主区) */
 .drama-rail .card { margin: 0; }
 .drama-rail textarea { font-size: var(--fs-sm); }
+
+/* 侧栏卡片头排版:标题独占一行(副标题另起一行小字),按钮收成两枚一行的整齐网格,
+   不再和标题在同一行互相挤压换行 */
+.drama-rail .card > .card-head { row-gap: 8px; }
+.drama-rail .card > .card-head > h3 {
+  flex: 1 0 100%; min-width: 0; line-height: 1.35;
+}
+.drama-rail .card > .card-head > h3 .muted {
+  display: block; font-size: var(--fs-xs); font-weight: 400; margin-top: 2px;
+}
+.drama-rail .card > .card-head > button {
+  flex: 1 1 calc(50% - 5px); min-width: 0;
+  justify-content: center; padding: 6px 8px; font-size: var(--fs-sm);
+}
+.drama-rail .card > .card-head > button:only-child { flex-basis: 100%; }
+/* 侧栏里的 chips 缩一号,方向七个也能两行排下 */
+.drama-rail .chips { gap: 6px; }
+.drama-rail .chips .chip { padding: 4px 10px; font-size: var(--fs-xs); white-space: nowrap; }
+/* 角色卡等子卡头部:允许换行但收紧行距,锁名不折行 */
+.drama-rail .sub-summary .card-head { row-gap: 6px; }
+.drama-rail .sub-summary .card-head > b { white-space: nowrap; }
 
 /* 画风方向:推荐条目(竖排小卡,含理由)+ 真人写实警示 */
 .dir-rec {
