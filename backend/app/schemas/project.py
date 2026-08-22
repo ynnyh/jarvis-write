@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.schemas.canon import StoryCanon
 from app.schemas.concept import Concept
 from app.schemas.dna import StoryDNA
 from app.schemas.tendency import Tendency
@@ -46,6 +47,8 @@ class ProjectOut(BaseModel):
     global_tendency: dict[str, Any]
     concept: Concept | None = None
     dna: StoryDNA | None = None
+    # 故事宪法(留白/常驻装置/倒计时):全书恒真声明,注入生成+门禁;可空(老项目无)
+    canon: StoryCanon | None = None
     synopsis: str | None = None
     setup_state: str | None = None
     chat_log: list[Any] | None = None

@@ -20,7 +20,8 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Outline
+from app.db.models import Outline, Project
+from app.engines.common import constitution_block
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.pipeline.handoff import handoff_gap, load_handoff_block
 from app.engines.timeline import timeline_block
@@ -29,7 +30,7 @@ from app.prompts.consistency import PREFLIGHT_CHECK_PROMPT
 
 logger = logging.getLogger("jarvis-write.preflight")
 
-_TYPES = {"state", "timeline"}
+_TYPES = {"state", "timeline", "worldrule"}
 _MAX_BEATS = 12  # 节拍注入上限,防蓝图膨胀
 
 
@@ -92,11 +93,15 @@ async def preflight_chapter(
                 "suggestion": "回到上一章重跑一次「章末交接契约」提取(或检查该章正文是否异常/为空)。",
             }]
         return []  # 第一章 / 上一章无正文 → 本就不需要契约,静默跳过
+    project = db.get(Project, project_id)
+    constitution = (constitution_block(project).strip() if project else "") \
+        or "(本书未设定额外世界观硬规则/故事宪法)"
     prompt = PREFLIGHT_CHECK_PROMPT.format(
         chapter_number=chapter_number,
         blueprint=_blueprint_block(outline),
         prev_contract=prev_contract,
         timeline_block=timeline_block(db, project_id, chapter_number),
+        constitution=constitution,
     )
     try:
         raw = await get_adapter_for(Task.CONSISTENCY).ask(prompt)

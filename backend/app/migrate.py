@@ -138,6 +138,23 @@ def _add_dna_column() -> None:
             logger.info("迁移:projects 补 dna 列")
 
 
+def _add_canon_column() -> None:
+    """给 projects 表补 canon 列(故事宪法:留白/常驻装置/倒计时 JSON,幂等)。
+
+    SQLite 的 JSON 底层是 TEXT;存量项目该列为 NULL,由作者编辑 / LLM 建议逐步填充,
+    生成与门禁在 canon 为空时行为与旧版一致(向后兼容)。见 app/schemas/canon.py。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "projects" not in insp.get_table_names():
+            return  # create_all 会新建,无需补列
+        if not _column_exists("projects", "canon"):
+            conn.execute(
+                text("ALTER TABLE projects ADD COLUMN canon JSON")
+            )
+            logger.info("迁移:projects 补 canon 列")
+
+
 def _add_setup_columns() -> None:
     """给 projects 表补 setup_state / chat_log 列(起步流 + 对话落库,幂等)。
 
@@ -488,6 +505,7 @@ def run_migrations() -> None:
     _add_synopsis_column()
     _add_concept_column()
     _add_dna_column()
+    _add_canon_column()
     _add_setup_columns()
     _add_retired_column()
     _add_word_guard_columns()

@@ -51,6 +51,11 @@ class Project(Base, TimestampMixin):
     # vibe 自备范本 / capsule 蒸馏基因。贯穿概念→脊柱→正文强位注入 + 双向治漂门。
     # 见 app/schemas/dna.py。可空(老项目无 DNA,生成回落到题材边界软约束)。
     dna: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # 故事宪法(Canon):书级恒真「声明」——刻意留白/常驻装置/倒计时。治长程一致性里
+    # 「窄窗机制够不着的恒真事实」(大院留白→第8章冒仆役、系统多章消失、倒计时算不清)。
+    # 与 world_rules(自由文本)在 engines/common.constitution_block 合并成同一「宪法块」,
+    # 全程注入生成 + 全程门禁比对。可空(老项目无,行为回落旧版)。见 app/schemas/canon.py。
+    canon: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     # 书籍简介(网文风格 150-300 字,可 AI 生成也可手改);老库由迁移补列
     synopsis: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 起步流进度:创建即建草稿,记录停在哪一步(idea/tone/title/scale/launch);

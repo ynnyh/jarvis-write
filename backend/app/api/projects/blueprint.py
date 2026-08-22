@@ -46,9 +46,9 @@ async def generate_project_blueprint(
         world_building=project.architecture.world_building,
         plot_architecture=project.architecture.plot_architecture,
     ).full_text
-    from app.engines.common import world_rules_block
+    from app.engines.common import constitution_block
 
-    arch_text += world_rules_block(project)
+    arch_text += constitution_block(project)
 
     chapters, warnings = await generate_blueprint(
         novel_architecture=arch_text,
@@ -136,14 +136,14 @@ ROLLING_THRESHOLD = 40
 def _arch_text(p: Project) -> str:
     from app.engines.pipeline.architecture import ArchitectureResult
 
-    from app.engines.common import world_rules_block
+    from app.engines.common import constitution_block
 
     return ArchitectureResult(
         core_seed=p.architecture.core_seed,
         character_dynamics=p.architecture.character_dynamics,
         world_building=p.architecture.world_building,
         plot_architecture=p.architecture.plot_architecture,
-    ).full_text + world_rules_block(p)
+    ).full_text + constitution_block(p)
 
 
 async def _ensure_macro_plan(session, p: Project, style_block: str) -> list[dict]:

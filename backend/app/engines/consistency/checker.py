@@ -22,7 +22,8 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Chapter, ChapterIssue, ChapterState
+from app.db.models import Chapter, ChapterIssue, ChapterState, Project
+from app.engines.common import constitution_block
 from app.engines.consistency.bible import BibleService
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.editorial import content_hash
@@ -106,9 +107,16 @@ async def check_chapter(
         # 圣经为空 → 降级为"仅对照上章"(docs/08 §5.4.1),不再直接跳过
         active_facts = "(故事圣经暂无有效事实,本次仅对照上一章契约与结尾原文)"
 
+    # 本书宪法(world_rules + 结构化 canon):门禁此前拿不到的书级恒真硬约束,
+    # 现作为一等对照源喂进来——这才让「早章立下的留白/装置/倒计时到后段仍可校验」。
+    project = db.get(Project, project_id)
+    constitution = (constitution_block(project).strip() if project else "") \
+        or "(本书未设定额外世界观硬规则/故事宪法)"
+
     prompt = CONSISTENCY_CHECK_PROMPT.format(
         active_facts=active_facts,
         known_roster=bible.known_roster_block(chapter_number),
+        constitution=constitution,
         prev_contract=prev_contract or "(无上一章契约——未提取或正文已改动失效)",
         prev_tail=prev_tail or "(无上一章结尾原文,本章可能是第一章)",
         rolling_summary=rolling_summary or "(无)",

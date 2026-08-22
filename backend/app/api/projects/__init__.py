@@ -35,6 +35,7 @@ from app.api.deps import delete_project_cascade
 from app.auth import current_user_id, get_current_user
 from app.db.models import Project
 from app.db.session import get_db
+from app.schemas.canon import StoryCanon
 from app.schemas.concept import Concept
 from app.schemas.dna import StoryDNA
 from app.schemas.project import ProjectCreate, ProjectOut
@@ -150,6 +151,9 @@ class ProjectPatch(BaseModel):
     concept: Concept | None = None
     # 故事 DNA / 本书基因(坐标卡产出):整段覆盖式保存,走通用 setattr 落 JSON 列
     dna: StoryDNA | None = None
+    # 故事宪法(留白/常驻装置/倒计时):整段覆盖式保存,走通用 setattr 落 JSON 列;
+    # 传空对象即清空。全书恒真声明,注入生成各环节 + 门禁比对。见 app/schemas/canon.py
+    canon: StoryCanon | None = None
     synopsis: str | None = None
     # 起步流进度:传 "" 表示起步完成(落库为 NULL)
     setup_state: str | None = None

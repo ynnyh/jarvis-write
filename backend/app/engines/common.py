@@ -58,6 +58,9 @@ def world_rules_block(project: Project) -> str:
 
     附在架构简报后,注入草稿/定稿/大纲改写/修改指令等所有生成环节——
     高考制度、年代规则、世界观硬设定这类模型容易临场编错的东西,钉一次全书生效。
+
+    注:本函数只渲染自由文本 world_rules(保持向后兼容与既有测试语义);结构化
+    故事宪法(canon)由 constitution_block 在其之上合并——两者对用户是「一处宪法」。
     """
     rules = (project.world_rules or "").strip()
     if not rules:
@@ -68,12 +71,37 @@ def world_rules_block(project: Project) -> str:
     )
 
 
+def constitution_block(project: Project) -> str:
+    """本书宪法块(统一):自由文本世界观硬规则 + 结构化故事宪法(canon)。
+
+    治长程一致性里「窄窗机制够不着的书级恒真事实」——闭集留白 / 常驻装置 / 倒计时。
+    这些设定在前几章立下后很快滑出圣经与契约的注入窗口,到后段既进不了生成上下文、
+    也进不了门禁比对(见 app/schemas/canon.py 病根)。故把它们提为一等公民:经本块
+    全程注入生成、经门禁全程比对。
+
+    边界(防双真相源):world_rules 保留不动(仍走 world_rules_block),canon 存
+    结构化声明,二者在此合并成同一个「宪法块」。canon 为空时输出与 world_rules_block
+    逐字相同(向后兼容,老项目行为不变)。
+    """
+    from app.schemas.canon import coerce_canon
+
+    wr = world_rules_block(project)
+    canon_text = coerce_canon(getattr(project, "canon", None)).render()
+    if not canon_text:
+        return wr  # 无 canon → 完全等价于旧 world_rules_block(向后兼容)
+    return wr + (
+        "\n\n【本书故事宪法(结构化)——全书恒真,绝对不可违背;与上下文/常识冲突时以此为准】\n"
+        + canon_text
+    )
+
+
 def chapter_architecture_brief(project: Project) -> str:
     """逐章生成用:创作初衷 + 核心种子 + 世界观 + 角色动力学 + 世界观硬规则。
 
     角色动力学给足篇幅并点明用途——不只是背景设定,更是揣摩各角色说话口吻、
     性格差异的依据(让笔下人物各有各的声音,是长篇质感的关键)。
     concept 的原始火花回注,缓解"灵感→种子→蓝图→正文"链路的信息减损。
+    尾部拼「本书宪法块」(world_rules + 结构化 canon),钉死留白/装置/倒计时。
     """
     arch = project.architecture
     if arch is None:
@@ -86,7 +114,7 @@ def chapter_architecture_brief(project: Project) -> str:
             f"{arch.character_dynamics[:1800]}"
             f"{_concept_spark_block(project)}"
         )
-    return base + world_rules_block(project)
+    return base + constitution_block(project)
 
 
 def cascade_architecture_brief(project: Project) -> str:

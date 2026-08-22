@@ -154,11 +154,22 @@ def test_preflight_normalizes_unknown_type_and_severity():
     """LLM 乱报 severity/type:severity 强制 major,未知类型钳为 state。"""
     from app.engines.consistency.preflight import _normalize_warning
 
+    # 真正未知的类型 → 钳为 state;severity 一律 major(只警告不阻断)
     w = _normalize_warning({
-        "severity": "blocker", "type": "worldrule", "description": "x",
+        "severity": "blocker", "type": "无此类型", "description": "x",
     })
     assert w["severity"] == "major"
     assert w["type"] == "state"
+
+
+def test_preflight_worldrule_is_valid_type():
+    """Phase 1 起 worldrule 是写前审核的合法维度(违背本书宪法),不再被钳成 state。"""
+    from app.engines.consistency.preflight import _normalize_warning
+
+    w = _normalize_warning({
+        "severity": "major", "type": "worldrule", "description": "蓝图安排了被留白排除的仆役",
+    })
+    assert w["type"] == "worldrule"
 
 
 def test_preflight_warns_on_missing_contract():
