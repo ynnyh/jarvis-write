@@ -533,3 +533,81 @@ def test_production_pack_and_exports(client):
     assert "走镖不看路,看人。" in md
     assert "低弦压场" in md
 
+
+# ---- 预告片 ----
+
+_TRAILER_REPLY = {
+    "title": "这场镖,押的是命",
+    "lines": [
+        {"speaker": "旁白", "text": "雪夜,镖队出动"},
+        {"speaker": "沈砚", "text": "走镖不看路,看人。"},
+    ],
+    "shots": [
+        {"seq": 1, "source_ep": 1, "scene_name": "荒山雪道", "characters": ["沈砚"],
+         "action_desc": "刀光劈开雪幕", "shot_type": "特写", "camera": "推",
+         "dialogue": "走镖不看路,看人。", "duration_s": 3,
+         "prompt_cn": "刀光劈开雪幕(漏锚段,验证兜底)", "prompt_en": "blade light", "negative": "低分辨率"},
+        {"seq": 2, "source_ep": 0, "scene_name": "荒山雪道", "characters": [],
+         "action_desc": "标题卡前的定格", "shot_type": "全景", "camera": "固定",
+         "dialogue": "", "duration_s": 2, "prompt_cn": "雪道远全景", "prompt_en": "snowy road wide", "negative": ""},
+        {"seq": 3, "source_ep": 1, "scene_name": "荒山破庙", "characters": ["沈砚"],
+         "action_desc": "箱底伸出一只手", "shot_type": "特写", "camera": "推",
+         "dialogue": "", "duration_s": 2, "prompt_cn": "箱中伸手的特写,画风锚已含国风厚涂", "prompt_en": "hand from crate close-up, ink-wash wuxia, cinematic, dark teal palette", "negative": ""},
+        {"seq": 4, "source_ep": 1, "scene_name": "荒山雪道", "characters": ["沈砚"],
+         "action_desc": "沈砚回眸", "shot_type": "近景", "camera": "固定",
+         "dialogue": "", "duration_s": 99, "prompt_cn": "回眸近景,含国风厚涂", "prompt_en": "look back, ink-wash wuxia, cinematic, dark teal palette", "negative": ""},
+    ],
+}
+
+
+def test_trailer_generate_and_export(client):
+    """预告片:生成(锚段兜底)+ GET 回读 + 导出(md/srt);无集时 400。"""
+    headers = _auth(client, "drama_trailer")
+    p = _create_project(client, headers, "预告片漫剧书")
+    pid = p["id"]
+    _seed_novel(pid, chapters=1)
+    _seed_assets(pid)
+
+    # 还没切集 → 生成失败(job error,业务引导)
+    r = client.post(f"/api/projects/{pid}/drama/trailer/generate", headers=headers,
+                    json={"from_ep": 1, "to_ep": 9, "target_s": 30})
+    job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "error"
+    assert "切集" in job["error"]
+
+    ep_id = _pipeline_to_storyboard(client, headers, pid)
+
+    with patch("app.engines.drama.trailer.get_adapter_for",
+               return_value=_JsonAdapter(_TRAILER_REPLY)):
+        r = client.post(f"/api/projects/{pid}/drama/trailer/generate", headers=headers,
+                        json={"from_ep": 1, "to_ep": 9, "target_s": 30})
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    trailer = job["result"]
+    assert trailer["title"] == "这场镖,押的是命"
+    assert len(trailer["shots"]) == 4
+    # 镜头 1 桩故意漏画风锚 → 兜底注入;角色锚同样兜底
+    assert "国风厚涂" in trailer["shots"][0]["prompt_cn"]
+    assert "玄色劲装" in trailer["shots"][0]["prompt_cn"]
+    # 镜头 1 英文漏锚 → 兜底
+    assert "ink-wash" in trailer["shots"][0]["prompt_en"]
+    # 镜头 4 时长 99 → 预告片上限 8
+    assert trailer["shots"][3]["duration_s"] == 8
+    # 负面词基座并入
+    assert trailer["shots"][1]["negative"].startswith("文字,水印")
+
+    # GET 回读
+    r = client.get(f"/api/projects/{pid}/drama/trailer", headers=headers)
+    assert r.status_code == 200
+    assert r.json()["trailer"]["totals"]["shots"] == 4
+
+    # 导出:md 含文案骨架与提示词;srt 时间轴累计(3+2+2+8)
+    r = client.get(f"/api/projects/{pid}/drama/trailer/export?format=md", headers=headers)
+    assert r.status_code == 200
+    assert "文案骨架" in r.text and "混剪分镜" in r.text
+    assert "这场镖,押的是命" in r.text
+    r = client.get(f"/api/projects/{pid}/drama/trailer/export?format=srt", headers=headers)
+    assert r.status_code == 200
+    assert "1\n00:00:00,000 --> 00:00:03,000\n走镖不看路,看人。" in r.text
+
+

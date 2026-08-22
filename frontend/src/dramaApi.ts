@@ -131,6 +131,30 @@ export interface DramaProductionPack {
   totals: { shots: number; target_s: number; storyboard_s: number; voice_s: number };
 }
 
+// 预告片:从各集高能素材混剪的 30-60 秒宣传片(项目级,一条)
+export interface TrailerLine { speaker: string; text: string }
+export interface TrailerShot {
+  seq: number;
+  source_ep: number; // 参考来源集号,0 = 预告片新创
+  scene_name: string;
+  characters: string[];
+  action_desc: string;
+  shot_type: string;
+  camera: string;
+  dialogue: string;
+  duration_s: number;
+  prompt_cn: string;
+  prompt_en: string;
+  negative: string;
+}
+export interface DramaTrailer {
+  target_s: number;
+  title: string;
+  lines: TrailerLine[];
+  shots: TrailerShot[];
+  totals: { shots: number; duration_s: number };
+}
+
 export const dramaApi = {
   meta: (pid: number) => req<DramaMeta>("GET", `/api/projects/${pid}/drama/meta`),
   getStyle: (pid: number) =>
@@ -174,6 +198,14 @@ export const dramaApi = {
   getPack: (pid: number, eid: number) =>
     req<{ pack: DramaProductionPack | null }>(
       "GET", `/api/projects/${pid}/drama/episodes/${eid}/pack`),
+
+  // 预告片:从各集高能素材混剪 30-60 秒宣传片
+  generateTrailer: (pid: number, body: { from_ep: number; to_ep: number; target_s: number }) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/trailer/generate`, body, LLM_TIMEOUT),
+  getTrailer: (pid: number) =>
+    req<{ trailer: DramaTrailer | null }>("GET", `/api/projects/${pid}/drama/trailer`),
+  exportTrailer: (pid: number, format: "md" | "srt") =>
+    downloadFile(`/api/projects/${pid}/drama/trailer/export?format=${format}`, `trailer.${format}`),
 
   exportEpisode: (pid: number, eid: number, format: "md" | "csv" | "json" | "pack" | "srt") =>
     downloadFile(`/api/projects/${pid}/drama/episodes/${eid}/export?format=${format}`,

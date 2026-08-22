@@ -35,6 +35,7 @@ class Task(str, Enum):
     DRAMA_STORYBOARD = "drama_storyboard"  # 漫剧分镜
     DRAMA_PROMPT = "drama_prompt"       # 漫剧分镜三轨提示词
     DRAMA_PACK = "drama_pack"           # 漫剧成片包(朗读润色/转场/配乐标注)
+    DRAMA_TRAILER = "drama_trailer"     # 漫剧预告片(高能混剪)
 
 
 class Tier(str, Enum):
@@ -61,6 +62,7 @@ _TASK_TIER: dict[Task, Tier] = {
     Task.DRAMA_STORYBOARD: Tier.QUALITY,
     Task.DRAMA_PROMPT: Tier.QUALITY,
     Task.DRAMA_PACK: Tier.QUALITY,
+    Task.DRAMA_TRAILER: Tier.QUALITY,
 }
 
 # 任务 -> 采样温度。创作类任务要发散(高温),判断/抽取/压缩类要稳准(低温)。
@@ -84,6 +86,7 @@ _TASK_TEMPERATURE: dict[Task, float] = {
     Task.DRAMA_STORYBOARD: 0.5,  # 分镜结构化,克制
     Task.DRAMA_PROMPT: 0.4,    # 提示词翻译/锚段嵌入,求稳求准
     Task.DRAMA_PACK: 0.4,      # 成片包标注/朗读润色,忠实为先
+    Task.DRAMA_TRAILER: 0.7,   # 预告片要钩子感,文案大胆些
 }
 
 
@@ -103,6 +106,7 @@ _TASK_MAX_TOKENS: dict[Task, int] = {
     Task.DRAMA_PLAN: 6000,
     Task.DRAMA_ASSET: 5000,
     Task.DRAMA_PACK: 6000,
+    Task.DRAMA_TRAILER: 8000,
 }
 
 

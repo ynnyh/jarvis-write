@@ -189,23 +189,87 @@ def _srt_ts(sec: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
-def export_srt(shots: list[DramaShot]) -> str:
-    """标准 SRT 字幕(剪映/PR 直接导入):时间轴按分镜时长累计,有台词才有字幕条。
-
-    纯确定性输出——时间轴来自分镜表,和剪辑清单同一口径。
-    """
+def _srt_blocks(items: list[tuple[int, str]]) -> str:
+    """(时长秒, 字幕文本) 序列 → 标准 SRT。有文本才有字幕条;空条时长仍计入时间轴。"""
     blocks: list[str] = []
     t = 0.0
     idx = 0
-    for s in shots:
-        start, end = t, t + s.duration_s
+    for duration, text in items:
+        start, end = t, t + duration
         t = end
-        text = (s.dialogue or "").strip()
+        text = (text or "").strip()
         if not text:
             continue
         idx += 1
         blocks.append(f"{idx}\n{_srt_ts(start)} --> {_srt_ts(end)}\n{text}\n")
     return "\n".join(blocks)
+
+
+def export_srt(shots: list[DramaShot]) -> str:
+    """标准 SRT 字幕(剪映/PR 直接导入):时间轴按分镜时长累计,有台词才有字幕条。
+
+    纯确定性输出——时间轴来自分镜表,和剪辑清单同一口径。
+    """
+    return _srt_blocks([(s.duration_s, s.dialogue or "") for s in shots])
+
+
+def export_trailer_srt(shots: list[dict]) -> str:
+    """预告片 SRT(dict 版 shots,与 export_srt 同一时间轴口径)。"""
+    return _srt_blocks([(int(s.get("duration_s") or 0), str(s.get("dialogue") or "")) for s in shots])
+
+
+def export_trailer_markdown(project: Project, trailer: dict) -> str:
+    """预告片拍摄手册:文案骨架 + 混剪分镜 + 三轨提示词。"""
+    L: list[str] = []
+    totals = trailer.get("totals") or {}
+    L.append(f"# 《{project.title}》漫剧预告片 · {trailer.get('title') or ''}")
+    L.append("")
+    L.append(
+        f"- 目标时长:{trailer.get('target_s', '?')} 秒 | 镜头:{totals.get('shots', '?')} 格 "
+        f"| 分镜总时长:{totals.get('duration_s', '?')}s | 取材:第 {totals.get('from_ep', '?')}-{totals.get('to_ep', '?')} 集"
+    )
+    L.append("")
+    lines = trailer.get("lines") or []
+    if lines:
+        L.append("## 文案骨架(旁白 + 金句)")
+        L.append("")
+        for l in lines:
+            if isinstance(l, dict):
+                L.append(f"- **{l.get('speaker', '')}**:{l.get('text', '')}")
+        L.append("")
+    shots = trailer.get("shots") or []
+    if shots:
+        L.append("## 混剪分镜")
+        L.append("")
+        L.append("| # | 取材 | 场景 | 角色 | 景别 | 运镜 | 秒 | 画面 | 台词 |")
+        L.append("|---|---|---|---|---|---|---|---|---|")
+        for s in shots:
+            src = s.get("source_ep") or 0
+            src_cn = "新创" if not src else f"第{src}集"
+            dia = str(s.get("dialogue") or "").replace("|", "/").replace("\n", " ")
+            act = str(s.get("action_desc") or "").replace("|", "/").replace("\n", " ")
+            L.append(
+                f"| {s.get('seq')} | {src_cn} | {s.get('scene_name') or ''} "
+                f"| {'、'.join(s.get('characters') or [])} | {s.get('shot_type')} | {s.get('camera')} "
+                f"| {s.get('duration_s')} | {act} | {dia} |"
+            )
+        L.append("")
+        L.append("## 三轨提示词(即拿即用)")
+        L.append("")
+        for s in shots:
+            L.append(f"### 镜头 {s.get('seq')}({s.get('shot_type')}/{s.get('camera')}/{s.get('duration_s')}s)")
+            L.append(f"**中文提示词(即梦/可灵)**")
+            L.append("")
+            L.append(s.get("prompt_cn") or "(未生成)")
+            L.append("")
+            L.append(f"**英文提示词(Midjourney)**")
+            L.append("")
+            L.append(s.get("prompt_en") or "(未生成)")
+            L.append("")
+            L.append(f"**负面提示词**:{s.get('negative') or '(无)'}")
+            L.append("")
+        L.append("> 混剪顺序:炸点开场 → 世界/人设速览 → 冲突升级连切 → 悬念定格 + 标题卡(后期加字)。")
+    return "\n".join(L)
 
 
 def export_pack_markdown(

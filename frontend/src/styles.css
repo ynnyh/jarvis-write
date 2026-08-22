@@ -3006,3 +3006,26 @@ body:has(.write-zone.immersive) .step-guide { display: none; }
 .script-line { font-size: var(--fs-sm); line-height: 1.8; }
 .script-line b { color: var(--text); }
 .script-line .muted { margin-left: 8px; font-size: var(--fs-xs); }
+
+/* ===== 漫剧工作台:管线步骤条 + 资产侧栏/主区双栏(≥901px),移动端单列 ===== */
+.drama-steps {
+  overflow-x: auto; scrollbar-width: none;
+  position: sticky; top: 0; z-index: 5;
+  background: var(--bg, var(--surface)); padding: 6px 0;
+}
+.drama-steps::-webkit-scrollbar { display: none; }
+.drama-cols { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
+.drama-rail { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.drama-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+/* 桌面:侧栏 320px 常驻可滚动,主区自适应;窄屏自动回落单列(顺序天然正确:资产→切集→流水线→预告片) */
+@media (min-width: 901px) {
+  .drama-cols { grid-template-columns: 320px minmax(0, 1fr); }
+  .drama-rail {
+    position: sticky; top: 48px;
+    max-height: calc(100vh - 64px); overflow-y: auto;
+    padding-right: 4px;
+  }
+}
+/* 侧栏内的卡片收紧一点(信息密度高于主区) */
+.drama-rail .card { margin: 0; }
+.drama-rail textarea { font-size: var(--fs-sm); }

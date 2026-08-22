@@ -173,3 +173,25 @@ class DramaProductionPack(Base, TimestampMixin):
         ForeignKey("drama_episodes.id", ondelete="CASCADE"), unique=True, index=True
     )
     pack: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class DramaTrailer(Base, TimestampMixin):
+    """预告片:从已有各集的高能素材重剪一条 30-60 秒宣传片(项目级,一条,重建覆盖)。
+
+    lines 为 [{speaker, text}](旁白 + 金句对白,按预告片节奏);
+    shots 为 [{seq, source_ep, scene_name, characters, action_desc, shot_type,
+    camera, dialogue, duration_s, prompt_cn, prompt_en, negative}]——
+    source_ep 标参考来源集号(0 = 预告片新创镜头),提示词同分镜三轨、
+    锚段注入规则一致(画风/角色锚逐字嵌入 + 引擎兜底)。
+    """
+
+    __tablename__ = "drama_trailers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    target_s: Mapped[int] = mapped_column(Integer, default=45)
+    title: Mapped[str] = mapped_column(String(200), default="")
+    lines: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    shots: Mapped[list[Any]] = mapped_column(JSON, default=list)

@@ -6,13 +6,22 @@
 阶段 2 补齐出片最后一块:声线选型卡 + 成片包(配音稿/剪辑清单/SRT 字幕)。
 """
 from .characters import DramaAssetError, generate_assets, generate_character_cards, generate_scene_cards
-from .exporter import export_csv, export_json, export_markdown, export_pack_markdown, export_srt
+from .exporter import (
+    export_csv,
+    export_json,
+    export_markdown,
+    export_pack_markdown,
+    export_srt,
+    export_trailer_markdown,
+    export_trailer_srt,
+)
 from .planner import DramaPlanError, plan_episodes
 from .production import DramaPackError, build_production_pack
 from .prompt_render import DramaPromptError, render_shot_prompts
 from .script import DramaScriptError, write_episode_script
 from .storyboard import DramaStoryboardError, build_storyboard
 from .style import generate_style_card
+from .trailer import DramaTrailerError, generate_trailer
 from .voice import DramaVoiceError, generate_voice_cast
 
 __all__ = [
@@ -23,6 +32,7 @@ __all__ = [
     "DramaPromptError",
     "DramaVoiceError",
     "DramaPackError",
+    "DramaTrailerError",
     "generate_style_card",
     "generate_character_cards",
     "generate_scene_cards",
@@ -33,9 +43,12 @@ __all__ = [
     "build_storyboard",
     "render_shot_prompts",
     "build_production_pack",
+    "generate_trailer",
     "export_markdown",
     "export_csv",
     "export_json",
     "export_srt",
     "export_pack_markdown",
+    "export_trailer_markdown",
+    "export_trailer_srt",
 ]
