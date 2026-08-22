@@ -13,6 +13,7 @@ from app.db.session import SessionLocal, get_db
 from app.engines.pipeline.chapter import generate_chapter
 from app.engines.pipeline.handoff import handoff_payload
 from app.jobs import create_job, fail_job, finish_job, fire_and_track, list_running, normalize_job_error, update_stage
+from app.schemas.canon import coerce_canon
 
 from ._common import _flavor_dict, _gate_payload, _get_chapter_or_404
 
@@ -31,6 +32,8 @@ class ChapterIssueOut(BaseModel):
     suggestion: str
     status: str
     created_at: str
+    # 仅 source=canon 的建议带结构化载荷 {kind: absence|device|deadline, ...},余者 None
+    payload: dict | None = None
 
 
 class IssuePatchRequest(BaseModel):
@@ -43,7 +46,7 @@ def _issue_out(r: ChapterIssue) -> ChapterIssueOut:
     return ChapterIssueOut(
         id=r.id, source=r.source, severity=r.severity, issue_type=r.issue_type,
         description=r.description, evidence=r.evidence, suggestion=r.suggestion,
-        status=r.status, created_at=r.created_at.isoformat(),
+        status=r.status, created_at=r.created_at.isoformat(), payload=r.payload,
     )
 
 
@@ -71,14 +74,7 @@ async def list_issues(
         .order_by(ChapterIssue.id.desc())
         .all()
     )
-    return [
-        ChapterIssueOut(
-            id=r.id, source=r.source, severity=r.severity, issue_type=r.issue_type,
-            description=r.description, evidence=r.evidence, suggestion=r.suggestion,
-            status=r.status, created_at=r.created_at.isoformat(),
-        )
-        for r in rows
-    ]
+    return [_issue_out(r) for r in rows]
 
 
 @router.patch("/{chapter_number}/issues/{issue_id}", response_model=ChapterIssueOut)
@@ -191,3 +187,77 @@ async def apply_issue_revision(
 
     fire_and_track(runner())
     return {"job_id": job_id}
+
+
+def _adopt_into_canon(current: dict | None, payload: dict) -> tuple[dict, bool]:
+    """把一条 canon 建议 payload 合并进现有 canon,返回(新 canon dict, 是否有变更)。
+
+    幂等:已存在(同名装置 / 同文留白 / 已设倒计时)则不重复、不覆盖。合并后统一走
+    coerce_canon 归一(整型/重要度/丢无名),与 PATCH 落库口径一致,单一真相源。
+    """
+    raw = coerce_canon(current).model_dump()  # 现有 canon 归一成 {absences,devices,deadline}
+    kind = str(payload.get("kind") or "").strip().lower()
+    changed = False
+
+    if kind == "absence":
+        txt = str(payload.get("text") or "").strip()
+        if txt and not any(str(a).strip() == txt for a in raw["absences"]):
+            raw["absences"].append(txt)
+            changed = True
+    elif kind == "device":
+        name = str(payload.get("name") or "").strip()
+        if name and not any(str(d.get("name") or "").strip() == name for d in raw["devices"]):
+            raw["devices"].append({
+                "name": name,
+                "cadence": str(payload.get("cadence") or "").strip(),
+                "importance": payload.get("importance") or "major",
+            })
+            changed = True
+    elif kind == "deadline":
+        name = str(payload.get("name") or "").strip()
+        cur_dl = raw.get("deadline")
+        if name and not (isinstance(cur_dl, dict) and str(cur_dl.get("name") or "").strip()):
+            raw["deadline"] = {
+                "name": name,
+                "total_days": payload.get("total_days") or 0,
+                "anchor_chapter": payload.get("anchor_chapter") or 1,
+                "importance": "critical",
+            }
+            changed = True
+
+    return coerce_canon(raw).model_dump(), changed
+
+
+@router.post("/{chapter_number}/issues/{issue_id}/adopt-canon")
+async def adopt_canon_suggestion(
+    project_id: int, chapter_number: int, issue_id: int,
+    db: Session = Depends(get_db),
+):
+    """采纳一条「故事宪法建议」(source=canon)进 project.canon,并标 issue 为 resolved。
+
+    这是 LLM 提议→人工确认的落点:抽取器只把建议落成 advisory issue、绝不自动改 canon;
+    真正写 canon 只在此处(作者触发的单独小事务,合规「canon 只在作者编辑时单写」)。
+    幂等:建议内容若已在 canon 里(changed=False)也照常标 resolved(视作已采纳)。
+    返回更新后的 canon 与 issue,供前端同时刷新宪法编辑器与问题清单。
+    """
+    project = get_project_or_404(db, project_id)
+    ch = _get_chapter_or_404(db, project_id, chapter_number)
+    issue = _get_issue_or_404(db, ch.id, issue_id)
+    if issue.source != "canon" or not isinstance(issue.payload, dict):
+        raise HTTPException(status_code=400, detail="该问题不是可采纳的故事宪法建议")
+    if issue.status != "open":
+        raise HTTPException(
+            status_code=400, detail=f"该建议已是 {issue.status} 状态,无需再采纳"
+        )
+    merged, changed = _adopt_into_canon(project.canon, issue.payload)
+    project.canon = merged
+    issue.status = "resolved"
+    db.commit()
+    db.refresh(project)
+    db.refresh(issue)
+    return {
+        "ok": True,
+        "changed": changed,  # False = 该建议内容此前已在宪法里(仍标记为已采纳)
+        "canon": project.canon,
+        "issue": _issue_out(issue),
+    }

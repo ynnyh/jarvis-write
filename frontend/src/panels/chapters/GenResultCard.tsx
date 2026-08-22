@@ -12,6 +12,7 @@ import { dispatchAction } from "../../ui/actions";
 import { useJob } from "../../ui/useJob";
 import { toast } from "../../ui/Toaster";
 import GateResolve from "./GateResolve";
+import { useInvalidateProject } from "../../hooks/queries";
 
 // 审校五维分中文标签;旧快照无 continuity 键,Object.entries 遍历天然不渲染该行
 const SCORE_LABEL: Record<string, string> = {
@@ -22,7 +23,7 @@ const SEV_BADGE: Record<string, string> = { blocker: "err", major: "warn", minor
 const SEV_CN: Record<string, string> = { blocker: "致命", major: "重要", minor: "次要" };
 // 问题来源中文
 const SOURCE_CN: Record<string, string> = {
-  gate: "门禁", preflight: "预审", diag: "诊断", review: "审校", rules: "规则",
+  gate: "门禁", preflight: "预审", diag: "诊断", review: "审校", rules: "规则", canon: "宪法建议",
 };
 const ISSUE_STATUS_CN: Record<string, string> = { resolved: "已人工解决", ignored: "已忽略" };
 // AI 味偏高分界线(/千字,加权命中+统计罚分;经验值,可调):超过即提示一键去味
@@ -49,6 +50,7 @@ interface Props {
 
 export default function GenResultCard({ pid, result, onChanged, onRewrite, onClose, genBlocked, genHint, historical }: Props) {
   const { run } = useJob();
+  const invalidateProject = useInvalidateProject(pid);
   const n = result.chapter_number;
   // 问题清单:挂载后按章拉取(与生成响应里的 consistency_issues 互补,这份可操作)
   const [issues, setIssues] = useState<ChapterIssue[] | null>(null);
@@ -104,6 +106,23 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, onClo
       }
     } catch (e) {
       toast.err("修订失败", errMsg(e));
+      await reloadIssues();
+    } finally {
+      setBusyIssue(null);
+    }
+  }
+
+  // 采纳一条宪法建议(source=canon)进 project.canon:标 issue resolved,并刷新宪法编辑器(project 查询)
+  async function adoptCanon(issue: ChapterIssue) {
+    setBusyIssue(issue.id);
+    try {
+      const res = await api.adoptCanonSuggestion(pid, n, issue.id);
+      toast.ok(res.changed ? "已采纳进故事宪法" : "该建议此前已在宪法里,已标记为已采纳");
+      await reloadIssues();
+      await invalidateProject();
+      onChanged();
+    } catch (e) {
+      toast.err("采纳失败", errMsg(e));
       await reloadIssues();
     } finally {
       setBusyIssue(null);
@@ -205,7 +224,8 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, onClo
             genBlocked={genBlocked} genHint={genHint}
             onApply={() => applyRevision(issue)}
             onResolve={() => markIssue(issue, "resolved")}
-            onIgnore={() => markIssue(issue, "ignored")} />
+            onIgnore={() => markIssue(issue, "ignored")}
+            onAdopt={() => adoptCanon(issue)} />
         ))}
         {doneIssues.length > 0 && (
           <details className="issue-done-box mt-1">
@@ -259,7 +279,7 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, onClo
 }
 
 // 单条问题:severity 徽标 + 来源 + 描述 + 可折叠证据 + 建议;open 状态给三个操作
-function IssueRow({ issue, busy, done, genBlocked, genHint, onApply, onResolve, onIgnore }: {
+function IssueRow({ issue, busy, done, genBlocked, genHint, onApply, onResolve, onIgnore, onAdopt }: {
   issue: ChapterIssue;
   busy: boolean;
   done?: boolean;
@@ -269,7 +289,14 @@ function IssueRow({ issue, busy, done, genBlocked, genHint, onApply, onResolve, 
   onApply?: () => void;
   onResolve?: () => void;
   onIgnore?: () => void;
+  // 宪法建议(source=canon)专用:采纳进 project.canon
+  onAdopt?: () => void;
 }) {
+  // source=canon 是「宪法建议」:操作换成「采纳进宪法/忽略」,done 后徽标显示「已采纳进宪法」
+  const isCanon = issue.source === "canon";
+  const doneCn = isCanon && issue.status === "resolved"
+    ? "已采纳进宪法"
+    : (ISSUE_STATUS_CN[issue.status] ?? issue.status);
   return (
     <div className={"fact-line issue-item" + (done ? " issue-done" : "")}>
       <div className="issue-head">
@@ -277,7 +304,7 @@ function IssueRow({ issue, busy, done, genBlocked, genHint, onApply, onResolve, 
           {SEV_CN[issue.severity] ?? issue.severity}
         </span>
         <span className="badge">{SOURCE_CN[issue.source] ?? issue.source}</span>
-        {done && <span className="badge">{ISSUE_STATUS_CN[issue.status] ?? issue.status}</span>}
+        {done && <span className="badge">{doneCn}</span>}
         <span>{issue.description}</span>
       </div>
       {issue.evidence && (
@@ -289,12 +316,22 @@ function IssueRow({ issue, busy, done, genBlocked, genHint, onApply, onResolve, 
       {issue.suggestion && <div className="muted">建议: {issue.suggestion}</div>}
       {!done && (
         <div className="issue-actions">
-          <button className="primary btn-sm" disabled={busy || genBlocked}
-            title={genBlocked ? genHint : "把该问题的修正建议交给 AI 走重写链路(受理即标记解决,门禁会重跑验证)"}
-            onClick={onApply}>
-            {busy && <span className="spin spin-sm" />}按建议修订
-          </button>
-          <button className="btn-sm" disabled={busy} onClick={onResolve}>已人工解决</button>
+          {isCanon ? (
+            <button className="primary btn-sm" disabled={busy}
+              title="把这条书级设定写进故事宪法,全程注入生成并参与一致性门禁(可稍后在项目设定里编辑)"
+              onClick={onAdopt}>
+              {busy && <span className="spin spin-sm" />}采纳进宪法
+            </button>
+          ) : (
+            <button className="primary btn-sm" disabled={busy || genBlocked}
+              title={genBlocked ? genHint : "把该问题的修正建议交给 AI 走重写链路(受理即标记解决,门禁会重跑验证)"}
+              onClick={onApply}>
+              {busy && <span className="spin spin-sm" />}按建议修订
+            </button>
+          )}
+          {!isCanon && (
+            <button className="btn-sm" disabled={busy} onClick={onResolve}>已人工解决</button>
+          )}
           <button className="btn-sm" disabled={busy} onClick={onIgnore}>忽略</button>
         </div>
       )}

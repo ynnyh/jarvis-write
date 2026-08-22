@@ -41,6 +41,11 @@ EXTRACTION_PROMPT = """\
   ],
   "knowledge_updates": [
     {{"fact": "对应 fact_changes 里的事实内容", "knower": "reader 或 角色名", "state": "known|suspected"}}
+  ],
+  "canon_suggestions": [
+    {{"kind": "absence", "text": "刻意留白声明(如:大院里只有主人、保镖、女主三人,没有仆役)", "evidence": "本章正文里正面确立此留白的原句", "reason": "为何值得设为全书恒真"}},
+    {{"kind": "device", "name": "装置名(如:系统)", "cadence": "复现节奏(如:每章都应有存在感)", "importance": "critical|major|minor", "evidence": "本章正文里该装置登场的原句", "reason": "为何是需长期复现的常驻装置"}},
+    {{"kind": "deadline", "name": "倒计时名(如:任务倒计时)", "total_days": 数字, "anchor_chapter": {chapter_number}, "evidence": "本章正文里点明期限的原句", "reason": "为何是全书倒计时"}}
   ]
 }}
 
@@ -51,7 +56,11 @@ EXTRACTION_PROMPT = """\
 3. 伏笔:本章新埋的用 plant;呼应强化已有的用 reinforce;明确揭晓的用 payoff
 4. knowledge_updates:谁在本章"得知"了什么。读者视角用 knower="reader"
 5. 宁缺毋滥,每类最多 8 条,按重要性取舍
-"""
+6. canon_suggestions(故事宪法建议,给作者过目、不自动生效):仅当本章正文【正面确立】了一条【全书恒真】的书级设定时才提议——
+   - absence 刻意留白:文中明写"只有…三人/空无一人/别无他人/此处不通电"等把某类人或物排除在外的硬设定(不是"检测缺席"猜出来的,必须有正面原句支撑)
+   - device 常驻装置/金手指:首次出现、设定为长期存在须反复现身的东西(系统/读心术/贴身信物),与一次性道具区分
+   - deadline 倒计时:文中明确点出的带天数期限(如"还有 31 天"),total_days 填天数、anchor_chapter 填本章号 {chapter_number}
+   宁缺毋滥,总共最多 3 条;拿不准、只是普通剧情、或无正面原句佐证的,一律不提(canon 事关全书,错一条比漏一条代价大)。本章没有可提议的就给空数组。"""
 
 # =============== 一致性检查 ===============
 # 写后一致性门禁(docs/08 §5.4)的对照 prompt:除圣经硬约束与前情摘要外,

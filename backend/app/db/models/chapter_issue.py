@@ -14,7 +14,10 @@ content_hash 是检查时正文指纹(与 editorial.content_hash 同算法)。
 """
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import ForeignKey, String, Text
+from sqlalchemy.types import JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin
@@ -28,11 +31,12 @@ class ChapterIssue(Base, TimestampMixin):
         ForeignKey("chapters.id", ondelete="CASCADE"), index=True
     )
     # 来源:gate(写后一致性门禁)/ preflight(写前审核,P1)/ diag(离线诊断,P2)/
-    # review(审校)/ rules(规则扫描,对照世界观硬规则钉板)
+    # review(审校)/ rules(规则扫描,对照世界观硬规则钉板)/ canon(LLM 提议的故事宪法建议)
     source: Mapped[str] = mapped_column(String(20), default="gate")
     # blocker(硬矛盾,阻断)/ major / minor
     severity: Mapped[str] = mapped_column(String(20), default="minor")
-    # state / knowledge / timeline / worldrule
+    # state / knowledge / timeline / worldrule / ambient / cast;
+    # source=canon 时为 absence / device / deadline(建议的宪法条目类别)
     issue_type: Mapped[str] = mapped_column(String(20), default="state")
     description: Mapped[str] = mapped_column(Text, default="")
     # 证据段落:本章正文里的逐字引用(引擎已过滤引不到原文的幻觉举证)
@@ -42,3 +46,6 @@ class ChapterIssue(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), default="open")
     # 本次检查所依据正文的指纹(sha256 前 16 位,同 editorial.content_hash)
     content_hash: Mapped[str] = mapped_column(String(16), default="")
+    # 结构化载荷:仅 source=canon 的建议存 {kind: absence|device|deadline, ...},
+    # 供「采纳进宪法」端点无损重建 canon 条目;其它来源为 NULL。见 extractor.py。
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)

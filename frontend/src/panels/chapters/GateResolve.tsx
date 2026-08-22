@@ -48,8 +48,9 @@ export default function GateResolve({ pid, n, onChanged, onRewriteFallback, genB
 
   const open = (issues ?? []).filter((i) => i.status === "open");
   const blockers = open.filter((i) => i.severity === "blocker");
-  // 最该处理的那条:优先致命矛盾,退而取任一未处理项;都没有时为 null(走兜底重写 / 靠重检自动放行)
-  const topBlocker = blockers[0] ?? open[0] ?? null;
+  // 最该处理的那条:优先致命矛盾,退而取任一未处理项;都没有时为 null(走兜底重写 / 靠重检自动放行)。
+  // 排除 source=canon 的宪法建议——它是「采纳进宪法」的增值提案,不是本章硬矛盾,不该被当成重写目标。
+  const topBlocker = blockers[0] ?? open.find((i) => i.source !== "canon") ?? null;
   const blockerCount = blockers.length;
 
   // ▸ 让 AI 按这条重写:有具体矛盾走「按建议修订」链路;拿不到则回落到 AI 窄栏梳理

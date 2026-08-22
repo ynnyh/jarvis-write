@@ -155,6 +155,25 @@ def _add_canon_column() -> None:
             logger.info("迁移:projects 补 canon 列")
 
 
+def _add_issue_payload_column() -> None:
+    """给 chapter_issues 表补 payload 列(结构化载荷 JSON,幂等)。
+
+    只有 source="canon"(LLM 提议的故事宪法建议)才在此存结构化提案
+    {kind: absence|device|deadline, ...},供「采纳进宪法」端点无损重建 canon 条目;
+    其它来源(gate/preflight/diag/review/rules)一律 NULL。存量记录该列为 NULL,
+    读取方按 None 处理。见 app/engines/consistency/extractor.py 的 canon 建议落库。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "chapter_issues" not in insp.get_table_names():
+            return  # create_all 会新建带 payload 的表,无需补列
+        if not _column_exists("chapter_issues", "payload"):
+            conn.execute(
+                text("ALTER TABLE chapter_issues ADD COLUMN payload JSON")
+            )
+            logger.info("迁移:chapter_issues 补 payload 列")
+
+
 def _add_setup_columns() -> None:
     """给 projects 表补 setup_state / chat_log 列(起步流 + 对话落库,幂等)。
 
@@ -506,6 +525,7 @@ def run_migrations() -> None:
     _add_concept_column()
     _add_dna_column()
     _add_canon_column()
+    _add_issue_payload_column()
     _add_setup_columns()
     _add_retired_column()
     _add_word_guard_columns()

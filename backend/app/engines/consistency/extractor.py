@@ -12,11 +12,12 @@ import re
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Entity
+from app.db.models import Chapter, Entity, Project
 from app.engines.consistency.bible import BibleService
 from app.engines.consistency.foreshadow import ForeshadowScheduler
 from app.llm.router import Task, get_adapter_for
 from app.prompts.consistency import EXTRACTION_PROMPT
+from app.schemas.canon import StoryCanon, coerce_canon
 
 logger = logging.getLogger("jarvis-write.extractor")
 
@@ -39,6 +40,135 @@ def parse_llm_json(text: str) -> dict:
     except json.JSONDecodeError as exc:
         logger.warning("LLM JSON 解析失败: %s;原文前200字: %s", exc, text[:200])
         return {}
+
+
+def _coerce_int(raw: object, default: int = 0) -> int:
+    """把 LLM 的 "31"/31/31.0/脏值收敛成非负 int;不可解析回落 default。"""
+    try:
+        n = int(float(str(raw).strip()))
+    except (TypeError, ValueError):
+        return default
+    return n if n >= 0 else default
+
+
+def _build_canon_suggestion_issues(
+    suggestions: object, existing: StoryCanon
+) -> list[dict]:
+    """把 LLM 的 canon_suggestions 转成 source=canon 的 advisory issue dict。
+
+    咨询式:这些只是给作者过目的「建议」,绝不自动写进 project.canon。逐条 try 保护,
+    坏形状跳过不抛;去重掉【已在现有宪法里】的(采纳后条目进 canon,下次抽取自然不再
+    重复冒出,不依赖 issue 状态去重);总共最多 3 条(与 EXTRACTION_PROMPT 口径一致)。
+    payload 存结构化提案,供「采纳进宪法」端点无损重建 canon 条目。
+    """
+    if not isinstance(suggestions, list):
+        return []
+    out: list[dict] = []
+    seen_absence = {a.strip() for a in existing.absences if (a or "").strip()}
+    seen_device = {d.name.strip() for d in existing.devices if d.name.strip()}
+    has_deadline = existing.deadline is not None and bool(existing.deadline.name.strip())
+
+    for raw in suggestions:
+        if len(out) >= 3:
+            break
+        try:
+            if not isinstance(raw, dict):
+                continue
+            kind = str(raw.get("kind") or "").strip().lower()
+            evidence = str(raw.get("evidence") or "").strip()
+            reason = str(raw.get("reason") or "").strip()
+
+            if kind == "absence":
+                txt = str(raw.get("text") or "").strip()
+                if not txt or txt in seen_absence:
+                    continue
+                seen_absence.add(txt)
+                out.append({
+                    "severity": "minor", "type": "absence",
+                    "description": f"建议加入刻意留白:{txt}",
+                    "evidence": evidence,
+                    "suggestion": reason or "采纳后写入故事宪法,全程注入生成并参与一致性门禁。",
+                    "payload": {"kind": "absence", "text": txt},
+                })
+            elif kind == "device":
+                name = str(raw.get("name") or "").strip()
+                if not name or name in seen_device:
+                    continue
+                seen_device.add(name)
+                cadence = str(raw.get("cadence") or "").strip()
+                importance = str(raw.get("importance") or "").strip().lower()
+                if importance not in ("critical", "major", "minor"):
+                    importance = "major"
+                desc = f"建议加入常驻装置:{name}"
+                if cadence:
+                    desc += f"(复现节奏:{cadence})"
+                out.append({
+                    "severity": "minor", "type": "device",
+                    "description": desc,
+                    "evidence": evidence,
+                    "suggestion": reason or "采纳后作为常驻装置全程注入,门禁会盯它别无故长期消失。",
+                    "payload": {
+                        "kind": "device", "name": name,
+                        "cadence": cadence, "importance": importance,
+                    },
+                })
+            elif kind == "deadline":
+                if has_deadline:
+                    continue  # 全书只设一个倒计时,已有则不再提议
+                name = str(raw.get("name") or "").strip()
+                if not name:
+                    continue
+                has_deadline = True  # 同批多条也只取第一个
+                total_days = _coerce_int(raw.get("total_days"))
+                anchor = _coerce_int(raw.get("anchor_chapter"), default=1) or 1
+                days_txt = f",共 {total_days} 天" if total_days > 0 else ""
+                out.append({
+                    "severity": "minor", "type": "deadline",
+                    "description": f"建议加入倒计时:{name}{days_txt},自第 {anchor} 章起算",
+                    "evidence": evidence,
+                    "suggestion": reason or "采纳后作为权威时间锚,门禁会校验各章天数与剩余时间一致。",
+                    "payload": {
+                        "kind": "deadline", "name": name,
+                        "total_days": total_days, "anchor_chapter": anchor,
+                    },
+                })
+        except Exception:  # noqa: BLE001 — 单条坏形状跳过,不拖累其它建议
+            continue
+    return out
+
+
+def _persist_canon_suggestions(
+    db: Session, project_id: int, chapter_number: int,
+    chapter_text: str, suggestions: object,
+) -> int:
+    """把本章 canon 建议落成 source=canon 的 advisory ChapterIssue —— 绝不改 project.canon。
+
+    独立于核心圣经提交【之后】单跑:全程无 await(无「写锁跨 LLM 调用」并发风险),
+    读现有 canon 去重后经 persist_issues 幂等重建本章 source=canon 记录并单独提交。
+    返回落库条数;无可提议时返回 0(不空跑提交)。
+    """
+    # 延迟导入:checker 顶部已 import 本模块 parse_llm_json,反向顶层 import 会循环。
+    from app.engines.consistency.checker import persist_issues
+
+    project = db.get(Project, project_id)
+    if project is None:
+        return 0
+    issues = _build_canon_suggestion_issues(suggestions, coerce_canon(project.canon))
+    if not issues:
+        return 0
+    chapter = (
+        db.query(Chapter)
+        .filter(
+            Chapter.project_id == project_id,
+            Chapter.chapter_number == chapter_number,
+        )
+        .first()
+    )
+    if chapter is None:
+        return 0
+    persist_issues(db, chapter, issues, source="canon", text=chapter_text)
+    db.commit()
+    return len(issues)
 
 
 async def extract_and_apply(
@@ -118,4 +248,20 @@ async def extract_and_apply(
         chapter_number, extraction.get("foreshadow_ops") or []
     )
     db.commit()
-    return {"bible": bible_stats, "foreshadow": fs_stats, "purged": purge_stats}
+    stats = {"bible": bible_stats, "foreshadow": fs_stats, "purged": purge_stats}
+
+    # 4. canon 建议(咨询式增值,不自动落库):核心圣经已原子提交,这里【之后】独立单跑。
+    #    失败只回滚本段、记日志,绝不影响已落地的圣经/伏笔,也绝不拖垮章节生成
+    #    (chapter.py 未包 extract_and_apply,抛出即崩生成 —— 故必须自吞异常)。
+    try:
+        n = _persist_canon_suggestions(
+            db, project_id, chapter_number, chapter_text,
+            extraction.get("canon_suggestions") or [],
+        )
+        if n:
+            stats["canon_suggestions"] = n
+    except Exception as exc:  # noqa: BLE001 — 建议是增值项,绝不拖垮抽取/生成
+        db.rollback()  # 仅回滚本段未提交的 canon 写;核心圣经已 commit,不受影响
+        logger.warning("canon 建议落库失败(不影响圣经): %s", exc)
+
+    return stats

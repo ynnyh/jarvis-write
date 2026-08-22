@@ -283,3 +283,191 @@ def test_patch_canon_roundtrip(client):
     got2 = client.get(f"/api/projects/{pid}", headers=headers).json()["canon"]
     assert got2["deadline"]["name"] == "任务倒计时"
     assert got2["devices"][0]["importance"] == "critical"
+
+
+# ---------- Phase 1c:LLM 提议宪法(咨询式,不自动落库 + 一键采纳)----------
+
+def test_build_canon_suggestion_issues_shapes_and_dedup():
+    from app.engines.consistency.extractor import _build_canon_suggestion_issues
+    from app.schemas.canon import coerce_canon
+
+    existing = coerce_canon({"absences": ["大院只有三人,无仆役"]})
+    issues = _build_canon_suggestion_issues([
+        {"kind": "absence", "text": "大院只有三人,无仆役", "evidence": "e", "reason": "r"},  # 已在宪法→丢
+        {"kind": "absence", "text": "女主没有家人在世", "evidence": "e2", "reason": "r2"},
+        {"kind": "device", "name": "系统", "cadence": "每章有存在感", "importance": "谁知道", "evidence": "e3"},
+        {"kind": "deadline", "name": "任务倒计时", "total_days": "31", "anchor_chapter": 2, "evidence": "e4"},
+        "不是 dict",                       # 坏形状→跳过
+        {"kind": "device", "name": "   "},  # 无名→跳过
+        {"kind": "deadline", "name": "第二个倒计时"},  # 同批已有 deadline→丢
+    ], existing)
+
+    by_type = {i["type"]: i for i in issues}
+    assert set(by_type) == {"absence", "device", "deadline"}  # 去重后各一条
+    assert by_type["absence"]["payload"]["text"] == "女主没有家人在世"
+    assert by_type["device"]["payload"]["importance"] == "major"  # 未知重要度→回落 major
+    assert by_type["deadline"]["payload"]["total_days"] == 31     # "31"→31
+    assert by_type["deadline"]["payload"]["anchor_chapter"] == 2
+    # 全部是不阻断的建议
+    assert all(i["severity"] == "minor" for i in issues)
+
+
+def test_build_canon_suggestion_issues_caps_at_three():
+    from app.engines.consistency.extractor import _build_canon_suggestion_issues
+    from app.schemas.canon import StoryCanon
+
+    many = [{"kind": "absence", "text": f"留白{i}"} for i in range(6)]
+    assert len(_build_canon_suggestion_issues(many, StoryCanon())) == 3  # 最多 3 条
+
+
+def test_adopt_into_canon_merges_and_idempotent():
+    from app.api.chapters.issues import _adopt_into_canon
+
+    # 空 canon 采纳装置 → 加入
+    c1, changed1 = _adopt_into_canon(None, {"kind": "device", "name": "系统", "importance": "critical"})
+    assert changed1 and c1["devices"][0]["name"] == "系统"
+    # 再采纳同名装置 → 幂等不重复
+    c2, changed2 = _adopt_into_canon(c1, {"kind": "device", "name": "系统"})
+    assert changed2 is False and len(c2["devices"]) == 1
+    # 采纳留白
+    c3, changed3 = _adopt_into_canon(c2, {"kind": "absence", "text": "大院无仆役"})
+    assert changed3 and "大院无仆役" in c3["absences"]
+    # 采纳倒计时
+    c4, changed4 = _adopt_into_canon(c3, {"kind": "deadline", "name": "任务倒计时", "total_days": 31})
+    assert changed4 and c4["deadline"]["total_days"] == 31
+    # 已有倒计时不覆盖
+    c5, changed5 = _adopt_into_canon(c4, {"kind": "deadline", "name": "别的倒计时", "total_days": 99})
+    assert changed5 is False and c5["deadline"]["name"] == "任务倒计时"
+
+
+def _run_extract_with_suggestions(canon, suggestions):
+    """在带 canon 的内存库上跑一次 extract_and_apply(mock LLM 只回 canon_suggestions),
+    返回 (db, project, stats)。核心圣经抽取为空,专验 canon 建议通道。"""
+    from app.engines.consistency import extractor
+
+    db, project = _make_db_with_canon(canon)
+    extraction = {
+        "new_entities": [], "fact_changes": [],
+        "foreshadow_ops": [], "knowledge_updates": [],
+        "canon_suggestions": suggestions,
+    }
+    adapter = _Adapter(json.dumps(extraction, ensure_ascii=False))
+    with patch.object(extractor, "get_adapter_for", return_value=adapter):
+        stats = asyncio.run(
+            extractor.extract_and_apply(db, project.id, 1, "第一章正文。" * 60)
+        )
+    return db, project, stats
+
+
+def test_extract_persists_canon_suggestions_without_autowrite():
+    """核心断言(方案边界):LLM 建议落成 source=canon 的 advisory issue,
+    但【绝不自动写 project.canon】——留白/缺席检测不可靠,必须人工确认。"""
+    from app.db.models import ChapterIssue, Project
+
+    db, project, stats = _run_extract_with_suggestions(None, [
+        {"kind": "absence", "text": "大院里只有三人,没有仆役", "evidence": "院中空荡荡", "reason": "闭集留白"},
+        {"kind": "device", "name": "系统", "cadence": "每章都应有存在感", "importance": "critical", "evidence": "系统提示音响起"},
+        {"kind": "deadline", "name": "任务倒计时", "total_days": 31, "anchor_chapter": 1, "evidence": "还有三十一天"},
+    ])
+
+    assert stats.get("canon_suggestions") == 3
+    rows = db.query(ChapterIssue).filter(ChapterIssue.source == "canon").all()
+    assert len(rows) == 3
+    by_type = {r.issue_type: r for r in rows}
+    assert set(by_type) == {"absence", "device", "deadline"}
+    assert by_type["device"].payload["name"] == "系统"
+    assert by_type["deadline"].payload["total_days"] == 31
+    assert all(r.status == "open" and r.severity == "minor" for r in rows)
+
+    # 关键:project.canon 仍为空,LLM 绝不自动落库
+    fresh = db.get(Project, project.id)
+    assert fresh.canon is None
+    db.close()
+
+
+def test_extract_canon_suggestion_dedups_existing_canon():
+    """已在 canon 里的建议不再冒出(采纳后自然不复现,不靠 issue 状态去重)。"""
+    from app.db.models import ChapterIssue
+
+    db, _project, _stats = _run_extract_with_suggestions(
+        {"absences": ["大院里只有三人,没有仆役"]},
+        [
+            {"kind": "absence", "text": "大院里只有三人,没有仆役", "evidence": "e", "reason": "r"},  # 已有→丢
+            {"kind": "absence", "text": "女主没有家人在世", "evidence": "e2", "reason": "r2"},         # 新
+        ],
+    )
+    rows = db.query(ChapterIssue).filter(ChapterIssue.source == "canon").all()
+    assert len(rows) == 1
+    assert rows[0].payload["text"] == "女主没有家人在世"
+    db.close()
+
+
+def test_extract_no_canon_suggestions_is_noop():
+    """抽取无 canon 建议时不落库、不报错(stats 无 canon_suggestions 键)。"""
+    from app.db.models import ChapterIssue
+
+    db, _project, stats = _run_extract_with_suggestions(None, [])
+    assert "canon_suggestions" not in stats
+    assert db.query(ChapterIssue).filter(ChapterIssue.source == "canon").count() == 0
+    db.close()
+
+
+def test_migration_adds_issue_payload_column_idempotent():
+    from app.migrate import _add_issue_payload_column
+
+    _add_issue_payload_column()
+    _add_issue_payload_column()  # 幂等:重复执行不报错
+
+
+def test_adopt_canon_suggestion_via_api(client):
+    """HTTP 采纳:建议 issue → project.canon 落库 + issue 标 resolved;二次采纳报 400。"""
+    from app.db.models import Chapter, ChapterIssue, Outline
+    from app.db.session import SessionLocal
+
+    headers = _auth(client, "canon_adopt_user")
+    pid = client.post(
+        "/api/projects", headers=headers,
+        json={"title": "采纳书", "target_chapters": 3},
+    ).json()["id"]
+
+    # 直接落一章 + 一条 canon 建议(建章走生成要 LLM,太重;绕过接口直插库)
+    s = SessionLocal()
+    try:
+        s.add(Outline(
+            project_id=pid, chapter_number=1, title="开篇",
+            chapter_purpose="立设定", summary="日常", current_version=1,
+        ))
+        s.flush()
+        ch = Chapter(
+            project_id=pid, outline_id=1, chapter_number=1,
+            final_content="正文", word_count=2, status="approved",
+        )
+        s.add(ch)
+        s.flush()
+        issue = ChapterIssue(
+            chapter_id=ch.id, source="canon", severity="minor", issue_type="device",
+            description="建议加入常驻装置:系统", evidence="系统提示音响起",
+            suggestion="金手指", status="open", content_hash="x",
+            payload={"kind": "device", "name": "系统", "cadence": "每章有存在感", "importance": "critical"},
+        )
+        s.add(issue)
+        s.commit()
+        issue_id = issue.id
+    finally:
+        s.close()
+
+    base = f"/api/projects/{pid}/chapters/1/issues/{issue_id}"
+    r = client.post(f"{base}/adopt-canon", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["changed"] is True
+    assert body["canon"]["devices"][0]["name"] == "系统"
+    assert body["issue"]["status"] == "resolved"
+
+    # canon 已落库(GET 再读一遍)
+    got = client.get(f"/api/projects/{pid}", headers=headers).json()["canon"]
+    assert got["devices"][0]["importance"] == "critical"
+
+    # 二次采纳:issue 已 resolved → 400
+    r2 = client.post(f"{base}/adopt-canon", headers=headers)
+    assert r2.status_code == 400

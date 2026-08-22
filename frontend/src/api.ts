@@ -284,17 +284,19 @@ export interface PreflightWarning {
   conflicting_fact?: string;
   suggestion: string;
 }
-/** 章节一致性问题记录(docs/08 §5.7):门禁/预审/诊断/审校/规则扫描产出,可操作流转 */
+/** 章节一致性问题记录(docs/08 §5.7):门禁/预审/诊断/审校/规则扫描/宪法建议产出,可操作流转 */
 export interface ChapterIssue {
   id: number;
-  source: string;             // gate | preflight | diag | review | rules
+  source: string;             // gate | preflight | diag | review | rules | canon
   severity: string;           // blocker | major | minor
-  issue_type: string;
+  issue_type: string;         // source=canon 时为 absence | device | deadline
   description: string;
   evidence: string;
   suggestion: string;
   status: string;             // open | resolved | ignored
   created_at?: string;
+  // 仅 source=canon 的建议带结构化载荷 {kind, ...},供「采纳进宪法」;余者 null
+  payload?: Record<string, unknown> | null;
 }
 export interface GenerateChapterResponse extends ChapterDetail {
   consistency_issues: Record<string, string>[];
@@ -859,6 +861,11 @@ export const api = {
   // 采纳单条问题的修正建议:异步修订 job(409=本章有任务在跑),result 含 applied_issue_id
   applyIssueRevision: (pid: number, n: number, issueId: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/chapters/${n}/issues/${issueId}/apply-revision`),
+  // 采纳一条「故事宪法建议」(source=canon)进 project.canon,并标 issue 为 resolved;
+  // changed=false 表示该建议内容此前已在宪法里(仍视作已采纳)。返回更新后的 canon + issue。
+  adoptCanonSuggestion: (pid: number, n: number, issueId: number) =>
+    req<{ ok: boolean; changed: boolean; canon: StoryCanon; issue: ChapterIssue }>(
+      "POST", `/api/projects/${pid}/chapters/${n}/issues/${issueId}/adopt-canon`),
   // quarantined 放行:忽略全部 blocker,补走圣经/摘要等章后链路(异步 job)
   gateRelease: (pid: number, n: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/chapters/${n}/gate-release`),

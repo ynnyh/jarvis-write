@@ -201,4 +201,5 @@ def persist_issues(
             suggestion=i.get("suggestion") or "",
             status="open",
             content_hash=current_hash,
+            payload=i.get("payload"),  # 仅 canon 建议带结构化载荷,余者 None
         ))
