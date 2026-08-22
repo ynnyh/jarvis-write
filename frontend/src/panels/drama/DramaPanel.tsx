@@ -2,11 +2,13 @@
 // 四步流水线(每步独立可重跑):美术风格卡/资产卡 → 集规划 → 单集剧本 → 分镜 → 三轨提示词,
 // 产物拿去即梦/可灵/Midjourney/剪映出片——沿用「只产提示词」哲学,不接生成模型。
 // 一致性靠锚段注入:画风锚(风格卡)+ 人物锚(角色卡)+ 场景锚(场景卡)逐字嵌入每格分镜。
+// 阶段 2 补齐出片最后一块:声线选型 + 成片包(配音稿/剪辑清单/SRT 字幕)。
 import { useCallback, useEffect, useState } from "react";
 import {
   DRAMA_STATUS_CN,
   DramaCharacterCard,
   DramaEpisode,
+  DramaProductionPack,
   DramaSceneCard,
   DramaShot,
   DramaStyleCard,
@@ -207,17 +209,34 @@ function AssetsSection({ pid, cards, scenes, onChanged }: {
     } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); setStage(""); }
   }
 
+  async function castVoices() {
+    setBusy(true); setErr(""); setStage("");
+    try {
+      const r = await run<{ cards: DramaCharacterCard[]; skipped_locked: number }>(
+        () => dramaApi.generateVoiceCast(pid),
+        { kind: `drama-voice-${pid}`, onStage: setStage },
+      );
+      if (r) {
+        const fresh = await dramaApi.getCharacters(pid);
+        onChanged(fresh.cards, scenes);
+        toast.ok("声线选型已生成", "每个角色带 TTS 平台选型建议与朗读指示");
+      }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); setStage(""); }
+  }
+
   return (
     <div className="card">
       <div className="card-head">
         <h3 className="grow">② 角色卡与场景卡 <span className="muted">人物一致性</span></h3>
+        <button disabled={busy || cards.length === 0} onClick={castVoices}>声线选型</button>
         <button className="primary" disabled={busy} onClick={generate}>
           {cards.length ? "重新生成(锁定的不动)" : "AI 生成资产卡"}
         </button>
       </div>
       <p className="card-desc">
         从故事圣经批量出「锁定外貌段」:角色出场的那格分镜会逐字嵌入这段描述,
-        同一个人不换脸;声线描述留给配音阶段。手动调过的卡点「锁定」,重跑不覆盖。
+        同一个人不换脸;「声线选型」给每个角色补 TTS 平台选型建议与朗读指示。
+        手动调过的卡点「锁定」,重跑不覆盖。
       </p>
       {busy && <Banner stage={stage} text="AI 正在设计角色视觉卡…" />}
       {err && <div className="msg-err">{err}</div>}
@@ -280,6 +299,13 @@ function CharCardRow({ pid, card, onSaved }: {
         <input value={draft.voice_desc}
           onChange={(e) => { setDraft({ ...draft, voice_desc: e.target.value }); setDirty(true); }} />
       </div>
+      {(draft.tts_hint || draft.reading_notes) && (
+        <div className="media-field">
+          <div className="card-head mb-2"><span className="muted">TTS 选型建议</span><CopyBtn text={draft.tts_hint} /></div>
+          <div className="hint">{draft.tts_hint}</div>
+          {draft.reading_notes && <div className="hint">朗读指示:{draft.reading_notes}</div>}
+        </div>
+      )}
     </div>
   );
 }
@@ -397,15 +423,20 @@ function EpisodeDetail({ pid, eid, onEpisodesChanged, onDeselect }: {
   const { run } = useJob();
   const [episode, setEpisode] = useState<DramaEpisode | null>(null);
   const [shots, setShots] = useState<DramaShot[]>([]);
-  const [busy, setBusy] = useState(""); // script | board | prompts | ""
+  const [pack, setPack] = useState<DramaProductionPack | null>(null);
+  const [busy, setBusy] = useState(""); // script | board | prompts | pack | ""
   const [stage, setStage] = useState("");
   const [err, setErr] = useState("");
 
   const reload = useCallback(async () => {
     try {
-      const r = await dramaApi.getEpisode(pid, eid);
+      const [r, pk] = await Promise.all([
+        dramaApi.getEpisode(pid, eid),
+        dramaApi.getPack(pid, eid),
+      ]);
       setEpisode(r.episode);
       setShots(r.shots);
+      setPack(pk.pack);
     } catch (e) { setErr(errMsg(e)); }
   }, [pid, eid]);
 
@@ -415,7 +446,7 @@ function EpisodeDetail({ pid, eid, onEpisodesChanged, onDeselect }: {
     try { onEpisodesChanged((await dramaApi.getEpisodes(pid)).episodes); } catch { /* 列表刷新失败不阻塞 */ }
   }
 
-  async function act(kind: "script" | "board" | "prompts", start: () => Promise<{ job_id: string }>, okTitle: string) {
+  async function act(kind: "script" | "board" | "prompts" | "pack", start: () => Promise<{ job_id: string }>, okTitle: string) {
     setBusy(kind); setErr(""); setStage("");
     try {
       await run(start, { kind: `drama-${kind}-${eid}`, onStage: setStage });
@@ -425,7 +456,7 @@ function EpisodeDetail({ pid, eid, onEpisodesChanged, onDeselect }: {
     } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); setStage(""); }
   }
 
-  async function exp(fmt: "md" | "csv" | "json") {
+  async function exp(fmt: "md" | "csv" | "json" | "pack" | "srt") {
     try { await dramaApi.exportEpisode(pid, eid, fmt); }
     catch (e) { toast.err("导出失败", errMsg(e)); }
   }
@@ -456,8 +487,14 @@ function EpisodeDetail({ pid, eid, onEpisodesChanged, onDeselect }: {
           onClick={() => act("prompts", () => dramaApi.prompts(pid, eid), "三轨提示词已生成")}>
           ④-3 出提示词
         </button>
+        <button className="primary" disabled={!!busy || shots.length === 0}
+          onClick={() => act("pack", () => dramaApi.buildPack(pid, eid), "成片包已生成(配音稿 + 剪辑清单)")}>
+          {pack ? "重建成片包" : "④-4 出成片包"}
+        </button>
         <span className="grow" />
         <button className="btn-sm" disabled={!shots.length} onClick={() => exp("md")}>导出手册</button>
+        <button className="btn-sm" disabled={!pack} onClick={() => exp("pack")}>成片包</button>
+        <button className="btn-sm" disabled={!shots.length} onClick={() => exp("srt")}>字幕SRT</button>
         <button className="btn-sm" disabled={!shots.length} onClick={() => exp("csv")}>CSV</button>
         <button className="btn-sm" disabled={!shots.length} onClick={() => exp("json")}>JSON</button>
       </div>
@@ -517,6 +554,75 @@ function EpisodeDetail({ pid, eid, onEpisodesChanged, onDeselect }: {
               setShots(shots.map((x) => (x.id === ns.id ? ns : x)));
             }} />
           ))}
+        </>
+      )}
+
+      {/* 成片包(阶段 2):配音稿 + 剪辑清单 */}
+      {pack && (
+        <>
+          <div className="card-head mb-2">
+            <b>成片包</b>
+            <span className="muted">
+              镜头 {pack.totals.shots} 格 · 分镜 {pack.totals.storyboard_s}s(目标 {pack.totals.target_s}s)
+              · 配音估时 {pack.totals.voice_s}s
+            </span>
+          </div>
+          {pack.dubbing.length > 0 && (
+            <>
+              <div className="card-head mb-2"><b>配音稿({pack.dubbing.length} 条)</b></div>
+              <div className="tbl-wrap">
+                <table className="tbl">
+                  <thead>
+                    <tr><th>#</th><th>说话人</th><th>声线</th><th>朗读文本</th><th>估时/画面</th><th>选型</th></tr>
+                  </thead>
+                  <tbody>
+                    {pack.dubbing.map((d) => (
+                      <tr key={d.seq}>
+                        <td>{d.seq}</td>
+                        <td>{d.speaker}</td>
+                        <td>{d.voice}</td>
+                        <td>{d.tts_text}</td>
+                        <td>{d.est_s}s / {d.shot_duration_s}s</td>
+                        <td className="muted">{d.tts_hint}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+          {pack.narration_full && (
+            <div className="sub-summary">
+              <div className="card-head mb-2"><b>整段口播(粘给 TTS 一把梭)</b><CopyBtn text={pack.narration_full} /></div>
+              <div className="script-line" style={{ whiteSpace: "pre-wrap" }}>{pack.narration_full}</div>
+            </div>
+          )}
+          {pack.checklist.length > 0 && (
+            <>
+              <div className="card-head mb-2"><b>剪辑清单(按镜头顺序)</b></div>
+              <div className="tbl-wrap">
+                <table className="tbl">
+                  <thead>
+                    <tr><th>#</th><th>场景</th><th>秒</th><th>字幕</th><th>转场</th><th>配乐</th><th>备注</th></tr>
+                  </thead>
+                  <tbody>
+                    {pack.checklist.map((c) => (
+                      <tr key={c.seq}>
+                        <td>{c.seq}</td>
+                        <td>{c.scene}</td>
+                        <td>{c.duration_s}</td>
+                        <td>{c.subtitle}</td>
+                        <td>{c.transition}</td>
+                        <td>{c.bgm_tag}</td>
+                        <td className="muted">{c.note}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="hint">出片顺序:分镜提示词出图(即梦/可灵) → 图生视频/加轻动 → 按配音稿合成语音 → 按剪辑清单拼接 → 压 SRT 字幕 → 铺 BGM。</p>
+            </>
+          )}
         </>
       )}
     </div>

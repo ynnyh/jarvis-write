@@ -52,6 +52,8 @@ export interface DramaCharacterCard {
   appearance_en: string;
   outfit_cn: string;
   voice_desc: string;
+  tts_hint: string;
+  reading_notes: string;
   locked: boolean;
 }
 
@@ -99,6 +101,36 @@ export interface DramaMeta {
   modes: { key: string; label: string }[];
 }
 
+// 成片包(阶段 2):配音稿 + 剪辑清单
+export interface DubbingLine {
+  seq: number;
+  speaker: string;
+  voice: string;
+  tts_hint: string;
+  reading_notes: string;
+  text: string;
+  tts_text: string;
+  est_s: number;
+  shot_duration_s: number;
+}
+export interface ChecklistItem {
+  seq: number;
+  scene: string;
+  duration_s: number;
+  subtitle: string;
+  transition: string;
+  bgm_tag: string;
+  note: string;
+}
+export interface DramaProductionPack {
+  mode: string;
+  synopsis: string;
+  dubbing: DubbingLine[];
+  narration_full: string;
+  checklist: ChecklistItem[];
+  totals: { shots: number; target_s: number; storyboard_s: number; voice_s: number };
+}
+
 export const dramaApi = {
   meta: (pid: number) => req<DramaMeta>("GET", `/api/projects/${pid}/drama/meta`),
   getStyle: (pid: number) =>
@@ -115,6 +147,9 @@ export const dramaApi = {
     req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/characters/generate`, undefined, LLM_TIMEOUT),
   patchCharacter: (pid: number, cid: number, body: Partial<DramaCharacterCard>) =>
     req<{ card: DramaCharacterCard }>("PATCH", `/api/projects/${pid}/drama/characters/${cid}`, body),
+  // 声线选型卡(阶段 2):给角色卡补 TTS 平台选型建议 + 朗读指示
+  generateVoiceCast: (pid: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/voice-cast/generate`, undefined, LLM_TIMEOUT),
 
   getEpisodes: (pid: number) =>
     req<{ episodes: DramaEpisode[] }>("GET", `/api/projects/${pid}/drama/episodes`),
@@ -133,8 +168,14 @@ export const dramaApi = {
     req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/episodes/${eid}/prompts`, undefined, LLM_TIMEOUT),
   patchShot: (pid: number, sid: number, body: Partial<DramaShot>) =>
     req<{ shot: DramaShot }>("PATCH", `/api/projects/${pid}/drama/shots/${sid}`, body),
+  // 成片包(阶段 2):配音稿 + 剪辑清单
+  buildPack: (pid: number, eid: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/episodes/${eid}/pack`, undefined, LLM_TIMEOUT),
+  getPack: (pid: number, eid: number) =>
+    req<{ pack: DramaProductionPack | null }>(
+      "GET", `/api/projects/${pid}/drama/episodes/${eid}/pack`),
 
-  exportEpisode: (pid: number, eid: number, format: "md" | "csv" | "json") =>
+  exportEpisode: (pid: number, eid: number, format: "md" | "csv" | "json" | "pack" | "srt") =>
     downloadFile(`/api/projects/${pid}/drama/episodes/${eid}/export?format=${format}`,
       `drama-export.${format}`),
 };

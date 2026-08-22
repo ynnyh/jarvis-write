@@ -33,6 +33,7 @@ from app.db.models.drama import (
     DramaSceneCard,
     DramaEpisode,
     DramaShot,
+    DramaProductionPack,
 )
 
 __all__ = [
@@ -64,4 +65,5 @@ __all__ = [
     "DramaSceneCard",
     "DramaEpisode",
     "DramaShot",
+    "DramaProductionPack",
 ]

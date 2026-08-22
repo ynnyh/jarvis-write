@@ -20,8 +20,11 @@ GET    /api/projects/{id}/drama/episodes/{eid}            集详情(含分镜)
 POST   /api/projects/{id}/drama/episodes/{eid}/script     写剧本(async)
 POST   /api/projects/{id}/drama/episodes/{eid}/storyboard 拆分镜(async,覆盖式)
 POST   /api/projects/{id}/drama/episodes/{eid}/prompts    出三轨提示词(async)
+POST   /api/projects/{id}/drama/voice-cast/generate          声线选型卡(async,阶段 2)
+GET    /api/projects/{id}/drama/episodes/{eid}/pack          成片包(配音稿+剪辑清单)
+POST   /api/projects/{id}/drama/episodes/{eid}/pack          生成成片包(async)
 PATCH  /api/projects/{id}/drama/shots/{sid}               手动改分镜/提示词
-GET    /api/projects/{id}/drama/episodes/{eid}/export     导出 ?format=md|csv|json
+GET    /api/projects/{id}/drama/episodes/{eid}/export     导出 ?format=md|csv|json|pack|srt
 """
 from __future__ import annotations
 
@@ -37,6 +40,7 @@ from app.auth import get_current_user
 from app.db.models import (
     DramaCharacterCard,
     DramaEpisode,
+    DramaProductionPack,
     DramaSceneCard,
     DramaShot,
     DramaStyleCard,
@@ -44,12 +48,16 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.engines.drama import (
+    build_production_pack,
     build_storyboard,
     export_csv,
     export_json,
     export_markdown,
+    export_pack_markdown,
+    export_srt,
     generate_assets,
     generate_style_card,
+    generate_voice_cast,
     plan_episodes,
     render_shot_prompts,
     write_episode_script,
@@ -89,6 +97,8 @@ class CharacterCardIn(BaseModel):
     appearance_en: str | None = None
     outfit_cn: str | None = None
     voice_desc: str | None = None
+    tts_hint: str | None = None
+    reading_notes: str | None = None
     locked: bool | None = None
 
 
@@ -264,7 +274,8 @@ async def patch_character(
         raise HTTPException(status_code=404, detail="角色卡不存在。")
     if body.name is not None:
         card.name = clip(body.name, 200)
-    for field in ("appearance_cn", "appearance_en", "outfit_cn", "voice_desc"):
+    for field in ("appearance_cn", "appearance_en", "outfit_cn", "voice_desc",
+                  "tts_hint", "reading_notes"):
         value = getattr(body, field)
         if value is not None:
             setattr(card, field, value)
@@ -272,6 +283,25 @@ async def patch_character(
         card.locked = body.locked
     db.commit()
     return {"card": character_card_dict(card)}
+
+
+# =============== 声线选型卡(阶段 2) ===============
+
+@router.post("/voice-cast/generate")
+async def generate_voice_cast_ep(project_id: int, db: Session = Depends(get_db)):
+    get_project_or_404(db, project_id)
+    kind = f"drama-voice-{project_id}"
+    if (existing := _existing_job("drama-", kind)):
+        return existing
+
+    async def work(progress):
+        from app.db.session import SessionLocal
+
+        with SessionLocal() as session:
+            proj = session.get(Project, project_id)
+            return await generate_voice_cast(session, proj, progress)
+
+    return {"job_id": spawn_job(kind, work)}
 
 
 # =============== 集:规划 / 列表 / 详情 / 删除 ===============
@@ -416,6 +446,36 @@ async def prompts(project_id: int, episode_id: int, db: Session = Depends(get_db
     return {"job_id": spawn_job(kind, work)}
 
 
+# =============== 成片包(阶段 2:配音稿 + 剪辑清单) ===============
+
+@router.post("/episodes/{episode_id}/pack")
+async def build_pack(project_id: int, episode_id: int, db: Session = Depends(get_db)):
+    _get_episode(db, project_id, episode_id)
+    kind = f"drama-pack-{episode_id}"
+    if (existing := _episode_job(kind)):
+        return existing
+
+    async def work(progress):
+        from app.db.session import SessionLocal
+
+        with SessionLocal() as session:
+            proj, ep = _load_for_job(session, project_id, episode_id)
+            return await build_production_pack(session, proj, ep, progress)
+
+    return {"job_id": spawn_job(kind, work)}
+
+
+@router.get("/episodes/{episode_id}/pack")
+async def get_pack(project_id: int, episode_id: int, db: Session = Depends(get_db)):
+    _get_episode(db, project_id, episode_id)
+    row = (
+        db.query(DramaProductionPack)
+        .filter(DramaProductionPack.episode_id == episode_id)
+        .first()
+    )
+    return {"pack": row.pack if row else None}
+
+
 # =============== 分镜手动编辑 ===============
 
 @router.patch("/shots/{shot_id}")
@@ -489,6 +549,23 @@ async def export_episode(
         content = export_json(project, ep, shots, style, cards, scenes)
         media = "application/json; charset=utf-8"
         name = f"{base}.json"
+    elif format == "srt":
+        content = export_srt(shots)
+        media = "application/x-subrip; charset=utf-8"
+        name = f"{base}-字幕.srt"
+    elif format == "pack":
+        row = (
+            db.query(DramaProductionPack)
+            .filter(DramaProductionPack.episode_id == ep.id)
+            .first()
+        )
+        if row is None or not row.pack:
+            raise HTTPException(
+                status_code=400, detail="这一集还没生成成片包,先点「出成片包」。"
+            )
+        content = export_pack_markdown(project, ep, row.pack)
+        media = "text/markdown; charset=utf-8"
+        name = f"{base}-成片包.md"
     else:
         content = export_markdown(project, ep, shots, style, cards, scenes)
         media = "text/markdown; charset=utf-8"

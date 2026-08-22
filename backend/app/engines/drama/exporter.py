@@ -176,3 +176,93 @@ def export_json(
         "shots": [shot_dict(s) for s in shots],
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+# =============== 阶段 2:字幕 / 成片包 ===============
+
+def _srt_ts(sec: float) -> str:
+    """秒 → SRT 时间码 HH:MM:SS,mmm。"""
+    ms = int(round(sec * 1000))
+    h, ms = divmod(ms, 3600_000)
+    m, ms = divmod(ms, 60_000)
+    s, ms = divmod(ms, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def export_srt(shots: list[DramaShot]) -> str:
+    """标准 SRT 字幕(剪映/PR 直接导入):时间轴按分镜时长累计,有台词才有字幕条。
+
+    纯确定性输出——时间轴来自分镜表,和剪辑清单同一口径。
+    """
+    blocks: list[str] = []
+    t = 0.0
+    idx = 0
+    for s in shots:
+        start, end = t, t + s.duration_s
+        t = end
+        text = (s.dialogue or "").strip()
+        if not text:
+            continue
+        idx += 1
+        blocks.append(f"{idx}\n{_srt_ts(start)} --> {_srt_ts(end)}\n{text}\n")
+    return "\n".join(blocks)
+
+
+def export_pack_markdown(
+    project: Project, episode: DramaEpisode, pack: dict
+) -> str:
+    """成片包 Markdown:配音稿 + 剪辑清单(TTS + 剪映照着走完出片)。"""
+    L: list[str] = []
+    L.append(f"# 《{project.title}》漫剧成片包 · 第 {episode.ep_index} 集《{episode.title}》")
+    totals = pack.get("totals") or {}
+    L.append("")
+    L.append(
+        f"- 模式:{MODE_DESC.get(episode.mode, episode.mode)} | 镜头:{totals.get('shots', '?')} 格"
+        f" | 分镜总时长:{totals.get('storyboard_s', '?')}s(目标 {totals.get('target_s', '?')}s)"
+        f" | 配音总估时:{totals.get('voice_s', '?')}s"
+    )
+    if pack.get("synopsis"):
+        L.append(f"- 本集梗概:{pack['synopsis']}")
+    L.append("")
+
+    dubbing = pack.get("dubbing") or []
+    if dubbing:
+        L.append("## 配音稿(按镜头顺序)")
+        L.append("")
+        L.append("| # | 说话人 | 声线 | 朗读文本 | 估时/画面 | 选型建议 |")
+        L.append("|---|---|---|---|---|---|")
+        for d in dubbing:
+            voice = str(d.get("voice") or "").replace("|", "/")
+            tts = str(d.get("tts_text") or "").replace("|", "/").replace("\n", " ")
+            L.append(
+                f"| {d.get('seq')} | {d.get('speaker')} | {voice} | {tts} "
+                f"| {d.get('est_s')}s/{d.get('shot_duration_s')}s | {str(d.get('tts_hint') or '').replace('|', '/')} |"
+            )
+        L.append("")
+        for d in dubbing:
+            if d.get("reading_notes"):
+                L.append(f"- **{d.get('speaker')}** 朗读指示:{d['reading_notes']}")
+        L.append("")
+
+    narration = pack.get("narration_full")
+    if narration:
+        L.append("## 整段口播(旁白一把梭版,粘给 TTS)")
+        L.append("")
+        L.append(narration)
+        L.append("")
+
+    checklist = pack.get("checklist") or []
+    if checklist:
+        L.append("## 剪辑清单(按镜头顺序)")
+        L.append("")
+        L.append("| # | 场景 | 时长 | 字幕 | 转场 | 配乐 | 备注 |")
+        L.append("|---|---|---|---|---|---|---|")
+        for c in checklist:
+            sub = str(c.get("subtitle") or "").replace("|", "/").replace("\n", " ")
+            L.append(
+                f"| {c.get('seq')} | {c.get('scene') or ''} | {c.get('duration_s')}s "
+                f"| {sub} | {c.get('transition') or ''} | {c.get('bgm_tag') or ''} | {c.get('note') or ''} |"
+            )
+        L.append("")
+        L.append("> 出片顺序:分镜提示词出图(即梦/可灵) → 图生视频/加轻动 → 按配音稿合成语音 → 按剪辑清单拼接 → 压 SRT 字幕 → 铺 BGM。")
+    return "\n".join(L)

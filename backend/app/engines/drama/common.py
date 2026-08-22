@@ -116,6 +116,8 @@ def character_card_dict(card: DramaCharacterCard) -> dict:
         "appearance_en": card.appearance_en,
         "outfit_cn": card.outfit_cn,
         "voice_desc": card.voice_desc,
+        "tts_hint": card.tts_hint,
+        "reading_notes": card.reading_notes,
         "locked": card.locked,
     }
 

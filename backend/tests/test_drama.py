@@ -402,3 +402,134 @@ def test_script_without_chapter_text_fails(client):
     job = _wait_job(client, headers, r.json()["job_id"])
     assert job["status"] == "error"
     assert "正文" in job["error"]
+
+
+# ---- 阶段 2:声线选型 + 成片包 ----
+
+_VOICE_REPLY = {
+    "casts": [
+        {"name": "沈砚", "tts_hint": "剪映:沉稳青年男声;火山:青涩青年男声;MiniMax:deep_male",
+         "reading_notes": "语速偏慢,压着说,「看人」二字咬重"},
+    ]
+}
+
+_PACK_REPLY = {
+    "shots": [
+        {"seq": 1, "transition": "推入", "bgm_tag": "低弦压场", "tts_text": "走镖不看路,看人。"},
+        {"seq": 2, "transition": "叠化", "bgm_tag": "低弦压场", "tts_text": ""},
+    ]
+}
+
+
+def test_voice_cast_updates_cards(client):
+    """声线选型:补 tts_hint/reading_notes;locked 卡跳过。"""
+    headers = _auth(client, "drama_voice")
+    p = _create_project(client, headers, "声线漫剧书")
+    pid = p["id"]
+    _seed_novel(pid, chapters=1)
+
+    from app.db.session import SessionLocal
+    from app.db.models import DramaCharacterCard, Entity
+
+    with SessionLocal() as s:
+        ent = s.query(Entity).filter(Entity.project_id == pid, Entity.name == "沈砚").first()
+        s.add(DramaCharacterCard(
+            project_id=pid, entity_id=ent.id, name="沈砚",
+            appearance_cn="三十岁,剑眉", voice_desc="青年男声,低沉克制",
+        ))
+        s.commit()
+
+    with patch("app.engines.drama.voice.get_adapter_for",
+               return_value=_JsonAdapter(_VOICE_REPLY)):
+        r = client.post(f"/api/projects/{pid}/drama/voice-cast/generate", headers=headers)
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    cards = job["result"]["cards"]
+    assert cards[0]["tts_hint"].startswith("剪映")
+    assert "咬重" in cards[0]["reading_notes"]
+
+    # 锁定后重跑:声线字段不再被覆盖
+    cid = cards[0]["id"]
+    client.patch(f"/api/projects/{pid}/drama/characters/{cid}", headers=headers,
+                 json={"locked": True, "tts_hint": "手工版"})
+    with patch("app.engines.drama.voice.get_adapter_for",
+               return_value=_JsonAdapter(_VOICE_REPLY)):
+        r = client.post(f"/api/projects/{pid}/drama/voice-cast/generate", headers=headers)
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["result"]["skipped_locked"] == 1
+    assert job["result"]["cards"][0]["tts_hint"] == "手工版"
+
+
+def _pipeline_to_storyboard(client, headers, pid: int) -> int:
+    """helper:规划→剧本→分镜,返回首集 id(成片包测试的前置)。"""
+    with patch("app.engines.drama.planner.get_adapter_for",
+               return_value=_JsonAdapter({"episodes": [_PLAN_REPLY["episodes"][0]]})):
+        r = client.post(f"/api/projects/{pid}/drama/episodes/plan", headers=headers,
+                        json={"from_chapter": 1, "to_chapter": 1})
+        job = _wait_job(client, headers, r.json()["job_id"])
+    ep_id = job["result"][0]["id"]
+    with patch("app.engines.drama.script.get_adapter_for",
+               return_value=_JsonAdapter(_SCRIPT_REPLY)):
+        r = client.post(f"/api/projects/{pid}/drama/episodes/{ep_id}/script", headers=headers)
+        _wait_job(client, headers, r.json()["job_id"])
+    with patch("app.engines.drama.storyboard.get_adapter_for",
+               return_value=_JsonAdapter(_BOARD_REPLY)):
+        r = client.post(f"/api/projects/{pid}/drama/episodes/{ep_id}/storyboard", headers=headers)
+        _wait_job(client, headers, r.json()["job_id"])
+    return ep_id
+
+
+def test_production_pack_and_exports(client):
+    """成片包:配音稿(说话人匹配/声线映射/估时)+ 剪辑清单 + SRT/成片包导出。"""
+    headers = _auth(client, "drama_pack")
+    p = _create_project(client, headers, "成片包漫剧书")
+    pid = p["id"]
+    _seed_novel(pid, chapters=1)
+    _seed_assets(pid)  # 角色卡带 voice_desc/tts_hint 由声线测试覆盖,这里用基础卡
+    ep_id = _pipeline_to_storyboard(client, headers, pid)
+
+    # 未生成前导出成片包 → 400
+    r = client.get(f"/api/projects/{pid}/drama/episodes/{ep_id}/export?format=pack", headers=headers)
+    assert r.status_code == 400
+
+    with patch("app.engines.drama.production.get_adapter_for",
+               return_value=_JsonAdapter(_PACK_REPLY)):
+        r = client.post(f"/api/projects/{pid}/drama/episodes/{ep_id}/pack", headers=headers)
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    pack = job["result"]["pack"]
+    # 配音稿:镜头 1 有台词,说话人从剧本匹配到「沈砚」,声线来自角色卡
+    assert len(pack["dubbing"]) == 1
+    d = pack["dubbing"][0]
+    assert d["speaker"] == "沈砚"
+    assert "低沉克制" in d["voice"]
+    assert d["tts_text"] == "走镖不看路,看人。"
+    assert d["est_s"] >= 1 and d["shot_duration_s"] == 4
+    # 剪辑清单:两格,LLM 标注并入,默认转场兜底
+    assert len(pack["checklist"]) == 2
+    assert pack["checklist"][0]["transition"] == "推入"
+    assert pack["checklist"][1]["transition"] == "叠化"
+    assert pack["totals"]["shots"] == 2
+    assert pack["totals"]["storyboard_s"] == 14  # 4 + 10
+    # 对白模式无整段口播
+    assert pack["narration_full"] == ""
+
+    # GET pack 回读
+    r = client.get(f"/api/projects/{pid}/drama/episodes/{ep_id}/pack", headers=headers)
+    assert r.status_code == 200 and r.json()["pack"]["totals"]["shots"] == 2
+
+    # SRT:时间轴按分镜累计,只有镜头 1 出字幕条(镜头 2 无台词)
+    r = client.get(f"/api/projects/{pid}/drama/episodes/{ep_id}/export?format=srt", headers=headers)
+    assert r.status_code == 200
+    srt = r.text
+    assert "1\n00:00:00,000 --> 00:00:04,000\n走镖不看路,看人。" in srt
+    assert "00:00:04,000 --> 00:00:14,000" not in srt  # 无台词镜头不占字幕条
+
+    # 成片包 Markdown:配音稿表 + 剪辑清单表
+    r = client.get(f"/api/projects/{pid}/drama/episodes/{ep_id}/export?format=pack", headers=headers)
+    assert r.status_code == 200
+    md = r.text
+    assert "配音稿" in md and "剪辑清单" in md
+    assert "走镖不看路,看人。" in md
+    assert "低弦压场" in md
+

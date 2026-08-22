@@ -66,6 +66,10 @@ class DramaCharacterCard(Base, TimestampMixin):
     outfit_cn: Mapped[str] = mapped_column(Text, default="")
     # TTS 声线描述(性别/年龄段/音色/语气),阶段 2 配音稿直接用
     voice_desc: Mapped[str] = mapped_column(Text, default="")
+    # 各 TTS 平台的选型建议(火山/MiniMax/剪映朗读怎么挑音色,阶段 2 声线选型卡)
+    tts_hint: Mapped[str] = mapped_column(Text, default="")
+    # 朗读备注:语速/情绪基调/重音,给配音环节的演奏指示
+    reading_notes: Mapped[str] = mapped_column(Text, default="")
     locked: Mapped[bool] = mapped_column(Boolean, default=False)
 
     __table_args__ = (UniqueConstraint("project_id", "name", name="uq_drama_char_name"),)
@@ -150,3 +154,22 @@ class DramaShot(Base, TimestampMixin):
     prompt_cn: Mapped[str] = mapped_column(Text, default="")
     prompt_en: Mapped[str] = mapped_column(Text, default="")
     negative: Mapped[str] = mapped_column(Text, default="")
+
+
+class DramaProductionPack(Base, TimestampMixin):
+    """成片包(阶段 2):一集的配音稿 + 剪辑清单,由分镜/剧本/角色卡组装。
+
+    pack 为 JSON,结构见 engines/drama/production.py:
+    {mode, dubbing:[{seq,speaker,voice,tts_hint,text,tts_text,est_s,shot_duration_s}],
+     narration_full, checklist:[{seq,scene,duration_s,subtitle,transition,bgm_tag,note}],
+     totals:{shots,target_s,storyboard_s,voice_s}}
+    重建即覆盖(upsert by episode_id)。
+    """
+
+    __tablename__ = "drama_production_packs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    episode_id: Mapped[int] = mapped_column(
+        ForeignKey("drama_episodes.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    pack: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
