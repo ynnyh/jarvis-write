@@ -284,12 +284,12 @@ export interface PreflightWarning {
   conflicting_fact?: string;
   suggestion: string;
 }
-/** 章节一致性问题记录(docs/08 §5.7):门禁/预审/诊断/审校/规则扫描/宪法建议/时间线产出,可操作流转 */
+/** 章节一致性问题记录(docs/08 §5.7):门禁/预审/诊断/审校/规则扫描/宪法建议/时间线/常驻装置产出,可操作流转 */
 export interface ChapterIssue {
   id: number;
-  source: string;             // gate | preflight | diag | review | rules | canon | clock
+  source: string;             // gate | preflight | diag | review | rules | canon | clock | devices
   severity: string;           // blocker | major | minor
-  issue_type: string;         // source=canon 时为 absence | device | deadline;source=clock 时为 timeline
+  issue_type: string;         // source=canon 时为 absence | device | deadline;source=clock 时为 timeline;source=devices 时为 worldrule
   description: string;
   evidence: string;
   suggestion: string;

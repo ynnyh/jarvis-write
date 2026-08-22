@@ -80,6 +80,7 @@ CHAPTER_DRAFT_PROMPT = """\
 【伏笔回收提醒(到期伏笔应在本章或近期自然回收)】
 {foreshadow_reminders}
 
+{device_reminders}
 {avoid_repetition}
 {revision_block}
 【本章蓝图】

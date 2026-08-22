@@ -27,8 +27,10 @@ class ChapterState(Base, TimestampMixin):
         ForeignKey("chapters.id", ondelete="CASCADE"), unique=True, index=True
     )
     # 契约 JSON:in_story_time / story_day / days_remaining / location /
-    # scene_continues / ambient / characters[] / open_threads / time_jump_hint
+    # scene_continues / ambient / characters[] / open_threads / devices_present /
+    # time_jump_hint
     # (story_day/days_remaining 供故事时钟派生权威天数轴,见 engines/timeline.py;
+    #  devices_present 供常驻装置复现驱动派生断档章数,见 engines/devices.py;
     #  结构详见 prompts/consistency.py 的 HANDOFF_CONTRACT_PROMPT)
     contract: Mapped[str] = mapped_column(Text, default="")
     # 提取所依据正文的指纹(sha256 前 16 位,同 editorial.content_hash)

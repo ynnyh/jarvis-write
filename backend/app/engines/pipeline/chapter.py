@@ -28,6 +28,7 @@ from app.engines.consistency.preflight import preflight_chapter
 from app.engines.consistency.repetition import avoid_block, dedup_paragraphs
 from app.engines.pipeline.handoff import extract_handoff_contract, load_handoff_block
 from app.engines.timeline import persist_clock_issues
+from app.engines.devices import devices_reminder_block, persist_device_issues
 from app.engines.polish import ai_flavor_report
 from app.engines.polish.polisher import _flavor_hits_block, deai_self_heal
 from app.engines.editorial import (
@@ -347,6 +348,16 @@ async def apply_chapter_tail(
     except Exception as exc:  # noqa: BLE001 — 时钟校验绝不阻塞主流程
         db.rollback()
         logger.warning("第 %d 章故事时钟校验失败(已跳过): %s", chapter_number, exc)
+
+    # ---- 常驻装置断档校验(advisory,不阻断):落 source=devices 建议 ----
+    # 同样放在契约抽取之后(此刻本章 devices_present 已入库)。与生成端催场块
+    # (devices_reminder_block)配对成闭环:催过了本章仍没让装置出场,才在这里软报。
+    # 与时钟校验各自 try/except,一边挂了不影响另一边。
+    try:
+        persist_device_issues(db, project.id, chapter, final)
+    except Exception as exc:  # noqa: BLE001 — 装置校验绝不阻塞主流程
+        db.rollback()
+        logger.warning("第 %d 章常驻装置校验失败(已跳过): %s", chapter_number, exc)
     return extraction_stats
 
 
@@ -457,6 +468,9 @@ async def generate_chapter(
     known_roster = bible.known_roster_block(chapter_number)
     scheduler = ForeshadowScheduler(db, project.id)
     foreshadow_reminders = scheduler.reminder_block(chapter_number)
+    # 常驻装置催场(Phase 3):宪法里登记的金手指/信物断档到阈值就点名催场,治
+    # 「女主有系统却多章消失」。无 canon 装置 / 老书契约无 devices_present → 空串零影响。
+    device_reminders = devices_reminder_block(db, project.id, chapter_number)
 
     recent_full = [
         c.final_content
@@ -501,6 +515,7 @@ async def generate_chapter(
             hard_constraints=hard_constraints,
             known_roster=known_roster,
             foreshadow_reminders=foreshadow_reminders,
+            device_reminders=device_reminders,
             avoid_repetition=avoid_repetition,
             revision_block=rev_block,
             chapter_role=outline.chapter_role,

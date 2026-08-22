@@ -24,7 +24,7 @@ const SEV_CN: Record<string, string> = { blocker: "致命", major: "重要", min
 // 问题来源中文
 const SOURCE_CN: Record<string, string> = {
   gate: "门禁", preflight: "预审", diag: "诊断", review: "审校", rules: "规则",
-  canon: "宪法建议", clock: "时间线",
+  canon: "宪法建议", clock: "时间线", devices: "常驻装置",
 };
 const ISSUE_STATUS_CN: Record<string, string> = { resolved: "已人工解决", ignored: "已忽略" };
 // AI 味偏高分界线(/千字,加权命中+统计罚分;经验值,可调):超过即提示一键去味

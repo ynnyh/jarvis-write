@@ -17,7 +17,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Chapter, ChapterState
+from app.db.models import Chapter, ChapterState, Project
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.editorial import content_hash
 from app.prompts.consistency import HANDOFF_CONTRACT_PROMPT
@@ -27,6 +27,7 @@ logger = logging.getLogger("jarvis-write.handoff")
 _MAX_CHARACTERS = 6      # 与提取 prompt 约定一致
 _MAX_KNOWS = 5
 _MAX_OPEN_THREADS = 8
+_MAX_DEVICES = 8         # 常驻装置清单本就短(canon 登记的金手指/信物)
 _CONTRACT_TEXT_CHARS = 12000  # 提取注入正文截断,防超长(对齐 extractor)
 
 
@@ -84,6 +85,13 @@ def validate_contract(data: dict) -> dict | None:
         })
 
     threads = data.get("open_threads")
+    devices_raw = data.get("devices_present")
+    devices_present: list[str] = []
+    if isinstance(devices_raw, list):
+        for item in devices_raw[:_MAX_DEVICES]:
+            name = _s(item)
+            if name and name not in devices_present:  # 顺带去重,同章重复认领只算一次
+                devices_present.append(name)
     contract = {
         "in_story_time": _s(data.get("in_story_time")),
         "story_day": _int_or_none(data.get("story_day")),
@@ -94,6 +102,7 @@ def validate_contract(data: dict) -> dict | None:
         "characters": characters,
         "open_threads": [s for s in (_s(x) for x in (threads or [])[:_MAX_OPEN_THREADS]) if s]
         if isinstance(threads, list) else [],
+        "devices_present": devices_present,
         "time_jump_hint": _s(data.get("time_jump_hint")) or "none",
     }
     if not (contract["in_story_time"] or contract["location"] or characters):
@@ -162,6 +171,21 @@ def format_contract_block(contract: dict, prev_chapter_number: int) -> str:
     if hint and hint != "none":
         lines.append(f"- 时间跳跃提示:{hint}(本章开头应有相应交代)")
     return "\n".join(lines)
+
+
+def _devices_roster(db: Session, chapter: Chapter) -> str:
+    """本书 canon 登记的常驻装置清单块,注入提取 prompt 供闭集认领;无装置 → 空串。
+
+    懒导入 engines.devices:它反向依赖本模块的 _fresh_contract 做契约聚合,
+    顶层导入会成环。取不到项目或渲染出错时降级为空串——提取绝不因此失败。
+    """
+    try:
+        from app.engines.devices import devices_roster_block
+
+        return devices_roster_block(db.get(Project, chapter.project_id))
+    except Exception as exc:  # noqa: BLE001 — 装置清单只是增益,拿不到也要照常提取
+        logger.warning("取常驻装置清单失败(按无清单继续): %s", exc)
+        return ""
 
 
 def _fresh_contract(row: ChapterState | None, chapter: Chapter) -> dict | None:
@@ -277,6 +301,10 @@ async def extract_handoff_contract(
     prompt = HANDOFF_CONTRACT_PROMPT.format(
         chapter_number=chapter_number,
         chapter_text=chapter_text[:_CONTRACT_TEXT_CHARS],
+        # 常驻装置闭集清单:让场记只认领 canon 已登记的装置,不自创(Phase 3)。
+        # 自取而非由调用方传入——批量补提(api/chapters/extraction)、诊断重提
+        # 等入口都能自动带上,不会漏;懒导入避免 devices → handoff 的循环。
+        devices_roster=_devices_roster(db, chapter),
     )
     try:
         raw = await adapter.ask(prompt)
