@@ -517,6 +517,24 @@ def _encrypt_existing_keys() -> None:
             logger.info("迁移:%d 条历史明文 LLM key 已加密", migrated)
 
 
+def _add_drama_voice_columns() -> None:
+    """漫剧工坊阶段 2:drama_character_cards 补 tts_hint / reading_notes 列(幂等)。
+
+    新表(drama_production_packs 等)由 create_all 建;只有老分支装过
+    drama 表的库需要补这两列。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "drama_character_cards" not in insp.get_table_names():
+            return  # create_all 会新建,无需补列
+        for col in ("tts_hint", "reading_notes"):
+            if not _column_exists("drama_character_cards", col):
+                conn.execute(
+                    text(f"ALTER TABLE drama_character_cards ADD COLUMN {col} TEXT")
+                )
+                logger.info("迁移:drama_character_cards 补 %s 列", col)
+
+
 def run_migrations() -> None:
     """启动时调用。幂等。"""
     _add_user_id_columns()
@@ -536,6 +554,7 @@ def run_migrations() -> None:
     _add_chapter_review_snapshot_column()
     _add_chapter_proofread_snapshot_column()
     _add_queue_require_approved_column()
+    _add_drama_voice_columns()
     _disable_word_guard_default()
     _migrate_finalized_to_approved()
     # 先补加密老表存量明文 key,再拷到新表,保证 provider_configs 落库必为密文

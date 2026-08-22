@@ -22,6 +22,7 @@ import BoardPanel, { BoardTab } from "../panels/BoardPanel";
 import AuditPanel from "../panels/AuditPanel";
 import RefreshPanel from "../panels/RefreshPanel";
 import SubmissionPanel from "../panels/SubmissionPanel";
+import DramaPanel from "../panels/drama/DramaPanel";
 import ProjectSettingsPanel from "../panels/ProjectSettingsPanel";
 import ReadPanel from "../panels/ReadPanel";
 import BookReader from "../components/BookReader";
@@ -33,7 +34,7 @@ export type SetupStep = "inspire" | "arch" | "outline";
 // 面板内「去下一步」跳转目标:setup 子步或直接进写作区
 export type GotoTarget = SetupStep | "write";
 // book 区页签(?tab=)
-type BookTab = BoardTab | "publish" | "audit" | "refresh";
+type BookTab = BoardTab | "publish" | "drama" | "audit" | "refresh";
 
 const VALID_ZONES: Zone[] = ["setup", "write", "book", "settings", "read"];
 const SETUP_STEPS: { key: SetupStep; label: string }[] = [
@@ -47,6 +48,7 @@ const BOOK_TABS: { key: BookTab; label: string }[] = [
   { key: "bible", label: "故事圣经" },
   { key: "foreshadow", label: "伏笔" },
   { key: "publish", label: "投稿" },
+  { key: "drama", label: "漫剧" },
   { key: "audit", label: "体检" },
   { key: "refresh", label: "翻新" },
 ];
@@ -87,6 +89,11 @@ const GUIDES = {
     what: "把全书压缩成投稿表单要的内容:书名、标签、金句、简介、封面提示词,并多格式导出正文。",
     ai: "AI 依据概念/架构/大纲一次产出候选,挑好微调后逐项复制去平台发表。",
     done: "可选步骤,有定稿章节后即可投稿。",
+  },
+  drama: {
+    what: "把已定稿的小说改编成漫剧拍摄手册:美术风格卡 → 角色卡 → 集数规划(钩子/卡点)→ 单集剧本 → 分镜表 → 三轨绘图提示词。",
+    ai: "AI 只做文字编排:画风锚/角色锚逐字注入每格分镜保一致,产物拿去即梦/可灵/MJ/剪映出片,本项目不接生成模型。",
+    done: "可选步骤,有定稿章节即可开工;一集「提示词就绪」后可导出整集拍摄手册。",
   },
   audit: {
     what: "全书体检:跨章矛盾扫描、世界观规则扫描、契约批量补提与审核报告聚合。",
@@ -445,6 +452,7 @@ export default function ProjectPage() {
                 : <EmptyState>生成章节后,这里会展示故事圣经与伏笔追踪。</EmptyState>
             )}
             {bookTab === "publish" && <SubmissionPanel pid={pid} project={project} />}
+            {bookTab === "drama" && <DramaPanel pid={pid} />}
             {bookTab === "audit" && <AuditPanel pid={pid} project={project} />}
             {bookTab === "refresh" && <RefreshPanel pid={pid} />}
           </>

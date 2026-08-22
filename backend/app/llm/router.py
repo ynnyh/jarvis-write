@@ -29,6 +29,13 @@ class Task(str, Enum):
     POLISH = "polish"                   # 润色
     CONSISTENCY = "consistency"         # 一致性校验
     IMPACT = "impact"                   # 大纲级联影响分析
+    DRAMA_ASSET = "drama_asset"         # 漫剧资产卡(风格/角色/场景)
+    DRAMA_PLAN = "drama_plan"           # 漫剧集数规划
+    DRAMA_SCRIPT = "drama_script"       # 漫剧单集剧本
+    DRAMA_STORYBOARD = "drama_storyboard"  # 漫剧分镜
+    DRAMA_PROMPT = "drama_prompt"       # 漫剧分镜三轨提示词
+    DRAMA_PACK = "drama_pack"           # 漫剧成片包(朗读润色/转场/配乐标注)
+    DRAMA_TRAILER = "drama_trailer"     # 漫剧预告片(高能混剪)
 
 
 class Tier(str, Enum):
@@ -48,6 +55,14 @@ _TASK_TIER: dict[Task, Tier] = {
     Task.POLISH: Tier.QUALITY,
     Task.CONSISTENCY: Tier.FAST,
     Task.IMPACT: Tier.QUALITY,
+    # 漫剧四步管线:改编质量优先,全部走强档(提示词锚段注入对模型服从性有要求)
+    Task.DRAMA_ASSET: Tier.QUALITY,
+    Task.DRAMA_PLAN: Tier.QUALITY,
+    Task.DRAMA_SCRIPT: Tier.QUALITY,
+    Task.DRAMA_STORYBOARD: Tier.QUALITY,
+    Task.DRAMA_PROMPT: Tier.QUALITY,
+    Task.DRAMA_PACK: Tier.QUALITY,
+    Task.DRAMA_TRAILER: Tier.QUALITY,
 }
 
 # 任务 -> 采样温度。创作类任务要发散(高温),判断/抽取/压缩类要稳准(低温)。
@@ -64,6 +79,14 @@ _TASK_TEMPERATURE: dict[Task, float] = {
     Task.HANDOFF_EXTRACT: 0.2, # 契约提取同为抽取类,低温最稳
     Task.CONSISTENCY: 0.3,     # 一致性/审校判断要稳定可复现
     Task.IMPACT: 0.4,          # 影响分析偏判断
+    # 漫剧:剧本要鲜活(高温),分镜/提示词是结构化输出锚段注入(低温稳)
+    Task.DRAMA_ASSET: 0.6,     # 资产卡:稳定可复现的描述
+    Task.DRAMA_PLAN: 0.6,      # 集规划:切分判断为主,留点创意
+    Task.DRAMA_SCRIPT: 0.8,    # 剧本台词要有戏
+    Task.DRAMA_STORYBOARD: 0.5,  # 分镜结构化,克制
+    Task.DRAMA_PROMPT: 0.4,    # 提示词翻译/锚段嵌入,求稳求准
+    Task.DRAMA_PACK: 0.4,      # 成片包标注/朗读润色,忠实为先
+    Task.DRAMA_TRAILER: 0.7,   # 预告片要钩子感,文案大胆些
 }
 
 
@@ -76,6 +99,14 @@ _TASK_MAX_TOKENS: dict[Task, int] = {
     Task.POLISH: 12288,
     Task.ARCHITECTURE: 8192,
     Task.BLUEPRINT: 8192,
+    # 漫剧批量输出(角色卡×12/分镜×24/提示词×8 一批)给足额度
+    Task.DRAMA_SCRIPT: 8192,
+    Task.DRAMA_STORYBOARD: 8192,
+    Task.DRAMA_PROMPT: 8192,
+    Task.DRAMA_PLAN: 6000,
+    Task.DRAMA_ASSET: 5000,
+    Task.DRAMA_PACK: 6000,
+    Task.DRAMA_TRAILER: 8000,
 }
 
 
