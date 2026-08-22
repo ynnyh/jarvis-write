@@ -250,6 +250,9 @@ export interface Project {
   style_memo?: string | null;
   // 世界观硬规则钉板:每行一条不可违背的设定/常识,注入后续所有生成;规则扫描以此体检正文
   world_rules?: string | null;
+  // 故事宪法(结构化):书级恒真声明——刻意留白 / 常驻装置+复现节奏 / 倒计时;
+  // 与 world_rules 在后端合并成一张「宪法块」,全程注入生成端 + 全程门禁比对(治长程一致性 #1/#2)
+  canon?: StoryCanon | null;
 }
 export interface Architecture {
   core_seed: string; character_dynamics: string;
@@ -547,6 +550,42 @@ export interface DnaOptions {
 /** 品味镜:把坐标卡蒸馏成一段人话 + 矛盾检测 + 该模式会拦的套路(生成前先照镜子) */
 export interface MirrorResult {
   basis: string; reflection: string; contradictions: string[]; forbidden: string[];
+}
+
+// ---------- 故事宪法 / Canon(书级恒真声明,治长程一致性 #1/#2) ----------
+/** 常驻装置/金手指:立了就长期有效、该反复现身(如系统/信物)。与后端 CanonDevice 对齐。 */
+export interface CanonDevice {
+  name: string;        // 装置名(空则视为无效条目,保存时剔除)
+  cadence: string;     // 复现节奏(如「每章都应有存在感」「关键抉择必登场」)
+  importance: string;  // critical | major | minor
+}
+/** 倒计时:全书权威天数轴的锚(如「任务倒计时 31 天」)。与后端 CanonDeadline 对齐。 */
+export interface CanonDeadline {
+  name: string;           // 倒计时名(空则视为未设,保存时置 null)
+  total_days: number;     // 总天数
+  anchor_chapter: number; // 自第几章起算
+  importance: string;     // critical | major | minor
+}
+/** 故事宪法:刻意留白 / 常驻装置 / 倒计时。与后端 app/schemas/canon.py 的 StoryCanon 对齐。 */
+export interface StoryCanon {
+  absences: string[];              // 刻意留白:这些「没有」是硬设定(如「大院只有三人、无仆役」)
+  devices: CanonDevice[];
+  deadline: CanonDeadline | null;
+}
+export const IMPORTANCE_OPTIONS: { key: string; label: string }[] = [
+  { key: "critical", label: "关键" },
+  { key: "major", label: "重要" },
+  { key: "minor", label: "次要" },
+];
+export const EMPTY_CANON: StoryCanon = { absences: [], devices: [], deadline: null };
+/** 宪法是否所有维度都为空(与后端 StoryCanon.is_empty 同口径) */
+export function canonIsEmpty(c: StoryCanon | null | undefined): boolean {
+  if (!c) return true;
+  return !(
+    (c.absences || []).some((a) => (a ?? "").trim()) ||
+    (c.devices || []).some((d) => (d?.name ?? "").trim()) ||
+    (c.deadline?.name ?? "").trim()
+  );
 }
 /** 投稿包:对齐知乎等平台投稿表单字段(标题/频道/时空/标签/金句/简介/封面提示词) */
 export interface SubmissionPackage {

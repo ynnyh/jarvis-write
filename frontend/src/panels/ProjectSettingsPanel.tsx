@@ -1,7 +1,8 @@
-// settings 区:书级设置。每章目标字数 / 字数守卫 / 审校把关(达标线·回炉上限·连写要求)/ 世界观硬规则。
+// settings 区:书级设置。每章目标字数 / 字数守卫 / 审校把关(达标线·回炉上限·连写要求)/ 世界观硬规则 / 故事宪法。
 // 字数守卫与审校把关两张卡从原 ChaptersPanel 侧栏搬来,世界观硬规则从原 EditorialPanel audit 页签搬来,功能文案不变。
+// 故事宪法(结构化 canon:刻意留白/常驻装置/倒计时)紧挨世界观硬规则——两者在后端合并成一张「宪法块」全程注入+门禁比对。
 import { useState } from "react";
-import { api, Project } from "../api";
+import { api, CanonDevice, EMPTY_CANON, IMPORTANCE_OPTIONS, Project, StoryCanon } from "../api";
 import { useInvalidateProject } from "../hooks/queries";
 import { errMsg } from "../pollJob";
 import { toast } from "../ui/Toaster";
@@ -20,6 +21,14 @@ export default function ProjectSettingsPanel({ pid, project }: Props) {
   // 每章目标字数编辑态(字符串保存原始输入,允许清空重输;保存时校验区间)
   const [targetWords, setTargetWords] = useState(String(project.target_words_per_chapter));
   const [wordsSaving, setWordsSaving] = useState(false);
+  // 故事宪法编辑态(结构化 canon):留白走多行文本框,装置走可增删行,倒计时留空「名称」=不设。
+  const canon0 = project.canon ?? EMPTY_CANON;
+  const [absencesText, setAbsencesText] = useState((canon0.absences ?? []).join("\n"));
+  const [devices, setDevices] = useState<CanonDevice[]>(canon0.devices ?? []);
+  const [dlName, setDlName] = useState(canon0.deadline?.name ?? "");
+  const [dlDays, setDlDays] = useState(canon0.deadline ? String(canon0.deadline.total_days) : "");
+  const [dlAnchor, setDlAnchor] = useState(canon0.deadline ? String(canon0.deadline.anchor_chapter) : "1");
+  const [canonSaving, setCanonSaving] = useState(false);
 
   // 保存每章目标字数:后端 ProjectPatch 已支持 target_words_per_chapter,纯前端接线
   async function saveTargetWords() {
@@ -67,6 +76,37 @@ export default function ProjectSettingsPanel({ pid, project }: Props) {
       await invalidateProject();
       toast.ok("世界观硬规则已保存", "将注入后续所有生成,可用于规则扫描体检正文");
     } catch (e) { toast.err("世界观硬规则保存失败", errMsg(e)); } finally { setRulesSaving(false); }
+  }
+
+  // 常驻装置行的增/删/改(本地态,保存时统一清洗)
+  const addDevice = () => setDevices((ds) => [...ds, { name: "", cadence: "", importance: "major" }]);
+  const removeDevice = (i: number) => setDevices((ds) => ds.filter((_, j) => j !== i));
+  const patchDevice = (i: number, patch: Partial<CanonDevice>) =>
+    setDevices((ds) => ds.map((d, j) => (j === i ? { ...d, ...patch } : d)));
+
+  // 保存故事宪法(结构化 canon):留白按行拆、装置剔无名、倒计时留空名=null,整体覆盖。
+  // 与后端 coerce_canon 同口径清洗,存进去就是干净数据。
+  async function saveCanon() {
+    const absences = absencesText.split("\n").map((s) => s.trim()).filter(Boolean);
+    const cleanDevices = devices
+      .map((d) => ({ name: d.name.trim(), cadence: d.cadence.trim(), importance: d.importance || "major" }))
+      .filter((d) => d.name);
+    const dlNameTrim = dlName.trim();
+    const deadline = dlNameTrim
+      ? {
+          name: dlNameTrim,
+          total_days: Math.max(0, Math.floor(Number(dlDays) || 0)),
+          anchor_chapter: Math.max(1, Math.floor(Number(dlAnchor) || 1)),
+          importance: "critical",
+        }
+      : null;
+    const canon: StoryCanon = { absences, devices: cleanDevices, deadline };
+    setCanonSaving(true);
+    try {
+      await api.patchProject(pid, { canon });
+      await invalidateProject();
+      toast.ok("故事宪法已保存", "留白/常驻装置/倒计时将全程注入生成并参与一致性门禁");
+    } catch (e) { toast.err("故事宪法保存失败", errMsg(e)); } finally { setCanonSaving(false); }
   }
 
   return (
@@ -141,6 +181,56 @@ export default function ProjectSettingsPanel({ pid, project }: Props) {
           <button className="primary btn-sm" disabled={rulesSaving}
             onClick={saveWorldRules}>
             {rulesSaving && <span className="spin spin-sm" />}保存规则
+          </button>
+        </div>
+      </div>
+      <div className="card card-compact mt-2">
+        <label className="fl">故事宪法(结构化,书级恒真)</label>
+        <div className="hint mb-1">
+          与上方「世界观硬规则」合并成本书宪法,全程注入生成并参与一致性门禁——治「早章立下的
+          留白 / 金手指 / 倒计时,写到后面被违背」(如凭空冒出仆役、系统消失多章、倒计时天数算不清)。
+        </div>
+
+        <label className="fl mt-2">刻意留白(每行一条:这些「没有」是硬设定)</label>
+        <textarea rows={3} value={absencesText}
+          placeholder={"大院里只有主人、保镖、女主三人,没有仆役\n女主没有家人在世"}
+          onChange={(e) => setAbsencesText(e.target.value)} />
+
+        <label className="fl mt-2">常驻装置 / 金手指(立了就该长期在、反复现身)</label>
+        {devices.length === 0 && (
+          <div className="hint">(暂无。如「系统」「随身空间」「贴身信物」等,立后应按节奏复现)</div>
+        )}
+        {devices.map((d, i) => (
+          <div className="input-row mt-1" key={i}>
+            <input value={d.name} placeholder="装置名(如:系统)"
+              onChange={(e) => patchDevice(i, { name: e.target.value })} />
+            <input value={d.cadence} placeholder="复现节奏(如:每章都应有存在感)"
+              onChange={(e) => patchDevice(i, { cadence: e.target.value })} />
+            <select className="input-md" value={d.importance}
+              onChange={(e) => patchDevice(i, { importance: e.target.value })}>
+              {IMPORTANCE_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+            </select>
+            <button className="btn-sm" title="删除该装置" onClick={() => removeDevice(i)}>✕</button>
+          </div>
+        ))}
+        <div className="mt-1">
+          <button className="btn-sm" onClick={addDevice}>+ 添加装置</button>
+        </div>
+
+        <label className="fl mt-2">倒计时(可选:留空「名称」= 不设)</label>
+        <div className="input-row mt-1">
+          <input value={dlName} placeholder="倒计时名(如:任务倒计时)"
+            onChange={(e) => setDlName(e.target.value)} />
+          <input className="input-md" type="number" min={0} value={dlDays} placeholder="总天数"
+            onChange={(e) => setDlDays(e.target.value)} />
+          <input className="input-md" type="number" min={1} value={dlAnchor} placeholder="起算章"
+            onChange={(e) => setDlAnchor(e.target.value)} />
+        </div>
+        <div className="hint mt-1">总天数 = 倒计时的全程天数(如 31);起算章 = 从第几章开始计时。</div>
+
+        <div className="actions mt-2">
+          <button className="primary btn-sm" disabled={canonSaving} onClick={saveCanon}>
+            {canonSaving && <span className="spin spin-sm" />}保存宪法
           </button>
         </div>
       </div>
