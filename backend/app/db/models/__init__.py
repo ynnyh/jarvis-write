@@ -27,6 +27,13 @@ from app.db.models.user import User
 from app.db.models.app_setting import AppSetting
 from app.db.models.invite_code import InviteCode
 from app.db.models.job import Job
+from app.db.models.drama import (
+    DramaStyleCard,
+    DramaCharacterCard,
+    DramaSceneCard,
+    DramaEpisode,
+    DramaShot,
+)
 
 __all__ = [
     "User",
@@ -52,4 +59,9 @@ __all__ = [
     "ChapterIssue",
     "LlmUsage",
     "Job",
+    "DramaStyleCard",
+    "DramaCharacterCard",
+    "DramaSceneCard",
+    "DramaEpisode",
+    "DramaShot",
 ]

@@ -2986,3 +2986,23 @@ body:has(.write-zone.immersive) .step-guide { display: none; }
 .mirror-contradict { margin-top: var(--sp-3); }
 .mirror-contradict ul { margin: 6px 0 0; padding-left: 20px; }
 .mirror-contradict li { font-size: var(--fs-sm); line-height: 1.7; color: var(--warn); }
+
+/* ===== 漫剧工坊 ===== */
+/* 集列表行:可点选,选中态高亮 */
+.ep-row { cursor: pointer; transition: border-color 0.15s; }
+.ep-row:hover { border-color: var(--line-2); }
+.ep-row.ep-on { border-color: var(--accent, var(--line-2)); box-shadow: 0 0 0 1px var(--accent, transparent) inset; }
+/* 规划表单:一行排开(窄屏自动换行) */
+.plan-form { flex-wrap: wrap; gap: 10px; }
+.plan-form label { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--text-2); }
+.plan-form select, .plan-form input[type="number"] {
+  padding: 4px 8px; border: 1px solid var(--line); border-radius: var(--r-sm, 6px);
+  background: var(--surface); color: var(--text);
+}
+.plan-form input[type="number"] { width: 64px; }
+/* 单集动作条:按钮组不换行错乱 */
+.ep-actions { flex-wrap: wrap; gap: 8px; }
+/* 剧本行:说话人加粗 + 画面提示弱化 */
+.script-line { font-size: var(--fs-sm); line-height: 1.8; }
+.script-line b { color: var(--text); }
+.script-line .muted { margin-left: 8px; font-size: var(--fs-xs); }
