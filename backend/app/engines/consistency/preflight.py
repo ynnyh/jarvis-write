@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Outline
 from app.engines.consistency.extractor import parse_llm_json
-from app.engines.pipeline.handoff import load_handoff_block
+from app.engines.pipeline.handoff import handoff_gap, load_handoff_block
 from app.engines.timeline import timeline_block
 from app.llm.router import Task, get_adapter_for
 from app.prompts.consistency import PREFLIGHT_CHECK_PROMPT
@@ -73,7 +73,25 @@ async def preflight_chapter(
     """本章蓝图 vs 上一章契约,返回警告列表(可为空)。绝不抛异常阻塞生成。"""
     prev_contract = load_handoff_block(db, project_id, chapter_number)
     if not prev_contract:
-        return []  # 上章无有效契约(第一章/老书/契约失效)→ 跳过,不报错
+        gap = handoff_gap(db, project_id, chapter_number)
+        if gap:
+            # 上一章有正文却没有效契约:把「静默降级=无锚」暴露成可见警告(仍不阻断生成)。
+            # 走既有 preflight 落库通道(source="preflight"),与其他写前警告同面板展示。
+            logger.info("第 %d 章写前审核:契约缺失可见警告(%s)", chapter_number, gap)
+            return [{
+                "severity": "major",
+                "type": "state",
+                "description": (
+                    f"{gap}——本章开头衔接与写后门禁的「环境氛围/人物状态」连续性校验将降级"
+                    "(缺上一章章末锚点,#5 环境穿帮类问题更难被拦住)。建议回到上一章重新提取"
+                    "章末交接契约后再生成本章,或人工核对本章开头是否与上一章结尾的时间、地点、"
+                    "环境、人物状态吻合。"
+                ),
+                "evidence": "",
+                "conflicting_fact": "",
+                "suggestion": "回到上一章重跑一次「章末交接契约」提取(或检查该章正文是否异常/为空)。",
+            }]
+        return []  # 第一章 / 上一章无正文 → 本就不需要契约,静默跳过
     prompt = PREFLIGHT_CHECK_PROMPT.format(
         chapter_number=chapter_number,
         blueprint=_blueprint_block(outline),

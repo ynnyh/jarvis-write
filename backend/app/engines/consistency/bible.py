@@ -195,6 +195,48 @@ class BibleService:
                 )
         return lines
 
+    def known_roster_block(self, chapter_number: int) -> str:
+        """已登场角色名册(闭集约束),防「凭空冒出常驻角色」——如大院一直写「只有三人/
+        空荡荡」,第 8 章却蹦出一个「每天伺候饮食起居」却从未登场的仆役。
+
+        名册取本书当前**非退场的 character 实体**现查派生(不新增存储):章后抽取
+        只把通过门禁的章的人物写进圣经,故生成/校验第 N 章时,名册恰是第 1..N-1 章
+        已登场的人——新冒出的常驻角色必不在其中。
+
+        规则对名册是否完备不敏感:核心禁令是「不得把一个从未登场的人写成早已常驻/
+        素来相熟」,新人必须以初次登场方式引入。故早章名册稀疏时仍然有效。
+        """
+        rows = (
+            self.db.query(Entity)
+            .filter(
+                Entity.project_id == self.project_id,
+                Entity.entity_type == "character",
+                Entity.retired.is_(False),
+            )
+            .order_by(Entity.id)
+            .all()
+        )
+        names: list[str] = []
+        for e in rows:
+            label = e.name
+            aliases = [a for a in (e.aliases or []) if a and a != e.name]
+            if aliases:
+                label += "(" + "、".join(aliases[:3]) + ")"
+            names.append(label)
+        if names:
+            roster = "本书截至本章已登场/在册的角色:" + "、".join(names) + "。"
+        else:
+            roster = "本书目前尚无已登记的角色(开篇阶段)。"
+        return (
+            "【已登场角色名册(闭集约束·硬规则)】\n"
+            + roster
+            + "\n严禁凭空引入一个被写成「一直都在 / 每天伺候饮食起居 / 素来相熟 / "
+            "府里的老人 / 早就认识」却在前文从未登场的常驻角色。确需新增人物时,必须是"
+            "本章蓝图【涉及人物】点名的,并以「初次登场 / 新来 / 头一回见」的方式交代来历,"
+            "绝不能假装他早已存在。尤其要与前文「人少 / 空荡 / 只有某几人 / 没有外人」的"
+            "设定保持一致,不要无缘由地多出仆役、随从、邻居等常驻配角。"
+        )
+
     # ---------- 写回 ----------
     def purge_chapter_extraction(self, chapter_number: int) -> dict:
         """撤销某章此前抽取的全部圣经写入(重写正文前调用,防记忆污染)。

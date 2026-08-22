@@ -181,6 +181,11 @@ def test_normalize_issue_severity_and_evidence():
         text,
     )
     assert i3["evidence"] == ""
+    # 新增维度 ambient(环境氛围连续性)/ cast(凭空常驻角色)是合法类型,不被降级为 state
+    for t in ("ambient", "cast"):
+        it = _normalize_issue({"severity": "blocker", "type": t, "description": "x"}, text)
+        assert it["type"] == t
+        assert it["severity"] == "blocker"
 
 
 # ---------- chapter_issues 落库幂等 ----------

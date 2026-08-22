@@ -36,7 +36,7 @@ logger = logging.getLogger("jarvis-write.checker")
 _PREV_TAIL_CHARS = 900  # 上一章结尾原文截断长度(对齐 chapter.py 的 _RECENT_TAIL_CHARS)
 
 _SEVERITIES = {"blocker", "major", "minor"}
-_TYPES = {"state", "knowledge", "timeline", "worldrule"}
+_TYPES = {"state", "knowledge", "timeline", "worldrule", "ambient", "cast"}
 
 
 def _prev_chapter_context(db: Session, project_id: int, chapter_number: int) -> tuple[str, str]:
@@ -108,6 +108,7 @@ async def check_chapter(
 
     prompt = CONSISTENCY_CHECK_PROMPT.format(
         active_facts=active_facts,
+        known_roster=bible.known_roster_block(chapter_number),
         prev_contract=prev_contract or "(无上一章契约——未提取或正文已改动失效)",
         prev_tail=prev_tail or "(无上一章结尾原文,本章可能是第一章)",
         rolling_summary=rolling_summary or "(无)",

@@ -10,7 +10,8 @@
 - issues 状态流转:PATCH open → resolved/ignored(单向,非 open 400)
 - apply-revision:suggestion 拼修订指令走重写链路(异步 job),发起即标 resolved
 - 写前审核 preflight:蓝图 vs 上章契约产出警告(severity 一律 major,落库
-  source=preflight,随生成响应透出);只警告不阻断;无契约跳过;LLM 失败降级
+  source=preflight,随生成响应透出);只警告不阻断;上一章缺契约→冒可见降级
+  警告、第一章→静默跳过;LLM 失败降级
 """
 from __future__ import annotations
 
@@ -160,8 +161,9 @@ def test_preflight_normalizes_unknown_type_and_severity():
     assert w["type"] == "state"
 
 
-def test_preflight_skips_without_prev_contract():
-    """上章无有效契约(老书/第一章/指纹失效)→ 跳过,不调 LLM,不报错。"""
+def test_preflight_warns_on_missing_contract():
+    """上一章有正文却没有效契约(老书未提取/提取失败/指纹失效)→ 冒一条可见降级
+    警告(major,不阻断),但不调 LLM——把过去的「静默降级=无锚」暴露出来(#5)。"""
     from app.engines.consistency import preflight as pf_mod
 
     db, project, _ch1 = _make_db(with_contract=False)
@@ -174,6 +176,28 @@ def test_preflight_skips_without_prev_contract():
     adapter = _Adapter(PREFLIGHT_JSON)
     with patch.object(pf_mod, "get_adapter_for", return_value=adapter):
         warnings = asyncio.run(pf_mod.preflight_chapter(db, project.id, 2, outline))
+    assert adapter.prompts == []  # 契约缺失走早退,不调 LLM
+    assert len(warnings) == 1
+    w = warnings[0]
+    assert w["severity"] == "major"  # 只警告不阻断
+    assert "契约" in w["description"]  # 点明契约缺失/连续性校验降级
+    assert w["suggestion"]
+
+
+def test_preflight_skips_first_chapter():
+    """第一章本就没有上一章契约 → 静默跳过,返回空,不调 LLM(不是缺失,不该报警)。"""
+    from app.engines.consistency import preflight as pf_mod
+
+    db, project, _ch1 = _make_db(with_contract=False)
+    from app.db.models import Outline
+    outline1 = (
+        db.query(Outline)
+        .filter(Outline.project_id == project.id, Outline.chapter_number == 1)
+        .first()
+    )
+    adapter = _Adapter(PREFLIGHT_JSON)
+    with patch.object(pf_mod, "get_adapter_for", return_value=adapter):
+        warnings = asyncio.run(pf_mod.preflight_chapter(db, project.id, 1, outline1))
     assert warnings == []
     assert adapter.prompts == []  # 没调 LLM
 

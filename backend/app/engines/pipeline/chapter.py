@@ -439,6 +439,10 @@ async def generate_chapter(
     hard_constraints = bible.hard_constraints_block(
         chapter_number, [str(c) for c in outline.characters_involved]
     )
+    # 已登场角色名册(闭集约束):防「凭空冒出常驻角色」(如大院一直写空荡荡,第8章却蹦出
+    # 一个每天伺候起居的仆役)。与 hard_constraints 互补——后者只列本章涉及人物的状态,
+    # 名册列全书已登场的人;草稿/定稿注入约束生成,同一份也喂给门禁(checker)比对。
+    known_roster = bible.known_roster_block(chapter_number)
     scheduler = ForeshadowScheduler(db, project.id)
     foreshadow_reminders = scheduler.reminder_block(chapter_number)
 
@@ -483,6 +487,7 @@ async def generate_chapter(
             recent_tail=recent,
             handoff_contract=handoff_block,
             hard_constraints=hard_constraints,
+            known_roster=known_roster,
             foreshadow_reminders=foreshadow_reminders,
             avoid_repetition=avoid_repetition,
             revision_block=rev_block,
@@ -513,6 +518,7 @@ async def generate_chapter(
             foreshadowing=outline.foreshadowing,
             chapter_summary=outline.summary,
             rolling_summary=rolling,
+            known_roster=known_roster,
             draft_text=d,
             flavor_hits=flavor_hits,
             # 定稿额外注入「AI 腔→人话」配对反例(给 pattern 比给 rule 有效);草稿不注入

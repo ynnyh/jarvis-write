@@ -167,6 +167,33 @@ def load_handoff_block(db: Session, project_id: int, chapter_number: int) -> str
     return format_contract_block(contract, prev.chapter_number)
 
 
+def handoff_gap(db: Session, project_id: int, chapter_number: int) -> str | None:
+    """上一章「本应有契约却缺失/失效」时返回人话原因,否则 None。
+
+    load_handoff_block 把「第一章/无上一章」与「上一章有正文却没有效契约」都塌成
+    空串静默降级(#5 的病根之一:静默=无锚,门禁与开头衔接都少了环境/状态对照)。
+    本函数把后者单拎出来,供写前审核冒一条可见警告,不再无声吞掉。
+    第一章 / 上一章无正文 → None(本就不需要契约,不算缺失)。
+    """
+    if chapter_number <= 1:
+        return None
+    prev = (
+        db.query(Chapter)
+        .filter(Chapter.project_id == project_id, Chapter.chapter_number == chapter_number - 1)
+        .first()
+    )
+    if prev is None or not prev.final_content:
+        return None
+    row = db.query(ChapterState).filter(ChapterState.chapter_id == prev.id).first()
+    if row is None:
+        return "上一章从未提取章末交接契约"
+    if row.extract_status != "ok" or not row.contract:
+        return "上一章章末交接契约提取失败(已留痕)"
+    if row.content_hash != content_hash(prev.final_content or ""):
+        return "上一章正文改动后章末契约已失效(指纹不符)"
+    return None
+
+
 def handoff_payload(db: Session, chapter: Chapter) -> dict:
     """章节详情 API 透出用:{status, contract, error}。
 

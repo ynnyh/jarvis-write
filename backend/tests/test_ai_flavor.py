@@ -94,6 +94,26 @@ def test_hollow_metaphor_no_false_positive_on_concrete_simile():
     assert "空洞比喻堆砌" not in ai_flavor_report(CLEAN_SAMPLE).categories
 
 
+# ---------- 记忆挑逗:治用户举的"脑海里似乎想起什么却又抓不住"套路(#4) ----------
+def test_memory_tease_trope_detected():
+    # 含逗号形态(用户原句形态:"…似乎想起…什么,却又…抓不住")要命中
+    tease = "她怔了怔,脑海里似乎想起了什么,却又怎么也抓不住,那点念头转瞬就消散了。"
+    labels = {h.phrase for h in ai_flavor_report(tease).hits if h.category == "空洞比喻堆砌"}
+    assert any("记忆挑逗" in l for l in labels), labels
+    # 无逗号紧凑形态也命中
+    assert any(
+        "记忆挑逗" in h.phrase
+        for h in ai_flavor_report("他仿佛记起某个名字却始终想不起来。").hits
+    )
+
+
+def test_memory_tease_no_false_positive_on_concrete_recall():
+    # 具体回忆(写出了想起的内容、没有"又抓不住"的落空)不该误伤
+    concrete = "他想起了昨天的约定,又检查了一遍行李,确认无误才锁门出发。"
+    r = ai_flavor_report(concrete)
+    assert not any("记忆挑逗" in h.phrase for h in r.hits)
+
+
 def test_statistical_metrics():
     r = ai_flavor_report(AI_SAMPLE)
     m = r.metrics
