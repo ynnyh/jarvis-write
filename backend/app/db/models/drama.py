@@ -74,6 +74,16 @@ class DramaCharacterCard(Base, TimestampMixin):
     tts_hint: Mapped[str] = mapped_column(Text, default="")
     # 朗读备注:语速/情绪基调/重音,给配音环节的演奏指示
     reading_notes: Mapped[str] = mapped_column(Text, default="")
+    # 定妆照(角色参考图)提示词:拿去生图站先出一张「正面半身+纯背景」的参考图,
+    # 之后每格改用「参考图 + 本格提示词」出图,人物一致性才能从文字层落到像素层。
+    # 与 appearance_cn 的分工:那段是注入每格的锁定外貌,这段是能独立出图的完整提示词
+    # (含构图/光线/背景 + 画风锚)。
+    ref_prompt_cn: Mapped[str] = mapped_column(Text, default="")
+    ref_prompt_en: Mapped[str] = mapped_column(Text, default="")
+    # 定妆照资产:[{kind: "upload"|"url", src: 相对路径或外链, note: 备注}],最多 3 张。
+    # upload 的 src 存相对路径(相对上传根目录),换卷/搬迁不破;url 是用户贴的外链
+    # (平台链接可能失效,所以上传优先)。
+    ref_images: Mapped[Any] = mapped_column(JSON, default=list)
     locked: Mapped[bool] = mapped_column(Boolean, default=False)
 
     __table_args__ = (UniqueConstraint("project_id", "name", name="uq_drama_char_name"),)

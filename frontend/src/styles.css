@@ -3152,6 +3152,29 @@ body:has(.write-zone.immersive) .step-guide { display: none; }
 .drama-compliance { border-top: 1px dashed var(--line); padding-top: 8px; margin-top: 10px; }
 .drama-compliance b { color: var(--warn); }
 
+/* ===== 一键粘贴框 + 定妆照缩略图 ===== */
+/* 粘贴版是只读的「拿去就能贴」文本,和下面可编辑的三轨要一眼分得开 */
+.paste-box textarea {
+  background: var(--surface-2); font-size: var(--fs-sm); line-height: 1.6;
+}
+.paste-box select { max-width: 100%; font-size: var(--fs-xs); }
+/* 定妆照:小图铺一行,窄栏自动换行 */
+.ref-thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+.ref-thumb {
+  width: 96px; border: 1px solid var(--line); border-radius: var(--r-md, 8px);
+  overflow: hidden; background: var(--surface-2);
+}
+.ref-thumb img { display: block; width: 100%; height: 120px; object-fit: cover; }
+.ref-thumb-bad {
+  display: flex; align-items: center; justify-content: center;
+  height: 120px; font-size: var(--fs-xs); color: var(--text-dim, var(--text));
+}
+.ref-thumb-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 4px; padding: 4px 6px; font-size: var(--fs-xs);
+}
+.ref-thumb-foot .btn-sm { padding: 2px 6px; font-size: var(--fs-xs); }
+
 /* ===== 漫剧引导层:引导卡 + 步骤条三态 + 「现在做这步」指针 ===== */
 /* 引导卡里的编号/项目清单:比正文缩一号,行距放开,长句好读 */
 .drama-guide .guide-body { gap: 6px; }

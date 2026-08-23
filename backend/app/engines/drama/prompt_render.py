@@ -19,7 +19,7 @@ from app.engines.drama.common import (
     episode_dict,
     match_character,
     scene_anchor_map,
-    shot_dict,
+    shots_payload,
 )
 from app.llm.router import Task, get_adapter_for
 from app.prompts.drama import SHOT_PROMPT_PROMPT
@@ -187,7 +187,7 @@ async def render_shot_prompts(
     db.commit()
     return {
         "episode": episode_dict(episode),
-        "shots": [shot_dict(s) for s in shots],
+        "shots": shots_payload(db, project.id, shots),
     }
 
 
@@ -237,4 +237,7 @@ async def render_single_shot_prompt(
     if all(s.prompt_cn or s.prompt_en for s in siblings):
         episode.status = "ready"
     db.commit()
-    return {"episode": episode_dict(episode), "shot": shot_dict(shot)}
+    return {
+        "episode": episode_dict(episode),
+        "shot": shots_payload(db, project.id, [shot])[0],
+    }

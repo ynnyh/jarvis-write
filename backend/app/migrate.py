@@ -572,6 +572,28 @@ def _add_drama_episode_source_chapters_column() -> None:
         )
 
 
+def _add_drama_ref_sheet_columns() -> None:
+    """漫剧工坊:drama_character_cards 补定妆照三列(幂等)。
+
+    ref_prompt_cn/ref_prompt_en = 定妆照提示词;ref_images = 定妆照资产列表(JSON)。
+    人物一致性靠「先出一张定妆照当参考图」,这三列是它的落点。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "drama_character_cards" not in insp.get_table_names():
+            return  # create_all 会按新模型建表,无需补列
+        for col, ddl in (
+            ("ref_prompt_cn", "TEXT"),
+            ("ref_prompt_en", "TEXT"),
+            ("ref_images", "JSON"),
+        ):
+            if not _column_exists("drama_character_cards", col):
+                conn.execute(
+                    text(f"ALTER TABLE drama_character_cards ADD COLUMN {col} {ddl}")
+                )
+                logger.info("迁移:drama_character_cards 补 %s 列", col)
+
+
 def run_migrations() -> None:
     """启动时调用。幂等。"""
     _add_user_id_columns()
@@ -594,6 +616,7 @@ def run_migrations() -> None:
     _add_drama_voice_columns()
     _add_drama_style_direction_column()
     _add_drama_episode_source_chapters_column()
+    _add_drama_ref_sheet_columns()
     _disable_word_guard_default()
     _migrate_finalized_to_approved()
     # 先补加密老表存量明文 key,再拷到新表,保证 provider_configs 落库必为密文

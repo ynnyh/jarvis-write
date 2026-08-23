@@ -53,6 +53,21 @@ export interface DramaStyleCard {
   ratio: string;
 }
 
+// 按生图站拼好的「粘贴版」(后端 engines/drama/paste.py 拼,前端只渲染):
+// 单框站(GPT-image/豆包/通义)没有负面词框,负面词已改写成否定句并入 main;
+// 双框站(即梦/可灵/SD)正反分开;MJ 走英文 + --ar/--no 参数。
+export interface PasteVariant {
+  label: string;     // 平台展示名(下拉选项)
+  main: string;      // 粘进主描述框的整段
+  negative: string;  // 有负面框的站粘这里;单框站为空(已并入 main)
+  hint: string;      // 一句人话操作提示
+}
+// key = oneframe / dualbox / mj;顺序即后端给的展示顺序
+export type PasteSet = Record<string, PasteVariant>;
+
+// 定妆照资产:上传的存相对路径(读取走鉴权端点),外链存 http(s) 地址
+export interface DramaRefImage { kind: "upload" | "url"; src: string; note: string }
+
 export interface DramaCharacterCard {
   id: number;
   entity_id: number | null;
@@ -63,6 +78,11 @@ export interface DramaCharacterCard {
   voice_desc: string;
   tts_hint: string;
   reading_notes: string;
+  // 定妆照:先出一张角色参考图,后面每格「参考图 + 提示词」出图才真锁得住脸
+  ref_prompt_cn: string;
+  ref_prompt_en: string;
+  ref_images: DramaRefImage[];
+  ref_paste: PasteSet | null;
   locked: boolean;
 }
 
@@ -104,6 +124,8 @@ export interface DramaShot {
   prompt_cn: string;
   prompt_en: string;
   negative: string;
+  // 按平台拼好的粘贴版(后端算,导出手册与这里同一套规则);老响应可能没有
+  paste?: PasteSet | null;
 }
 
 export interface DramaMeta {
@@ -204,6 +226,44 @@ export const dramaApi = {
     req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/characters/generate`, undefined, LLM_TIMEOUT),
   patchCharacter: (pid: number, cid: number, body: Partial<DramaCharacterCard>) =>
     req<{ card: DramaCharacterCard }>("PATCH", `/api/projects/${pid}/drama/characters/${cid}`, body),
+  // 定妆照:出提示词(names 空 = 只补还没有的;给了名字 = 强制重出那几张)
+  genRefPrompts: (pid: number, names: string[] = []) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/characters/ref-prompts`,
+      { names }, LLM_TIMEOUT),
+  // 上传定妆照:multipart(不能手设 Content-Type,浏览器要自己带 boundary)
+  uploadRef: async (pid: number, cid: number, file: File, note = "") => {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("note", note);
+    const headers: Record<string, string> = {};
+    const tk = token.get();
+    if (tk) headers["Authorization"] = `Bearer ${tk}`;
+    const res = await fetch(`/api/projects/${pid}/drama/characters/${cid}/reference`,
+      { method: "POST", headers, body: fd });
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try { const j = await res.json(); detail = j.detail ?? detail; } catch { /* ignore */ }
+      throw new ApiError(res.status, detail);
+    }
+    return (await res.json()) as { card: DramaCharacterCard };
+  },
+  linkRef: (pid: number, cid: number, url: string, note = "") =>
+    req<{ card: DramaCharacterCard }>(
+      "POST", `/api/projects/${pid}/drama/characters/${cid}/reference/link`, { url, note }),
+  deleteRef: (pid: number, cid: number, index: number) =>
+    req<{ card: DramaCharacterCard }>(
+      "DELETE", `/api/projects/${pid}/drama/characters/${cid}/reference/${index}`),
+  // 缩略图:读取端点要 Authorization 头,<img src> 带不了,只能取 blob 转本地 URL
+  refBlobUrl: async (pid: number, cid: number, index: number): Promise<string> => {
+    const headers: Record<string, string> = {};
+    const tk = token.get();
+    if (tk) headers["Authorization"] = `Bearer ${tk}`;
+    const res = await fetch(`/api/projects/${pid}/drama/characters/${cid}/reference/${index}`,
+      { headers });
+    if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+    return URL.createObjectURL(await res.blob());
+  },
+
   // 声线选型卡(阶段 2):给角色卡补 TTS 平台选型建议 + 朗读指示
   generateVoiceCast: (pid: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/voice-cast/generate`, undefined, LLM_TIMEOUT),

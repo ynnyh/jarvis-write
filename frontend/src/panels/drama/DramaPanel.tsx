@@ -13,10 +13,12 @@ import {
   DramaEpisode,
   DramaMeta,
   DramaProductionPack,
+  DramaRefImage,
   DramaSceneCard,
   DramaShot,
   DramaStyleCard,
   DramaTrailer,
+  PasteSet,
   dramaApi,
 } from "../../dramaApi";
 import { useJob } from "../../ui/useJob";
@@ -41,6 +43,84 @@ function CopyBtn({ text, label = "复制" }: { text: string; label?: string }) {
     }
   }
   return <button className="btn-sm" onClick={go}>{done ? "✓ 已复制" : label}</button>;
+}
+
+// 记住用户上次选的生图站:换一格/刷新页面不用重选(全项目共用一个偏好)
+const PASTE_PLATFORM_KEY = "jarvis_drama_paste_platform";
+
+/** 一键粘贴框:按用户的生图站给「整段能直接粘」的版本。
+ *
+ *  为什么不让用户自己拼:我们出的是三轨(中文/英文/负面),而生图站长相不一——
+ *  只有一个描述框的站(GPT-image / 豆包 / 通义)没处放负面词,照原样复制等于把
+ *  负面词丢了。拼装规则在后端(paste.py),导出手册用的是同一份,不会两边跑偏。
+ */
+function PasteBox({ paste, stale, rows = 5 }: {
+  paste?: PasteSet | null; stale?: boolean; rows?: number;
+}) {
+  const [plat, setPlat] = useState(
+    () => localStorage.getItem(PASTE_PLATFORM_KEY) || "oneframe",
+  );
+  if (!paste) return null;
+  const keys = Object.keys(paste);
+  if (!keys.length) return null;
+  const key = paste[plat] ? plat : keys[0];
+  const v = paste[key];
+  if (!v.main.trim()) return null;
+  return (
+    <div className="media-field paste-box">
+      <div className="card-head mb-2">
+        <span className="muted">一键粘贴 · 你用的生图站</span>
+        <select value={key} onChange={(e) => {
+          setPlat(e.target.value);
+          localStorage.setItem(PASTE_PLATFORM_KEY, e.target.value);
+        }}>
+          {keys.map((k) => <option key={k} value={k}>{paste[k].label}</option>)}
+        </select>
+        <span className="grow" />
+        <CopyBtn text={v.main} label="复制整段" />
+        {v.negative.trim() && <CopyBtn text={v.negative} label="复制负面词" />}
+      </div>
+      <textarea rows={rows} readOnly value={v.main} />
+      {v.negative.trim() && (
+        <>
+          <div className="card-head mb-2 mt-2"><span className="muted">负面词(粘到负面词框)</span></div>
+          <textarea rows={2} readOnly value={v.negative} />
+        </>
+      )}
+      <p className="hint">{v.hint}</p>
+      {stale && <p className="hint">提示词改过还没保存——这里是已保存版本,点「保存」后同步。</p>}
+    </div>
+  );
+}
+
+/** 定妆照缩略图:读取端点要带 Authorization,<img src> 带不了头,所以取 blob 转本地 URL。 */
+function RefThumb({ pid, cid, index, img, onDelete }: {
+  pid: number; cid: number; index: number; img: DramaRefImage; onDelete: () => void;
+}) {
+  const [url, setUrl] = useState(img.kind === "url" ? img.src : "");
+  const [bad, setBad] = useState(false);
+
+  useEffect(() => {
+    if (img.kind === "url") { setUrl(img.src); return; }
+    let revoke = "";
+    let alive = true;
+    dramaApi.refBlobUrl(pid, cid, index)
+      .then((u) => { if (alive) { revoke = u; setUrl(u); } else URL.revokeObjectURL(u); })
+      .catch(() => setBad(true));
+    return () => { alive = false; if (revoke) URL.revokeObjectURL(revoke); };
+  }, [pid, cid, index, img.kind, img.src]);
+
+  return (
+    <div className="ref-thumb">
+      {url && !bad
+        ? <img src={url} alt={img.note || "定妆照"} onError={() => setBad(true)} />
+        : <div className="ref-thumb-bad">{bad ? "图片读不到" : "加载中…"}</div>}
+      <div className="ref-thumb-foot">
+        <span className="muted">{img.kind === "url" ? "外链" : "已上传"}</span>
+        <button className="btn-sm" onClick={onDelete}>删除</button>
+      </div>
+    </div>
+  );
 }
 
 function Banner({ stage, text }: { stage: string; text: string }) {
@@ -536,10 +616,32 @@ function AssetsSection({ pid, cards, scenes, onChanged }: {
     } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); setStage(""); }
   }
 
+  /** 批量出定妆照提示词:只补还没有的,不覆盖手改过的(要覆盖点单卡「重出提示词」)。 */
+  async function refPrompts() {
+    setBusy(true); setErr(""); setStage("");
+    try {
+      const r = await run<{ cards: DramaCharacterCard[]; generated: number }>(
+        () => dramaApi.genRefPrompts(pid),
+        { kind: `drama-refsheet-${pid}-all`, onStage: setStage },
+      );
+      if (r) {
+        onChanged(r.cards, scenes);
+        toast.ok(
+          r.generated ? `${r.generated} 张定妆照提示词已就绪` : "都已经有了",
+          r.generated
+            ? "拿去生图站先出参考图,再上传回来"
+            : "想重写某一张,点那张卡上的「重出提示词」",
+        );
+      }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); setStage(""); }
+  }
+
   return (
     <div className="card">
       <div className="card-head">
         <h3 className="grow">② 角色卡与场景卡 <span className="muted">人物一致性</span></h3>
+        <button disabled={busy || cards.length === 0} onClick={refPrompts}
+          title="先出一张角色参考图,后面每格拿它当参考图,才真锁得住脸">出定妆照</button>
         <button disabled={busy || cards.length === 0} onClick={castVoices}>声线选型</button>
         <button className="primary" disabled={busy} onClick={generate}>
           {cards.length ? "重新生成" : "AI 生成资产卡"}
@@ -547,8 +649,9 @@ function AssetsSection({ pid, cards, scenes, onChanged }: {
       </div>
       <p className="card-desc">
         从故事圣经批量出「锁定外貌段」:角色出场的那格分镜会逐字嵌入这段描述,
-        同一个人不换脸;「声线选型」给每个角色补 TTS 平台选型建议与朗读指示。
-        手动调过的卡点「锁定」,重跑不覆盖。
+        同一个人不换脸;「出定妆照」再给每个角色出一条参考图提示词——先出一张正面半身定妆照
+        上传回来,之后每格「参考图 + 提示词」出图,人物一致性才从文字层落到像素层。
+        「声线选型」给每个角色补 TTS 平台选型建议与朗读指示;手动调过的卡点「锁定」,重跑不覆盖。
       </p>
       {busy && <Banner stage={stage} text="AI 正在设计角色视觉卡…" />}
       {err && <div className="msg-err">{err}</div>}
@@ -580,8 +683,12 @@ function AssetsSection({ pid, cards, scenes, onChanged }: {
 function CharCardRow({ pid, card, onSaved }: {
   pid: number; card: DramaCharacterCard; onSaved: (c: DramaCharacterCard) => void;
 }) {
+  const { run } = useJob();
   const [draft, setDraft] = useState(card);
   const [dirty, setDirty] = useState(false);
+  const [refBusy, setRefBusy] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [link, setLink] = useState("");
 
   useEffect(() => { setDraft(card); setDirty(false); }, [card]);
 
@@ -592,6 +699,49 @@ function CharCardRow({ pid, card, onSaved }: {
       setDirty(false);
       if (extra) toast.ok(extra.locked ? "已锁定" : "已解锁");
     } catch (e) { toast.err("保存失败", errMsg(e)); }
+  }
+
+  /** 只给这一张角色重出定妆照提示词(批量按钮只补缺,不覆盖手改过的)。 */
+  async function regenRef() {
+    setRefBusy(true);
+    try {
+      const r = await run<{ cards: DramaCharacterCard[]; generated: number }>(
+        () => dramaApi.genRefPrompts(pid, [card.name]),
+        { kind: `drama-refsheet-${pid}-${card.name}` },
+      );
+      const fresh = r?.cards.find((c) => c.id === card.id);
+      if (fresh) { onSaved(fresh); toast.ok(`${card.name} 的定妆照提示词已就绪`); }
+    } catch (e) { toast.err("出定妆照提示词失败", errMsg(e)); } finally { setRefBusy(false); }
+  }
+
+  async function pickFile(file: File | undefined) {
+    if (!file) return;
+    setRefBusy(true);
+    try {
+      const r = await dramaApi.uploadRef(pid, card.id, file);
+      onSaved(r.card);
+      toast.ok("定妆照已上传", "这一格出图时把它当参考图传给生图站");
+    } catch (e) { toast.err("上传失败", errMsg(e)); } finally { setRefBusy(false); }
+  }
+
+  async function addLink() {
+    const url = link.trim();
+    if (!url) { setLinkOpen(false); return; }
+    setRefBusy(true);
+    try {
+      const r = await dramaApi.linkRef(pid, card.id, url);
+      onSaved(r.card);
+      setLink(""); setLinkOpen(false);
+      toast.ok("已记下外链", "生图站链接常带时效,建议下载后改用上传");
+    } catch (e) { toast.err("保存外链失败", errMsg(e)); } finally { setRefBusy(false); }
+  }
+
+  async function removeRef(index: number) {
+    if (!confirm("删掉这张定妆照?")) return;
+    try {
+      const r = await dramaApi.deleteRef(pid, card.id, index);
+      onSaved(r.card);
+    } catch (e) { toast.err("删除失败", errMsg(e)); }
   }
 
   return (
@@ -614,6 +764,44 @@ function CharCardRow({ pid, card, onSaved }: {
         <div className="card-head mb-2"><span className="muted">声线(配音用)</span></div>
         <input value={draft.voice_desc}
           onChange={(e) => { setDraft({ ...draft, voice_desc: e.target.value }); setDirty(true); }} />
+      </div>
+      <div className="media-field">
+        <div className="card-head mb-2">
+          <span className="muted">定妆照(锁脸的关键一步)</span>
+          <span className="grow" />
+          <label className="btn-sm" style={{ cursor: "pointer" }}>
+            上传参考图
+            <input type="file" accept="image/png,image/jpeg,image/webp" hidden disabled={refBusy}
+              onChange={(e) => { void pickFile(e.target.files?.[0]); e.target.value = ""; }} />
+          </label>
+          <button className="btn-sm" disabled={refBusy} onClick={() => setLinkOpen(!linkOpen)}>贴外链</button>
+          <button className="btn-sm" disabled={refBusy} onClick={() => void regenRef()}>
+            {refBusy ? "处理中…" : card.ref_prompt_cn ? "重出提示词" : "出定妆照提示词"}
+          </button>
+        </div>
+        <p className="hint">
+          文字描述只能把「不像」压小,压不到零。正确做法:先用下面这段生成<b>一张</b>正面半身定妆照,
+          上传到这里存好;之后每一格出图,都在生图站点「上传参考图」把它传上去 + 粘这一格的提示词,
+          人物才真的前后一致。
+        </p>
+        {linkOpen && (
+          <div className="card-head mb-2">
+            <input value={link} placeholder="粘生图站的图片地址(http/https)"
+              onChange={(e) => setLink(e.target.value)} />
+            <button className="btn-sm primary" disabled={refBusy} onClick={() => void addLink()}>保存</button>
+          </div>
+        )}
+        {draft.ref_images.length > 0 && (
+          <div className="ref-thumbs">
+            {draft.ref_images.map((img, i) => (
+              <RefThumb key={`${img.src}-${i}`} pid={pid} cid={card.id} index={i} img={img}
+                onDelete={() => void removeRef(i)} />
+            ))}
+          </div>
+        )}
+        {draft.ref_prompt_cn
+          ? <PasteBox paste={draft.ref_paste} rows={4} />
+          : <p className="hint">还没有定妆照提示词——点上面「出定妆照提示词」(需要先定好画风)。</p>}
       </div>
       {(draft.tts_hint || draft.reading_notes) && (
         <div className="media-field">
@@ -1043,6 +1231,7 @@ function PromptRow({ pid, shot, onSaved, onRegenerated }: {
             onChange={(e) => setNote(e.target.value)} />
         </div>
       )}
+      <PasteBox paste={draft.paste} stale={dirty} />
       <div className="media-field">
         <div className="card-head mb-2"><span className="muted">中文提示词(即梦/可灵)</span><CopyBtn text={draft.prompt_cn} /></div>
         <textarea rows={4} value={draft.prompt_cn}

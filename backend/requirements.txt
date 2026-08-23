@@ -9,3 +9,5 @@ PyJWT==2.10.1
 bcrypt==5.0.0
 cryptography==49.0.0
 python-docx==1.1.2
+# multipart 表单解析:漫剧定妆照上传(FastAPI 的 File/Form 依赖它,缺了连路由都建不起来)
+python-multipart==0.0.20

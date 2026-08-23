@@ -191,7 +191,20 @@ def style_card_dict(card: DramaStyleCard | None) -> dict | None:
     }
 
 
-def character_card_dict(card: DramaCharacterCard) -> dict:
+def style_card(db: Session, project_id: int) -> DramaStyleCard | None:
+    """项目的美术风格卡(1 项目 1 张)。序列化角色卡/分镜时都要它——粘贴版要画幅
+    与负面词基座,取不到就退化成默认 9:16 无负面词。"""
+    return (
+        db.query(DramaStyleCard)
+        .filter(DramaStyleCard.project_id == project_id)
+        .first()
+    )
+
+
+def character_card_dict(card: DramaCharacterCard, style=None) -> dict:
+    """角色卡序列化。style 给上时附带定妆照的「按平台粘贴版」(见 paste.py)。"""
+    from app.engines.drama.paste import ref_sheet_paste  # 局部导入:避免模块循环
+
     return {
         "id": card.id,
         "entity_id": card.entity_id,
@@ -203,7 +216,30 @@ def character_card_dict(card: DramaCharacterCard) -> dict:
         "tts_hint": card.tts_hint,
         "reading_notes": card.reading_notes,
         "locked": card.locked,
+        # 定妆照(人物一致性:先出参考图,再逐格引用)
+        "ref_prompt_cn": card.ref_prompt_cn or "",
+        "ref_prompt_en": card.ref_prompt_en or "",
+        "ref_images": ref_image_list(card),
+        "ref_paste": ref_sheet_paste(card, style) if (card.ref_prompt_cn or "") else None,
     }
+
+
+def ref_image_list(card: DramaCharacterCard) -> list[dict]:
+    """定妆照条目清洗成 [{kind, src, note}](脏数据一律丢,前端不必设防)。"""
+    out: list[dict] = []
+    for item in (card.ref_images or []):
+        if not isinstance(item, dict):
+            continue
+        src = str(item.get("src") or "").strip()
+        kind = str(item.get("kind") or "").strip()
+        if not src or kind not in ("upload", "url"):
+            continue
+        out.append({"kind": kind, "src": src, "note": str(item.get("note") or "")[:100]})
+    return out
+
+
+def has_ref_image(card: DramaCharacterCard | None) -> bool:
+    return bool(card is not None and ref_image_list(card))
 
 
 def scene_card_dict(card: DramaSceneCard) -> dict:
@@ -233,7 +269,8 @@ def episode_dict(ep: DramaEpisode) -> dict:
     }
 
 
-def shot_dict(shot: DramaShot) -> dict:
+def shot_dict(shot: DramaShot, paste: dict | None = None) -> dict:
+    """分镜格序列化。paste 是按平台拼好的粘贴版(见 shots_payload)。"""
     return {
         "id": shot.id,
         "episode_id": shot.episode_id,
@@ -248,7 +285,29 @@ def shot_dict(shot: DramaShot) -> dict:
         "prompt_cn": shot.prompt_cn,
         "prompt_en": shot.prompt_en,
         "negative": shot.negative,
+        "paste": paste,
     }
+
+
+def shots_payload(db: Session, project_id: int, shots: list[DramaShot]) -> list[dict]:
+    """一组分镜格 → 前端载荷(每格附「按平台粘贴版」)。
+
+    粘贴版在后端拼:导出手册与前端复制按钮共用同一套规则,不会两边各写一份跑偏。
+    参考图指令只在该格出场角色**确实有定妆照**时才加,免得提示用户去传不存在的图。
+    """
+    from app.engines.drama.paste import shot_paste
+
+    style = style_card(db, project_id)
+    by_name, by_alias = character_anchor_maps(db, project_id)
+    out: list[dict] = []
+    for s in shots:
+        refs: list[str] = []
+        for name in (s.characters or []):
+            card = match_character(str(name), by_name, by_alias)
+            if has_ref_image(card) and card.name not in refs:
+                refs.append(card.name)
+        out.append(shot_dict(s, paste=shot_paste(s, style, refs)))
+    return out
 
 
 # =============== 资产索引(prompt_render 按名匹配用) ===============

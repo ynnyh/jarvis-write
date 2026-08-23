@@ -23,7 +23,7 @@ from app.db.models import (
     Project,
 )
 from app.engines.consistency.extractor import parse_llm_json
-from app.engines.drama.common import coerce_int, episode_dict, shot_dict
+from app.engines.drama.common import coerce_int, episode_dict, shots_payload
 from app.llm.router import Task, get_adapter_for
 from app.prompts.drama import STORYBOARD_PROMPT
 
@@ -156,7 +156,7 @@ async def build_storyboard(
         )
     return {
         "episode": episode_dict(episode),
-        "shots": [shot_dict(s) for s in shots],
+        "shots": shots_payload(db, project.id, shots),
         "truncated": dropped > 0,
         "notice": ";".join(notes),
     }
