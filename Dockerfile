@@ -5,7 +5,11 @@ FROM node:22-slim AS frontend
 ARG GIT_COMMIT=dev
 WORKDIR /fe
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci --no-fund --no-audit --registry=https://registry.npmmirror.com
+# npmmirror 偶发 ECONNRESET / "Exit handler never called"(2026-08-23 连撞两次,
+# 一次构建就此报废)。开重试 + 限并发连接数:抖动自己扛过去,别让发版卡在这一行。
+RUN npm ci --no-fund --no-audit --registry=https://registry.npmmirror.com \
+      --fetch-retries=5 --fetch-retry-mintimeout=5000 --fetch-retry-maxtimeout=60000 \
+      --maxsockets=8
 COPY frontend/ ./
 ENV VITE_APP_COMMIT=${GIT_COMMIT}
 RUN npm run build
