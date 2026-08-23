@@ -17,6 +17,8 @@ from typing import Any
 
 import httpx
 
+from app import live
+
 logger = logging.getLogger("jarvis-write.jobs")
 
 _LOCK = threading.Lock()
@@ -96,6 +98,10 @@ def create_job(kind: str) -> str:
             "kind": kind, "status": "running", "owner_id": owner,
             "stage": "排队中", "result": None, "error": None,
         }
+    # 实时正文归属:在这里(而非各 runner 里)设 ContextVar——asyncio.create_task
+    # 复制创建时的上下文,所以随后 fire_and_track/spawn_job 起的后台任务及其嵌套
+    # 的每一次 LLM 调用都自动认领这个 job_id,不必逐个接口改(共 20+ 处建任务点)。
+    live.current_job_id.set(job_id)
     _persist_create(job_id, kind, owner)
     return job_id
 
@@ -105,12 +111,14 @@ def update_stage(job_id: str, stage: str) -> None:
     with _LOCK:
         if job_id in _JOBS:
             _JOBS[job_id]["stage"] = stage
+    live.set_step(job_id, stage)  # 直播换一屏:一步一屏,不把几段正文糊在一起
 
 
 def finish_job(job_id: str, result: Any) -> None:
     with _LOCK:
         if job_id in _JOBS:
             _JOBS[job_id].update(status="done", stage="完成", result=result)
+    live.close(job_id)
     _persist_finish(job_id, result)
 
 
@@ -118,6 +126,7 @@ def fail_job(job_id: str, error: str) -> None:
     with _LOCK:
         if job_id in _JOBS:
             _JOBS[job_id].update(status="error", stage="失败", error=error)
+    live.close(job_id)
     _persist_fail(job_id, error)
 
 
@@ -191,6 +200,9 @@ def spawn_job(kind: str, work: Callable[[Callable[[str], None]], Awaitable[Any]]
     job_id = create_job(kind)
 
     async def runner() -> None:
+        # 兜底再设一次(create_job 已设):万一 work 被从别的上下文调度,
+        # 直播归属也不会串到别的任务上
+        live.current_job_id.set(job_id)
         try:
             result = await work(lambda s: update_stage(job_id, s))
             finish_job(job_id, result)

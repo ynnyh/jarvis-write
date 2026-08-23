@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.db.models import DramaCharacterCard, Project
 from app.engines.consistency.extractor import parse_llm_json
-from app.engines.drama.common import character_card_dict, clip
+from app.engines.drama.common import character_card_dict, clip, style_card
+from app.engines.drama.gender import gender_tag
 from app.llm.router import Task, get_adapter_for
 from app.prompts.drama import VOICE_CAST_PROMPT
 
@@ -35,12 +36,18 @@ async def generate_voice_cast(
     if not cards:
         raise DramaVoiceError("还没有角色卡——先在上方「AI 生成资产卡」。")
 
+    style = style_card(db, project.id)
     unlocked = [c for c in cards if not c.locked]
     if not unlocked:
-        return {"cards": [character_card_dict(c) for c in cards], "skipped_locked": len(cards)}
+        return {
+            "cards": [character_card_dict(c, style) for c in cards],
+            "skipped_locked": len(cards),
+        }
 
+    # 性别显式下发:声线选型最容易踩的坑就是给女角色推了个男声
     lines = [
-        f"【{c.name}】声线:{c.voice_desc or '未定'}|身份线索:{c.outfit_cn or ''}"
+        f"【{c.name}】{gender_tag(c.gender) or '性别:未定'}"
+        f"|声线:{c.voice_desc or '未定'}|身份线索:{c.outfit_cn or ''}"
         for c in unlocked
     ]
     progress(f"AI 正在为 {len(unlocked)} 个角色配声线选型…")
@@ -66,6 +73,6 @@ async def generate_voice_cast(
 
     db.commit()
     return {
-        "cards": [character_card_dict(c) for c in cards],
+        "cards": [character_card_dict(c, style) for c in cards],
         "skipped_locked": len(cards) - len(unlocked),
     }

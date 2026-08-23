@@ -123,6 +123,57 @@ def chapter_final_text(db: Session, project_id: int, chapter_number: int) -> str
     return (row.final_content or row.draft_content or "").strip()
 
 
+# =============== 集的源章号(支持「数章并一集」) ===============
+
+def episode_source_chapters(ep: DramaEpisode) -> list[int]:
+    """集的源章号列表(升序去重)。
+
+    兼容老数据:source_chapters 为空时回落到单个 source_chapter——
+    迁移会回填,但 job 里现建的对象/测试直接构造的行可能只有单值。
+    """
+    out: list[int] = []
+    for raw in (ep.source_chapters or []):
+        n = coerce_int(raw, 0, lo=0)
+        if n > 0 and n not in out:
+            out.append(n)
+    if not out and ep.source_chapter:
+        out = [ep.source_chapter]
+    return sorted(out)
+
+
+def source_chapter_label(ep: DramaEpisode) -> str:
+    """源章号的人话标签:「第 3 章」/「第 3-5 章」(连续)/「第 3、7 章」(跳号)。"""
+    nums = episode_source_chapters(ep)
+    if not nums:
+        return "未指定源章"
+    if len(nums) == 1:
+        return f"第 {nums[0]} 章"
+    if nums[-1] - nums[0] == len(nums) - 1:
+        return f"第 {nums[0]}-{nums[-1]} 章"
+    return "第 " + "、".join(str(n) for n in nums) + " 章"
+
+
+def chapters_final_text(
+    db: Session, project_id: int, chapter_numbers: list[int], budget: int
+) -> tuple[str, list[int]]:
+    """多章正文拼接(带章号小标题),总量控制在 budget 字符内。
+
+    并集的每一章都要进剧本上下文——只喂主章会把并进来的章静默丢掉。
+    预算按章平分(至少 800 字/章,避免章多时每章都被砍成碎片);
+    返回 (拼接文本, 真的有正文的章号)。
+    """
+    got: list[int] = []
+    texts: list[str] = []
+    per = max(800, budget // max(1, len(chapter_numbers)))
+    for n in chapter_numbers:
+        body = chapter_final_text(db, project_id, n)
+        if not body:
+            continue
+        got.append(n)
+        texts.append(f"—— 第 {n} 章 ——\n{body[:per]}")
+    return "\n\n".join(texts)[:budget], got
+
+
 # =============== 行 → dict 序列化(API 响应/导出共用) ===============
 
 def style_card_dict(card: DramaStyleCard | None) -> dict | None:
@@ -140,11 +191,29 @@ def style_card_dict(card: DramaStyleCard | None) -> dict | None:
     }
 
 
-def character_card_dict(card: DramaCharacterCard) -> dict:
+def style_card(db: Session, project_id: int) -> DramaStyleCard | None:
+    """项目的美术风格卡(1 项目 1 张)。序列化角色卡/分镜时都要它——粘贴版要画幅
+    与负面词基座,取不到就退化成默认 9:16 无负面词。"""
+    return (
+        db.query(DramaStyleCard)
+        .filter(DramaStyleCard.project_id == project_id)
+        .first()
+    )
+
+
+def character_card_dict(card: DramaCharacterCard, style=None) -> dict:
+    """角色卡序列化。style 给上时附带定妆照的「按平台粘贴版」(见 paste.py)。"""
+    from app.engines.drama.gender import gender_conflict_note
+    from app.engines.drama.paste import ref_sheet_paste  # 局部导入:避免模块循环
+
     return {
         "id": card.id,
         "entity_id": card.entity_id,
         "name": card.name,
+        # 性别单列一栏:前端可一键改,改完「按性别重出」整卡重写(见 gender.py)
+        "gender": card.gender or "",
+        # 描述与标定的性别打架时的一句人话提示(不打架为空串)
+        "gender_conflict": gender_conflict_note(card),
         "appearance_cn": card.appearance_cn,
         "appearance_en": card.appearance_en,
         "outfit_cn": card.outfit_cn,
@@ -152,7 +221,30 @@ def character_card_dict(card: DramaCharacterCard) -> dict:
         "tts_hint": card.tts_hint,
         "reading_notes": card.reading_notes,
         "locked": card.locked,
+        # 定妆照(人物一致性:先出参考图,再逐格引用)
+        "ref_prompt_cn": card.ref_prompt_cn or "",
+        "ref_prompt_en": card.ref_prompt_en or "",
+        "ref_images": ref_image_list(card),
+        "ref_paste": ref_sheet_paste(card, style) if (card.ref_prompt_cn or "") else None,
     }
+
+
+def ref_image_list(card: DramaCharacterCard) -> list[dict]:
+    """定妆照条目清洗成 [{kind, src, note}](脏数据一律丢,前端不必设防)。"""
+    out: list[dict] = []
+    for item in (card.ref_images or []):
+        if not isinstance(item, dict):
+            continue
+        src = str(item.get("src") or "").strip()
+        kind = str(item.get("kind") or "").strip()
+        if not src or kind not in ("upload", "url"):
+            continue
+        out.append({"kind": kind, "src": src, "note": str(item.get("note") or "")[:100]})
+    return out
+
+
+def has_ref_image(card: DramaCharacterCard | None) -> bool:
+    return bool(card is not None and ref_image_list(card))
 
 
 def scene_card_dict(card: DramaSceneCard) -> dict:
@@ -170,6 +262,8 @@ def episode_dict(ep: DramaEpisode) -> dict:
         "ep_index": ep.ep_index,
         "title": ep.title,
         "source_chapter": ep.source_chapter,
+        "source_chapters": episode_source_chapters(ep),
+        "source_label": source_chapter_label(ep),
         "hook": ep.hook,
         "recap": ep.recap,
         "cliffhanger": ep.cliffhanger,
@@ -180,7 +274,8 @@ def episode_dict(ep: DramaEpisode) -> dict:
     }
 
 
-def shot_dict(shot: DramaShot) -> dict:
+def shot_dict(shot: DramaShot, paste: dict | None = None) -> dict:
+    """分镜格序列化。paste 是按平台拼好的粘贴版(见 shots_payload)。"""
     return {
         "id": shot.id,
         "episode_id": shot.episode_id,
@@ -195,7 +290,29 @@ def shot_dict(shot: DramaShot) -> dict:
         "prompt_cn": shot.prompt_cn,
         "prompt_en": shot.prompt_en,
         "negative": shot.negative,
+        "paste": paste,
     }
+
+
+def shots_payload(db: Session, project_id: int, shots: list[DramaShot]) -> list[dict]:
+    """一组分镜格 → 前端载荷(每格附「按平台粘贴版」)。
+
+    粘贴版在后端拼:导出手册与前端复制按钮共用同一套规则,不会两边各写一份跑偏。
+    参考图指令只在该格出场角色**确实有定妆照**时才加,免得提示用户去传不存在的图。
+    """
+    from app.engines.drama.paste import shot_paste
+
+    style = style_card(db, project_id)
+    by_name, by_alias = character_anchor_maps(db, project_id)
+    out: list[dict] = []
+    for s in shots:
+        refs: list[str] = []
+        for name in (s.characters or []):
+            card = match_character(str(name), by_name, by_alias)
+            if has_ref_image(card) and card.name not in refs:
+                refs.append(card.name)
+        out.append(shot_dict(s, paste=shot_paste(s, style, refs)))
+    return out
 
 
 # =============== 资产索引(prompt_render 按名匹配用) ===============

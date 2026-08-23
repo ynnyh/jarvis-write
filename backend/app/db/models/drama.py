@@ -64,6 +64,11 @@ class DramaCharacterCard(Base, TimestampMixin):
         ForeignKey("entities.id", ondelete="SET NULL"), nullable=True
     )
     name: Mapped[str] = mapped_column(String(200))
+    # 性别(""=未定 / female / male / other):从自由文本里拎出来单独存的一列。
+    # 写错性别是漫剧最刺眼的错(女角色出成男相),而且会顺着外貌段 → 定妆照 →
+    # 每格提示词 → 配音声线一路复制。单列一栏才能:生成时当硬约束下发、
+    # 用户一键改、事后校验描述有没有跟它打架(见 engines/drama/gender.py)。
+    gender: Mapped[str] = mapped_column(String(10), default="")
     # 锁定外貌段(中文):发型面容/体型/服饰材质颜色,80-150 字,必须「可画」
     appearance_cn: Mapped[str] = mapped_column(Text, default="")
     appearance_en: Mapped[str] = mapped_column(Text, default="")
@@ -74,6 +79,16 @@ class DramaCharacterCard(Base, TimestampMixin):
     tts_hint: Mapped[str] = mapped_column(Text, default="")
     # 朗读备注:语速/情绪基调/重音,给配音环节的演奏指示
     reading_notes: Mapped[str] = mapped_column(Text, default="")
+    # 定妆照(角色参考图)提示词:拿去生图站先出一张「正面半身+纯背景」的参考图,
+    # 之后每格改用「参考图 + 本格提示词」出图,人物一致性才能从文字层落到像素层。
+    # 与 appearance_cn 的分工:那段是注入每格的锁定外貌,这段是能独立出图的完整提示词
+    # (含构图/光线/背景 + 画风锚)。
+    ref_prompt_cn: Mapped[str] = mapped_column(Text, default="")
+    ref_prompt_en: Mapped[str] = mapped_column(Text, default="")
+    # 定妆照资产:[{kind: "upload"|"url", src: 相对路径或外链, note: 备注}],最多 3 张。
+    # upload 的 src 存相对路径(相对上传根目录),换卷/搬迁不破;url 是用户贴的外链
+    # (平台链接可能失效,所以上传优先)。
+    ref_images: Mapped[Any] = mapped_column(JSON, default=list)
     locked: Mapped[bool] = mapped_column(Boolean, default=False)
 
     __table_args__ = (UniqueConstraint("project_id", "name", name="uq_drama_char_name"),)
@@ -112,8 +127,13 @@ class DramaEpisode(Base, TimestampMixin):
     )
     ep_index: Mapped[int] = mapped_column(Integer)
     title: Mapped[str] = mapped_column(String(200), default="")
-    # 源章节号(存章号而非 chapter.id:章节重生成不换号,引用更稳)
+    # 主源章号(存章号而非 chapter.id:章节重生成不换号,引用更稳)。
+    # = source_chapters 的最小章号,重规划的范围替换与集排序都按它走。
     source_chapter: Mapped[int] = mapped_column(Integer, default=0)
+    # 源章号全集:一集可以由数章合并而来(EPISODE_PLAN_PROMPT 允许「过渡章数章并一集」),
+    # 写剧本时按这个列表逐章取正文——只认 source_chapter 会把并进来的章静默丢掉。
+    # 老库无此列时迁移回填 [source_chapter];读取一律走 common.episode_source_chapters。
+    source_chapters: Mapped[list[Any]] = mapped_column(JSON, default=list)
     # 前 3 秒钩子:第一画面/第一句话,刷到就停住的那种
     hook: Mapped[str] = mapped_column(Text, default="")
     # 本集梗概(50 字内,列表页速览)

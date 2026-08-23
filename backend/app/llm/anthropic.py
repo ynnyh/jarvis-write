@@ -4,10 +4,10 @@ Claude 的 Messages API 与 OpenAI /chat/completions 不同:
 - 端点 /v1/messages,认证走 x-api-key 头 + anthropic-version 头(不是 Bearer);
 - system 提示走顶层 `system` 字段,不放进 messages;
 - messages 只含 user/assistant,max_tokens 必填;
-- 响应是 content blocks 数组;流式是 SSE 事件(content_block_delta.delta.text)。
+- 响应是 content blocks 数组(text / thinking / tool_use);流式是 SSE 事件。
 
 用 httpx 直连,不引厂商 SDK,保持与其它适配器一致的轻量风格。
-complete 的重试 + CDN 掐断改流式兜底逻辑与 OpenAICompatibleAdapter 对齐。
+流式优先 / 重试 / 空正文归因由 LLMAdapter 统一实现。
 """
 from __future__ import annotations
 
@@ -20,12 +20,16 @@ from app.llm.base import (
     LLMAdapter,
     LLMMessage,
     LLMResponse,
+    UpstreamError,
+    as_text,
     check_upstream,
-    with_retries,
+    strip_think,
 )
 
 # Messages API 版本头。锚定稳定版,升级时集中改这里。
 ANTHROPIC_VERSION = "2023-06-01"
+
+_HINT = "确认 Base URL 正确(默认 https://api.anthropic.com)且渠道支持 Anthropic 协议"
 
 
 class AnthropicAdapter(LLMAdapter):
@@ -77,29 +81,41 @@ class AnthropicAdapter(LLMAdapter):
             payload["system"] = system_text
         return payload
 
-    async def complete(self, messages: list[LLMMessage]) -> LLMResponse:
-        """一次性返回完整回复,带瞬时错误重试与 CDN 掐断兜底。
+    # ---- 响应解析 ----
+    def _parse_message(self, data: dict, *, status: int | None = None) -> LLMResponse:
+        """content blocks → LLMResponse,并做空正文归因。
 
-        与 OpenAI 兼容卡同策略:首次走非流式,遭遇 52x/超时等瞬时错误后
-        改走流式聚合(流式一出响应头就持续吐 chunk,CDN 不会再掐)。
+        text 块是正文;thinking 块是思考(不进正文,但空正文时是归因依据——
+        开了 extended thinking 又给的 max_tokens 不够时,整个响应可能只有
+        thinking 块,stop_reason=max_tokens)。
         """
-        use_stream = False
-
-        async def call(_attempt: int) -> LLMResponse:
-            if use_stream:
-                return await self._complete_via_stream(messages)
-            return await self._complete_once(messages)
-
-        def on_retry(_exc: Exception) -> None:
-            nonlocal use_stream
-            use_stream = True
-
-        return await with_retries(
-            call,
-            attempts=self.retry_attempts,
-            base_delay=self.retry_base_delay,
-            on_retry=on_retry,
+        blocks = data.get("content") or []
+        text = "".join(
+            as_text(b.get("text")) for b in blocks if b.get("type") == "text"
         )
+        thinking = "".join(
+            as_text(b.get("thinking") or b.get("text"))
+            for b in blocks
+            if b.get("type") in ("thinking", "redacted_thinking")
+        )
+        usage = data.get("usage") or {}
+        resp = LLMResponse(
+            content=strip_think(text),
+            model=data.get("model") or self.model_name,
+            prompt_tokens=usage.get("input_tokens", 0),
+            completion_tokens=usage.get("output_tokens", 0),
+            # stop_reason 归一到 finish_reason:max_tokens 即被截断
+            finish_reason=data.get("stop_reason") or "",
+            reasoning=thinking,
+            raw=data,
+        )
+        if resp.content.strip():
+            return resp
+        salvaged = self._salvage_reasoning(resp)
+        if salvaged:
+            resp.content = salvaged
+            return resp
+        raise self._empty_content_error(resp, status=status)
 
     async def _complete_once(self, messages: list[LLMMessage]) -> LLMResponse:
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -108,58 +124,78 @@ class AnthropicAdapter(LLMAdapter):
                 headers=self._headers(),
                 json=self._payload(messages, stream=False),
             )
-            data = check_upstream(
-                resp,
-                hint="确认 Base URL 正确(默认 https://api.anthropic.com)且渠道支持 Anthropic 协议",
-            )
+            data = check_upstream(resp, hint=_HINT)
+        return self._parse_message(data, status=resp.status_code)
 
-        # content 是 block 数组,拼接所有 text 块(忽略 thinking/tool_use 等)
-        blocks = data.get("content") or []
-        text = "".join(
-            b.get("text", "") for b in blocks if b.get("type") == "text"
-        )
-        usage = data.get("usage", {})
-        return LLMResponse(
-            content=text,
-            model=data.get("model", self.model_name),
-            prompt_tokens=usage.get("input_tokens", 0),
-            completion_tokens=usage.get("output_tokens", 0),
-            raw=data,
-        )
-
-    async def _complete_via_stream(self, messages: list[LLMMessage]) -> LLMResponse:
-        """流式聚合:规避 CDN 的长请求掐断(token 用量可能拿不到,记账允许为 0)。"""
-        chunks: list[str] = []
-        async for delta in self.stream(messages):
-            chunks.append(delta)
-        return LLMResponse(content="".join(chunks), model=self.model_name)
-
-    async def stream(self, messages: list[LLMMessage]) -> AsyncIterator[str]:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            async with client.stream(
-                "POST",
-                self._endpoint(),
-                headers=self._headers(),
-                json=self._payload(messages, stream=True),
-            ) as resp:
-                if resp.status_code >= 400:
-                    # 流式错误体也读出来,给用户可读文案(而非裸状态码)
-                    await resp.aread()
-                    check_upstream(
-                        resp,
-                        hint="确认 Base URL 正确且渠道支持 Anthropic 协议",
-                    )
-                async for line in resp.aiter_lines():
-                    # Anthropic SSE 交替 event:/data: 行,只关心 data: 行的增量事件
-                    if not line or not line.startswith("data:"):
-                        continue
-                    payload = line[len("data:"):].strip()
-                    try:
-                        chunk = json.loads(payload)
-                    except json.JSONDecodeError:
-                        continue
-                    # 文本增量事件:content_block_delta.delta.text(text_delta)
-                    if chunk.get("type") == "content_block_delta":
-                        text = chunk.get("delta", {}).get("text")
-                        if text:
-                            yield text
+    async def _iter_stream(
+        self, messages: list[LLMMessage], sink: dict
+    ) -> AsyncIterator[str]:
+        """SSE 流式:产出 text_delta,把 thinking/stop_reason/用量塞进 sink。"""
+        reasoning: list[str] = []
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                async with client.stream(
+                    "POST",
+                    self._endpoint(),
+                    headers=self._headers(),
+                    json=self._payload(messages, stream=True),
+                ) as resp:
+                    if resp.status_code >= 400:
+                        # 流式错误体也读出来,给用户可读文案(而非裸状态码)
+                        await resp.aread()
+                        check_upstream(resp, hint=_HINT)
+                    # 渠道无视 stream:true 直接回整包 JSON(中转站常见)→ 按非流式解析
+                    if "event-stream" not in resp.headers.get("content-type", ""):
+                        await resp.aread()
+                        parsed = self._parse_message(
+                            check_upstream(resp, hint=_HINT), status=resp.status_code
+                        )
+                        sink.update(
+                            finish_reason=parsed.finish_reason,
+                            prompt_tokens=parsed.prompt_tokens,
+                            completion_tokens=parsed.completion_tokens,
+                        )
+                        reasoning.append(parsed.reasoning)
+                        if parsed.content:
+                            yield parsed.content
+                        return
+                    async for line in resp.aiter_lines():
+                        # Anthropic SSE 交替 event:/data: 行,只关心 data: 行
+                        if not line or not line.startswith("data:"):
+                            continue
+                        payload = line[len("data:"):].strip()
+                        try:
+                            chunk = json.loads(payload)
+                        except json.JSONDecodeError:
+                            continue
+                        kind = chunk.get("type")
+                        if kind == "error":
+                            err = chunk.get("error") or {}
+                            raise UpstreamError(
+                                f"上游在流式响应中报错: {err.get('message') or err}",
+                                status=resp.status_code,
+                                retryable=True,
+                            )
+                        if kind == "message_start":
+                            usage = (chunk.get("message") or {}).get("usage") or {}
+                            sink["prompt_tokens"] = usage.get("input_tokens", 0)
+                            continue
+                        if kind == "message_delta":
+                            stop = (chunk.get("delta") or {}).get("stop_reason")
+                            if stop:
+                                sink["finish_reason"] = stop
+                            usage = chunk.get("usage") or {}
+                            if usage.get("output_tokens"):
+                                sink["completion_tokens"] = usage["output_tokens"]
+                            continue
+                        if kind == "content_block_delta":
+                            delta = chunk.get("delta") or {}
+                            think = delta.get("thinking")
+                            if think:
+                                reasoning.append(as_text(think))
+                                continue
+                            text = delta.get("text")
+                            if text:
+                                yield text
+        finally:
+            sink["reasoning"] = "".join(reasoning)

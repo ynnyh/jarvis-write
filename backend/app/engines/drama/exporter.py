@@ -18,7 +18,13 @@ from app.db.models import (
     DramaStyleCard,
     Project,
 )
-from app.engines.drama.common import MODE_DESC
+from app.engines.drama.common import (
+    MODE_DESC,
+    has_ref_image,
+    ref_image_list,
+    source_chapter_label,
+)
+from app.engines.drama.paste import ref_sheet_paste, shot_paste
 
 _STATUS_CN = {
     "planned": "已规划",
@@ -39,6 +45,16 @@ def _shot_characters(shots: list[DramaShot]) -> set[str]:
     return names
 
 
+def _ref_names(shot: DramaShot, cards: list[DramaCharacterCard]) -> list[str]:
+    """本格里**已经有定妆照**的角色名(没有的不提,免得让用户去传不存在的图)。
+
+    导出层按名直配(不查库、不走别名):分镜的 characters 本就来自角色卡清单,
+    别名命中是渲染提示词那一步的事,这里只决定「手册上要不要写参考图指令」。
+    """
+    with_ref = {c.name for c in cards if has_ref_image(c)}
+    return [n for n in (shot.characters or []) if n in with_ref]
+
+
 def export_markdown(
     project: Project,
     episode: DramaEpisode,
@@ -55,7 +71,7 @@ def export_markdown(
     L.append("")
     L.append(
         f"- 模式:{MODE_DESC.get(episode.mode, episode.mode)} | 目标时长:{episode.duration_target_s} 秒"
-        f" | 源章节:第 {episode.source_chapter} 章 | 状态:{_STATUS_CN.get(episode.status, episode.status)}"
+        f" | 源章节:{source_chapter_label(episode)} | 状态:{_STATUS_CN.get(episode.status, episode.status)}"
     )
     L.append(f"- 开场钩子:{episode.hook}")
     L.append(f"- 结尾卡点:{episode.cliffhanger}")
@@ -81,6 +97,29 @@ def export_markdown(
                 L.append(f"- 标志服饰:{c.outfit_cn}")
             if c.voice_desc:
                 L.append(f"- 配音声线:{c.voice_desc}")
+            imgs = ref_image_list(c)
+            if c.ref_prompt_cn or imgs:
+                L.append("")
+                L.append("**定妆照(先出这张,再拿它当每格的参考图)**")
+                L.append("")
+                if imgs:
+                    srcs = "、".join(
+                        (i["src"] if i["kind"] == "url" else f"随手册目录 {i['src']}")
+                        for i in imgs
+                    )
+                    L.append(f"- 已有参考图 {len(imgs)} 张:{srcs}")
+                else:
+                    L.append("- ⚠ 还没出参考图:先用下面这段生成一张,存好备用。")
+                if c.ref_prompt_cn:
+                    paste = ref_sheet_paste(c, style)
+                    L.append("- 单框站(GPT-image / 豆包 / 通义)整段粘这个:")
+                    L.append("")
+                    L.append(paste["oneframe"]["main"])
+                    L.append("")
+                    if paste["mj"]["main"]:
+                        L.append(f"- Midjourney:`{paste['mj']['main']}`")
+                if c.ref_prompt_en and not c.ref_prompt_cn:
+                    L.append(f"- 英文定妆照提示词:{c.ref_prompt_en}")
         L.append("")
 
     if scenes:
@@ -116,36 +155,59 @@ def export_markdown(
                 f"| {s.duration_s} | {act} | {dia} |"
             )
         L.append("")
-        L.append("## 分镜提示词(即拿即用)")
+        L.append("## 分镜提示词(按你用的生图站选一版粘)")
+        L.append("")
+        L.append(
+            "> 生图站长相不一样:**只有一个描述框**的站(GPT-image / DALL·E / 豆包 / 通义)"
+            "要用 ① ——负面词已改写成「不要出现」并进正文,直接整段粘;"
+            "**有负面词框**的站(即梦 / 可灵 / SD)用 ②,正反分开粘;Midjourney 用 ③。"
+        )
+        L.append("")
         for s in shots:
+            paste = shot_paste(s, style, _ref_names(s, cards))
             L.append(f"### 镜头 {s.seq}({s.shot_type}/{s.camera}/{s.duration_s}s)")
-            L.append(f"**中文提示词(即梦等)**")
             L.append("")
-            L.append(s.prompt_cn or "(未生成)")
+            L.append("**① 单框站:整段粘这个**")
             L.append("")
-            L.append(f"**英文提示词(Midjourney)**")
+            L.append(paste["oneframe"]["main"] or "(未生成)")
             L.append("")
-            L.append(s.prompt_en or "(未生成)")
+            L.append("**② 有负面词框的站**")
             L.append("")
-            L.append(f"**负面提示词**:{s.negative or '(无)'}")
+            L.append(f"- 正文:{paste['dualbox']['main'] or '(未生成)'}")
+            L.append(f"- 负面词:{paste['dualbox']['negative'] or '(无)'}")
+            L.append("")
+            L.append("**③ Midjourney / Niji**")
+            L.append("")
+            L.append(paste["mj"]["main"] or "(没有英文轨,先出提示词)")
             L.append("")
 
     return "\n".join(L)
 
 
-def export_csv(episode: DramaEpisode, shots: list[DramaShot]) -> str:
-    """分镜表 CSV(带 BOM,Excel 打开中文不乱码)。"""
+def export_csv(
+    episode: DramaEpisode,
+    shots: list[DramaShot],
+    style: DramaStyleCard | None = None,
+    cards: list[DramaCharacterCard] | None = None,
+) -> str:
+    """分镜表 CSV(带 BOM,Excel 打开中文不乱码)。
+
+    最后一列 paste_oneframe 是「单框站直接粘贴版」(负面词已并入正文):
+    批量出图的人普遍拿 Excel 一行行复制,没这列就得自己拼负面词。
+    """
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(
         ["seq", "scene_name", "characters", "shot_type", "camera", "duration_s",
-         "action_desc", "dialogue", "prompt_cn", "prompt_en", "negative"]
+         "action_desc", "dialogue", "prompt_cn", "prompt_en", "negative",
+         "paste_oneframe"]
     )
     for s in shots:
+        paste = shot_paste(s, style, _ref_names(s, cards or []))
         writer.writerow(
             [s.seq, s.scene_name, "、".join(s.characters or []), s.shot_type,
              s.camera, s.duration_s, s.action_desc, s.dialogue,
-             s.prompt_cn, s.prompt_en, s.negative]
+             s.prompt_cn, s.prompt_en, s.negative, paste["oneframe"]["main"]]
         )
     return "\ufeff" + buf.getvalue()
 
@@ -171,9 +233,12 @@ def export_json(
         "project_title": project.title,
         "episode": episode_dict(episode),
         "style": style_card_dict(style),
-        "characters": [character_card_dict(c) for c in cards],
+        "characters": [character_card_dict(c, style) for c in cards],
         "scenes": [scene_card_dict(sc) for sc in scenes],
-        "shots": [shot_dict(s) for s in shots],
+        "shots": [
+            shot_dict(s, paste=shot_paste(s, style, _ref_names(s, cards)))
+            for s in shots
+        ],
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -328,5 +393,6 @@ def export_pack_markdown(
                 f"| {sub} | {c.get('transition') or ''} | {c.get('bgm_tag') or ''} | {c.get('note') or ''} |"
             )
         L.append("")
-        L.append("> 出片顺序:分镜提示词出图(即梦/可灵) → 图生视频/加轻动 → 按配音稿合成语音 → 按剪辑清单拼接 → 压 SRT 字幕 → 铺 BGM。")
+        L.append("> 出片顺序:先出角色定妆照(手册「角色卡」段) → 每格「定妆照当参考图 + 分镜提示词」出图"
+                 " → 图生视频/加轻动 → 按配音稿合成语音 → 按剪辑清单拼接 → 压 SRT 字幕 → 铺 BGM。")
     return "\n".join(L)

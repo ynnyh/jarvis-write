@@ -5,7 +5,14 @@
 (沿用封面/主题曲哲学);准入门槛 = 有已定稿章节(衍生工坊定位)。
 阶段 2 补齐出片最后一块:声线选型卡 + 成片包(配音稿/剪辑清单/SRT 字幕)。
 """
-from .characters import DramaAssetError, generate_assets, generate_character_cards, generate_scene_cards
+from .characters import (
+    DramaAssetError,
+    generate_assets,
+    generate_character_cards,
+    generate_ref_sheets,
+    generate_scene_cards,
+    regenerate_character_card,
+)
 from .exporter import (
     export_csv,
     export_json,
@@ -17,7 +24,11 @@ from .exporter import (
 )
 from .planner import DramaPlanError, plan_episodes
 from .production import DramaPackError, build_production_pack
-from .prompt_render import DramaPromptError, render_shot_prompts
+from .prompt_render import (
+    DramaPromptError,
+    render_shot_prompts,
+    render_single_shot_prompt,
+)
 from .script import DramaScriptError, write_episode_script
 from .storyboard import DramaStoryboardError, build_storyboard
 from .style import DramaStyleError, generate_style_card, recommend_directions
@@ -39,11 +50,14 @@ __all__ = [
     "generate_character_cards",
     "generate_scene_cards",
     "generate_assets",
+    "generate_ref_sheets",
+    "regenerate_character_card",
     "generate_voice_cast",
     "plan_episodes",
     "write_episode_script",
     "build_storyboard",
     "render_shot_prompts",
+    "render_single_shot_prompt",
     "build_production_pack",
     "generate_trailer",
     "export_markdown",

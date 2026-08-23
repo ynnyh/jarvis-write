@@ -11,10 +11,16 @@ from __future__ import annotations
 import abc
 import asyncio
 import json
+import logging
+import re
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Literal
 
 import httpx
+
+from app import live
+
+logger = logging.getLogger("jarvis-write.llm")
 
 # 瞬时错误状态码:限流/服务端抖动/网关与 CDN 异常,值得退避重试。
 # 520-529 是 Cloudflare 系错误(524=CDN 等源站超时掐断,中转站高发)。
@@ -24,6 +30,58 @@ RETRYABLE_STATUSES = frozenset(
 
 # 网络层瞬时异常:超时/连接失败,同样值得重试
 TRANSIENT_NET_ERRORS = (httpx.TimeoutException, httpx.ConnectError)
+
+# 输出被 max_tokens 截断的收尾原因(各家叫法不同,归一到一处判定):
+# OpenAI=length / Anthropic=max_tokens / Gemini=MAX_TOKENS
+FINISH_TRUNCATED = frozenset(
+    {"length", "max_tokens", "model_length", "max_output_tokens"}
+)
+# 被安全策略拦下:同一段提示词重试多少次都是空,不该浪费重试
+FINISH_FILTERED = frozenset(
+    {
+        "content_filter",
+        "safety",
+        "recitation",
+        "blocklist",
+        "prohibited_content",
+        "image_safety",
+        "spii",
+    }
+)
+
+_THINK_BLOCK = re.compile(r"<think(?:ing)?>.*?</think(?:ing)?>", re.DOTALL | re.I)
+
+
+def strip_think(text: str) -> str:
+    """剥掉正文里的 `<think>…</think>` 思考块。
+
+    一部分推理模型/中转站不走 reasoning_content 字段,而是把思考直接混在
+    content 里。闭合的思考块整块删;删完还残留未闭合的 `<think`(思考被
+    max_tokens 截断在半途)就从该处截断——半截思考不是正文,留着只会污染
+    下游的 JSON 解析与正文入库。
+    """
+    if not text or "<think" not in text.lower():
+        return text
+    cleaned = _THINK_BLOCK.sub("", text)
+    unclosed = cleaned.lower().rfind("<think")
+    if unclosed != -1:
+        cleaned = cleaned[:unclosed]
+    return cleaned.strip()
+
+
+def as_text(value) -> str:
+    """把渠道五花八门的 content/reasoning 形态归一成字符串。
+
+    见过的形态:纯字符串、content blocks 数组(`[{"type":"text","text":…}]`)、
+    以及 `{"content": …}` 包一层。取不出文本就返回空串,绝不抛异常。
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return as_text(value.get("text") or value.get("content") or "")
+    if isinstance(value, list):
+        return "".join(as_text(v) for v in value)
+    return ""
 
 
 class UpstreamError(RuntimeError):
@@ -39,6 +97,29 @@ class UpstreamError(RuntimeError):
         super().__init__(message)
         self.status = status
         self.retryable = retryable
+
+
+class EmptyContentError(UpstreamError):
+    """上游 HTTP 200 但正文为空(推理模型思考吃满预算/被安全过滤/渠道空转)。
+
+    retryable=False 是刻意的:同参数再打一次只会再等一次几分钟的长生成,
+    毫无意义,所以不进 `with_retries` 的重试圈;由 `ask()` 决定是放大
+    max_tokens 重来(budget_bound=True)还是直接把原因抛给用户。
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        budget_bound: bool = False,
+        status: int | None = None,
+        diagnosis: str = "",
+    ) -> None:
+        super().__init__(message, status=status, retryable=False)
+        # True = 放大输出预算有希望救回来(思考截断/渠道空转)
+        self.budget_bound = budget_bound
+        # 机器可读的现场:finish_reason / 思考字数 / token 数,汇进最终报错
+        self.diagnosis = diagnosis
 
 
 def check_upstream(resp: httpx.Response, *, hint: str = "") -> dict:
@@ -161,6 +242,12 @@ class LLMResponse:
     model: str
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    # 收尾原因:stop/length/content_filter…(Anthropic 的 stop_reason、
+    # Gemini 的 finishReason 都归一到这里)。空正文归因全靠它。
+    finish_reason: str = ""
+    # 推理模型的思考内容(reasoning_content / thinking block),只用于诊断
+    # 与兜底,正常路径绝不当正文
+    reasoning: str = ""
     # 原始返回,调试用;不参与业务逻辑
     raw: dict = field(default_factory=dict)
 
@@ -173,10 +260,16 @@ class LLMAdapter(abc.ABC):
     """厂商适配器抽象基类。
 
     子类通过构造函数拿到 api_key / base_url / model_name 等,
-    实现 `complete` 与 `stream` 两个方法即可接入。
+    实现 `_complete_once`(非流式)与 `_iter_stream`(流式)即可接入;
+    `complete()` 的流式优先/重试/空正文归因在本类统一实现。
     """
 
     interface_format: str = "base"
+
+    # 长生成默认走流式(与 cc-switch / Claude Code 的行为一致)。
+    # 非流式的长生成可能几分钟不吐一个字节,套 Cloudflare 的中转站会在
+    # ~100 秒处掐断(HTTP 524),表现就是"测试连通没问题、正式生成老失败"。
+    prefer_stream: bool = True
 
     def __init__(
         self,
@@ -208,18 +301,186 @@ class LLMAdapter(abc.ABC):
         msgs.append(LLMMessage(role="user", content=prompt))
         return msgs
 
-    @abc.abstractmethod
+    # ---- 统一的 complete:流式优先 + 退避重试 + 空正文归因 ----
     async def complete(self, messages: list[LLMMessage]) -> LLMResponse:
-        """一次性返回完整回复。"""
+        """一次性拿完整回复。
+
+        为什么默认走流式:流式一出响应头就持续吐 chunk,CDN 不会掐,慢渠道也
+        不会整段闷住;这正是 cc-switch/Claude Code 稳而我们这边容易失败的差别。
+        - 渠道明确拒绝 SSE(非瞬时错,如 400/404 参数不支持)→ 自动回落非流式;
+        - 429/5xx/网络超时 → 指数退避重试,并把后续尝试切到流式;
+        - 空正文(EmptyContentError)不在这层重试,交给 `ask()` 放大预算。
+        """
+        use_stream = self.prefer_stream
+        stream_rejected = False
+
+        async def call(_attempt: int) -> LLMResponse:
+            nonlocal use_stream, stream_rejected
+            if not use_stream:
+                return await self._once_live(messages)
+            try:
+                return await self._complete_via_stream(messages)
+            except EmptyContentError:
+                raise
+            except UpstreamError as exc:
+                # 瞬时错/鉴权错换成非流式也一样,交给外层重试或直接抛
+                if exc.retryable or exc.status in (401, 403):
+                    raise
+                logger.warning(
+                    "该渠道疑似不支持流式(HTTP %s),回落非流式: %s", exc.status, exc
+                )
+                stream_rejected = True
+                use_stream = False
+                return await self._once_live(messages)
+
+        def on_retry(_exc: Exception) -> None:
+            nonlocal use_stream
+            use_stream = not stream_rejected
+
+        return await with_retries(
+            call,
+            attempts=self.retry_attempts,
+            base_delay=self.retry_base_delay,
+            on_retry=on_retry,
+        )
+
+    @abc.abstractmethod
+    async def _complete_once(self, messages: list[LLMMessage]) -> LLMResponse:
+        """非流式调用一次:POST 后等完整响应体。"""
         raise NotImplementedError
 
     @abc.abstractmethod
-    def stream(self, messages: list[LLMMessage]) -> AsyncIterator[str]:
-        """异步逐块产出文本增量(用于 SSE)。
+    def _iter_stream(
+        self, messages: list[LLMMessage], sink: dict
+    ) -> AsyncIterator[str]:
+        """流式产出文本增量,并把诊断信息塞进 sink。
 
-        注意:实现应为 async generator,调用方 `async for chunk in ...`。
+        sink 约定(都可缺省):finish_reason / reasoning / prompt_tokens /
+        completion_tokens。实现应为 async generator。
         """
         raise NotImplementedError
+
+    def stream(self, messages: list[LLMMessage]) -> AsyncIterator[str]:
+        """异步逐块产出文本增量(用于 SSE 打字机效果),丢弃诊断信息。"""
+        return self._iter_live(messages, {})
+
+    # ---- 实时正文:全站唯一的直播出水口 ----
+    def _iter_live(
+        self, messages: list[LLMMessage], sink: dict
+    ) -> AsyncIterator[str]:
+        """在流式增量上装一个分流器:一边照常产出给调用方,一边推给实时正文总线。
+
+        全站 60+ 处 LLM 调用最终都汇到这两条路(`ask()/complete()` 走
+        `_complete_via_stream`,少数自己接 SSE 的走 `stream()`),所以"让前端看见
+        模型正在写什么"只需这一个钩子,不必逐接口改、也不会漏。
+        无 job 上下文时(前台请求/脚本/测试)`live.publish` 自己丢弃。
+
+        注:这里推的是原始增量。少数把思考混在正文里的模型会带 `<think>` 标签,
+        直播照原样显示(正式落库的正文由 strip_think 清洗,两者互不影响)。
+
+        begin_call/end_call 圈出"这一次调用正在吐字":有些环节会在同一次流式调用
+        进行中反复更新进度文案(蓝图边写边报「已生成 N/M 章」),总线据此只换标签、
+        不清屏,免得用户眼前的字每隔几百字消失一次。
+        """
+        async def gen() -> AsyncIterator[str]:
+            live.begin_call()
+            try:
+                async for delta in self._iter_stream(messages, sink):
+                    if delta:
+                        live.publish(delta)
+                    yield delta
+            finally:
+                live.end_call()
+
+        return gen()
+
+    async def _once_live(self, messages: list[LLMMessage]) -> LLMResponse:
+        """非流式兜底路径:整段回来后补播一次(总比一个字都看不到强)。"""
+        resp = await self._complete_once(messages)
+        if resp.content:
+            live.publish(resp.content)
+        return resp
+
+    async def _complete_via_stream(self, messages: list[LLMMessage]) -> LLMResponse:
+        """流式聚合成一次完整回复:边收边拼,并做空正文归因。"""
+        sink: dict = {}
+        chunks: list[str] = []
+        async for delta in self._iter_live(messages, sink):
+            chunks.append(delta)
+        text = strip_think("".join(chunks))
+        resp = LLMResponse(
+            content=text,
+            model=self.model_name,
+            prompt_tokens=sink.get("prompt_tokens", 0),
+            completion_tokens=sink.get("completion_tokens", 0),
+            finish_reason=sink.get("finish_reason", "") or "",
+            reasoning=sink.get("reasoning", "") or "",
+        )
+        if text.strip():
+            return resp
+        salvaged = self._salvage_reasoning(resp)
+        if salvaged:
+            resp.content = salvaged
+            return resp
+        note = "" if (chunks or resp.reasoning) else "流式连上了但一个字节都没吐"
+        raise self._empty_content_error(resp, note=note)
+
+    # ---- 空正文:归因与兜底 ----
+    def _salvage_reasoning(self, resp: LLMResponse) -> str:
+        """正文为空但思考完整时,拿思考内容兜底。
+
+        少数中转渠道会把答案整段塞进 reasoning_content / thinking,content 留空。
+        只在"正常收尾"(finish_reason 非截断非过滤)时兜底——思考被 max_tokens
+        截断时那就是半截思考,绝不能当正文写进书里。
+        """
+        fr = (resp.finish_reason or "").lower()
+        if fr in FINISH_TRUNCATED or fr in FINISH_FILTERED:
+            return ""
+        text = strip_think(resp.reasoning or "").strip()
+        if not text:
+            return ""
+        logger.warning(
+            "上游把正文放进了思考字段(model=%s, finish_reason=%s),取思考内容兜底 %d 字",
+            self.model_name,
+            resp.finish_reason or "无",
+            len(text),
+        )
+        return text
+
+    def _empty_content_error(
+        self, resp: LLMResponse, *, status: int | None = None, note: str = ""
+    ) -> EmptyContentError:
+        """把"200 但正文为空"翻译成有原因、可行动的错误。"""
+        fr_raw = resp.finish_reason or ""
+        fr = fr_raw.lower()
+        diag = (
+            f"finish_reason={fr_raw or '未知'}, 思考 {len(resp.reasoning or '')} 字, "
+            f"输出 {resp.completion_tokens} tokens, max_tokens={self.max_tokens}"
+        )
+        prefix = f"{note}。" if note else ""
+        if fr in FINISH_FILTERED:
+            return EmptyContentError(
+                f"{prefix}上游拒绝输出:内容被安全策略拦下({diag})。"
+                "改写敏感段落或到「模型设置」换渠道再试",
+                budget_bound=False,
+                status=status,
+                diagnosis=diag,
+            )
+        if fr in FINISH_TRUNCATED or (resp.reasoning or "").strip():
+            return EmptyContentError(
+                f"{prefix}模型把输出预算全花在思考上了,正文为空({diag})。"
+                "推理模型的思考也占 max_tokens,系统会放大预算重试",
+                budget_bound=True,
+                status=status,
+                diagnosis=diag,
+            )
+        return EmptyContentError(
+            f"{prefix}上游返回 200 但正文为空({diag})。"
+            "多为中转渠道空转/额度耗尽/被静默过滤",
+            budget_bound=True,
+            status=status,
+            diagnosis=diag,
+        )
 
     @staticmethod
     def _record_usage(resp: "LLMResponse") -> None:
@@ -243,26 +504,93 @@ class LLMAdapter(abc.ABC):
 
     # ---- 便捷入口:直接传字符串 ----
     async def ask(self, prompt: str, system: str | None = None) -> str:
-        """带重试的问答:空回复自动重试并放大 max_tokens。
+        """带重试的问答:空正文自动放大 max_tokens 重试,并给出原因。
 
-        推理类模型(DeepSeek-R 系/中转站)思考内容可能吃掉 token 上限,
-        导致正文为空——空正文绝不能当结果返回污染下游,这里兜底。
-        每次调用自动记录 token 用量。
+        推理类模型(DeepSeek-R 系/中转站转的思考模型)思考内容会吃掉 token
+        上限,导致正文为空——空正文绝不能当结果返回污染下游,这里兜底。
         """
-        messages = self.to_messages(prompt, system)
-        original_max = self.max_tokens
-        try:
-            for attempt in range(3):
-                resp = await self.complete(messages)
-                self._record_usage(resp)
-                content = (resp.content or "").strip()
-                if content:
+        return await self.ask_messages(self.to_messages(prompt, system))
+
+    async def ask_messages(self, messages: list[LLMMessage]) -> str:
+        """多轮对话版的 ask(见模块级 `complete_text_with_budget`)。"""
+        return await complete_text_with_budget(self, messages)
+
+
+async def complete_text_with_budget(adapter, messages: list[LLMMessage]) -> str:
+    """调一次模型拿纯文本:空正文/被截断都放大预算重试(最多 3 轮)+ 用量记账。
+
+    自己拼 messages 的入口(改稿讨论、架构讨论、润色讨论、灵感对话)都必须走这里,
+    不要裸调 `complete()`:complete() 遇空正文是**抛** EmptyContentError,裸调用会
+    在第一次空正文就把错误摔给用户,拿不到放大预算的第二、三次机会。
+    安全过滤类的空正文(budget_bound=False)放大预算也没用,立即抛出。
+
+    **截断也要重试**:推理模型思考吃掉大半预算时,正文往往不是空的而是**吐了个开头
+    就被 max_tokens 砍断**(实测:定妆照 JSON 停在 `char 73`,报「Unterminated string」)。
+    只治空正文治不到这种,半截内容会一路流到下游解析失败,还错怪成别的原因。
+    三轮都截断就把**最长的那次**返回(总比无内容好),由调用方决定能不能用。
+
+    写成模块级函数而不是只挂在 LLMAdapter 上:调用方大量使用鸭子类型的假适配器
+    (测试里只实现 complete/ask),这里只依赖 `complete()` 与 `max_tokens`。
+    """
+    original_max = adapter.max_tokens
+    model = getattr(adapter, "model_name", "?")
+    diag = ""
+    longest = ""  # 被截断但非空的最好一次(兜底返回,别让一次调用彻底白跑)
+    try:
+        for attempt in range(3):
+            try:
+                resp = await adapter.complete(messages)
+            except EmptyContentError as exc:
+                diag = exc.diagnosis or str(exc)
+                logger.warning(
+                    "空正文(model=%s, 第 %d/3 次, max_tokens=%d): %s",
+                    model, attempt + 1, adapter.max_tokens, exc,
+                )
+                if not exc.budget_bound:
+                    raise
+                adapter.max_tokens = min(adapter.max_tokens * 2, 32768)
+                continue
+            LLMAdapter._record_usage(resp)
+            content = (resp.content or "").strip()
+            # getattr:鸭子类型的假适配器(测试/自定义)可能没有这两个字段,
+            # 而本函数的契约是只依赖 complete() 与 max_tokens,不许因此炸掉
+            finish = str(getattr(resp, "finish_reason", "") or "")
+            if content:
+                if finish.lower() not in FINISH_TRUNCATED:
                     return content
-                # 空正文:翻倍 max_tokens 再试,给推理模型留足思考+输出空间
-                self.max_tokens = min(self.max_tokens * 2, 32768)
-            raise RuntimeError(
-                f"模型连续 3 次返回空正文(model={self.model_name})。"
-                "可能是推理模型思考耗尽 token,请调大 max_tokens 或更换模型。"
+                if len(content) > len(longest):
+                    longest = content
+                diag = (
+                    f"finish_reason={finish}, 正文 {len(content)} 字, "
+                    f"思考 {len(getattr(resp, 'reasoning', '') or '')} 字, "
+                    f"max_tokens={adapter.max_tokens}"
+                )
+                logger.warning(
+                    "正文被截断(model=%s, 第 %d/3 次): %s", model, attempt + 1, diag
+                )
+                if adapter.max_tokens >= 32768:
+                    break  # 预算已到顶,再翻倍也没有意义
+                adapter.max_tokens = min(adapter.max_tokens * 2, 32768)
+                continue
+            # 适配器没归因出来的空正文(自定义/鸭子类型适配器可能走到)
+            diag = (
+                f"finish_reason={finish or '未知'}, "
+                f"输出 {getattr(resp, 'completion_tokens', 0)} tokens"
             )
-        finally:
-            self.max_tokens = original_max
+            logger.warning("空正文(model=%s, 第 %d/3 次): %s", model, attempt + 1, diag)
+            adapter.max_tokens = min(adapter.max_tokens * 2, 32768)
+        if longest:
+            logger.warning(
+                "三轮均被截断,返回最长的一次(model=%s, %d 字): %s",
+                model, len(longest), diag,
+            )
+            return longest
+        raise UpstreamError(
+            f"模型连续 3 次返回空正文(model={model},输出预算已放大到 "
+            f"{adapter.max_tokens})。诊断: {diag or '无'}。"
+            "最常见原因是推理模型的思考吃满了输出预算:换一个非推理模型/"
+            "思考更省的模型,或到「模型设置」把该配置的 max_tokens 调大",
+            retryable=False,
+        )
+    finally:
+        adapter.max_tokens = original_max

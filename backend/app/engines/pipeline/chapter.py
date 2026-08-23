@@ -44,7 +44,7 @@ from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import _PROFILE_KEY, render_style_block
 from app.engines.tendency.cards import render_cards_block
 from app.prompts.style_capsules import pairwise_examples_block, render_voice_block
-from app.llm.base import LLMMessage
+from app.llm.base import LLMMessage, complete_text_with_budget
 from app.llm.router import Task, get_adapter_for
 from app.prompts.chapter import (
     CHAPTER_DRAFT_PROMPT,
@@ -748,19 +748,12 @@ _MAX_REVISE_CHAPTER_CHARS = 3000  # 当前正文注入 system 时截断,防 toke
 
 
 async def _revise_complete(adapter, messages: list[LLMMessage]) -> str:
-    """多轮 complete 的薄封装:空回复重试 + 用量记账(对齐 ask 的兜底)。"""
-    original_max = adapter.max_tokens
-    try:
-        for _ in range(3):
-            resp = await adapter.complete(messages)
-            adapter._record_usage(resp)
-            content = (resp.content or "").strip()
-            if content:
-                return content
-            adapter.max_tokens = min(adapter.max_tokens * 2, 32768)
-        raise RuntimeError("模型连续 3 次返回空回复")
-    finally:
-        adapter.max_tokens = original_max
+    """多轮 complete 的薄封装:空正文放大预算重试 + 用量记账。
+
+    别在这里自己写"空串就翻倍"的循环:complete() 遇空正文是抛 EmptyContentError,
+    统一交给 complete_text_with_budget 处理(见 llm/base.py)。
+    """
+    return await complete_text_with_budget(adapter, messages)
 
 
 def _format_revise_transcript(turns: list[dict], latest_reply: str) -> str:

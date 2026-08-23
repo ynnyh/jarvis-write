@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, AdminUser, InviteCodeItem } from "../api";
 import { errMsg } from "../pollJob";
+import { CopyBtn } from "../ui/copy";
 
 // 8 位易读随机串(去掉易混淆的 0/O/1/I),中间加连字符
 function randomCode(): string {
@@ -315,6 +316,8 @@ function InviteCodeRow(props: {
         <td>{status}</td>
         <td>
           <div className="actions">
+            {/* 邀请码是要发给别人的,给一枚一键复制,别让人手选 */}
+            <CopyBtn text={c.code} label="复制码" />
             <button
               className={`btn-sm${c.is_active ? " danger" : ""}`}
               disabled={busy}

@@ -23,6 +23,7 @@ from app.db.models import ProviderConfig, User
 from app.db.session import get_db
 from app.jobs import normalize_job_error
 from app.net_guard import assert_public_base_url, is_cloudflare_hosted
+from app.llm.base import EmptyContentError
 from app.llm.factory import (
     _REGISTRY,
     available_providers,
@@ -286,9 +287,11 @@ async def _config_alive(config_id: int) -> bool:
     """现场探测某配置是否连通(删除前的二次确认判定)。
     任何失败/未配置都视为不连通(可直接删),不抛异常。"""
     try:
-        adapter = create_llm_adapter(config_id=config_id, max_tokens=32, timeout=30)
+        adapter = create_llm_adapter(config_id=config_id, max_tokens=512, timeout=30)
         await adapter.complete(adapter.to_messages("ping"))
         return True
+    except EmptyContentError:
+        return True  # 空正文说明链路是通的(推理模型没说话而已),仍算"在用"
     except Exception:  # noqa: BLE001 — 探测失败即视为不连通,允许直接删
         return False
 
@@ -345,17 +348,28 @@ async def test_provider_config(
             ok=False, provider=row.interface_format, error="尚未配置 api_key"
         )
 
-    adapter = create_llm_adapter(config_id=config_id, max_tokens=100, timeout=60)
+    # max_tokens 给到 1024:100 对推理模型连"思考"都不够,会白白测出空正文
+    adapter = create_llm_adapter(config_id=config_id, max_tokens=1024, timeout=60)
+    warnings: list[str] = []
+    resp = None
     try:
         resp = await adapter.complete(
             adapter.to_messages("请回复:连接成功")
+        )
+    except EmptyContentError as exc:
+        # 链路是通的(HTTP 打通了、鉴权过了),只是这个模型没把话说出来:
+        # 思考吃满输出预算或被安全过滤。判 ok,但把原因挂成警告——正式生成
+        # 的长文调用更容易撞上,用户需要提前知道。
+        warnings.append(
+            f"连接本身正常,但模型没吐出正文:{exc} "
+            "(生成时系统会自动放大输出预算重试;若仍频繁失败,"
+            "建议换非推理模型或把该配置的 max_tokens 调大)"
         )
     except Exception as exc:  # noqa: BLE001 — 测试接口,错误原样反馈给用户
         return TestResult(
             ok=False, provider=row.interface_format, error=normalize_job_error(exc)[:500]
         )
 
-    warnings: list[str] = []
     if await asyncio.to_thread(is_cloudflare_hosted, row.base_url):
         warnings.append(
             "该渠道套了 Cloudflare CDN,国内网络直连可能出现间歇性连接失败;"
@@ -367,6 +381,8 @@ async def test_provider_config(
             await asyncio.sleep(2)
             try:
                 await adapter.complete(adapter.to_messages("ping"))
+            except EmptyContentError:  # 空正文不算链路问题,上面已单独提示
+                pass
             except Exception:  # noqa: BLE001 — 探测失败只计数,不影响 ok
                 flaky += 1
         if flaky:
@@ -377,7 +393,7 @@ async def test_provider_config(
     return TestResult(
         ok=True,
         provider=row.interface_format,
-        model=resp.model,
-        reply=resp.content[:200],
+        model=resp.model if resp else row.model,
+        reply=(resp.content[:200] if resp else ""),
         warnings=warnings,
     )

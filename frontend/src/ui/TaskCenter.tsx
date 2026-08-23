@@ -19,10 +19,14 @@ interface TaskCenterValue {
   /** 发起长任务后调用,立刻把任务塞进列表并加速轮询 */
   track: (job: Pick<BgJob, "job_id" | "kind">) => void;
   refresh: () => void;
+  /** 「实时正文」窗当前盯着哪个任务(null = 自动跟最新在跑的那个) */
+  liveJobId: string | null;
+  focusLive: (jobId: string | null) => void;
 }
 
 const Ctx = createContext<TaskCenterValue>({
   jobs: [], running: [], track: () => {}, refresh: () => {},
+  liveJobId: null, focusLive: () => {},
 });
 
 export const useTaskCenter = () => useContext(Ctx);
@@ -58,6 +62,7 @@ const ACTIVE_MS = 3000;  // 有任务在跑时快轮询
 
 export function TaskCenterProvider({ children, enabled }: { children: ReactNode; enabled: boolean }) {
   const [jobs, setJobs] = useState<BgJob[]>([]);
+  const [liveJobId, setLiveJobId] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
   const jobsRef = useRef<BgJob[]>([]);
   jobsRef.current = jobs;
@@ -91,6 +96,7 @@ export function TaskCenterProvider({ children, enabled }: { children: ReactNode;
         ? js
         : [...js, { ...job, status: "running", stage: "排队中" }],
     );
+    setLiveJobId(job.job_id);  // 实时正文窗跟上刚发起的这个任务
     // 加速下一轮:立刻拉一次真实状态
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(async () => {
@@ -105,7 +111,9 @@ export function TaskCenterProvider({ children, enabled }: { children: ReactNode;
 
   const running = jobs.filter((j) => j.status === "running");
   return (
-    <Ctx.Provider value={{ jobs, running, track, refresh: poll }}>
+    <Ctx.Provider
+      value={{ jobs, running, track, refresh: poll, liveJobId, focusLive: setLiveJobId }}
+    >
       {children}
     </Ctx.Provider>
   );
@@ -113,7 +121,7 @@ export function TaskCenterProvider({ children, enabled }: { children: ReactNode;
 
 /** 顶栏角标 + 下拉任务抽屉 */
 export function TaskCenterBadge() {
-  const { jobs, running } = useTaskCenter();
+  const { jobs, running, focusLive } = useTaskCenter();
   const [open, setOpen] = useState(false);
   const recent = [...jobs].reverse().slice(0, 12);
   if (!jobs.length) return null;
@@ -142,6 +150,16 @@ export function TaskCenterBadge() {
                     {j.status === "running" && <span className="spin" />}
                     {stageText}
                   </span>
+                  {/* 在跑的任务可以直接盯着看模型写字(实时正文窗) */}
+                  {j.status === "running" && (
+                    <button
+                      className="tc-live-btn"
+                      title="看模型正在写什么"
+                      onClick={() => { focusLive(j.job_id); setOpen(false); }}
+                    >
+                      看正文
+                    </button>
+                  )}
                 </div>
               );
             })}

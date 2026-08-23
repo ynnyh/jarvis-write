@@ -5,8 +5,11 @@
 改编输入用结构化事件(蓝图 summary + beats + 悬念),不喂全文——
 Toonflow 的事件图谱思路,咱们的故事圣经/蓝图就是现成图谱,防长文本信息丢失。
 
-重规划语义:只替换 source_chapter 落在本次范围内的旧集(其它集保留),
+重规划语义:只替换任一源章号落在本次范围内的旧集(其它集保留),
 之后全表按源章号重排序号。想全部重来,选覆盖全部章节的范围即可。
+
+一集可以由数章合并而来(过渡章),源章号存 source_chapters 列表,
+source_chapter 存其最小值(排序与范围替换的锚)。
 """
 from __future__ import annotations
 
@@ -20,6 +23,7 @@ from app.engines.drama.common import (
     clip,
     concept_block,
     episode_dict,
+    episode_source_chapters,
     outline_rows,
 )
 from app.llm.router import Task, get_adapter_for
@@ -76,21 +80,20 @@ async def plan_episodes(
     raw = await adapter.ask(prompt)
     data = parse_llm_json(raw)
 
-    # ---- normalize:clip + source_chapter 收敛回范围内 + 限条数 ----
+    # ---- normalize:clip + source_chapters 收敛回范围内 + 限条数 ----
     eps: list[dict] = []
     for item in (data.get("episodes") or []):
         if not isinstance(item, dict):
             continue
-        src = coerce_int(item.get("source_chapter"), from_ch, lo=1)
-        if not (from_ch <= src <= to_ch):
-            src = from_ch
+        srcs = _parse_source_chapters(item, from_ch, to_ch)
         title = clip(item.get("title"), 200)
         if not title:
             continue
         eps.append(
             {
                 "title": title,
-                "source_chapter": src,
+                "source_chapter": srcs[0],
+                "source_chapters": srcs,
                 "hook": clip(item.get("hook"), 200),
                 "recap": clip(item.get("recap"), 200),
                 "cliffhanger": clip(item.get("cliffhanger"), 200),
@@ -102,10 +105,11 @@ async def plan_episodes(
         raise DramaPlanError("规划结果为空,请重试或换一个章节范围。")
 
     # ---- 落库:删本次范围内的旧集(连分镜),保留范围外的,再全表重排序号 ----
+    # 「范围内」= 任一源章号落在本次范围(并集的集只要沾到就重切,免得同一章被两集重复覆盖)
     stale_ids = [
         e.id
         for e in db.query(DramaEpisode).filter(DramaEpisode.project_id == project.id).all()
-        if from_ch <= e.source_chapter <= to_ch
+        if any(from_ch <= n <= to_ch for n in episode_source_chapters(e))
     ]
     if stale_ids:
         db.query(DramaShot).filter(DramaShot.episode_id.in_(stale_ids)).delete(
@@ -123,6 +127,7 @@ async def plan_episodes(
                 ep_index=-(i + 1),
                 title=spec["title"],
                 source_chapter=spec["source_chapter"],
+                source_chapters=spec["source_chapters"],
                 hook=spec["hook"],
                 recap=spec["recap"],
                 cliffhanger=spec["cliffhanger"],
@@ -137,6 +142,20 @@ async def plan_episodes(
     _reindex_episodes(db, project.id)
     db.commit()
     return [episode_dict(e) for e in _ordered_episodes(db, project.id)]
+
+
+def _parse_source_chapters(item: dict, from_ch: int, to_ch: int) -> list[int]:
+    """取这一集的源章号列表:兼容 source_chapters(新)与 source_chapter(旧/漏写),
+    越界的章号丢弃,全丢光则回落到 from_ch(集照样能建,只是取文可能不准)。"""
+    raw = item.get("source_chapters")
+    if not isinstance(raw, list) or not raw:
+        raw = [item.get("source_chapter")]
+    nums: list[int] = []
+    for v in raw:
+        n = coerce_int(v, 0, lo=0)
+        if from_ch <= n <= to_ch and n not in nums:
+            nums.append(n)
+    return sorted(nums) or [from_ch]
 
 
 def _ordered_episodes(db: Session, project_id: int) -> list[DramaEpisode]:

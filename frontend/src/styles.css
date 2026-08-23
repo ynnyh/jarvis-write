@@ -1770,6 +1770,13 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
   display: flex; justify-content: flex-end; gap: 10px;
   margin-top: 20px;
 }
+/* 手动复制兜底层:框要够大够宽,方便一眼看全 + Ctrl+C */
+.dlg-copy { width: 560px; }
+.dlg-copy-text {
+  width: 100%; margin-top: 12px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-sm);
+}
 
 .tc-wrap { position: relative; }
 .tc-badge {
@@ -1814,6 +1821,93 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 
 /* 点击空白收起的透明背板(触屏没有 mouseleave,靠它关抽屉) */
 .tc-backdrop { position: fixed; inset: 0; z-index: 400; background: transparent; }
+
+/* 抽屉里的「看正文」:把实时正文窗切到该任务 */
+.tc-live-btn {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--brand-line);
+  background: var(--brand-weak);
+  color: var(--brand);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+/* ---------- 实时正文窗(全局悬浮):后台任务里模型正在写的字 ---------- */
+.live-dock {
+  position: fixed;
+  right: 16px; bottom: 16px;
+  width: min(420px, calc(100vw - 32px));
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+  z-index: 450;                /* 低于任务中心抽屉(500),高于正文区 */
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.live-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: var(--fs-xs);
+}
+.live-dock.collapsed .live-head { border-bottom: none; }
+.live-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--line-strong); flex-shrink: 0;
+}
+.live-dot.on { background: var(--brand); animation: live-pulse 1.4s ease-in-out infinite; }
+@keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+.live-title { font-weight: 600; flex-shrink: 0; }
+.live-step {
+  color: var(--text-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.live-nth { color: var(--text-2); }
+.live-btn {
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  border-radius: var(--r-sm);
+  padding: 1px 7px;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.live-body {
+  padding: 10px 12px;
+  max-height: 34vh;
+  overflow-y: auto;
+  font-size: var(--fs-sm);
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+/* 打字机光标:跟在最后一个字后面闪 */
+.live-caret {
+  display: inline-block;
+  width: 2px; height: 1em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: var(--brand);
+  animation: live-blink 1s step-end infinite;
+}
+@keyframes live-blink { 50% { opacity: 0; } }
+
+@media (max-width: 640px) {
+  /* 移动端贴底通栏。上抬 64px:底下是写作区的 .m-ai-bar(fixed,min-height 48px
+     + 8px 边距 + 安全区),直播窗 z-index 450 会把它整条压住,AI 就点不开了。 */
+  .live-dock {
+    right: 8px; left: 8px; width: auto;
+    bottom: calc(64px + constant(safe-area-inset-bottom));
+    bottom: calc(64px + env(safe-area-inset-bottom));
+  }
+  .live-body { max-height: 28vh; }
+}
 
 /* 移动端:角标在顶栏第二行最左,抽屉若沿用 right:0 会整体溢出到屏幕左外并盖住标题行。
    改为左锚定 + 视口内限宽,保证始终落在屏幕内。 */
@@ -3077,3 +3171,57 @@ body:has(.write-zone.immersive) .step-guide { display: none; }
 }
 .promo-bubble b { display: block; font-size: var(--fs-xs); color: var(--text-2); margin-bottom: 2px; }
 .promo-bubble.mine { align-self: flex-end; background: var(--brand-weak, var(--surface-2)); }
+
+/* 性别四档要读成「一个选择器」而不是四枚散按钮:靠拢排,别吃 card-head 的 10px 间距 */
+.gender-pick { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+
+/* ===== 一键粘贴框 + 定妆照缩略图 ===== */
+/* 粘贴版是只读的「拿去就能贴」文本,和下面可编辑的三轨要一眼分得开 */
+.paste-box textarea {
+  background: var(--surface-2); font-size: var(--fs-sm); line-height: 1.6;
+}
+.paste-box select { max-width: 100%; font-size: var(--fs-xs); }
+/* 定妆照:小图铺一行,窄栏自动换行 */
+.ref-thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+.ref-thumb {
+  width: 96px; border: 1px solid var(--line); border-radius: var(--r-md, 8px);
+  overflow: hidden; background: var(--surface-2);
+}
+.ref-thumb img { display: block; width: 100%; height: 120px; object-fit: cover; }
+.ref-thumb-bad {
+  display: flex; align-items: center; justify-content: center;
+  height: 120px; font-size: var(--fs-xs); color: var(--text-dim, var(--text));
+}
+.ref-thumb-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 4px; padding: 4px 6px; font-size: var(--fs-xs);
+}
+.ref-thumb-foot .btn-sm { padding: 2px 6px; font-size: var(--fs-xs); }
+
+/* ===== 漫剧引导层:引导卡 + 步骤条三态 + 「现在做这步」指针 ===== */
+/* 引导卡里的编号/项目清单:比正文缩一号,行距放开,长句好读 */
+.drama-guide .guide-body { gap: 6px; }
+.drama-guide-steps {
+  margin: 2px 0 6px; padding-left: 20px;
+  display: grid; gap: 4px;
+  font-size: var(--fs-sm); line-height: 1.7;
+}
+.drama-guide-steps b { color: var(--text); }
+.drama-guide code {
+  padding: 0 4px; border-radius: 4px;
+  background: var(--surface-2); font-size: var(--fs-xs);
+}
+/* 步骤条:✓ 已完成的弱化,▸ 当前步用品牌色高亮(.chip.on 已给底色,这里补描边强调) */
+.drama-steps .chip.done { color: var(--text-3); border-style: dashed; }
+.drama-steps .chip.done:hover { color: var(--brand); }
+.drama-steps .chip[aria-current="true"] { box-shadow: 0 0 0 1px var(--brand) inset; }
+/* 「现在做这步」指针行:整段是给人读的指令,不能缩成 hint 的小字;
+   不用 flex——句中的 <b>/文案片段会被切成独立 flex item,中间凭空多出间隙 */
+.drama-next {
+  margin: 0 0 10px;
+  color: var(--text-2); font-size: var(--fs-sm); line-height: 1.9;
+}
+.drama-next b { color: var(--brand); }
+.drama-next .btn-sm { margin-left: 8px; vertical-align: baseline; }
+/* 未选集时的占位卡:虚线框提示「先点一集」 */
+.drama-pick-hint { border-style: dashed; }

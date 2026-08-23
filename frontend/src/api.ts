@@ -90,17 +90,18 @@ export function createSseDecoder(): (chunk: string) => SseFrame[] {
   };
 }
 
-/** POST 一个 SSE 流,逐帧回调 onFrame。鉴权/401 与 req 对齐;非 2xx(流未开始)抛 ApiError。 */
-async function ssePost(
+/** 发起一条 SSE 流,逐帧回调 onFrame。鉴权/401 与 req 对齐;非 2xx(流还没开始)抛 ApiError。
+ *  GET/POST 都走这里:POST 用于对话流,GET 用于订阅任务的实时正文。 */
+async function sseStream(
   path: string,
-  body: unknown,
+  init: RequestInit,
   onFrame: (frame: SseFrame) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = { ...(init.headers as Record<string, string> | undefined) };
   const tk = token.get();
   if (tk) headers["Authorization"] = `Bearer ${tk}`;
-  const res = await fetch(BASE + path, { method: "POST", headers, body: JSON.stringify(body), signal });
+  const res = await fetch(BASE + path, { ...init, headers, signal });
   if (!res.ok || !res.body) {
     if (res.status === 401) {
       token.clear();
@@ -122,6 +123,21 @@ async function ssePost(
     for (const frame of feed(decoder.decode(value, { stream: true }))) onFrame(frame);
   }
   for (const frame of feed(decoder.decode())) onFrame(frame); // 冲净残余尾字节
+}
+
+/** POST 一个 SSE 流(JSON body)。 */
+async function ssePost(
+  path: string,
+  body: unknown,
+  onFrame: (frame: SseFrame) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return sseStream(
+    path,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    onFrame,
+    signal,
+  );
 }
 
 /** 跑一条「AI 对话流」:token 帧喂打字机(onToken),done 帧作为最终结果 resolve,
@@ -735,6 +751,15 @@ export const api = {
   myJobs: (all = false) =>
     req<{ jobs: { job_id: string; kind: string; status: string; stage: string; error?: string | null }[] }>(
       "GET", `/api/jobs${all ? "?all=true" : ""}`),
+  // 订阅某任务的「实时正文」(SSE):模型正在吐的字逐帧到达。
+  // 帧:step(换屏/初始快照)/token(增量)/reset(整屏重置)/ping(心跳)/done(结束)。
+  // cursor 传已收到的字数,断线重连可续;返回的 Promise 在流结束时 resolve。
+  followJobLive: (
+    jobId: string,
+    cursor: number,
+    onFrame: (frame: SseFrame) => void,
+    signal?: AbortSignal,
+  ) => sseStream(`/api/jobs/${jobId}/live?cursor=${cursor}`, { method: "GET" }, onFrame, signal),
 
   // ---- 异步 job 版长任务(返回 job_id,配合 pollJob/任务中心) ----
   inspireAsync: (spark: string, tendency: Tendency, count = 4, dna: StoryDNA | null = null) =>

@@ -18,10 +18,12 @@ from html import escape
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app import live
+from app.api.sse import STREAM_HEADERS, sse_event
 from app.auth import assert_project_owner, current_user_id, get_current_user
 from app.db.models import Chapter, LlmUsage, Outline, Project
 from app.db.session import get_db
@@ -56,6 +58,33 @@ async def job_status(job_id: str):
         raise HTTPException(status_code=404, detail="任务不存在或已被清理")
     job.pop("owner_id", None)  # 内部字段,不下发
     return job
+
+
+@router.get("/api/jobs/{job_id}/live")
+async def job_live(job_id: str, cursor: int = 0):
+    """订阅任务的「实时正文」:模型正在吐的字逐帧下发(SSE 打字机)。
+
+    一条端点覆盖全部后台任务(生成/摘要/一致性/定稿/翻新/漫剧…),因为增量是在
+    LLM 适配器那唯一的出水口按 job_id 分流的(见 app/live.py)。
+    帧:step(换屏/初始快照)、label(同一步里的进度计数,只换标签)、token(增量)、
+    reset(落后太多整屏重置)、ping(心跳)、done(任务结束)。
+    cursor 传上次收到的字数,断线重连可续;连接到期(1 小时)服务端会静默断开
+    而不发 done,客户端照常带 cursor 重订,跑几小时的任务也不会停更。
+
+    归属校验在建流前做完:StreamingResponse 的生成器在响应返回后才跑,
+    那时 current_user_id 这个 ContextVar 已不可靠。
+    """
+    job = get_job(job_id)
+    if job is None or job.get("owner_id") != current_user_id.get():
+        raise HTTPException(status_code=404, detail="任务不存在或已被清理")
+
+    async def gen():
+        async for event, data in live.follow(job_id, cursor=cursor):
+            yield sse_event(event, data)
+
+    return StreamingResponse(
+        gen(), media_type="text/event-stream", headers=STREAM_HEADERS
+    )
 
 
 @router.get("/api/projects/{project_id}/running-jobs")
