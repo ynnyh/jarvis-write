@@ -72,6 +72,21 @@ Beyond writing and editing — the "Book → Comic Drama" tab turns approved cha
 - **Voice compliance red line**: voice casting describes timbre characteristics and points to **licensed platform voice libraries** — never clone, never name-imitate a real person's voice; confirm commercial licensing before publishing
 - **Same "prompts only" philosophy**: no generation models attached, zero new config — image/video models iterate fast and bill per shot, orchestration and know-how are what we do
 
+## 📣⚡ Promo Workshop & Mood-Clips Workshop: a production desk beyond novels
+
+Two more workshops now share the same production pipeline (anchor consistency / three-track prompts / chunking / SRT):
+
+**📣 Promo Workshop (cities / scenic areas / brands)** — talk it through first, then generate:
+
+- **Multi-round creative chat** (true streaming typewriter) with an AI promo director: say "I want to start from food" and get pointed questions, concrete proposals, and per-round consensus recaps; when the direction is clear, distill it into a **creative brief** (positioning / audience / segment structure / slogans / fact-check list) — the brief is the contract for everything downstream, lockable and re-distillable
+- **Fact red line**: history, numbers and slogans may only come from the material notes you provide; anything uncertain lands in the fact-check list — a wrong dynasty in a city promo is an accident, not a typo
+- Full chain: visual style + landmark cards → narration script → storyboard → three-track prompts → **generation chunks** (shot-boundary grouping ≤5/10/15s with whole-chunk video prompts + first-frame hints, shaped for canvas-splicing workflows) → production pack → four-format export
+
+**⚡ Mood-Clips Workshop (15/30s, dual entry)** — three takes per run, pick one:
+
+- **Generic entry**: ten emotion themes (regret / quarrel / love / childhood / longing / loneliness / healing / heroic / farewell / reunion); each run produces **3 clips with genuinely different takes** (hook → build → punchline caption card), every take shipping three-track prompts, chunks and SRT — short-video is an A/B game, don't polish one draft
+- **Novel-derived entry** (Book → "Ad Clips" tab): pulls punchlines and money shots from your approved chapters into book-marketing clips, with **quote grounding** — every quote must cite its original sentence from your prose and is verified by substring match; fabrications get flagged on the spot. It reads your book and quotes your words — that's the gap a generic AI chat can't close
+
 ## Key Features
 
 - **Six-step generation pipeline**: seed → character dynamics → worldbuilding → plot architecture → chapter blueprint → chapter prose (built on a mature Snowflake-Method-style prompt system; see Acknowledgments). The chapter blueprint now **grows chapter by chapter**, with live "generated N / M chapters" progress instead of waiting on an opaque batch call
