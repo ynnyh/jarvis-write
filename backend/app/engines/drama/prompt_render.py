@@ -22,6 +22,7 @@ from app.engines.drama.common import (
     shots_payload,
 )
 from app.engines.drama.gender import gender_paren, gender_tag
+from app.engines.drama.video import motion_fallback
 from app.llm.router import Task, get_adapter_for
 from app.prompts.drama import SHOT_PROMPT_PROMPT
 
@@ -134,6 +135,12 @@ def _write_prompts(
     shot.prompt_cn = prompt_cn
     shot.prompt_en = prompt_en
     shot.negative = negative
+    # 运动轨(图生视频用):模型漏给就按运镜栏兜底拼一条,这一栏空着 i2v 就没输入了
+    motion_cn = clip(item.get("motion_cn"), 300)
+    motion_en = clip(item.get("motion_en"), 300)
+    fb_cn, fb_en = motion_fallback(shot)
+    shot.motion_cn = motion_cn or fb_cn
+    shot.motion_en = motion_en or fb_en
     return True
 
 

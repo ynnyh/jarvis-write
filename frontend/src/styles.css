@@ -353,6 +353,9 @@ select { cursor: pointer; }
 .notice-warn { background: var(--warn-weak); border-color: var(--warn-line); color: var(--warn); }
 .notice-info { background: var(--brand-weak); border-color: var(--brand-line); color: var(--brand); }
 
+/* 表格里需要提请注意的一行(如:视频段超过站点单次时长上限,要分两次生成) */
+.tbl tr.row-warn > td { background: var(--warn-weak); }
+
 .msg-ok { color: var(--ok); font-size: var(--fs-sm); }
 .msg-err { color: var(--err); font-size: var(--fs-sm); white-space: pre-wrap; }
 
@@ -3197,6 +3200,14 @@ body:has(.write-zone.immersive) .step-guide { display: none; }
   gap: 4px; padding: 4px 6px; font-size: var(--fs-xs);
 }
 .ref-thumb-foot .btn-sm { padding: 2px 6px; font-size: var(--fs-xs); }
+
+/* 逐格施工单的两个打勾栏:横排靠拢,别让「静帧/视频出好了」读成两条独立设置 */
+.shot-ticks {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px;
+  margin: 6px 0; font-size: var(--fs-sm);
+}
+.shot-ticks label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.shot-ticks .muted { font-size: var(--fs-xs); }
 
 /* ===== 漫剧引导层:引导卡 + 步骤条三态 + 「现在做这步」指针 ===== */
 /* 引导卡里的编号/项目清单:比正文缩一号,行距放开,长句好读 */

@@ -1,10 +1,12 @@
 # app/storage.py
 # -*- coding: utf-8 -*-
-"""用户上传的图片资产落盘(目前只有漫剧角色定妆照)。
+"""用户上传的图片资产落盘(漫剧的角色定妆照 + 分镜静帧)。
 
 为什么要落盘而不是只存外链:定妆照是人物一致性的锚点,后面每一格出图都要拿它当
 参考图。生图站给的图片链接普遍带时效签名,过几天就 404,靠外链等于锚点会自己消失。
 所以上传优先、外链兜底(用户想贴链接也允许,但会提示可能失效)。
+分镜静帧同理:出好的图挂回那一格,才知道这一集做到哪儿、哪一段的首帧图已就位。
+视频成片刻意不收上传(动辄几十 MB,一集就吃满配额),只在分镜上记「成片在哪」。
 
 安全取舍(公网试用环境,上传是新攻击面):
 - 只认 PNG/JPEG/WebP,且按**文件头**判定,不信扩展名与 Content-Type;
@@ -27,6 +29,7 @@ logger = logging.getLogger("jarvis-write.storage")
 
 MAX_IMAGE_BYTES = 4 * 1024 * 1024      # 单张上限 4MB(定妆照够用,防塞大图)
 MAX_REFS_PER_CARD = 3                  # 每个角色最多 3 张(正面/侧面/表情)
+MAX_ASSETS_PER_SHOT = 2                # 每格分镜最多挂 2 张静帧(出两版挑一版)
 MAX_PROJECT_UPLOAD_BYTES = 80 * 1024 * 1024  # 单项目上传总量上限 80MB
 
 # 文件头 → 扩展名(WebP 还要校验第 8-12 字节的 "WEBP")
@@ -36,7 +39,9 @@ _SIGNATURES: tuple[tuple[bytes, str], ...] = (
     (b"RIFF", "webp"),
 )
 _CONTENT_TYPES = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}
-_REL_RE = re.compile(r"^drama/\d+/\d+-\d+\.(png|jpg|webp)$")
+# 两种资产共用一个项目目录,所以分镜静帧的文件名带 shot 前缀:
+# 角色卡 id 与分镜 id 来自不同表,同一个数字完全可能撞上(卡 7 与第 7 格)。
+_REL_RE = re.compile(r"^drama/\d+/(?:shot)?\d+-\d+\.(png|jpg|webp)$")
 
 
 class UploadError(ValueError):
@@ -84,6 +89,22 @@ def save_character_ref(project_id: int, card_id: int, data: bytes, taken: int) -
 
     taken 是该卡已有的张数,用来定序号;调用方负责张数上限的业务判断。
     """
+    return _save_image(project_id, str(int(card_id)), data, taken, "定妆照")
+
+
+def save_shot_asset(project_id: int, shot_id: int, data: bytes, taken: int) -> str:
+    """保存一张分镜静帧(出好的图挂回那一格),返回相对路径(存进 DramaShot.assets)。
+
+    文件名带 shot 前缀:与定妆照共用项目目录,而卡 id 和分镜 id 会撞号。
+    """
+    return _save_image(project_id, f"shot{int(shot_id)}", data, taken, "分镜静帧")
+
+
+def _save_image(project_id: int, stem: str, data: bytes, taken: int, what: str) -> str:
+    """落盘一张用户上传的图:校验(空/大小/文件头/项目配额)→ 服务端定名 → 写文件。
+
+    stem 是文件名前缀(定妆照用卡号,分镜静帧用 shot<格 id>),用户输入不参与路径。
+    """
     if not data:
         raise UploadError("图片是空的,请重新选择文件。")
     if len(data) > MAX_IMAGE_BYTES:
@@ -95,18 +116,18 @@ def save_character_ref(project_id: int, card_id: int, data: bytes, taken: int) -
     if project_usage_bytes(project_id) + len(data) > MAX_PROJECT_UPLOAD_BYTES:
         raise UploadError(
             f"本项目上传总量已接近上限({MAX_PROJECT_UPLOAD_BYTES // 1024 // 1024}MB),"
-            "请先删掉不用的定妆照。"
+            "请先删掉不用的定妆照或分镜静帧。"
         )
     d = upload_root() / "drama" / str(int(project_id))
     d.mkdir(parents=True, exist_ok=True)
     # 序号避让已存在的文件:删掉中间某张后再传,不覆盖别人
     n = max(taken, 0) + 1
-    while (d / f"{int(card_id)}-{n}.{ext}").exists():
+    while (d / f"{stem}-{n}.{ext}").exists():
         n += 1
-    path = d / f"{int(card_id)}-{n}.{ext}"
+    path = d / f"{stem}-{n}.{ext}"
     path.write_bytes(data)
     rel = f"drama/{int(project_id)}/{path.name}"
-    logger.info("定妆照落盘 %s(%.1fKB)", rel, len(data) / 1024)
+    logger.info("%s落盘 %s(%.1fKB)", what, rel, len(data) / 1024)
     return rel
 
 

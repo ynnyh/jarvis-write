@@ -22,9 +22,12 @@ from app.engines.drama.common import (
     MODE_DESC,
     has_ref_image,
     ref_image_list,
+    shot_asset_list,
+    shot_progress,
     source_chapter_label,
 )
 from app.engines.drama.paste import ref_sheet_paste, shot_paste
+from app.engines.drama.video import CLIP_LIMIT_DEFAULT, clips_payload, motion_tracks
 
 _STATUS_CN = {
     "planned": "已规划",
@@ -75,6 +78,14 @@ def export_markdown(
     )
     L.append(f"- 开场钩子:{episode.hook}")
     L.append(f"- 结尾卡点:{episode.cliffhanger}")
+    if shots:
+        # 施工进度:导出的手册常被当进度表用,做到哪儿一开头就得看见
+        prog = shot_progress(shots)
+        L.append(
+            f"- 施工进度:静帧 {prog['stills_done']}/{prog['shots']} 格"
+            f" | 视频 {prog['videos_done']}/{prog['shots']} 格"
+            f" | 已挂素材 {prog['assets']} 张(在站内每格「挂静帧」处更新)"
+        )
     L.append("")
 
     if style is not None:
@@ -181,7 +192,65 @@ def export_markdown(
             L.append(paste["mj"]["main"] or "(没有英文轨,先出提示词)")
             L.append("")
 
+        L.extend(_video_section(shots, style))
+
     return "\n".join(L)
+
+
+def _video_section(shots: list[DramaShot], style: DramaStyleCard | None) -> list[str]:
+    """让静帧动起来那一步:视频段计划(按单次时长上限并段)+ 每段的视频提示词。
+
+    单列一节而不是混进出图那节:生图与生视频吃的提示词根本不是一回事(i2v 不许
+    带外貌词,见 engines/drama/video.py),而且视频站有单次时长上限,得先并段。
+    """
+    plan = clips_payload(shots, style, CLIP_LIMIT_DEFAULT)
+    L = ["## 让它动起来:视频段计划(按单次上限 %d 秒并段)" % plan["limit_s"], ""]
+    L.append(
+        "> 视频站单次只能出 5-15 秒,而分镜格是 2-8 秒——所以**一段生成一次,再在画布/"
+        "剪映里按段号首尾相接**。首帧图用该段第一格出好的静帧,人物长相全靠它锁住;"
+        "提示词里**刻意不写外貌**(写了模型会重画脸)。"
+    )
+    L.append("")
+    L.append(f"> {plan['note']}")
+    L.append("")
+    L.append("| 段 | 含分镜 | 场景 | 角色 | 秒 | 生成次数 | 首帧 | 首帧图 | 这一段怎么动 |")
+    L.append("|---|---|---|---|---|---|---|---|---|")
+    for seg in plan["segments"]:
+        who = "、".join(seg["characters"]) or "(空镜)"
+        motion = seg["motion"].replace("|", "/").replace("\n", " ")
+        ready = "✓ 已挂" if seg["first_frame_ready"] else "待出图"
+        L.append(
+            f"| {seg['index']} | {'、'.join(map(str, seg['seqs']))} | {seg['scene_name']} "
+            f"| {who} | {seg['duration_s']} | {seg['runs']} | {seg['first_frame']} "
+            f"| {ready} | {motion} |"
+        )
+    L.append("")
+    for seg in plan["segments"]:
+        paste = seg["paste"]
+        L.append(f"### 视频段 {seg['index']}(分镜 {'、'.join(map(str, seg['seqs']))},{seg['duration_s']}s)")
+        L.append("")
+        if seg["split_hint"]:
+            L.append(f"> ⚠ {seg['split_hint']}")
+            L.append("")
+        L.append("**① 图生视频·中文站(即梦 / 可灵 / 海螺):传首帧图 + 整段粘**")
+        L.append("")
+        L.append(paste["i2v"]["main"])
+        L.append("")
+        L.append("**② 图生视频·英文站(Runway / Luma / Pika)**")
+        L.append("")
+        L.append(f"- 正文:{paste['i2v_en']['main']}")
+        L.append(f"- 负面词:{paste['i2v_en']['negative']}")
+        L.append("")
+        L.append("**③ 文生视频(没有首帧,慎用)**")
+        L.append("")
+        L.append(paste["t2v"]["main"] or "(这一格还没有出图提示词,先出提示词)")
+        L.append("")
+        L.append(f"> {paste['t2v']['hint']}")
+        L.append("")
+        if seg["dialogue"]:
+            L.append(f"> 这一段的字幕/配音:{seg['dialogue']}")
+            L.append("")
+    return L
 
 
 def export_csv(
@@ -192,22 +261,46 @@ def export_csv(
 ) -> str:
     """分镜表 CSV(带 BOM,Excel 打开中文不乱码)。
 
-    最后一列 paste_oneframe 是「单框站直接粘贴版」(负面词已并入正文):
+    最后几列是「让它动起来」那一步的:clip 说明这一格属于第几个视频段(段内共用一次
+    生成),paste_i2v 是那一段的图生视频提示词;still_asset 是你挂回来的静帧、
+    clip_ref 是成片在哪,done_* 是两个打勾栏(站内勾过的这里就是 ✓,没勾的留空给你手打)。
+    paste_oneframe 是「单框站直接粘贴版」(负面词已并入正文):
     批量出图的人普遍拿 Excel 一行行复制,没这列就得自己拼负面词。
     """
     buf = io.StringIO()
     writer = csv.writer(buf)
+    # 逐格施工单:出图三栏 + 运动轨两栏 + 段号/生成次数 + 素材两栏 + 两个打勾栏。
+    # 打勾栏取站内的真实状态而不是一律留空——在站里勾过的进度,导出来还要重勾一遍就白勾了。
     writer.writerow(
         ["seq", "scene_name", "characters", "shot_type", "camera", "duration_s",
          "action_desc", "dialogue", "prompt_cn", "prompt_en", "negative",
-         "paste_oneframe"]
+         "paste_oneframe", "motion_cn", "motion_en", "clip", "clip_seqs",
+         "clip_duration_s", "clip_runs", "paste_i2v", "still_asset", "clip_ref",
+         "done_still", "done_video"]
     )
+    # 段号按格反查:表是逐格的,而视频段是「几格并一段」,不给映射用户对不上号
+    plan = clips_payload(shots, style, CLIP_LIMIT_DEFAULT)
+    seg_of: dict[int, dict] = {}
+    for seg in plan["segments"]:
+        for q in seg["seqs"]:
+            seg_of[q] = seg
     for s in shots:
         paste = shot_paste(s, style, _ref_names(s, cards or []))
+        motion_cn, motion_en = motion_tracks(s)
+        seg = seg_of.get(s.seq) or {}
+        assets = shot_asset_list(s)
         writer.writerow(
             [s.seq, s.scene_name, "、".join(s.characters or []), s.shot_type,
              s.camera, s.duration_s, s.action_desc, s.dialogue,
-             s.prompt_cn, s.prompt_en, s.negative, paste["oneframe"]["main"]]
+             s.prompt_cn, s.prompt_en, s.negative, paste["oneframe"]["main"],
+             motion_cn, motion_en,
+             seg.get("index", ""), "、".join(str(q) for q in seg.get("seqs", [])),
+             seg.get("duration_s", ""), seg.get("runs", ""),
+             (seg.get("paste") or {}).get("i2v", {}).get("main", ""),
+             "、".join(a["src"] for a in assets),
+             getattr(s, "clip_ref", "") or "",
+             "✓" if getattr(s, "done_still", False) else "",
+             "✓" if getattr(s, "done_video", False) else ""]
         )
     return "\ufeff" + buf.getvalue()
 
