@@ -72,6 +72,10 @@ export interface DramaCharacterCard {
   id: number;
   entity_id: number | null;
   name: string;
+  // 性别:""=未定。单列一栏才改得动——写在外貌自由文本里的性别,英文轨那边改不到
+  gender: "" | "female" | "male" | "other";
+  // 描述与标定性别打架时后端给的一句人话提示(不打架为空串)
+  gender_conflict: string;
   appearance_cn: string;
   appearance_en: string;
   outfit_cn: string;
@@ -226,6 +230,10 @@ export const dramaApi = {
     req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/characters/generate`, undefined, LLM_TIMEOUT),
   patchCharacter: (pid: number, cid: number, body: Partial<DramaCharacterCard>) =>
     req<{ card: DramaCharacterCard }>("PATCH", `/api/projects/${pid}/drama/characters/${cid}`, body),
+  // 只重出这一张角色卡:卡上拍板的性别当硬约束(治「女角色被写成男的」)
+  regenCharacter: (pid: number, cid: number) =>
+    req<{ job_id: string }>("POST",
+      `/api/projects/${pid}/drama/characters/${cid}/regenerate`, undefined, LLM_TIMEOUT),
   // 定妆照:出提示词(names 空 = 只补还没有的;给了名字 = 强制重出那几张)
   genRefPrompts: (pid: number, names: string[] = []) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/characters/ref-prompts`,

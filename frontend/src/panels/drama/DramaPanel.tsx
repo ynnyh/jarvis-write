@@ -642,6 +642,8 @@ function AssetsSection({ pid, cards, scenes, onChanged }: {
         同一个人不换脸;「出定妆照」再给每个角色出一条参考图提示词——先出一张正面半身定妆照
         上传回来,之后每格「参考图 + 提示词」出图,人物一致性才从文字层落到像素层。
         「声线选型」给每个角色补 TTS 平台选型建议与朗读指示;手动调过的卡点「锁定」,重跑不覆盖。
+        每张卡的<b>性别单列一栏</b>——女角色被 AI 写成男的,就在那儿点「女」拍板,
+        再点那张卡的「重出这张卡」让 AI 按性别重写(定妆照提示词要一起换,再点「重出提示词」)。
       </p>
       {busy && <Banner stage={stage} text="AI 正在设计角色视觉卡…" />}
       {err && <div className="msg-err">{err}</div>}
@@ -670,6 +672,16 @@ function AssetsSection({ pid, cards, scenes, onChanged }: {
   );
 }
 
+// 性别是硬约束:生成/重出时逐字下发给模型,定妆照与每格提示词都跟着它走。
+// 单列一栏而不是埋在外貌文本里——埋着的话英文轨(appearance_en)那边根本改不到。
+const GENDERS: { key: DramaCharacterCard["gender"]; label: string }[] = [
+  { key: "female", label: "女" },
+  { key: "male", label: "男" },
+  { key: "other", label: "其他" },
+  { key: "", label: "未定" },
+];
+const GENDER_LABEL: Record<string, string> = { female: "女", male: "男", other: "其他", "": "未定" };
+
 function CharCardRow({ pid, card, onSaved }: {
   pid: number; card: DramaCharacterCard; onSaved: (c: DramaCharacterCard) => void;
 }) {
@@ -677,18 +689,46 @@ function CharCardRow({ pid, card, onSaved }: {
   const [draft, setDraft] = useState(card);
   const [dirty, setDirty] = useState(false);
   const [refBusy, setRefBusy] = useState(false);
+  const [cardBusy, setCardBusy] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
   const [link, setLink] = useState("");
 
   useEffect(() => { setDraft(card); setDirty(false); }, [card]);
 
-  async function save(extra?: Partial<DramaCharacterCard>) {
+  async function save(extra?: Partial<DramaCharacterCard>, note?: string) {
     try {
       const r = await dramaApi.patchCharacter(pid, card.id, { ...draft, ...extra });
       onSaved(r.card);
       setDirty(false);
-      if (extra) toast.ok(extra.locked ? "已锁定" : "已解锁");
+      if (note) toast.ok(note);
     } catch (e) { toast.err("保存失败", errMsg(e)); }
+  }
+
+  /** 性别点一下就存:它是硬约束,不该跟别的编辑一起攒在「保存」里。 */
+  async function pickGender(g: DramaCharacterCard["gender"]) {
+    if (g === draft.gender) return;
+    setDraft({ ...draft, gender: g });
+    await save({ gender: g }, `性别已改为「${GENDER_LABEL[g]}」`);
+  }
+
+  /** 只重出这一张卡:按上面拍板的性别重写外貌/服饰/声线(锁定的卡也覆盖)。 */
+  async function regenCard() {
+    if (dirty && !confirm("这张卡有还没保存的修改,重出会用 AI 的新版本覆盖。继续?")) return;
+    setCardBusy(true);
+    try {
+      const r = await run<{ card: DramaCharacterCard }>(
+        () => dramaApi.regenCharacter(pid, card.id),
+        { kind: `drama-charcard-${pid}-${card.id}` },
+      );
+      if (r?.card) {
+        onSaved(r.card);
+        toast.ok(
+          `${r.card.name} 的角色卡已重写`,
+          (r.card.gender ? `按「${GENDER_LABEL[r.card.gender]}」重写了外貌/服饰/声线;` : "外貌/服饰/声线已重写;")
+          + "定妆照提示词不会自动跟着变,要一起换就再点「重出提示词」",
+        );
+      }
+    } catch (e) { toast.err("重出角色卡失败", errMsg(e)); } finally { setCardBusy(false); }
   }
 
   /** 只给这一张角色重出定妆照提示词(批量按钮只补缺,不覆盖手改过的)。 */
@@ -744,20 +784,53 @@ function CharCardRow({ pid, card, onSaved }: {
     <div className="sub-summary">
       <div className="card-head mb-2">
         <b>{draft.name}</b>
+        <span className="muted">性别</span>
+        <span className="gender-pick">
+          {GENDERS.map((g) => (
+            <button key={g.key || "none"}
+              className={"btn-sm" + (draft.gender === g.key ? " primary" : "")}
+              disabled={cardBusy}
+              title="性别是硬约束:重出这张卡、出定妆照、出每格提示词都照它写"
+              onClick={() => void pickGender(g.key)}>{g.label}</button>
+          ))}
+        </span>
         <span className="grow" />
+        <button className="btn-sm" disabled={cardBusy} onClick={() => void regenCard()}
+          title="按上面拍板的性别,让 AI 重写这张卡的外貌/服饰/声线(锁定的卡也会覆盖)">
+          {cardBusy ? "重出中…" : "重出这张卡"}
+        </button>
         <button className={"btn-sm" + (card.locked ? " primary" : "")}
-          onClick={() => save({ locked: !card.locked })}>
+          onClick={() => save({ locked: !card.locked }, card.locked ? "已解锁" : "已锁定")}>
           {card.locked ? "🔒 已锁定" : "锁定"}
         </button>
-        {dirty && <button className="btn-sm primary" onClick={() => save()}>保存</button>}
+        {dirty && <button className="btn-sm primary" onClick={() => save(undefined, "已保存")}>保存</button>}
       </div>
+      {/* 描述与拍板的性别打架(常见:女角色被写成「剑眉入鬓/青年男声」)。
+          不自动改文字——女扮男装是正当写法,只能提示,由用户判断改哪边。 */}
+      {card.gender_conflict && <div className="msg-err mb-2">⚠ {card.gender_conflict}</div>}
+      <p className="hint">下面每一栏都能直接改,改完点右上「保存」;性别点一下就存。</p>
       <div className="media-field">
         <div className="card-head mb-2"><span className="muted">锁定外貌段(注入每格分镜)</span><CopyBtn text={draft.appearance_cn} /></div>
         <textarea rows={3} value={draft.appearance_cn}
           onChange={(e) => { setDraft({ ...draft, appearance_cn: e.target.value }); setDirty(true); }} />
       </div>
+      {/* 英文轨也得能改:生图站吃的是这条,只改中文那条等于没改 */}
       <div className="media-field">
-        <div className="card-head mb-2"><span className="muted">声线(配音用)</span></div>
+        <div className="card-head mb-2">
+          <span className="muted">英文外貌关键词(生图站实际吃这条)</span>
+          <CopyBtn text={draft.appearance_en} />
+        </div>
+        <textarea rows={2} value={draft.appearance_en}
+          placeholder="young woman, oval face, pale blue robe…"
+          onChange={(e) => { setDraft({ ...draft, appearance_en: e.target.value }); setDirty(true); }} />
+      </div>
+      <div className="media-field">
+        <div className="card-head mb-2"><span className="muted">标志服饰</span><CopyBtn text={draft.outfit_cn} /></div>
+        <input value={draft.outfit_cn}
+          onChange={(e) => { setDraft({ ...draft, outfit_cn: e.target.value }); setDirty(true); }} />
+      </div>
+      <div className="media-field">
+        <div className="card-head mb-2"><span className="muted">声线(配音用)</span><CopyBtn text={draft.voice_desc} /></div>
         <input value={draft.voice_desc}
           onChange={(e) => { setDraft({ ...draft, voice_desc: e.target.value }); setDirty(true); }} />
       </div>

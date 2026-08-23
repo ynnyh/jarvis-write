@@ -11,6 +11,7 @@ from .characters import (
     generate_character_cards,
     generate_ref_sheets,
     generate_scene_cards,
+    regenerate_character_card,
 )
 from .exporter import (
     export_csv,
@@ -50,6 +51,7 @@ __all__ = [
     "generate_scene_cards",
     "generate_assets",
     "generate_ref_sheets",
+    "regenerate_character_card",
     "generate_voice_cast",
     "plan_episodes",
     "write_episode_script",

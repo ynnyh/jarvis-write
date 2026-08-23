@@ -594,6 +594,27 @@ def _add_drama_ref_sheet_columns() -> None:
                 logger.info("迁移:drama_character_cards 补 %s 列", col)
 
 
+def _add_drama_gender_column() -> None:
+    """漫剧工坊:drama_character_cards 补 gender 列(幂等)。
+
+    老库的角色卡没有这一列,性别只散落在外貌段的自由文本里——改不动也校不了。
+    补上之后:生成时当硬约束下发、用户可一键改、描述打架能提示(见 drama/gender.py)。
+    存量行留空 = 「未定」,下次生成或用户拍板时自然填上。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "drama_character_cards" not in insp.get_table_names():
+            return  # create_all 会按新模型建表,无需补列
+        if not _column_exists("drama_character_cards", "gender"):
+            conn.execute(
+                text(
+                    "ALTER TABLE drama_character_cards "
+                    "ADD COLUMN gender VARCHAR(10) DEFAULT ''"
+                )
+            )
+            logger.info("迁移:drama_character_cards 补 gender 列")
+
+
 def run_migrations() -> None:
     """启动时调用。幂等。"""
     _add_user_id_columns()
@@ -617,6 +638,7 @@ def run_migrations() -> None:
     _add_drama_style_direction_column()
     _add_drama_episode_source_chapters_column()
     _add_drama_ref_sheet_columns()
+    _add_drama_gender_column()
     _disable_word_guard_default()
     _migrate_finalized_to_approved()
     # 先补加密老表存量明文 key,再拷到新表,保证 provider_configs 落库必为密文

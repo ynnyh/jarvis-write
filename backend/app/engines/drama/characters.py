@@ -28,6 +28,14 @@ from app.engines.drama.common import (
     scene_card_dict,
     style_card,
 )
+from app.engines.drama.gender import (
+    gender_directive,
+    gender_phrase_cn,
+    gender_phrase_en,
+    gender_tag,
+    infer_gender,
+    normalize_gender,
+)
 from app.llm.router import Task, get_adapter_for
 from app.prompts.drama import CHARACTER_PROMPT, REF_SHEET_PROMPT, SCENE_PROMPT
 
@@ -35,6 +43,9 @@ from app.prompts.drama import CHARACTER_PROMPT, REF_SHEET_PROMPT, SCENE_PROMPT
 _MAX_CHARACTERS = 12
 _MAX_SCENES = 10
 _MAX_REF_SHEETS = 8  # 定妆照提示词单次批量上限(每条比视觉卡更长)
+# 判性别时扫多少条事实:比 digest 宽得多——digest 只有 300 字,
+# 性别线索(「她」「夫人」)经常正好被截掉,于是模型只能靠猜,一猜就把女角写成男的
+_GENDER_FACT_LIMIT = 40
 
 
 class DramaAssetError(ValueError):
@@ -57,6 +68,43 @@ def _entity_digest(db: Session, entity: Entity) -> str:
     return clip(digest, 300)
 
 
+def _gender_evidence(db: Session, entity: Entity) -> list[str]:
+    """判性别的证据面:别名 + 档案全文 + 最近 40 条事实,都不截断。
+
+    刻意跟 digest 分开扫:digest 要控长(300 字)会把「她」「夫人」这类线索截掉,
+    而性别一旦缺失,模型就按提示词里的示例惯性写——女角色于是出成了男相。
+    """
+    parts = [entity.name, "/".join(str(a) for a in (entity.aliases or []))]
+    profile = entity.base_profile if isinstance(entity.base_profile, dict) else {}
+    parts.extend(str(v) for v in profile.values() if str(v or "").strip())
+    facts = (
+        db.query(Fact.content)
+        .filter(Fact.entity_id == entity.id)
+        .order_by(Fact.valid_from.desc(), Fact.id.desc())
+        .limit(_GENDER_FACT_LIMIT)
+        .all()
+    )
+    parts.extend(str(c) for (c,) in facts if c)
+    return [p for p in parts if str(p or "").strip()]
+
+
+def _resolve_gender(
+    db: Session, entity: Entity | None, card: DramaCharacterCard | None
+) -> tuple[str, str]:
+    """这个角色本轮下发给模型的性别,返回 (gender, 依据人话)。
+
+    优先级:卡上已有 > 档案推断 > 未定(交模型判断、由用户在卡上拍板)。
+    卡上已有的最硬——那要么是用户手动改过的,要么是上一轮按同一份档案推出来的,
+    重跑不该把用户拍板的性别再改回去。
+    """
+    pinned = normalize_gender(getattr(card, "gender", ""))
+    if pinned:
+        return pinned, "卡上已定"
+    if entity is None:
+        return "", ""
+    return infer_gender(*_gender_evidence(db, entity))
+
+
 async def generate_character_cards(
     db: Session, project: Project, progress=lambda s: None
 ) -> dict:
@@ -77,11 +125,24 @@ async def generate_character_cards(
             "故事圣经里还没有角色——先在写作区定稿几章让引擎抽取角色,再来生成角色卡。"
         )
 
+    # 既有卡索引:entity_id 优先,名字兜底。要在拼提示词之前建好——
+    # 卡上已拍板的性别得当硬约束下发,否则重跑一次又被模型改回去
+    existing = (
+        db.query(DramaCharacterCard)
+        .filter(DramaCharacterCard.project_id == project.id)
+        .all()
+    )
+    by_entity = {c.entity_id: c for c in existing if c.entity_id}
+    by_name = {c.name: c for c in existing}
+
     lines = []
+    genders: dict[str, str] = {}  # 角色名 → 本轮下发的性别(空 = 让模型自己判断)
     for e in entities:
         aliases = "/".join(str(a) for a in (e.aliases or []))
         head = f"{e.name}" + (f"(又称:{aliases})" if aliases else "")
-        lines.append(f"【{head}】{_entity_digest(db, e)}")
+        gender, why = _resolve_gender(db, e, by_entity.get(e.id) or by_name.get(e.name))
+        genders[e.name] = gender
+        lines.append(f"【{head}】{gender_directive(gender, why)}|{_entity_digest(db, e)}")
     characters_block = "\n".join(lines)
 
     progress(f"AI 正在设计 {len(entities)} 张角色视觉卡…")
@@ -93,15 +154,6 @@ async def generate_character_cards(
     )
     raw = await adapter.ask(prompt)
     data = parse_llm_json(raw)
-
-    # 既有卡索引:entity_id 优先,名字兜底
-    existing = (
-        db.query(DramaCharacterCard)
-        .filter(DramaCharacterCard.project_id == project.id)
-        .all()
-    )
-    by_entity = {c.entity_id: c for c in existing if c.entity_id}
-    by_name = {c.name: c for c in existing}
 
     style = style_card(db, project.id)
     cards_out: list[dict] = []
@@ -126,6 +178,8 @@ async def generate_character_cards(
                 target.entity_id = next(e.id for e in entities if e.name == name)
             db.add(target)
         target.name = name
+        # 性别:档案/卡上定了的说一不二,没定才用模型自己判断的结果
+        target.gender = genders.get(name) or normalize_gender(item.get("gender"))
         target.appearance_cn = clip(item.get("appearance_cn"), 600)
         target.appearance_en = clip(item.get("appearance_en"), 400)
         target.outfit_cn = clip(item.get("outfit_cn"), 120)
@@ -134,6 +188,76 @@ async def generate_character_cards(
 
     db.commit()
     return {"cards": cards_out, "skipped_locked": skipped_locked}
+
+
+def _one_card_item(raw: str) -> dict | None:
+    """单卡重出:从模型输出里取出那唯一一条(cards 数组 → 顶层对象 → 截断抢救)。
+
+    只重一张卡,所以不校名字——「一条对一卡」时名字写跑了也配不错人
+    (同 _match_sheets 的那条道理)。
+    """
+    data = parse_llm_json(raw)
+    if isinstance(data, dict) and (data.get("appearance_cn") or data.get("appearance_en")):
+        return data  # 模型直接给了一张卡,没套 {"cards": [...]}
+    items = data.get("cards") if isinstance(data, dict) else None
+    if not isinstance(items, list) or not items:
+        items = salvage_json_objects(raw)
+    for it in items:
+        if isinstance(it, dict) and (it.get("appearance_cn") or it.get("appearance_en")):
+            return it
+    return None
+
+
+async def regenerate_character_card(
+    db: Session, project: Project, card_id: int, progress=lambda s: None
+) -> dict:
+    """只重出这一张角色卡(显式重出 = 覆盖,连 locked 的也覆盖),返回 {card}。
+
+    为什么要有单卡入口:批量「重新生成」会动所有卡,而用户往往只想修一张——
+    最典型的就是「这个女角色被写成男的了」。这里把卡上拍板的性别当成
+    不可违抗的硬约束下发,重写外貌/服饰/声线三段;定妆照提示词不动
+    (它有自己的「重出提示词」,重写完外貌再点一次即可)。
+    """
+    card = db.get(DramaCharacterCard, card_id)
+    if card is None or card.project_id != project.id:
+        raise DramaAssetError("角色卡不存在。")
+
+    entity = db.get(Entity, card.entity_id) if card.entity_id else None
+    gender, why = _resolve_gender(db, entity, card)
+    digest = _entity_digest(db, entity) if entity is not None else ""
+    if not digest:
+        # 圣经里没有这个角色(用户手加的卡):拿卡上现有描述当档案,别让模型凭空捏
+        digest = clip(
+            ";".join(
+                p for p in (card.appearance_cn, card.outfit_cn, card.voice_desc) if p
+            ),
+            300,
+        ) or "(圣经里没有这个角色的档案,按角色名与本书类型合理设计)"
+    aliases = "/".join(str(a) for a in ((entity.aliases if entity else None) or []))
+    head = card.name + (f"(又称:{aliases})" if aliases else "")
+
+    progress(f"AI 正在重写「{card.name}」的角色卡…")
+    adapter = get_adapter_for(Task.DRAMA_ASSET, timeout=300)
+    prompt = CHARACTER_PROMPT.format(
+        title=project.title,
+        genre=project.genre.strip() or "不限",
+        characters_block=f"【{head}】{gender_directive(gender, why)}|{digest}",
+    )
+    item = _one_card_item(await adapter.ask(prompt))
+    if item is None:
+        raise DramaAssetError(
+            f"模型这次没吐出可用的结果(要重写「{card.name}」),多半是输出被截断。"
+            "直接重试一次;反复如此就到「模型设置」把该配置的 max_tokens 调大,或换个模型。"
+        )
+
+    card.gender = gender or normalize_gender(item.get("gender")) or (card.gender or "")
+    # 逐字段兜底:模型漏给哪段就保留原值,不把已有的描述清空
+    card.appearance_cn = clip(item.get("appearance_cn"), 600) or card.appearance_cn
+    card.appearance_en = clip(item.get("appearance_en"), 400) or card.appearance_en
+    card.outfit_cn = clip(item.get("outfit_cn"), 120) or card.outfit_cn
+    card.voice_desc = clip(item.get("voice_desc"), 120) or card.voice_desc
+    db.commit()
+    return {"card": character_card_dict(card, style_card(db, project.id))}
 
 
 def collect_scene_names(db: Session, project_id: int) -> list[str]:
@@ -275,6 +399,7 @@ def _assemble_ref_prompt(card: DramaCharacterCard, style) -> tuple[str, str]:
     """
     parts = [
         "单人正面半身居中,纯色浅灰背景,柔和均匀光,无动作无表情表演,画面里不出现任何文字",
+        gender_phrase_cn(card.gender),
         clip(card.appearance_cn, 400),
         f"标志服饰:{clip(card.outfit_cn, 120)}" if card.outfit_cn else "",
         clip(getattr(style, "style_cn", ""), 300),
@@ -282,6 +407,7 @@ def _assemble_ref_prompt(card: DramaCharacterCard, style) -> tuple[str, str]:
     en_parts = [
         "character reference sheet, single person, front view, upper body, "
         "plain background, soft even lighting, no text",
+        gender_phrase_en(card.gender),
         clip(card.appearance_en, 300),
         clip(getattr(style, "style_en", ""), 200),
     ]
@@ -292,9 +418,13 @@ def _assemble_ref_prompt(card: DramaCharacterCard, style) -> tuple[str, str]:
 
 def _cards_block(cards: list[DramaCharacterCard]) -> str:
     """本批角色的素材块。名字用 [] 包(与提示词里「照抄方括号里的名字」呼应),
-    不用【】——中文书名号更容易被模型连着抄进 name 字段。"""
+    不用【】——中文书名号更容易被模型连着抄进 name 字段。
+    性别单列一项:定妆照是「这张脸」的第一次落地,性别在这里写错,
+    后面每一格都会跟着错。"""
     return "\n".join(
-        f"{i}. [{c.name}] 锁定外貌:{clip(c.appearance_cn, 400)}"
+        f"{i}. [{c.name}] "
+        + (f"{gender_tag(c.gender)};" if gender_tag(c.gender) else "")
+        + f"锁定外貌:{clip(c.appearance_cn, 400)}"
         + (f";英文:{clip(c.appearance_en, 300)}" if c.appearance_en else "")
         + (f";标志服饰:{clip(c.outfit_cn, 120)}" if c.outfit_cn else "")
         for i, c in enumerate(cards, 1)

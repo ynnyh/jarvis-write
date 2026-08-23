@@ -203,12 +203,17 @@ def style_card(db: Session, project_id: int) -> DramaStyleCard | None:
 
 def character_card_dict(card: DramaCharacterCard, style=None) -> dict:
     """角色卡序列化。style 给上时附带定妆照的「按平台粘贴版」(见 paste.py)。"""
+    from app.engines.drama.gender import gender_conflict_note
     from app.engines.drama.paste import ref_sheet_paste  # 局部导入:避免模块循环
 
     return {
         "id": card.id,
         "entity_id": card.entity_id,
         "name": card.name,
+        # 性别单列一栏:前端可一键改,改完「按性别重出」整卡重写(见 gender.py)
+        "gender": card.gender or "",
+        # 描述与标定的性别打架时的一句人话提示(不打架为空串)
+        "gender_conflict": gender_conflict_note(card),
         "appearance_cn": card.appearance_cn,
         "appearance_en": card.appearance_en,
         "outfit_cn": card.outfit_cn,

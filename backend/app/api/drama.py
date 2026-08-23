@@ -12,7 +12,8 @@ PUT    /api/projects/{id}/drama/style                     手动保存风格卡
 POST   /api/projects/{id}/drama/style/generate            生成风格卡(async)
 GET    /api/projects/{id}/drama/characters                角色卡+场景卡列表
 POST   /api/projects/{id}/drama/characters/generate       批量生成资产卡(async)
-PATCH  /api/projects/{id}/drama/characters/{cid}          编辑/锁定角色卡
+PATCH  /api/projects/{id}/drama/characters/{cid}          编辑/锁定角色卡(含性别)
+POST   /api/projects/{id}/drama/characters/{cid}/regenerate 只重出这一张角色卡(async)
 POST   /api/projects/{id}/drama/characters/ref-prompts    出定妆照提示词(async)
 POST   /api/projects/{id}/drama/characters/{cid}/reference        上传定妆照(multipart)
 POST   /api/projects/{id}/drama/characters/{cid}/reference/link   贴定妆照外链
@@ -72,6 +73,7 @@ from app.engines.drama import (
     generate_voice_cast,
     plan_episodes,
     recommend_directions,
+    regenerate_character_card,
     render_shot_prompts,
     render_single_shot_prompt,
     write_episode_script,
@@ -91,6 +93,7 @@ from app.engines.drama.common import (
     style_card,
     style_card_dict,
 )
+from app.engines.drama.gender import VALID_GENDERS
 from app.jobs import list_running, spawn_job
 
 logger = logging.getLogger("jarvis-write.drama")
@@ -116,6 +119,8 @@ class StyleGenIn(BaseModel):
 
 class CharacterCardIn(BaseModel):
     name: str | None = None
+    # 性别:""(未定)/female/male/other,别的写法一律 400 打回(见 drama/gender.py)
+    gender: str | None = None
     appearance_cn: str | None = None
     appearance_en: str | None = None
     outfit_cn: str | None = None
@@ -369,6 +374,14 @@ async def patch_character(
     card = _get_character(db, project_id, card_id)
     if body.name is not None:
         card.name = clip(body.name, 200)
+    if body.gender is not None:
+        gender = clip(body.gender, 10)
+        if gender and gender not in VALID_GENDERS:
+            raise HTTPException(
+                status_code=400,
+                detail="性别只能是 female / male / other,或留空表示未定。",
+            )
+        card.gender = gender
     for field in ("appearance_cn", "appearance_en", "outfit_cn", "voice_desc",
                   "tts_hint", "reading_notes", "ref_prompt_cn", "ref_prompt_en"):
         value = getattr(body, field)
@@ -378,6 +391,31 @@ async def patch_character(
         card.locked = body.locked
     db.commit()
     return {"card": character_card_dict(card, style_card(db, project_id))}
+
+
+@router.post("/characters/{card_id}/regenerate")
+async def regenerate_character(
+    project_id: int, card_id: int, db: Session = Depends(get_db)
+):
+    """只重出这一张角色卡(async)。显式重出 = 覆盖,连锁定的卡也覆盖。
+
+    典型用法:发现某个女角色被写成了男的 → 在卡上把性别改成「女」→ 点这个
+    → AI 按拍板的性别重写外貌/服饰/声线三段(定妆照提示词另有「重出提示词」)。
+    """
+    get_project_or_404(db, project_id)
+    _get_character(db, project_id, card_id)  # 归属校验:别人的卡 404
+    kind = f"drama-charcard-{project_id}-{card_id}"
+    if (existing := _existing_job("drama-", kind)):
+        return existing
+
+    async def work(progress):
+        from app.db.session import SessionLocal
+
+        with SessionLocal() as session:
+            proj = session.get(Project, project_id)
+            return await regenerate_character_card(session, proj, card_id, progress)
+
+    return {"job_id": spawn_job(kind, work)}
 
 
 # =============== 定妆照(角色参考图:人物一致性从文字层落到像素层) ===============

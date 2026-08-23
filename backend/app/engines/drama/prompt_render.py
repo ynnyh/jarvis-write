@@ -21,6 +21,7 @@ from app.engines.drama.common import (
     scene_anchor_map,
     shots_payload,
 )
+from app.engines.drama.gender import gender_paren, gender_tag
 from app.llm.router import Task, get_adapter_for
 from app.prompts.drama import SHOT_PROMPT_PROMPT
 
@@ -61,8 +62,12 @@ def _anchor_blocks(
             if card is not None:
                 scenes[card.name] = card
 
+    # 性别写进角色锚:模型看着锚段写提示词,性别缺一栏它就自己猜,一猜就出岔
     char_lines = [
-        f"【{c.name}】{c.appearance_cn}\n  EN: {c.appearance_en}" for c in chars.values()
+        f"【{c.name}】"
+        + (f"{gender_tag(c.gender)};" if gender_tag(c.gender) else "")
+        + f"{c.appearance_cn}\n  EN: {c.appearance_en}"
+        for c in chars.values()
     ] or ["(本块镜头无角色卡命中,按分镜描述自行合理设计人物)"]
     scene_lines = [
         f"【{sc.name}】{sc.appearance_cn}\n  EN: {sc.appearance_en}"
@@ -86,7 +91,8 @@ def _ensure_character_anchors(
     for name in shot.characters or []:
         card = match_character(name, char_by_name, char_by_alias)
         if card and card.appearance_cn and card.appearance_cn not in prompt_cn and card.name not in prompt_cn:
-            missing.append(f"{card.name}:{card.appearance_cn}")
+            # 带上「(女性)」:兜底拼进去的这段是生图站唯一能看到的性别线索
+            missing.append(f"{card.name}{gender_paren(card.gender)}:{card.appearance_cn}")
     if not missing:
         return prompt_cn
     return "【角色锚】" + ";".join(missing) + "。" + prompt_cn

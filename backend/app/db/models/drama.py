@@ -64,6 +64,11 @@ class DramaCharacterCard(Base, TimestampMixin):
         ForeignKey("entities.id", ondelete="SET NULL"), nullable=True
     )
     name: Mapped[str] = mapped_column(String(200))
+    # 性别(""=未定 / female / male / other):从自由文本里拎出来单独存的一列。
+    # 写错性别是漫剧最刺眼的错(女角色出成男相),而且会顺着外貌段 → 定妆照 →
+    # 每格提示词 → 配音声线一路复制。单列一栏才能:生成时当硬约束下发、
+    # 用户一键改、事后校验描述有没有跟它打架(见 engines/drama/gender.py)。
+    gender: Mapped[str] = mapped_column(String(10), default="")
     # 锁定外貌段(中文):发型面容/体型/服饰材质颜色,80-150 字,必须「可画」
     appearance_cn: Mapped[str] = mapped_column(Text, default="")
     appearance_en: Mapped[str] = mapped_column(Text, default="")

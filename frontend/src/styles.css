@@ -3159,6 +3159,9 @@ body:has(.write-zone.immersive) .step-guide { display: none; }
 .drama-compliance { border-top: 1px dashed var(--line); padding-top: 8px; margin-top: 10px; }
 .drama-compliance b { color: var(--warn); }
 
+/* 性别四档要读成「一个选择器」而不是四枚散按钮:靠拢排,别吃 card-head 的 10px 间距 */
+.gender-pick { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+
 /* ===== 一键粘贴框 + 定妆照缩略图 ===== */
 /* 粘贴版是只读的「拿去就能贴」文本,和下面可编辑的三轨要一眼分得开 */
 .paste-box textarea {
