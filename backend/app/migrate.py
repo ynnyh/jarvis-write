@@ -548,6 +548,30 @@ def _add_drama_style_direction_column() -> None:
             logger.info("迁移:drama_style_cards 补 direction 列")
 
 
+def _add_drama_episode_source_chapters_column() -> None:
+    """漫剧工坊:drama_episodes 补 source_chapters 列(多章并一集,幂等)。
+
+    老库每集只有单个 source_chapter,回填成 [source_chapter] —— 语义等价,
+    之后「数章并一集」才有地方存(见 models/drama.py 的字段注释)。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "drama_episodes" not in insp.get_table_names():
+            return
+        if not _column_exists("drama_episodes", "source_chapters"):
+            conn.execute(text("ALTER TABLE drama_episodes ADD COLUMN source_chapters JSON"))
+            logger.info("迁移:drama_episodes 补 source_chapters 列")
+        # 回填(新加列或历史遗留的空值都补上;SQLite 的 JSON 列底层是 TEXT)
+        conn.execute(
+            text(
+                "UPDATE drama_episodes SET source_chapters = "
+                "'[' || CAST(source_chapter AS TEXT) || ']' "
+                "WHERE (source_chapters IS NULL OR source_chapters IN ('', '[]')) "
+                "AND source_chapter > 0"
+            )
+        )
+
+
 def run_migrations() -> None:
     """启动时调用。幂等。"""
     _add_user_id_columns()
@@ -569,6 +593,7 @@ def run_migrations() -> None:
     _add_queue_require_approved_column()
     _add_drama_voice_columns()
     _add_drama_style_direction_column()
+    _add_drama_episode_source_chapters_column()
     _disable_word_guard_default()
     _migrate_finalized_to_approved()
     # 先补加密老表存量明文 key,再拷到新表,保证 provider_configs 落库必为密文

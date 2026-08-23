@@ -63,8 +63,10 @@ class _JsonAdapter:
 
     def __init__(self, *payloads: dict):
         self._queue = [json.dumps(p, ensure_ascii=False) for p in payloads]
+        self.prompts: list[str] = []  # 收到的提示词(校验注入了什么)
 
     async def ask(self, prompt, system=None):
+        self.prompts.append(prompt)
         return self._queue.pop(0) if len(self._queue) > 1 else self._queue[0]
 
 
@@ -153,11 +155,12 @@ def _seed_assets(pid: int) -> None:
 
 _PLAN_REPLY = {
     "episodes": [
-        {"title": "雪夜杀机", "source_chapter": 1, "hook": "刀光劈开雪幕",
+        {"title": "雪夜杀机", "source_chapters": [1], "hook": "刀光劈开雪幕",
          "recap": "镖队夜宿荒庙遭袭", "cliffhanger": "箱底伸出一只手"},
+        # 用旧键 source_chapter 且越界:验证兼容 + 收敛
         {"title": "箱中人", "source_chapter": 99, "hook": "撬开箱盖",
          "recap": "开箱发现大活人", "cliffhanger": "追兵火把照亮山道"},
-        {"title": "", "source_chapter": 2, "hook": "无效应被丢弃",
+        {"title": "", "source_chapters": [2], "hook": "无效应被丢弃",
          "recap": "", "cliffhanger": ""},
     ]
 }
@@ -239,6 +242,7 @@ def test_drama_full_pipeline(client):
     assert len(eps) == 2  # 无标题条目丢弃
     assert [e["ep_index"] for e in eps] == [1, 2]
     assert eps[1]["source_chapter"] == 1  # 99 越界收敛回 from_chapter
+    assert eps[1]["source_chapters"] == [1] and eps[1]["source_label"] == "第 1 章"
     assert eps[0]["status"] == "planned"
     # 归属隔离
     other = _auth(client, "drama_flow_other")
@@ -270,6 +274,9 @@ def test_drama_full_pipeline(client):
     assert [s["seq"] for s in shots] == [1, 2]
     assert shots[1]["duration_s"] == 10  # 99 → 上限 10
     assert job["result"]["episode"]["status"] == "storyboarded"
+    # 分镜总时长 14s 远短于目标 90s → 如实提示,不装作正常
+    assert job["result"]["truncated"] is False
+    assert "短于目标" in job["result"]["notice"]
 
     # ---- 4. 三轨提示词(桩故意漏锚段,验证兜底) ----
     with patch("app.engines.drama.prompt_render.get_adapter_for",
@@ -289,15 +296,37 @@ def test_drama_full_pipeline(client):
     assert shots[1]["prompt_cn"] == ""
     assert job["result"]["episode"]["status"] == "storyboarded"
 
-    # ---- 5. 手动补一版提示词后转 ready ----
+    # ---- 5. 单格重出:只动这一格,额外要求进提示词 ----
+    single = _JsonAdapter({"shots": [
+        # seq 故意写错(999):单格场景下只有一条结果,引擎照用
+        {"seq": 999, "prompt_cn": "收刀回鞘,近景,目光扫向镖箱", "prompt_en": "sheath sword, close-up",
+         "negative": "低分辨率"},
+    ]})
+    with patch("app.engines.drama.prompt_render.get_adapter_for", return_value=single):
+        r = client.post(f"/api/projects/{pid}/drama/shots/{shots[1]['id']}/prompt",
+                        headers=headers, json={"note": "刀锋上要有一道血线"})
+        assert r.status_code == 200, r.text
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    assert len(single.prompts) == 1  # 只跑一格,不是整集重跑
+    assert "刀锋上要有一道血线" in single.prompts[0]  # 额外要求进了提示词
+    one = job["result"]["shot"]
+    assert one["seq"] == 2 and "收刀回鞘" in one["prompt_cn"]
+    assert "国风厚涂" in one["prompt_cn"] and "玄色劲装" in one["prompt_cn"]  # 锚段兜底照旧
+    assert shots[0]["prompt_cn"] in (
+        client.get(f"/api/projects/{pid}/drama/episodes/{ep_id}", headers=headers)
+        .json()["shots"][0]["prompt_cn"]
+    )  # 别的格没被动
+    # 最后一格补齐 → 整集转 ready
+    assert job["result"]["episode"]["status"] == "ready"
+
+    # ---- 6. 手动改提示词照旧可用 ----
     r = client.patch(f"/api/projects/{pid}/drama/shots/{shots[1]['id']}", headers=headers,
                      json={"prompt_cn": "收刀回鞘,近景", "prompt_en": "sheath sword, close-up"})
     assert r.status_code == 200
     r = client.get(f"/api/projects/{pid}/drama/episodes/{ep_id}", headers=headers)
     assert r.status_code == 200
-    detail = r.json()
-    # 提示词齐了(手动补齐) → 手动不算 ready,重新跑 prompts 让引擎盖章
-    assert detail["episode"]["status"] in ("storyboarded", "ready")
+    assert r.json()["shots"][1]["prompt_cn"] == "收刀回鞘,近景"
 
 
 def test_export_markdown_and_csv(client):
@@ -402,6 +431,79 @@ def test_script_without_chapter_text_fails(client):
     job = _wait_job(client, headers, r.json()["job_id"])
     assert job["status"] == "error"
     assert "正文" in job["error"]
+
+
+def test_multi_chapter_episode(client):
+    """数章并一集:源章号存全集,写剧本时逐章取正文(只喂主章会丢内容)。"""
+    headers = _auth(client, "drama_multi")
+    p = _create_project(client, headers, "并集漫剧书")
+    pid = p["id"]
+    _seed_novel(pid, chapters=2)
+
+    with patch("app.engines.drama.planner.get_adapter_for",
+               return_value=_JsonAdapter({"episodes": [
+                   {"title": "两章并一集", "source_chapters": [2, 1, 99],
+                    "hook": "h", "recap": "r", "cliffhanger": "c"},
+               ]})):
+        r = client.post(f"/api/projects/{pid}/drama/episodes/plan", headers=headers,
+                        json={"from_chapter": 1, "to_chapter": 2})
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    ep = job["result"][0]
+    assert ep["source_chapters"] == [1, 2]  # 升序去重,越界的 99 丢弃
+    assert ep["source_chapter"] == 1  # 主源章 = 最小章号
+    assert ep["source_label"] == "第 1-2 章"
+
+    adapter = _JsonAdapter(_SCRIPT_REPLY)
+    with patch("app.engines.drama.script.get_adapter_for", return_value=adapter):
+        r = client.post(f"/api/projects/{pid}/drama/episodes/{ep['id']}/script", headers=headers)
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    sent = adapter.prompts[0]
+    assert "—— 第 1 章 ——" in sent and "—— 第 2 章 ——" in sent  # 两章正文都进了上下文
+    assert "第 1-2 章" in sent
+
+
+def test_storyboard_cap_scales_with_duration(client):
+    """镜头数上限按目标时长动态算;超上限如实报数,不静默截断。"""
+    from app.engines.drama.storyboard import shot_cap
+
+    assert shot_cap(30) == 15  # 30s / 每格最短 2s
+    assert shot_cap(180) == 80  # 夹在上限内
+    assert shot_cap(10) == 8  # 短集也有下限
+
+    headers = _auth(client, "drama_cap")
+    p = _create_project(client, headers, "上限漫剧书")
+    pid = p["id"]
+    _seed_novel(pid, chapters=1)
+    _seed_assets(pid)
+
+    with patch("app.engines.drama.planner.get_adapter_for",
+               return_value=_JsonAdapter({"episodes": [_PLAN_REPLY["episodes"][0]]})):
+        r = client.post(f"/api/projects/{pid}/drama/episodes/plan", headers=headers,
+                        json={"from_chapter": 1, "to_chapter": 1, "duration_s": 30})
+        job = _wait_job(client, headers, r.json()["job_id"])
+    ep_id = job["result"][0]["id"]
+    with patch("app.engines.drama.script.get_adapter_for",
+               return_value=_JsonAdapter(_SCRIPT_REPLY)):
+        r = client.post(f"/api/projects/{pid}/drama/episodes/{ep_id}/script", headers=headers)
+        _wait_job(client, headers, r.json()["job_id"])
+
+    over = _JsonAdapter({"shots": [
+        {"seq": i, "scene_name": "荒山雪道", "characters": ["沈砚"],
+         "action_desc": f"第{i}格画面", "shot_type": "近景", "camera": "固定",
+         "dialogue": "", "duration_s": 2}
+        for i in range(1, 19)  # 18 格,超 15 格上限
+    ]})
+    with patch("app.engines.drama.storyboard.get_adapter_for", return_value=over):
+        r = client.post(f"/api/projects/{pid}/drama/episodes/{ep_id}/storyboard", headers=headers)
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    assert "镜头数上限 15 格" in over.prompts[0]  # 上限进了提示词
+    assert len(job["result"]["shots"]) == 15
+    assert job["result"]["truncated"] is True
+    assert "多给了 3 格" in job["result"]["notice"]
+    assert "短于目标" not in job["result"]["notice"]  # 15×2=30s 已达目标
 
 
 # ---- 阶段 2:声线选型 + 成片包 ----

@@ -78,7 +78,9 @@ export interface DramaEpisode {
   id: number;
   ep_index: number;
   title: string;
-  source_chapter: number;
+  source_chapter: number; // 主源章号 = source_chapters 最小值(排序锚)
+  source_chapters: number[]; // 源章号全集(一集可由数章合并而来)
+  source_label: string; // 人话标签:「第 3 章」/「第 3-5 章」/「第 3、7 章」
   hook: string;
   recap: string;
   cliffhanger: string;
@@ -109,6 +111,14 @@ export interface DramaMeta {
   approved_count: number;
   modes: { key: string; label: string }[];
   directions: DramaDirection[];
+}
+
+// 拆分镜结果:notice 是引擎的如实交代(被截断 / 总时长短于目标),空串 = 一切正常
+export interface DramaBoardResult {
+  episode: DramaEpisode;
+  shots: DramaShot[];
+  truncated: boolean;
+  notice: string;
 }
 
 // 方向推荐:按书的气质荐前 3(带理由与优先级),AI 荐、用户选
@@ -215,6 +225,10 @@ export const dramaApi = {
     req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/episodes/${eid}/prompts`, undefined, LLM_TIMEOUT),
   patchShot: (pid: number, sid: number, body: Partial<DramaShot>) =>
     req<{ shot: DramaShot }>("PATCH", `/api/projects/${pid}/drama/shots/${sid}`, body),
+  // 单格重出提示词:只动这一格(整集重跑慢且会盖掉手改),note = 这一格的额外要求
+  regenShotPrompt: (pid: number, sid: number, note = "") =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/shots/${sid}/prompt`,
+      { note }, LLM_TIMEOUT),
   // 成片包(阶段 2):配音稿 + 剪辑清单
   buildPack: (pid: number, eid: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/episodes/${eid}/pack`, undefined, LLM_TIMEOUT),

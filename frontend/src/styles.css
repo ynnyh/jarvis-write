@@ -3064,3 +3064,31 @@ body:has(.write-zone.immersive) .step-guide { display: none; }
 .drama-warn-tip { color: var(--warn); font-size: var(--fs-xs); }
 .drama-compliance { border-top: 1px dashed var(--line); padding-top: 8px; margin-top: 10px; }
 .drama-compliance b { color: var(--warn); }
+
+/* ===== 漫剧引导层:引导卡 + 步骤条三态 + 「现在做这步」指针 ===== */
+/* 引导卡里的编号/项目清单:比正文缩一号,行距放开,长句好读 */
+.drama-guide .guide-body { gap: 6px; }
+.drama-guide-steps {
+  margin: 2px 0 6px; padding-left: 20px;
+  display: grid; gap: 4px;
+  font-size: var(--fs-sm); line-height: 1.7;
+}
+.drama-guide-steps b { color: var(--text); }
+.drama-guide code {
+  padding: 0 4px; border-radius: 4px;
+  background: var(--surface-2); font-size: var(--fs-xs);
+}
+/* 步骤条:✓ 已完成的弱化,▸ 当前步用品牌色高亮(.chip.on 已给底色,这里补描边强调) */
+.drama-steps .chip.done { color: var(--text-3); border-style: dashed; }
+.drama-steps .chip.done:hover { color: var(--brand); }
+.drama-steps .chip[aria-current="true"] { box-shadow: 0 0 0 1px var(--brand) inset; }
+/* 「现在做这步」指针行:整段是给人读的指令,不能缩成 hint 的小字;
+   不用 flex——句中的 <b>/文案片段会被切成独立 flex item,中间凭空多出间隙 */
+.drama-next {
+  margin: 0 0 10px;
+  color: var(--text-2); font-size: var(--fs-sm); line-height: 1.9;
+}
+.drama-next b { color: var(--brand); }
+.drama-next .btn-sm { margin-left: 8px; vertical-align: baseline; }
+/* 未选集时的占位卡:虚线框提示「先点一集」 */
+.drama-pick-hint { border-style: dashed; }

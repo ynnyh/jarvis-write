@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   DRAMA_STATUS_CN,
+  DramaBoardResult,
   DramaCharacterCard,
   DramaDirection,
   DramaDirectionRec,
@@ -22,6 +23,7 @@ import { useJob } from "../../ui/useJob";
 import { toast } from "../../ui/Toaster";
 import { errMsg } from "../../pollJob";
 import EmptyState from "../../ui/EmptyState";
+import { DramaGuide, DramaProductionGuide } from "./DramaGuide";
 
 interface Props { pid: number }
 
@@ -45,6 +47,15 @@ function Banner({ stage, text }: { stage: string; text: string }) {
   return (
     <div className="gen-banner"><span className="spin" /><span className="gen-banner-text">{stage || text}</span></div>
   );
+}
+
+/** 选中这一集时,「单集流水线」还差哪一步(状态 → 该点哪个按钮的人话)。 */
+function nextEpisodeTodo(ep: DramaEpisode): string {
+  const at = `第 ${ep.ep_index} 集`;
+  if (ep.status === "planned") return `${at}还没剧本:点 ④-1 写剧本。`;
+  if (ep.status === "scripted") return `${at}有剧本了,点 ④-2 拆分镜(把台词摊成一格格画面)。`;
+  if (ep.status === "storyboarded") return `${at}有分镜了,点 ④-3 出提示词(每格的绘图提示词)。`;
+  return `${at}提示词已就绪:点 ④-4 出成片包(配音稿 + 剪辑清单),再「导出手册」。`;
 }
 
 export default function DramaPanel({ pid }: Props) {
@@ -85,32 +96,67 @@ export default function DramaPanel({ pid }: Props) {
   if (meta.approved_chapters.length === 0) {
     return (
       <EmptyState>
-        还没有已定稿章节——漫剧工坊改编的是小说成稿。先去写作区定稿几章,再回来把故事变成漫剧。
+        <b>漫剧工坊还开不了工:一章都还没定稿。</b>
+        <div className="mt-2">
+          这里改编的是小说<b>成稿</b>——先去<b>写作区</b>生成章节并点「定稿」,有一章就能开工。
+          定稿后回来照着 ①→⑤ 走:定画风 → 出角色卡 → 切集 → 单集(剧本/分镜/提示词/成片包)→ 预告片,
+          最后导出一份能直接照着出图、配音、剪辑的拍摄手册。
+        </div>
       </EmptyState>
     );
   }
 
-  // 管线步骤状态(步骤条 + 各区小标)
+  // 管线步骤状态(步骤条 + 各区小标);第一个未完成的就是「现在做这步」
+  const selected = episodes.find((e) => e.id === selectedId) ?? null;
   const steps = [
-    { key: "style", label: "风格卡", done: !!style?.style_cn },
-    { key: "assets", label: "角色/场景卡", done: cards.length > 0 },
-    { key: "plan", label: "切集", done: episodes.length > 0 },
-    { key: "episode", label: "单集流水线", done: episodes.some((e) => e.status === "ready") },
-    { key: "trailer", label: "预告片", done: !!trailer },
+    { key: "style", label: "风格卡", done: !!style?.style_cn,
+      todo: "定全片画风:选个方向,点「AI 定美术风格」。" },
+    { key: "assets", label: "角色/场景卡", done: cards.length > 0,
+      todo: "出角色的锁定外貌段:点「AI 生成资产卡」,人物才不会换脸。" },
+    { key: "plan", label: "切集", done: episodes.length > 0,
+      todo: "选章节范围,点「切集」——把小说切成一集集短剧。" },
+    { key: "episode", label: "单集流水线", done: episodes.some((e) => e.status === "ready"),
+      todo: episodes.length === 0
+        ? "先切集,再做单集。"
+        : selected === null
+          ? "在下面的集列表里点任意一集展开,再走 ④-1 → ④-4。"
+          : nextEpisodeTodo(selected) },
+    { key: "trailer", label: "预告片", done: !!trailer,
+      todo: "可选:从各集高能素材混剪一条宣传片。" },
   ];
+  const current = steps.find((s) => !s.done) ?? null;
+
+  function jump(key: string) {
+    document.getElementById(`drama-step-${key}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   return (
     <div className="drama-workbench">
-      {/* 管线步骤条:点按即滚动到对应区 */}
+      <DramaGuide />
+
+      {/* 管线步骤条:✓ 已完成 / ▸ 现在做这步 / 序号 未开始;点按滚动到对应区 */}
       <div className="chips drama-steps" role="tablist">
         {steps.map((s, i) => (
-          <button key={s.key} type="button" className="chip"
-            onClick={() => document.getElementById(`drama-step-${s.key}`)
-              ?.scrollIntoView({ behavior: "smooth", block: "start" })}>
-            {s.done ? "✓ " : `${i + 1} `}{s.label}
+          <button key={s.key} type="button"
+            className={"chip" + (s.done ? " done" : "") + (current?.key === s.key ? " on" : "")}
+            aria-current={current?.key === s.key}
+            onClick={() => jump(s.key)}>
+            {s.done ? "✓ " : current?.key === s.key ? "▸ " : `${i + 1} `}{s.label}
           </button>
         ))}
       </div>
+      {current ? (
+        <p className="hint drama-next">
+          <b>现在做这步:{current.label}</b> —— {current.todo}
+          <button type="button" className="btn-sm" onClick={() => jump(current.key)}>去这一步</button>
+        </p>
+      ) : (
+        <p className="hint drama-next">
+          五步都走完了 👏 导出拍摄手册,照下面的「出片指引」去出图/配音/剪辑;
+          想做下一批章节就回 ③ 换个章节范围再切集。
+        </p>
+      )}
 
       <div className="drama-cols">
         {/* 资产侧栏:桌面常驻左侧(sticky),移动端随流单列 */}
@@ -134,16 +180,30 @@ export default function DramaPanel({ pid }: Props) {
               onSelect={setSelectedId} />
           </div>
           <div id="drama-step-episode">
-            {selectedId !== null && (
+            {selectedId !== null ? (
               <EpisodeDetail pid={pid} eid={selectedId}
+                hasStyle={!!style?.style_cn}
                 onEpisodesChanged={setEpisodes}
                 onDeselect={() => setSelectedId(null)} />
+            ) : episodes.length > 0 && (
+              <div className="card drama-pick-hint">
+                <h3>④ 单集流水线 <span className="muted">先选一集</span></h3>
+                <p className="card-desc">
+                  ↑ 在上面的集列表里<b>点任意一集</b>,这里就会展开那一集的流水线:
+                  ④-1 写剧本 → ④-2 拆分镜 → ④-3 出提示词 → ④-4 出成片包 → 导出手册。
+                  建议从第 1 集开始,一集走通了再批量做后面的。
+                </p>
+                <button className="primary" onClick={() => setSelectedId(episodes[0].id)}>
+                  从第 {episodes[0].ep_index} 集开始
+                </button>
+              </div>
             )}
           </div>
           <div id="drama-step-trailer">
             <TrailerSection pid={pid} episodes={episodes}
               trailer={trailer} onGenerated={setTrailer} />
           </div>
+          <DramaProductionGuide />
         </div>
       </div>
     </div>
@@ -403,6 +463,12 @@ function StyleSection({ pid, style, directions, onSaved }: {
         ))}
       </div>
       {dirInfo?.tip && <p className="hint drama-warn-tip">⚠ {dirInfo.tip}</p>}
+      {!style && !busy && (
+        <p className="hint drama-next">
+          <b>第一步就在这儿:</b>拿不定方向就先点「AI 荐方向」看它怎么说,
+          定好后点「AI 定美术风格」——没有这张卡,后面的「出提示词」会被拦下。
+        </p>
+      )}
 
       {busy && <Banner stage={stage} text="AI 正在定全片美术风格…" />}
       {err && <div className="msg-err">{err}</div>}
@@ -644,13 +710,19 @@ function PlanSection({ pid, approved, episodes, onChanged, selectedId, onSelect 
       </div>
       {busy && <Banner stage={stage} text="AI 正在切集(钩子/卡点)…" />}
       {err && <div className="msg-err">{err}</div>}
+      {episodes.length > 0 && (
+        <p className="hint">
+          点一行展开那一集的流水线(剧本/分镜/提示词/成片包),再点一下收起。
+          {selectedId === null && " ↓ 现在选一集吧。"}
+        </p>
+      )}
       {episodes.map((ep) => (
         <div key={ep.id}
           className={"sub-summary ep-row" + (selectedId === ep.id ? " ep-on" : "")}
           onClick={() => onSelect(ep.id === selectedId ? null : ep.id)}>
           <div className="card-head mb-2">
             <b>第 {ep.ep_index} 集《{ep.title}》</b>
-            <span className="badge">源:第{ep.source_chapter}章</span>
+            <span className="badge">源:{ep.source_label || `第${ep.source_chapter}章`}</span>
             <span className="badge">{ep.mode === "narration" ? "口播" : "对白"}</span>
             <span className="badge">{DRAMA_STATUS_CN[ep.status] ?? ep.status}</span>
             <span className="grow" />
@@ -665,8 +737,8 @@ function PlanSection({ pid, approved, episodes, onChanged, selectedId, onSelect 
 }
 
 // ================= 单集详情:剧本 → 分镜 → 提示词 → 导出 =================
-function EpisodeDetail({ pid, eid, onEpisodesChanged, onDeselect }: {
-  pid: number; eid: number;
+function EpisodeDetail({ pid, eid, hasStyle, onEpisodesChanged, onDeselect }: {
+  pid: number; eid: number; hasStyle: boolean;
   onEpisodesChanged: (eps: DramaEpisode[]) => void;
   onDeselect: () => void;
 }) {
@@ -677,6 +749,8 @@ function EpisodeDetail({ pid, eid, onEpisodesChanged, onDeselect }: {
   const [busy, setBusy] = useState(""); // script | board | prompts | pack | ""
   const [stage, setStage] = useState("");
   const [err, setErr] = useState("");
+  // 拆分镜的如实交代(被截断 / 总时长短于目标),留在页面上直到下次重拆
+  const [boardNotice, setBoardNotice] = useState("");
 
   const reload = useCallback(async () => {
     try {
@@ -699,7 +773,8 @@ function EpisodeDetail({ pid, eid, onEpisodesChanged, onDeselect }: {
   async function act(kind: "script" | "board" | "prompts" | "pack", start: () => Promise<{ job_id: string }>, okTitle: string) {
     setBusy(kind); setErr(""); setStage("");
     try {
-      await run(start, { kind: `drama-${kind}-${eid}`, onStage: setStage });
+      const r = await run<unknown>(start, { kind: `drama-${kind}-${eid}`, onStage: setStage });
+      if (kind === "board") setBoardNotice((r as DramaBoardResult | null)?.notice || "");
       await reload();
       await refreshList();
       toast.ok(okTitle);
@@ -713,11 +788,16 @@ function EpisodeDetail({ pid, eid, onEpisodesChanged, onDeselect }: {
 
   if (episode === null && !err) return <p className="muted">加载中…</p>;
 
+  const hasScript = !!episode?.script?.lines?.length;
+  const sourceLabel = episode?.source_label || `第 ${episode?.source_chapter} 章`;
+  const boardTotalS = shots.reduce((s, x) => s + x.duration_s, 0);
+
   return (
     <div className="card">
       <div className="card-head">
         <h3 className="grow">
           ④ 第 {episode?.ep_index} 集《{episode?.title}》
+          <span className="badge">源:{sourceLabel}</span>
           <span className="badge">{episode ? (DRAMA_STATUS_CN[episode.status] ?? episode.status) : ""}</span>
         </h3>
         <button className="btn-sm" onClick={onDeselect}>收起</button>
@@ -726,18 +806,22 @@ function EpisodeDetail({ pid, eid, onEpisodesChanged, onDeselect }: {
 
       <div className="card-head mb-2 ep-actions">
         <button className="primary" disabled={!!busy}
+          title={`按钩子/卡点把${sourceLabel}的正文写成台词稿`}
           onClick={() => act("script", () => dramaApi.writeScript(pid, eid), "剧本已生成")}>
-          {episode?.script?.lines?.length ? "重写剧本" : "④-1 写剧本"}
+          {hasScript ? "重写剧本" : "④-1 写剧本"}
         </button>
-        <button className="primary" disabled={!!busy || !episode?.script?.lines?.length}
+        <button className="primary" disabled={!!busy || !hasScript}
+          title={hasScript ? "把台词摊成一格格可画的画面(会覆盖旧分镜)" : "先写剧本"}
           onClick={() => act("board", () => dramaApi.storyboard(pid, eid), "分镜已生成(旧分镜已覆盖)")}>
           {shots.length ? "重新拆分镜" : "④-2 拆分镜"}
         </button>
         <button className="primary" disabled={!!busy || shots.length === 0}
+          title={shots.length ? "给每格出中文/英文/负面三轨绘图提示词" : "先拆分镜"}
           onClick={() => act("prompts", () => dramaApi.prompts(pid, eid), "三轨提示词已生成")}>
           ④-3 出提示词
         </button>
         <button className="primary" disabled={!!busy || shots.length === 0}
+          title={shots.length ? "出配音稿 + 剪辑清单(剪映照着走)" : "先拆分镜"}
           onClick={() => act("pack", () => dramaApi.buildPack(pid, eid), "成片包已生成(配音稿 + 剪辑清单)")}>
           {pack ? "重建成片包" : "④-4 出成片包"}
         </button>
@@ -748,7 +832,13 @@ function EpisodeDetail({ pid, eid, onEpisodesChanged, onDeselect }: {
         <button className="btn-sm" disabled={!shots.length} onClick={() => exp("csv")}>CSV</button>
         <button className="btn-sm" disabled={!shots.length} onClick={() => exp("json")}>JSON</button>
       </div>
+      {/* 现在该点哪个 / 为什么点不动:按状态只说一句 */}
+      {!busy && <p className="hint drama-next">{episode ? nextEpisodeTodo(episode) : ""}
+        {!hasScript && <> 剧本取的是<b>{sourceLabel}</b>的正文,那几章没定稿就会报错。</>}
+        {shots.length > 0 && !hasStyle && <> ⚠ 还没定美术风格卡,「出提示词」会被拦下——先回 ① 定画风。</>}
+      </p>}
       {busy && <Banner stage={stage} text="AI 正在处理…" />}
+      {boardNotice && !busy && <div className="notice notice-warn">分镜说明:{boardNotice}</div>}
 
       {/* 剧本 */}
       {episode?.script?.lines?.length ? (
@@ -769,7 +859,14 @@ function EpisodeDetail({ pid, eid, onEpisodesChanged, onDeselect }: {
       {/* 分镜表 */}
       {shots.length > 0 && (
         <>
-          <div className="card-head mb-2"><b>分镜表({shots.length} 格 · 约 {shots.reduce((s, x) => s + x.duration_s, 0)} 秒)</b></div>
+          <div className="card-head mb-2">
+            <b>分镜表({shots.length} 格 · 约 {boardTotalS} 秒)</b>
+            <span className="muted">
+              目标 {episode?.duration_target_s}s
+              {episode && boardTotalS < episode.duration_target_s * 0.8
+                ? " · 偏短,可重拆或手动加时长" : ""}
+            </span>
+          </div>
           <div className="tbl-wrap">
             <table className="tbl">
               <thead>
@@ -798,11 +895,13 @@ function EpisodeDetail({ pid, eid, onEpisodesChanged, onDeselect }: {
       {shots.some((s) => s.prompt_cn || s.prompt_en) && (
         <>
           <div className="card-head mb-2"><b>三轨提示词(即拿即用)</b>
-            <span className="muted">画风锚/角色锚已注入,可在框里继续微调</span></div>
+            <span className="muted">
+              画风锚/角色锚已注入。复制中文提示词去即梦/可灵出图;某一格不满意就点「重出这格」
+            </span></div>
           {shots.filter((s) => s.prompt_cn || s.prompt_en).map((s) => (
             <PromptRow key={s.id} pid={pid} shot={s} onSaved={(ns) => {
               setShots(shots.map((x) => (x.id === ns.id ? ns : x)));
-            }} />
+            }} onRegenerated={() => { void reload(); void refreshList(); }} />
           ))}
         </>
       )}
@@ -879,11 +978,17 @@ function EpisodeDetail({ pid, eid, onEpisodesChanged, onDeselect }: {
   );
 }
 
-function PromptRow({ pid, shot, onSaved }: {
-  pid: number; shot: DramaShot; onSaved: (s: DramaShot) => void;
+function PromptRow({ pid, shot, onSaved, onRegenerated }: {
+  pid: number; shot: DramaShot;
+  onSaved: (s: DramaShot) => void;
+  onRegenerated: () => void;
 }) {
+  const { run } = useJob();
   const [draft, setDraft] = useState(shot);
   const [dirty, setDirty] = useState(false);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => { setDraft(shot); setDirty(false); }, [shot]);
 
@@ -896,13 +1001,48 @@ function PromptRow({ pid, shot, onSaved }: {
     } catch (e) { toast.err("保存失败", errMsg(e)); }
   }
 
+  /** 只重出这一格:整集重跑慢,还会盖掉别的格手改过的提示词。 */
+  async function regen() {
+    setBusy(true);
+    try {
+      const r = await run<{ shot: DramaShot }>(
+        () => dramaApi.regenShotPrompt(pid, shot.id, note),
+        { kind: `drama-shot-${shot.id}` },
+      );
+      if (r?.shot) {
+        onSaved(r.shot);
+        setNoteOpen(false);
+        setNote("");
+        onRegenerated();
+        toast.ok(`镜头 ${shot.seq} 已重出`, note ? "已按你的额外要求重写" : "画风锚/角色锚照旧注入");
+      }
+    } catch (e) { toast.err("重出失败", errMsg(e)); } finally { setBusy(false); }
+  }
+
   return (
     <div className="sub-summary">
       <div className="card-head mb-2">
         <b>镜头 {draft.seq}({draft.shot_type}/{draft.camera}/{draft.duration_s}s)</b>
         <span className="grow" />
         {dirty && <button className="btn-sm primary" onClick={save}>保存</button>}
+        <button className="btn-sm" disabled={busy}
+          title="只重生成这一格的提示词,别的格不动"
+          onClick={() => (noteOpen ? void regen() : setNoteOpen(true))}>
+          {busy ? "重出中…" : noteOpen ? "开始重出" : "重出这格"}
+        </button>
+        {noteOpen && !busy && (
+          <button className="btn-sm" onClick={() => { setNoteOpen(false); setNote(""); }}>取消</button>
+        )}
       </div>
+      {noteOpen && (
+        <div className="media-field">
+          <div className="card-head mb-2">
+            <span className="muted">这一格想怎么改?(可留空直接重出)</span>
+          </div>
+          <input value={note} disabled={busy} placeholder="例:改成仰角、雨天、刀锋上有血线"
+            onChange={(e) => setNote(e.target.value)} />
+        </div>
+      )}
       <div className="media-field">
         <div className="card-head mb-2"><span className="muted">中文提示词(即梦/可灵)</span><CopyBtn text={draft.prompt_cn} /></div>
         <textarea rows={4} value={draft.prompt_cn}

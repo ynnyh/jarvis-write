@@ -18,7 +18,7 @@ from app.db.models import (
     DramaStyleCard,
     Project,
 )
-from app.engines.drama.common import MODE_DESC
+from app.engines.drama.common import MODE_DESC, source_chapter_label
 
 _STATUS_CN = {
     "planned": "已规划",
@@ -55,7 +55,7 @@ def export_markdown(
     L.append("")
     L.append(
         f"- 模式:{MODE_DESC.get(episode.mode, episode.mode)} | 目标时长:{episode.duration_target_s} 秒"
-        f" | 源章节:第 {episode.source_chapter} 章 | 状态:{_STATUS_CN.get(episode.status, episode.status)}"
+        f" | 源章节:{source_chapter_label(episode)} | 状态:{_STATUS_CN.get(episode.status, episode.status)}"
     )
     L.append(f"- 开场钩子:{episode.hook}")
     L.append(f"- 结尾卡点:{episode.cliffhanger}")

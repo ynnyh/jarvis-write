@@ -17,7 +17,11 @@ from .exporter import (
 )
 from .planner import DramaPlanError, plan_episodes
 from .production import DramaPackError, build_production_pack
-from .prompt_render import DramaPromptError, render_shot_prompts
+from .prompt_render import (
+    DramaPromptError,
+    render_shot_prompts,
+    render_single_shot_prompt,
+)
 from .script import DramaScriptError, write_episode_script
 from .storyboard import DramaStoryboardError, build_storyboard
 from .style import DramaStyleError, generate_style_card, recommend_directions
@@ -44,6 +48,7 @@ __all__ = [
     "write_episode_script",
     "build_storyboard",
     "render_shot_prompts",
+    "render_single_shot_prompt",
     "build_production_pack",
     "generate_trailer",
     "export_markdown",

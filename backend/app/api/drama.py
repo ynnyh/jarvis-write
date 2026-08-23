@@ -24,6 +24,7 @@ POST   /api/projects/{id}/drama/voice-cast/generate          声线选型卡(asy
 GET    /api/projects/{id}/drama/episodes/{eid}/pack          成片包(配音稿+剪辑清单)
 POST   /api/projects/{id}/drama/episodes/{eid}/pack          生成成片包(async)
 PATCH  /api/projects/{id}/drama/shots/{sid}               手动改分镜/提示词
+POST   /api/projects/{id}/drama/shots/{sid}/prompt        只重出这一格提示词(async)
 GET    /api/projects/{id}/drama/episodes/{eid}/export     导出 ?format=md|csv|json|pack|srt
 """
 from __future__ import annotations
@@ -65,6 +66,7 @@ from app.engines.drama import (
     plan_episodes,
     recommend_directions,
     render_shot_prompts,
+    render_single_shot_prompt,
     write_episode_script,
 )
 from app.engines.drama.common import (
@@ -140,6 +142,12 @@ class ShotIn(BaseModel):
     negative: str | None = None
 
 
+class ShotPromptIn(BaseModel):
+    """单格重出提示词:note 是用户对这一格的额外要求(可空)。"""
+
+    note: str = ""
+
+
 # =============== 工具 ===============
 
 def _get_episode(db: Session, project_id: int, episode_id: int) -> DramaEpisode:
@@ -151,6 +159,18 @@ def _get_episode(db: Session, project_id: int, episode_id: int) -> DramaEpisode:
     if ep is None:
         raise HTTPException(status_code=404, detail="这一集不存在。")
     return ep
+
+
+def _get_shot(db: Session, project_id: int, shot_id: int) -> DramaShot:
+    shot = (
+        db.query(DramaShot)
+        .join(DramaEpisode, DramaShot.episode_id == DramaEpisode.id)
+        .filter(DramaShot.id == shot_id, DramaEpisode.project_id == project_id)
+        .first()
+    )
+    if shot is None:
+        raise HTTPException(status_code=404, detail="分镜不存在。")
+    return shot
 
 
 def _existing_job(prefix: str, kind: str) -> dict | None:
@@ -528,14 +548,7 @@ async def get_pack(project_id: int, episode_id: int, db: Session = Depends(get_d
 
 @router.patch("/shots/{shot_id}")
 async def patch_shot(project_id: int, shot_id: int, body: ShotIn, db: Session = Depends(get_db)):
-    shot = (
-        db.query(DramaShot)
-        .join(DramaEpisode, DramaShot.episode_id == DramaEpisode.id)
-        .filter(DramaShot.id == shot_id, DramaEpisode.project_id == project_id)
-        .first()
-    )
-    if shot is None:
-        raise HTTPException(status_code=404, detail="分镜不存在。")
+    shot = _get_shot(db, project_id, shot_id)
     if body.scene_name is not None:
         shot.scene_name = clip(body.scene_name, 200)
     if body.characters is not None:
@@ -556,6 +569,37 @@ async def patch_shot(project_id: int, shot_id: int, body: ShotIn, db: Session = 
             setattr(shot, field, value)
     db.commit()
     return {"shot": shot_dict(shot)}
+
+
+@router.post("/shots/{shot_id}/prompt")
+async def regen_shot_prompt(
+    project_id: int,
+    shot_id: int,
+    body: ShotPromptIn | None = None,
+    db: Session = Depends(get_db),
+):
+    """只重出这一格的三轨提示词(其余格不动),note 是这一格的额外要求。
+
+    整集重跑几十格又慢又会覆盖已手改的格子,而「就这一格不满意」是最高频的场景。
+    """
+    shot = _get_shot(db, project_id, shot_id)
+    episode_id = shot.episode_id
+    note = clip(body.note if body else "", 300)
+    kind = f"drama-shot-{shot_id}"
+    if (existing := _episode_job(kind)):
+        return existing
+
+    async def work(progress):
+        from app.db.session import SessionLocal
+
+        with SessionLocal() as session:
+            proj, ep = _load_for_job(session, project_id, episode_id)
+            row = session.get(DramaShot, shot_id)
+            if row is None:
+                raise ValueError("这一格已不存在(可能重拆过分镜),任务取消。")
+            return await render_single_shot_prompt(session, proj, ep, row, note, progress)
+
+    return {"job_id": spawn_job(kind, work)}
 
 
 # =============== 预告片(项目级,一条,重建覆盖) ===============

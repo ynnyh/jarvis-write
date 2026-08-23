@@ -112,8 +112,13 @@ class DramaEpisode(Base, TimestampMixin):
     )
     ep_index: Mapped[int] = mapped_column(Integer)
     title: Mapped[str] = mapped_column(String(200), default="")
-    # 源章节号(存章号而非 chapter.id:章节重生成不换号,引用更稳)
+    # 主源章号(存章号而非 chapter.id:章节重生成不换号,引用更稳)。
+    # = source_chapters 的最小章号,重规划的范围替换与集排序都按它走。
     source_chapter: Mapped[int] = mapped_column(Integer, default=0)
+    # 源章号全集:一集可以由数章合并而来(EPISODE_PLAN_PROMPT 允许「过渡章数章并一集」),
+    # 写剧本时按这个列表逐章取正文——只认 source_chapter 会把并进来的章静默丢掉。
+    # 老库无此列时迁移回填 [source_chapter];读取一律走 common.episode_source_chapters。
+    source_chapters: Mapped[list[Any]] = mapped_column(JSON, default=list)
     # 前 3 秒钩子:第一画面/第一句话,刷到就停住的那种
     hook: Mapped[str] = mapped_column(Text, default="")
     # 本集梗概(50 字内,列表页速览)

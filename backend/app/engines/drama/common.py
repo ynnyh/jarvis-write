@@ -123,6 +123,57 @@ def chapter_final_text(db: Session, project_id: int, chapter_number: int) -> str
     return (row.final_content or row.draft_content or "").strip()
 
 
+# =============== 集的源章号(支持「数章并一集」) ===============
+
+def episode_source_chapters(ep: DramaEpisode) -> list[int]:
+    """集的源章号列表(升序去重)。
+
+    兼容老数据:source_chapters 为空时回落到单个 source_chapter——
+    迁移会回填,但 job 里现建的对象/测试直接构造的行可能只有单值。
+    """
+    out: list[int] = []
+    for raw in (ep.source_chapters or []):
+        n = coerce_int(raw, 0, lo=0)
+        if n > 0 and n not in out:
+            out.append(n)
+    if not out and ep.source_chapter:
+        out = [ep.source_chapter]
+    return sorted(out)
+
+
+def source_chapter_label(ep: DramaEpisode) -> str:
+    """源章号的人话标签:「第 3 章」/「第 3-5 章」(连续)/「第 3、7 章」(跳号)。"""
+    nums = episode_source_chapters(ep)
+    if not nums:
+        return "未指定源章"
+    if len(nums) == 1:
+        return f"第 {nums[0]} 章"
+    if nums[-1] - nums[0] == len(nums) - 1:
+        return f"第 {nums[0]}-{nums[-1]} 章"
+    return "第 " + "、".join(str(n) for n in nums) + " 章"
+
+
+def chapters_final_text(
+    db: Session, project_id: int, chapter_numbers: list[int], budget: int
+) -> tuple[str, list[int]]:
+    """多章正文拼接(带章号小标题),总量控制在 budget 字符内。
+
+    并集的每一章都要进剧本上下文——只喂主章会把并进来的章静默丢掉。
+    预算按章平分(至少 800 字/章,避免章多时每章都被砍成碎片);
+    返回 (拼接文本, 真的有正文的章号)。
+    """
+    got: list[int] = []
+    texts: list[str] = []
+    per = max(800, budget // max(1, len(chapter_numbers)))
+    for n in chapter_numbers:
+        body = chapter_final_text(db, project_id, n)
+        if not body:
+            continue
+        got.append(n)
+        texts.append(f"—— 第 {n} 章 ——\n{body[:per]}")
+    return "\n\n".join(texts)[:budget], got
+
+
 # =============== 行 → dict 序列化(API 响应/导出共用) ===============
 
 def style_card_dict(card: DramaStyleCard | None) -> dict | None:
@@ -170,6 +221,8 @@ def episode_dict(ep: DramaEpisode) -> dict:
         "ep_index": ep.ep_index,
         "title": ep.title,
         "source_chapter": ep.source_chapter,
+        "source_chapters": episode_source_chapters(ep),
+        "source_label": source_chapter_label(ep),
         "hook": ep.hook,
         "recap": ep.recap,
         "cliffhanger": ep.cliffhanger,
