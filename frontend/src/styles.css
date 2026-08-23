@@ -1892,8 +1892,13 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 @keyframes live-blink { 50% { opacity: 0; } }
 
 @media (max-width: 640px) {
-  /* 移动端贴底通栏,别遮住底部操作区太多 */
-  .live-dock { right: 8px; left: 8px; bottom: 8px; width: auto; }
+  /* 移动端贴底通栏。上抬 64px:底下是写作区的 .m-ai-bar(fixed,min-height 48px
+     + 8px 边距 + 安全区),直播窗 z-index 450 会把它整条压住,AI 就点不开了。 */
+  .live-dock {
+    right: 8px; left: 8px; width: auto;
+    bottom: calc(64px + constant(safe-area-inset-bottom));
+    bottom: calc(64px + env(safe-area-inset-bottom));
+  }
   .live-body { max-height: 28vh; }
 }
 

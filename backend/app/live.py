@@ -262,8 +262,10 @@ async def follow(
             return
         now = time.monotonic()
         if now - started > _FOLLOW_MAX_S:
-            logger.debug("直播订阅超时退出: job=%s", job_id)
-            yield ("done", {"status": "timeout", "stage": "", "error": None})
+            # 单条连接不长驻,但**不发 done**:任务可能还在跑(连写能跑几小时),
+            # 发 done 前端就当"结束了"永久停更。这里直接断,客户端按"流没 done
+            # 就断了"的常规路径带 cursor 重订,直播继续。
+            logger.debug("直播订阅到期,断开等客户端重订: job=%s", job_id)
             return
         if now - last_sent >= _HEARTBEAT_S:
             last_sent = now

@@ -257,6 +257,24 @@ def test_follow_relabels_mid_call_without_new_screen():
     assert tokens == "第一章 雪夜第二章 归人"          # 换标签不打断正文
 
 
+def test_follow_expiry_disconnects_without_done(monkeypatch):
+    """连接到期只断开、不发 done:任务还在跑(连写能跑几小时),
+    发 done 前端就当"结束了"永久停更,后半程一个字都看不到。"""
+
+    async def scenario():
+        monkeypatch.setattr(live, "_FOLLOW_MAX_S", 0.05)
+        job_id = jobs.create_job("live-longrun")     # 一直 running,不收尾
+        jobs.update_stage(job_id, "正在连写")
+        frames: list[tuple[str, dict]] = []
+        async for frame in live.follow(job_id):
+            frames.append(frame)
+        return job_id, frames
+
+    job_id, frames = asyncio.run(scenario())
+    assert [k for k, _ in frames] == ["step"]        # 只有首屏,没有 done
+    assert jobs.get_job(job_id)["status"] == "running"   # 任务确实还在跑
+
+
 def test_follow_on_unknown_job_ends_immediately():
     """没有这个任务(已被清理)→ 立刻 done,不让订阅者干等。"""
     frames = asyncio.run(_read_until_done("no-such-job"))

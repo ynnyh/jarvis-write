@@ -23,7 +23,7 @@ from app.engines.polish.ai_flavor import FlavorReport, ai_flavor_report
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import render_style_block, voice_block_of
 from app.engines.tendency.cards import render_cards_block
-from app.llm.base import LLMAdapter, LLMMessage
+from app.llm.base import LLMAdapter, LLMMessage, complete_text_with_budget
 from app.llm.router import Task, get_adapter_for
 from app.prompts.polish import (
     _DEAI_RULES,
@@ -503,16 +503,9 @@ async def discuss_fragment_stream(
 
 
 async def _discuss_complete(adapter: LLMAdapter, messages: list[LLMMessage]) -> str:
-    """多轮 complete 的薄封装:带空回复重试 + 用量记账(对齐 ask 的兜底)。"""
-    original_max = adapter.max_tokens
-    try:
-        for _ in range(3):
-            resp = await adapter.complete(messages)
-            adapter._record_usage(resp)
-            content = (resp.content or "").strip()
-            if content:
-                return content
-            adapter.max_tokens = min(adapter.max_tokens * 2, 32768)
-        raise RuntimeError("模型连续 3 次返回空回复")
-    finally:
-        adapter.max_tokens = original_max
+    """多轮 complete 的薄封装:空正文放大预算重试 + 用量记账。
+
+    别在这里自己写"空串就翻倍"的循环:complete() 遇空正文是抛 EmptyContentError,
+    统一交给 complete_text_with_budget 处理(见 llm/base.py)。
+    """
+    return await complete_text_with_budget(adapter, messages)

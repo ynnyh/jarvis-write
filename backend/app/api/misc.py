@@ -66,8 +66,10 @@ async def job_live(job_id: str, cursor: int = 0):
 
     一条端点覆盖全部后台任务(生成/摘要/一致性/定稿/翻新/漫剧…),因为增量是在
     LLM 适配器那唯一的出水口按 job_id 分流的(见 app/live.py)。
-    帧:step(换屏/初始快照)、token(增量)、reset(落后太多整屏重置)、
-    ping(心跳)、done(任务结束)。cursor 传上次收到的字数,断线重连可续。
+    帧:step(换屏/初始快照)、label(同一步里的进度计数,只换标签)、token(增量)、
+    reset(落后太多整屏重置)、ping(心跳)、done(任务结束)。
+    cursor 传上次收到的字数,断线重连可续;连接到期(1 小时)服务端会静默断开
+    而不发 done,客户端照常带 cursor 重订,跑几小时的任务也不会停更。
 
     归属校验在建流前做完:StreamingResponse 的生成器在响应返回后才跑,
     那时 current_user_id 这个 ContextVar 已不可靠。

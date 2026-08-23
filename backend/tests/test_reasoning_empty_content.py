@@ -279,6 +279,63 @@ def test_ask_returns_salvaged_reasoning():
     assert asyncio.run(a.ask("hi")) == "兜底正文"
 
 
+# ---------- 讨论类入口(自己拼 messages)也必须吃到放大预算 ----------
+
+def test_ask_messages_escalates_budget_for_multi_turn_callers():
+    """改稿/架构/润色讨论与灵感对话走的是 ask_messages,不能在第一次空正文就摔。
+
+    这条是回归护栏:complete() 改成"遇空正文抛 EmptyContentError"之后,那四处
+    薄封装里"等空串再翻倍"的老循环就永远等不到了——一次空正文直接摔给用户。
+    """
+    calls: list[int] = []
+
+    class _EmptyThenOk(OpenAICompatibleAdapter):
+        async def _complete_via_stream(self, messages):
+            calls.append(self.max_tokens)
+            if len(calls) == 1:
+                raise EmptyContentError(
+                    "思考吃满预算", budget_bound=True, diagnosis="finish_reason=length"
+                )
+            return LLMResponse(content="第二次给了正文", model="m", finish_reason="stop")
+
+    a = _EmptyThenOk(api_key="sk-x", model_name="reasoner", max_tokens=4096)
+    a.retry_base_delay = 0
+    assert asyncio.run(a.ask_messages(a.to_messages("接着上一轮聊"))) == "第二次给了正文"
+    assert calls == [4096, 8192]        # 第二次是放大后的预算
+    assert a.max_tokens == 4096         # 放大只在本次调用内生效
+
+
+def test_discussion_wrappers_delegate_to_shared_budget_helper():
+    """四处讨论入口都必须走共享的放大预算逻辑,而不是各写一份会失效的循环。
+
+    用鸭子类型假适配器(只有 complete/max_tokens)调用它们——线上那些入口也常被
+    这样替身测试,共享逻辑必须只依赖 complete()。
+    """
+    from app.api.inspire import _complete_text
+    from app.engines.pipeline.architecture import _arch_complete
+    from app.engines.pipeline.chapter import _revise_complete
+    from app.engines.polish.polisher import _discuss_complete
+
+    class _EmptyThenOk:
+        """第一次空正文(抛),第二次给正文——只有走共享逻辑才能拿到第二次。"""
+
+        def __init__(self):
+            self.max_tokens = 4096
+            self.budgets: list[int] = []
+
+        async def complete(self, messages):
+            self.budgets.append(self.max_tokens)
+            if len(self.budgets) == 1:
+                raise EmptyContentError("思考吃满预算", budget_bound=True)
+            return LLMResponse(content="第二次给了正文", model="m", finish_reason="stop")
+
+    for fn in (_complete_text, _arch_complete, _revise_complete, _discuss_complete):
+        spy = _EmptyThenOk()
+        assert asyncio.run(fn(spy, [])) == "第二次给了正文", fn.__name__
+        assert spy.budgets == [4096, 8192], fn.__name__   # 放大后重试
+        assert spy.max_tokens == 4096, fn.__name__        # 事后还原
+
+
 # ---------- 另两个协议:同一类坑 ----------
 
 def test_anthropic_thinking_only_response(monkeypatch):

@@ -508,48 +508,59 @@ class LLMAdapter(abc.ABC):
 
         推理类模型(DeepSeek-R 系/中转站转的思考模型)思考内容会吃掉 token
         上限,导致正文为空——空正文绝不能当结果返回污染下游,这里兜底。
-        安全过滤类的空正文(budget_bound=False)放大预算也没用,立即抛出。
-        每次成功调用自动记录 token 用量。
         """
-        messages = self.to_messages(prompt, system)
-        original_max = self.max_tokens
-        diag = ""
-        try:
-            for attempt in range(3):
-                try:
-                    resp = await self.complete(messages)
-                except EmptyContentError as exc:
-                    diag = exc.diagnosis or str(exc)
-                    logger.warning(
-                        "空正文(model=%s, 第 %d/3 次, max_tokens=%d): %s",
-                        self.model_name,
-                        attempt + 1,
-                        self.max_tokens,
-                        exc,
-                    )
-                    if not exc.budget_bound:
-                        raise
-                    self.max_tokens = min(self.max_tokens * 2, 32768)
-                    continue
-                self._record_usage(resp)
-                content = (resp.content or "").strip()
-                if content:
-                    return content
-                # 适配器没归因出来的空正文(理论上走不到,留作兜底)
-                diag = (
-                    f"finish_reason={resp.finish_reason or '未知'}, "
-                    f"输出 {resp.completion_tokens} tokens"
-                )
+        return await self.ask_messages(self.to_messages(prompt, system))
+
+    async def ask_messages(self, messages: list[LLMMessage]) -> str:
+        """多轮对话版的 ask(见模块级 `complete_text_with_budget`)。"""
+        return await complete_text_with_budget(self, messages)
+
+
+async def complete_text_with_budget(adapter, messages: list[LLMMessage]) -> str:
+    """调一次模型拿纯文本:空正文放大预算重试(最多 3 轮)+ 用量记账。
+
+    自己拼 messages 的入口(改稿讨论、架构讨论、润色讨论、灵感对话)都必须走这里,
+    不要裸调 `complete()`:complete() 遇空正文是**抛** EmptyContentError,裸调用会
+    在第一次空正文就把错误摔给用户,拿不到放大预算的第二、三次机会。
+    安全过滤类的空正文(budget_bound=False)放大预算也没用,立即抛出。
+
+    写成模块级函数而不是只挂在 LLMAdapter 上:调用方大量使用鸭子类型的假适配器
+    (测试里只实现 complete/ask),这里只依赖 `complete()` 与 `max_tokens`。
+    """
+    original_max = adapter.max_tokens
+    model = getattr(adapter, "model_name", "?")
+    diag = ""
+    try:
+        for attempt in range(3):
+            try:
+                resp = await adapter.complete(messages)
+            except EmptyContentError as exc:
+                diag = exc.diagnosis or str(exc)
                 logger.warning(
-                    "空正文(model=%s, 第 %d/3 次): %s", self.model_name, attempt + 1, diag
+                    "空正文(model=%s, 第 %d/3 次, max_tokens=%d): %s",
+                    model, attempt + 1, adapter.max_tokens, exc,
                 )
-                self.max_tokens = min(self.max_tokens * 2, 32768)
-            raise UpstreamError(
-                f"模型连续 3 次返回空正文(model={self.model_name},输出预算已放大到 "
-                f"{self.max_tokens})。诊断: {diag or '无'}。"
-                "最常见原因是推理模型的思考吃满了输出预算:换一个非推理模型/"
-                "思考更省的模型,或到「模型设置」把该配置的 max_tokens 调大",
-                retryable=False,
+                if not exc.budget_bound:
+                    raise
+                adapter.max_tokens = min(adapter.max_tokens * 2, 32768)
+                continue
+            LLMAdapter._record_usage(resp)
+            content = (resp.content or "").strip()
+            if content:
+                return content
+            # 适配器没归因出来的空正文(自定义/鸭子类型适配器可能走到)
+            diag = (
+                f"finish_reason={resp.finish_reason or '未知'}, "
+                f"输出 {resp.completion_tokens} tokens"
             )
-        finally:
-            self.max_tokens = original_max
+            logger.warning("空正文(model=%s, 第 %d/3 次): %s", model, attempt + 1, diag)
+            adapter.max_tokens = min(adapter.max_tokens * 2, 32768)
+        raise UpstreamError(
+            f"模型连续 3 次返回空正文(model={model},输出预算已放大到 "
+            f"{adapter.max_tokens})。诊断: {diag or '无'}。"
+            "最常见原因是推理模型的思考吃满了输出预算:换一个非推理模型/"
+            "思考更省的模型,或到「模型设置」把该配置的 max_tokens 调大",
+            retryable=False,
+        )
+    finally:
+        adapter.max_tokens = original_max
