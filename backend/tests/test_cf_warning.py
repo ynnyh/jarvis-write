@@ -110,3 +110,41 @@ def test_non_cf_channel_unchanged(client, monkeypatch):
     assert body["ok"] is True
     assert adapter.calls == 1
     assert body["warnings"] == []
+
+
+def test_empty_content_is_connected_with_warning(client, monkeypatch):
+    """推理模型测试时只顾思考、不吐正文:链路是通的 → ok=True + 原因挂 warning。
+
+    否则会出现"测试连接失败"的假警报——真正的问题是输出预算,不是连通性。
+    """
+    from app.llm.base import EmptyContentError
+
+    headers, cid = _save_provider(client, "empty_content_user")
+    adapter = _FakeAdapter([
+        EmptyContentError("思考吃满预算", budget_bound=True, diagnosis="finish_reason=length")
+    ])
+    monkeypatch.setattr("app.api.settings.create_llm_adapter", lambda **kw: adapter)
+    monkeypatch.setattr("app.api.settings.is_cloudflare_hosted", lambda url: False)
+
+    body = _test(client, headers, cid).json()
+    assert body["ok"] is True
+    assert body["error"] == ""
+    assert any("连接本身正常" in w and "思考吃满预算" in w for w in body["warnings"])
+
+
+def test_empty_content_not_counted_as_flaky_link(client, monkeypatch):
+    """CF 渠道的稳定性快测:空正文不算链路失败,不误报"链路不稳"。"""
+    from app.llm.base import EmptyContentError
+
+    headers, cid = _save_provider(client, "empty_flaky_user")
+    adapter = _FakeAdapter([
+        "连接成功",
+        EmptyContentError("空", budget_bound=True),
+        EmptyContentError("空", budget_bound=True),
+    ])
+    monkeypatch.setattr("app.api.settings.create_llm_adapter", lambda **kw: adapter)
+    monkeypatch.setattr("app.api.settings.is_cloudflare_hosted", lambda url: True)
+
+    body = _test(client, headers, cid).json()
+    assert body["ok"] is True
+    assert not any("稳定性探测" in w for w in body["warnings"])
