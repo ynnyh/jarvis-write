@@ -49,6 +49,8 @@ from app.api.drama import router as drama_router
 from app.api.system import router as system_router
 from app.api.tendency import router as tendency_router
 from app.api.writing_cards import router as writing_cards_router
+from app.api.drama import router as drama_router
+from app.api.promo import router as promo_router
 from app.config import get_settings
 from app.db.base import Base
 from app.db.session import engine
@@ -211,6 +213,7 @@ def create_app() -> FastAPI:
     app.include_router(submission_router)
     app.include_router(media_router)
     app.include_router(drama_router)
+    app.include_router(promo_router)
     app.include_router(misc_router)
 
     # 资源定位统一走 resource_path:源码环境相对 backend/,冻结(桌面版)相对

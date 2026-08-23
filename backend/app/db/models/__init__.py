@@ -36,6 +36,7 @@ from app.db.models.drama import (
     DramaProductionPack,
     DramaTrailer,
 )
+from app.db.models.promo import PromoPlan, PromoShot
 
 __all__ = [
     "User",
@@ -68,4 +69,6 @@ __all__ = [
     "DramaShot",
     "DramaProductionPack",
     "DramaTrailer",
+    "PromoPlan",
+    "PromoShot",
 ]

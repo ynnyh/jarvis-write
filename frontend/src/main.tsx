@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import ProjectsPage from "./pages/ProjectsPage";
 import ProjectPage from "./pages/ProjectPage";
+import PromoPage from "./pages/PromoPage";
 import OnboardingFlow from "./pages/OnboardingFlow";
 import AdminPage from "./pages/AdminPage";
 import HelpPage from "./pages/HelpPage";
@@ -33,6 +34,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="new/:id?/:step?" element={<OnboardingFlow />} />
             {/* 工作台步骤进 URL:/project/3/write;旧链接 /project/3 重定向由组件内处理 */}
             <Route path="project/:id/:step?" element={<ProjectPage />} />
+            {/* 宣传片工坊(独立于小说项目):/promo 列表,/promo/5 工作台 */}
+            <Route path="promo/:id?" element={<PromoPage />} />
             <Route path="admin" element={<AdminPage />} />
             <Route path="help" element={<HelpPage />} />
             <Route path="settings" element={<SettingsPage />} />

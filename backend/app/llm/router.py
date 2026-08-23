@@ -36,6 +36,14 @@ class Task(str, Enum):
     DRAMA_PROMPT = "drama_prompt"       # 漫剧分镜三轨提示词
     DRAMA_PACK = "drama_pack"           # 漫剧成片包(朗读润色/转场/配乐标注)
     DRAMA_TRAILER = "drama_trailer"     # 漫剧预告片(高能混剪)
+    PROMO_CHAT = "promo_chat"           # 宣传片研讨对话(多轮流式)
+    PROMO_BRIEF = "promo_brief"         # 宣传片简报收敛
+    PROMO_ASSET = "promo_asset"         # 宣传片风格卡/地标卡
+    PROMO_SCRIPT = "promo_script"       # 宣传片解说词
+    PROMO_STORYBOARD = "promo_storyboard"  # 宣传片分镜
+    PROMO_PROMPT = "promo_prompt"       # 宣传片三轨提示词
+    PROMO_PACK = "promo_pack"           # 宣传片成片包标注
+    PROMO_CHUNKS = "promo_chunks"       # 宣传片生成切段(视频提示词)
 
 
 class Tier(str, Enum):
@@ -63,6 +71,15 @@ _TASK_TIER: dict[Task, Tier] = {
     Task.DRAMA_PROMPT: Tier.QUALITY,
     Task.DRAMA_PACK: Tier.QUALITY,
     Task.DRAMA_TRAILER: Tier.QUALITY,
+    # 宣传片管线:研讨/解说词要才气,简报/分镜/提示词求稳
+    Task.PROMO_CHAT: Tier.QUALITY,
+    Task.PROMO_BRIEF: Tier.QUALITY,
+    Task.PROMO_ASSET: Tier.QUALITY,
+    Task.PROMO_SCRIPT: Tier.QUALITY,
+    Task.PROMO_STORYBOARD: Tier.QUALITY,
+    Task.PROMO_PROMPT: Tier.QUALITY,
+    Task.PROMO_PACK: Tier.QUALITY,
+    Task.PROMO_CHUNKS: Tier.QUALITY,
 }
 
 # 任务 -> 采样温度。创作类任务要发散(高温),判断/抽取/压缩类要稳准(低温)。
@@ -87,6 +104,14 @@ _TASK_TEMPERATURE: dict[Task, float] = {
     Task.DRAMA_PROMPT: 0.4,    # 提示词翻译/锚段嵌入,求稳求准
     Task.DRAMA_PACK: 0.4,      # 成片包标注/朗读润色,忠实为先
     Task.DRAMA_TRAILER: 0.7,   # 预告片要钩子感,文案大胆些
+    Task.PROMO_CHAT: 0.8,      # 研讨要有真知灼见的语感
+    Task.PROMO_BRIEF: 0.5,     # 简报收敛,忠实共识
+    Task.PROMO_ASSET: 0.6,     # 资产卡稳定
+    Task.PROMO_SCRIPT: 0.8,    # 解说词要有文气
+    Task.PROMO_STORYBOARD: 0.5,
+    Task.PROMO_PROMPT: 0.4,    # 锚段嵌入求稳
+    Task.PROMO_PACK: 0.4,
+    Task.PROMO_CHUNKS: 0.5,    # 运动叙事要连贯
 }
 
 
@@ -107,6 +132,14 @@ _TASK_MAX_TOKENS: dict[Task, int] = {
     Task.DRAMA_ASSET: 5000,
     Task.DRAMA_PACK: 6000,
     Task.DRAMA_TRAILER: 8000,
+    Task.PROMO_CHAT: 4000,
+    Task.PROMO_BRIEF: 4000,
+    Task.PROMO_ASSET: 4000,
+    Task.PROMO_SCRIPT: 6000,
+    Task.PROMO_STORYBOARD: 8000,
+    Task.PROMO_PROMPT: 8000,
+    Task.PROMO_PACK: 6000,
+    Task.PROMO_CHUNKS: 6000,
 }
 
 

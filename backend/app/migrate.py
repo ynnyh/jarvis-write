@@ -548,6 +548,17 @@ def _add_drama_style_direction_column() -> None:
             logger.info("迁移:drama_style_cards 补 direction 列")
 
 
+def _add_promo_chunks_column() -> None:
+    """宣传片工坊:promo_plans 补 chunks 列(生成切段,幂等)。"""
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "promo_plans" not in insp.get_table_names():
+            return
+        if not _column_exists("promo_plans", "chunks"):
+            conn.execute(text("ALTER TABLE promo_plans ADD COLUMN chunks JSON"))
+            logger.info("迁移:promo_plans 补 chunks 列")
+
+
 def run_migrations() -> None:
     """启动时调用。幂等。"""
     _add_user_id_columns()
@@ -569,6 +580,7 @@ def run_migrations() -> None:
     _add_queue_require_approved_column()
     _add_drama_voice_columns()
     _add_drama_style_direction_column()
+    _add_promo_chunks_column()
     _disable_word_guard_default()
     _migrate_finalized_to_approved()
     # 先补加密老表存量明文 key,再拷到新表,保证 provider_configs 落库必为密文

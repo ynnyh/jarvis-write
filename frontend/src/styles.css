@@ -3064,3 +3064,16 @@ body:has(.write-zone.immersive) .step-guide { display: none; }
 .drama-warn-tip { color: var(--warn); font-size: var(--fs-xs); }
 .drama-compliance { border-top: 1px dashed var(--line); padding-top: 8px; margin-top: 10px; }
 .drama-compliance b { color: var(--warn); }
+
+/* ===== 宣传片工坊:研讨对话气泡 ===== */
+.promo-chat {
+  display: flex; flex-direction: column; gap: 10px;
+  max-height: 420px; overflow-y: auto; padding: 4px 2px;
+}
+.promo-bubble {
+  max-width: 88%; padding: 8px 12px; border-radius: 10px;
+  background: var(--surface-2); border: 1px solid var(--line);
+  font-size: var(--fs-sm); line-height: 1.7; white-space: pre-wrap;
+}
+.promo-bubble b { display: block; font-size: var(--fs-xs); color: var(--text-2); margin-bottom: 2px; }
+.promo-bubble.mine { align-self: flex-end; background: var(--brand-weak, var(--surface-2)); }
