@@ -6,6 +6,7 @@ import App from "./App";
 import ProjectsPage from "./pages/ProjectsPage";
 import ProjectPage from "./pages/ProjectPage";
 import PromoPage from "./pages/PromoPage";
+import ClipsPage from "./pages/ClipsPage";
 import OnboardingFlow from "./pages/OnboardingFlow";
 import AdminPage from "./pages/AdminPage";
 import HelpPage from "./pages/HelpPage";
@@ -36,6 +37,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="project/:id/:step?" element={<ProjectPage />} />
             {/* 宣传片工坊(独立于小说项目):/promo 列表,/promo/5 工作台 */}
             <Route path="promo/:id?" element={<PromoPage />} />
+            {/* 情绪短片(通用命题):/clips 列表,/clips/7 三选一工作台;小说衍生走项目内「投流」页签 */}
+            <Route path="clips/:id?" element={<ClipsPage />} />
             <Route path="admin" element={<AdminPage />} />
             <Route path="help" element={<HelpPage />} />
             <Route path="settings" element={<SettingsPage />} />

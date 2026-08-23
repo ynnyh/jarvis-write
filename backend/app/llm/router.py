@@ -44,6 +44,7 @@ class Task(str, Enum):
     PROMO_PROMPT = "promo_prompt"       # 宣传片三轨提示词
     PROMO_PACK = "promo_pack"           # 宣传片成片包标注
     PROMO_CHUNKS = "promo_chunks"       # 宣传片生成切段(视频提示词)
+    CLIPS_BATCH = "clips_batch"         # 情绪短片批产(三本子一次出)
 
 
 class Tier(str, Enum):
@@ -80,6 +81,7 @@ _TASK_TIER: dict[Task, Tier] = {
     Task.PROMO_PROMPT: Tier.QUALITY,
     Task.PROMO_PACK: Tier.QUALITY,
     Task.PROMO_CHUNKS: Tier.QUALITY,
+    Task.CLIPS_BATCH: Tier.QUALITY,
 }
 
 # 任务 -> 采样温度。创作类任务要发散(高温),判断/抽取/压缩类要稳准(低温)。
@@ -112,6 +114,7 @@ _TASK_TEMPERATURE: dict[Task, float] = {
     Task.PROMO_PROMPT: 0.4,    # 锚段嵌入求稳
     Task.PROMO_PACK: 0.4,
     Task.PROMO_CHUNKS: 0.5,    # 运动叙事要连贯
+    Task.CLIPS_BATCH: 0.85,   # 情绪短片要才气与钩子
 }
 
 
@@ -142,6 +145,7 @@ _TASK_MAX_TOKENS: dict[Task, int] = {
     Task.PROMO_PROMPT: 8000,
     Task.PROMO_PACK: 6000,
     Task.PROMO_CHUNKS: 6000,
+    Task.CLIPS_BATCH: 8000,
 }
 
 

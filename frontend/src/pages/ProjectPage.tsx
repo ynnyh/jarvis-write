@@ -23,6 +23,7 @@ import AuditPanel from "../panels/AuditPanel";
 import RefreshPanel from "../panels/RefreshPanel";
 import SubmissionPanel from "../panels/SubmissionPanel";
 import DramaPanel from "../panels/drama/DramaPanel";
+import { ClipsList } from "./ClipsPage";
 import ProjectSettingsPanel from "../panels/ProjectSettingsPanel";
 import ReadPanel from "../panels/ReadPanel";
 import BookReader from "../components/BookReader";
@@ -34,7 +35,7 @@ export type SetupStep = "inspire" | "arch" | "outline";
 // 面板内「去下一步」跳转目标:setup 子步或直接进写作区
 export type GotoTarget = SetupStep | "write";
 // book 区页签(?tab=)
-type BookTab = BoardTab | "publish" | "drama" | "audit" | "refresh";
+type BookTab = BoardTab | "publish" | "drama" | "clips" | "audit" | "refresh";
 
 const VALID_ZONES: Zone[] = ["setup", "write", "book", "settings", "read"];
 const SETUP_STEPS: { key: SetupStep; label: string }[] = [
@@ -49,6 +50,7 @@ const BOOK_TABS: { key: BookTab; label: string }[] = [
   { key: "foreshadow", label: "伏笔" },
   { key: "publish", label: "投稿" },
   { key: "drama", label: "漫剧" },
+  { key: "clips", label: "投流" },
   { key: "audit", label: "体检" },
   { key: "refresh", label: "翻新" },
 ];
@@ -453,6 +455,7 @@ export default function ProjectPage() {
             )}
             {bookTab === "publish" && <SubmissionPanel pid={pid} project={project} />}
             {bookTab === "drama" && <DramaPanel pid={pid} />}
+            {bookTab === "clips" && <ClipsList projectId={pid} />}
             {bookTab === "audit" && <AuditPanel pid={pid} project={project} />}
             {bookTab === "refresh" && <RefreshPanel pid={pid} />}
           </>
