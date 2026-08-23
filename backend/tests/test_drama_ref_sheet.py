@@ -66,6 +66,19 @@ class _JsonAdapter:
         return self._raw
 
 
+class _RawAdapter:
+    """按调用顺序吐预置原文的桩(用尽后重复最后一条),用来模拟截断/异形输出。"""
+
+    def __init__(self, *raws: str):
+        assert raws
+        self._raws = list(raws)
+        self.prompts: list[str] = []
+
+    async def ask(self, prompt, system=None):
+        self.prompts.append(prompt)
+        return self._raws.pop(0) if len(self._raws) > 1 else self._raws[0]
+
+
 def _png() -> bytes:
     """真的 1x1 PNG(不是随手拼的字节):既过文件头校验,也确实是张图。"""
     def chunk(tag: bytes, data: bytes) -> bytes:
@@ -116,6 +129,30 @@ def _seed_card(pid: int, with_style: bool = True) -> int:
         s.add(card)
         s.commit()
         return card.id
+
+
+def _seed_extra(pid: int, name: str, appearance: str = "二十岁,杏眼圆脸,月白襦裙") -> int:
+    """再种一张角色卡(appearance 传空串 = 没有锁定外貌段的卡)。"""
+    from app.db.models import DramaCharacterCard
+    from app.db.session import SessionLocal
+
+    with SessionLocal() as s:
+        card = DramaCharacterCard(project_id=pid, name=name, appearance_cn=appearance)
+        s.add(card)
+        s.commit()
+        return card.id
+
+
+def _card_of(pid: int, name: str):
+    from app.db.models import DramaCharacterCard
+    from app.db.session import SessionLocal
+
+    with SessionLocal() as s:
+        return (
+            s.query(DramaCharacterCard)
+            .filter(DramaCharacterCard.project_id == pid, DramaCharacterCard.name == name)
+            .one()
+        )
 
 
 _SHEET_REPLY = {
@@ -184,6 +221,147 @@ def test_ref_prompts_fill_missing_then_force(client):
         job = _wait_job(client, headers, r.json()["job_id"])
     assert job["status"] == "done" and job["result"]["generated"] == 1
     assert job["result"]["cards"][0]["ref_prompt_cn"] == "重出版本"
+
+
+# ---- 可靠性:模型输出被截断 / 名字异形 / 干脆没给,都不许走进死胡同 ----
+
+# 真实线上失败长这样:推理吃掉预算,JSON 停在半个字符串上(Unterminated string)
+_TRUNCATED = (
+    '{"sheets": [\n'
+    '  {"name": "沈砚", "ref_prompt_cn": "单人正面半身居中,纯色浅灰背景,柔和均匀光;'
+    '三十岁,剑眉薄唇,玄色劲装银线滚边;国风厚涂,黛青主色,侧逆光", '
+    '"ref_prompt_en": "character reference sheet, single person, front view"},\n'
+    '  {"name": "柳青", "ref_prompt_cn": "单人正面半身居中,纯色浅'
+)
+
+
+def test_ref_prompts_salvage_truncated_then_assemble(client):
+    """输出被截断:写完的那条照样收下,没写完的由引擎按锚段拼一条,不整批白跑。"""
+    headers = _auth(client, "ref_trunc")
+    pid = _project(client, headers, "截断漫剧书")
+    _seed_card(pid)
+    _seed_extra(pid, "柳青")
+
+    # 第二次调用(单条纠偏)也空手而归 → 逼出引擎兜底
+    adapter = _RawAdapter(_TRUNCATED, "")
+    with patch("app.engines.drama.characters.get_adapter_for", return_value=adapter):
+        r = client.post(f"/api/projects/{pid}/drama/characters/ref-prompts",
+                        headers=headers, json={})
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    assert job["result"] == {**job["result"], "generated": 1, "assembled": 1}
+
+    shen = _card_of(pid, "沈砚")
+    assert "剑眉薄唇" in shen.ref_prompt_cn and shen.ref_prompt_en          # 模型那条
+    liu = _card_of(pid, "柳青")
+    assert "杏眼圆脸" in liu.ref_prompt_cn                                  # 外貌锚
+    assert "国风厚涂" in liu.ref_prompt_cn                                  # 画风锚
+    assert "单人正面半身" in liu.ref_prompt_cn                              # 构图规范
+    assert liu.ref_prompt_en.startswith("character reference sheet")
+
+
+def test_ref_prompts_tolerates_odd_names_and_keys(client):
+    """名字带【】/(主角)、键名写成同义词、顶层是数组——一律照样落到卡上。"""
+    headers = _auth(client, "ref_odd")
+    pid = _project(client, headers, "异形漫剧书")
+    _seed_card(pid)
+    _seed_extra(pid, "柳青")
+
+    raw = json.dumps(
+        [
+            {"角色": "【沈砚】", "prompt_cn": "单人正面半身,沈砚,国风厚涂"},
+            {"name": "柳青(女主)", "中文": "单人正面半身,柳青,国风厚涂", "en": "liu qing ref"},
+        ],
+        ensure_ascii=False,
+    )
+    adapter = _RawAdapter(raw)
+    with patch("app.engines.drama.characters.get_adapter_for", return_value=adapter):
+        r = client.post(f"/api/projects/{pid}/drama/characters/ref-prompts",
+                        headers=headers, json={})
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    assert job["result"]["generated"] == 2 and job["result"]["assembled"] == 0
+    assert len(adapter.prompts) == 1  # 两位一批,没触发纠偏重问
+    assert "沈砚" in _card_of(pid, "沈砚").ref_prompt_cn
+    assert _card_of(pid, "柳青").ref_prompt_en == "liu qing ref"
+
+
+def test_ref_prompts_chunks_by_four(client):
+    """超过 4 位分批调用:一次要 8 条正是当初被截断的原因,现在每批最多 4 条。"""
+    headers = _auth(client, "ref_chunk")
+    pid = _project(client, headers, "分批漫剧书")
+    _seed_card(pid)
+    for n in ("柳青", "陆行舟", "苏窈", "裴九"):
+        _seed_extra(pid, n)
+
+    reply = {
+        "sheets": [
+            {"name": n, "ref_prompt_cn": f"单人正面半身,{n},国风厚涂", "ref_prompt_en": f"{n} ref"}
+            for n in ("沈砚", "柳青", "陆行舟", "苏窈", "裴九")
+        ]
+    }
+    adapter = _RawAdapter(json.dumps(reply, ensure_ascii=False))
+    with patch("app.engines.drama.characters.get_adapter_for", return_value=adapter):
+        r = client.post(f"/api/projects/{pid}/drama/characters/ref-prompts",
+                        headers=headers, json={})
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    assert job["result"]["generated"] == 5 and job["result"]["assembled"] == 0
+    assert len(adapter.prompts) == 2                      # 4 + 1
+    assert "共 4 位" in adapter.prompts[0]
+    assert "共 1 位" in adapter.prompts[1]
+    # 每批只带本批的卡:第一批不许出现第五位的名字(串批 = 又变成一次 8 条)
+    assert "裴九" not in adapter.prompts[0] and "裴九" in adapter.prompts[1]
+
+
+def test_ref_prompts_error_points_at_real_cause(client):
+    """一条也没成时报错要说清哪一环坏了,不再一律甩「角色名对不上」。"""
+    headers = _auth(client, "ref_why")
+    pid = _project(client, headers, "报错漫剧书")
+    _seed_card(pid, with_style=True)
+    # 没有锁定外貌段的卡:连兜底也拼不出来,报错要点名让用户先补外貌
+    _seed_extra(pid, "无名氏", appearance="")
+
+    adapter = _RawAdapter("")
+    with patch("app.engines.drama.characters.get_adapter_for", return_value=adapter):
+        r = client.post(f"/api/projects/{pid}/drama/characters/ref-prompts",
+                        headers=headers, json={"names": ["无名氏"]})
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "error", job
+    assert "锁定外貌" in job["error"] and "无名氏" in job["error"]
+
+    # 有外貌段但模型干脆没吐东西 → 引擎兜底顶上,不报错(按钮永不走进死胡同)
+    silent = _RawAdapter("")
+    with patch("app.engines.drama.characters.get_adapter_for", return_value=silent):
+        r = client.post(f"/api/projects/{pid}/drama/characters/ref-prompts",
+                        headers=headers, json={"names": ["沈砚"]})
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    assert job["result"]["assembled"] == 1 and job["result"]["generated"] == 0
+    assert len(silent.prompts) == 2  # 一批 + 一次单条纠偏重问,才认命兜底
+    assert "剑眉薄唇" in _card_of(pid, "沈砚").ref_prompt_cn
+
+
+def test_ref_prompts_single_card_takes_result_despite_wrong_name(client):
+    """只要一张卡时,名字写跑了也照样收下——一条对一卡不可能配错人。
+
+    (多条的情况刻意不按位置配:把甲的脸描述写到乙的卡上,用户看不出来,
+    却会毁掉整片的人物一致性,那种错宁可让引擎兜底。)
+    """
+    headers = _auth(client, "ref_single")
+    pid = _project(client, headers, "单卡漫剧书")
+    _seed_card(pid)
+
+    wrong = _RawAdapter(json.dumps(
+        {"sheets": [{"name": "路人甲", "ref_prompt_cn": "单人正面半身,玄色劲装,国风厚涂"}]},
+        ensure_ascii=False))
+    with patch("app.engines.drama.characters.get_adapter_for", return_value=wrong):
+        r = client.post(f"/api/projects/{pid}/drama/characters/ref-prompts",
+                        headers=headers, json={"names": ["沈砚"]})
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    assert job["result"]["generated"] == 1 and job["result"]["assembled"] == 0
+    assert _card_of(pid, "沈砚").ref_prompt_cn.endswith("国风厚涂")
 
 
 # =============== 上传 / 外链 / 删除 / 读取 ===============

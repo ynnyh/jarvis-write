@@ -279,6 +279,50 @@ def test_ask_returns_salvaged_reasoning():
     assert asyncio.run(a.ask("hi")) == "兜底正文"
 
 
+# ---------- 截断:正文不空但被 max_tokens 砍断,也要放大预算重试 ----------
+
+def test_ask_retries_when_content_is_truncated():
+    """半截正文不能当成功:放大预算重来,拿到完整的那次才返回。
+
+    只治"空正文"治不到这种——推理模型常常是吐了个开头就被砍断,半截 JSON
+    一路流到下游解析失败,还会被错怪成"模型返回的角色名对不上"。
+    """
+    budgets: list[int] = []
+
+    class _TruncThenOk(OpenAICompatibleAdapter):
+        async def _complete_via_stream(self, messages):
+            budgets.append(self.max_tokens)
+            if len(budgets) == 1:
+                return LLMResponse(
+                    content='{"sheets": [{"name": "沈砚", "ref_prompt_cn": "单人正',
+                    model="m", finish_reason="length", reasoning="想了很久",
+                )
+            return LLMResponse(content='{"sheets": []}', model="m", finish_reason="stop")
+
+    a = _TruncThenOk(api_key="sk-x", model_name="reasoner", max_tokens=4096)
+    a.retry_base_delay = 0
+    assert asyncio.run(a.ask("出定妆照")) == '{"sheets": []}'
+    assert budgets == [4096, 8192]
+    assert a.max_tokens == 4096  # 放大只在本次调用内生效
+
+
+def test_ask_returns_longest_truncated_as_last_resort():
+    """三轮全被截断:返回最长的那一次,由调用方去抢救,而不是整次调用白跑。"""
+    budgets: list[int] = []
+
+    class _AlwaysTrunc(OpenAICompatibleAdapter):
+        async def _complete_via_stream(self, messages):
+            budgets.append(self.max_tokens)
+            return LLMResponse(
+                content="半截" * len(budgets), model="m", finish_reason="max_tokens"
+            )
+
+    a = _AlwaysTrunc(api_key="sk-x", model_name="reasoner", max_tokens=4096)
+    a.retry_base_delay = 0
+    assert asyncio.run(a.ask("出定妆照")) == "半截半截半截"
+    assert budgets == [4096, 8192, 16384]
+
+
 # ---------- 讨论类入口(自己拼 messages)也必须吃到放大预算 ----------
 
 def test_ask_messages_escalates_budget_for_multi_turn_callers():

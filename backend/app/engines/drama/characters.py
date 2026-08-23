@@ -8,6 +8,8 @@
 """
 from __future__ import annotations
 
+import re
+
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -18,7 +20,7 @@ from app.db.models import (
     Outline,
     Project,
 )
-from app.engines.consistency.extractor import parse_llm_json
+from app.engines.consistency.extractor import parse_llm_json, salvage_json_objects
 from app.engines.drama.common import (
     character_card_dict,
     clip,
@@ -224,6 +226,141 @@ async def generate_assets(db: Session, project: Project, progress=lambda s: None
 
 # =============== 定妆照提示词(人物一致性:先出参考图) ===============
 
+# 每次 LLM 调用最多几条:每条 100-160 字中文 + 30-50 词英文,4 条约 1.2k 字。
+# 曾经一次要 8 条 → 推理模型思考吃掉大半预算,JSON 停在半个字符串上,整批全丢。
+# 宁可多调几次短的,也不赌一次长输出不被截断。
+_REF_CHUNK = 4
+# 名字对不上时,单条重问的上限(单条输出极短,几乎不可能再被截断)
+_REF_RETRY_CAP = 4
+
+# 名字归一:模型爱把 name 写成「【沈砚】」「沈砚(主角)」「沈 砚」
+_WRAPPER = re.compile(r"^[【\[「『（(<《\"'\s]+|[】\]」』）)>》\"'\s]+$")
+# 括号后缀(「沈砚(主角)」)。要求前面至少有一个字符,否则「(沈砚)」会被整段吃掉
+_PAREN_SUFFIX = re.compile(r"(?<=.)[(（][^)）]*[)）]\s*$")
+_FILLER = re.compile(r"[\s　·・.、,,:：\-—_]+")
+
+
+def _norm_name(raw: object) -> str:
+    """角色名归一,用于宽容匹配(只用来找卡,落库仍用卡上的原名)。"""
+    s = str(raw or "").strip()
+    s = _PAREN_SUFFIX.sub("", s).strip()
+    s = _WRAPPER.sub("", s).strip()
+    return _FILLER.sub("", s)
+
+
+def _pick(item: dict, *keys: str) -> str:
+    """按候选键顺序取第一个非空标量值(模型常把键名写成同义词)。"""
+    for k in keys:
+        v = item.get(k)
+        if isinstance(v, (str, int, float)) and str(v).strip():
+            return str(v).strip()
+    return ""
+
+
+def _sheet_items(raw: str) -> list[dict]:
+    """从模型输出里取出定妆照条目:正常 JSON → 顶层数组/截断抢救,逐层退。"""
+    data = parse_llm_json(raw)
+    items = data.get("sheets") if isinstance(data, dict) else None
+    if not isinstance(items, list) or not items:
+        items = salvage_json_objects(raw)
+    return [i for i in items if isinstance(i, dict)]
+
+
+def _assemble_ref_prompt(card: DramaCharacterCard, style) -> tuple[str, str]:
+    """引擎确定性拼一条定妆照提示词(模型失手时的兜底,与分镜锚段兜底同思路)。
+
+    定妆照提示词的成分本来就是死的——构图规范 + 这张卡的外貌锚 + 画风锚,
+    不需要创作。所以模型漏条/名字对不上时引擎自己拼一条同样能用的,
+    绝不让用户点了按钮只拿到一句「请重试」。
+    """
+    parts = [
+        "单人正面半身居中,纯色浅灰背景,柔和均匀光,无动作无表情表演,画面里不出现任何文字",
+        clip(card.appearance_cn, 400),
+        f"标志服饰:{clip(card.outfit_cn, 120)}" if card.outfit_cn else "",
+        clip(getattr(style, "style_cn", ""), 300),
+    ]
+    en_parts = [
+        "character reference sheet, single person, front view, upper body, "
+        "plain background, soft even lighting, no text",
+        clip(card.appearance_en, 300),
+        clip(getattr(style, "style_en", ""), 200),
+    ]
+    cn = ";".join(p for p in parts if p)
+    en = ", ".join(p for p in en_parts if p)
+    return cn[:800], en[:600]
+
+
+def _cards_block(cards: list[DramaCharacterCard]) -> str:
+    """本批角色的素材块。名字用 [] 包(与提示词里「照抄方括号里的名字」呼应),
+    不用【】——中文书名号更容易被模型连着抄进 name 字段。"""
+    return "\n".join(
+        f"{i}. [{c.name}] 锁定外貌:{clip(c.appearance_cn, 400)}"
+        + (f";英文:{clip(c.appearance_en, 300)}" if c.appearance_en else "")
+        + (f";标志服饰:{clip(c.outfit_cn, 120)}" if c.outfit_cn else "")
+        for i, c in enumerate(cards, 1)
+    )
+
+
+def _apply_sheet(card: DramaCharacterCard, item: dict) -> bool:
+    """把一条结果写进卡;中文轨为空视为没出(英文轨单独存在也没法当主提示词用)。"""
+    cn = clip(_pick(item, "ref_prompt_cn", "prompt_cn", "ref_prompt", "prompt", "cn", "中文"), 800)
+    if not cn:
+        return False
+    card.ref_prompt_cn = cn
+    card.ref_prompt_en = clip(
+        _pick(item, "ref_prompt_en", "prompt_en", "en", "英文"), 600
+    )
+    return True
+
+
+def _match_sheets(
+    items: list[dict], batch: list[DramaCharacterCard]
+) -> tuple[set[int], list[str]]:
+    """把模型返回的条目落到卡上,返回(已写入的卡 id 集合, 模型报出的名字列表)。
+
+    匹配顺序:原名逐字 → 归一后 → 唯一包含 → (只有一条且只要一张卡时)按位置。
+    位置匹配只在「一条对一卡」时才用:多条时若按位置乱配,会把甲的脸描述
+    写到乙的卡上——那种错用户看不出来,却会毁掉整片的人物一致性,
+    宁可让它落空、由引擎兜底拼一条正确的。
+    """
+    by_exact = {c.name: c for c in batch}
+    by_norm: dict[str, DramaCharacterCard] = {}
+    for c in batch:
+        key = _norm_name(c.name)
+        if key:
+            by_norm.setdefault(key, c)
+
+    done: set[int] = set()
+    reported: list[str] = []
+    for item in items:
+        raw_name = _pick(item, "name", "character", "role", "角色", "角色名", "姓名")
+        if raw_name:
+            reported.append(raw_name)
+        norm = _norm_name(raw_name)
+        card = by_exact.get(raw_name) or (by_norm.get(norm) if norm else None)
+        if card is None and norm:
+            hits = [c for k, c in by_norm.items() if k in norm or norm in k]
+            if len(hits) == 1:
+                card = hits[0]
+        if card is None and len(items) == 1 and len(batch) == 1:
+            card = batch[0]  # 一条对一卡:名字写跑了也不会配错人
+        if card is None or card.id in done:
+            continue
+        if _apply_sheet(card, item):
+            done.add(card.id)
+    return done, reported
+
+
+async def _ask_sheets(adapter, style, batch: list[DramaCharacterCard]) -> list[dict]:
+    prompt = REF_SHEET_PROMPT.format(
+        style_cn=style.style_cn,
+        style_en=style.style_en,
+        count=len(batch),
+        cards_block=_cards_block(batch),
+    )
+    return _sheet_items(await adapter.ask(prompt))
+
+
 async def generate_ref_sheets(
     db: Session,
     project: Project,
@@ -237,6 +374,11 @@ async def generate_ref_sheets(
 
     names 显式给了就强制重出那几张(单卡「重出」按钮);不给则只补缺
     (ref_prompt_cn 为空的卡),避免整批覆盖用户手改过的提示词。
+
+    可靠性(这个按钮以前会「经常失败」,根因是模型输出被截断):
+    每 4 张一批分开调用 → 条目宽容抽取(键名同义词/顶层数组/半截 JSON 抢救)
+    → 名字宽容匹配 → 仍缺的单条重问 → 最后由引擎确定性拼装兜底。
+    返回 cards / generated(模型出的条数)/ assembled(引擎兜底拼的条数)。
     """
     style = style_card(db, project.id)
     if style is None or not (style.style_cn or "").strip():
@@ -261,44 +403,75 @@ async def generate_ref_sheets(
         return {
             "cards": [character_card_dict(c, style) for c in cards],
             "generated": 0,
+            "assembled": 0,
         }
     targets = targets[:_MAX_REF_SHEETS]
 
-    cards_block = "\n".join(
-        f"【{c.name}】锁定外貌:{clip(c.appearance_cn, 400)}"
-        + (f";英文:{clip(c.appearance_en, 300)}" if c.appearance_en else "")
-        + (f";标志服饰:{clip(c.outfit_cn, 120)}" if c.outfit_cn else "")
-        for c in targets
-    )
-    progress(f"AI 正在写 {len(targets)} 张定妆照提示词…")
     adapter = get_adapter_for(Task.DRAMA_ASSET, timeout=300)
-    prompt = REF_SHEET_PROMPT.format(
-        style_cn=style.style_cn,
-        style_en=style.style_en,
-        cards_block=cards_block,
-    )
-    raw = await adapter.ask(prompt)
-    data = parse_llm_json(raw)
+    total = len(targets)
+    done: set[int] = set()
+    reported: list[str] = []
+    for start in range(0, total, _REF_CHUNK):
+        batch = targets[start : start + _REF_CHUNK]
+        progress(
+            f"AI 正在写定妆照提示词({start + 1}-{start + len(batch)}/{total} 位)…"
+        )
+        items = await _ask_sheets(adapter, style, batch)
+        got, said = _match_sheets(items, batch)
+        done |= got
+        reported.extend(said)
 
-    by_name = {c.name: c for c in targets}
-    generated = 0
-    for item in (data.get("sheets") or []):
-        if not isinstance(item, dict):
-            continue
-        card = by_name.get(clip(item.get("name"), 200))
-        if card is None:
-            continue  # LLM 自创角色不收
-        cn = clip(item.get("ref_prompt_cn"), 800)
-        if not cn:
-            continue
+    # 纠偏:仍缺的单条重问一次(单条输出极短,且「一条对一卡」时名字写跑也能落位)
+    missing = [c for c in targets if c.id not in done]
+    for card in missing[:_REF_RETRY_CAP]:
+        progress(f"「{card.name}」这条没对上,正在单独重问…")
+        items = await _ask_sheets(adapter, style, [card])
+        got, said = _match_sheets(items, [card])
+        done |= got
+        reported.extend(said)
+
+    # 兜底:模型三番四次没给的,引擎自己拼——成分是死的,不需要创作
+    assembled = 0
+    for card in targets:
+        if card.id in done or not (card.appearance_cn or card.appearance_en):
+            continue  # 连外貌锚都没有的卡拼不出东西,让它继续缺,由报错点名
+        cn, en = _assemble_ref_prompt(card, style)
         card.ref_prompt_cn = cn
-        card.ref_prompt_en = clip(item.get("ref_prompt_en"), 600)
-        generated += 1
-    if not generated:
-        raise DramaAssetError("这轮没出结果,请重试(模型返回的角色名对不上)。")
+        card.ref_prompt_en = en
+        assembled += 1
+        done.add(card.id)
+
+    if not done:
+        raise DramaAssetError(_ref_failure_hint(targets, reported))
 
     db.commit()
     return {
         "cards": [character_card_dict(c, style) for c in cards],
-        "generated": generated,
+        "generated": len(done) - assembled,
+        "assembled": assembled,
     }
+
+
+def _ref_failure_hint(targets: list[DramaCharacterCard], reported: list[str]) -> str:
+    """一条也没成时的报错:说清到底是哪一环坏了,不再一律甩「角色名对不上」。
+
+    以前无论截断、空返回、名字不符都报同一句「模型返回的角色名对不上」,
+    用户照着排查名字只会白费功夫——真正的原因多半是输出被截断。
+    """
+    who = "、".join(c.name for c in targets[:5])
+    lack = [c.name for c in targets if not (c.appearance_cn or c.appearance_en)]
+    if lack:
+        return (
+            f"这些角色卡还没有「锁定外貌」段,写不出定妆照:{'、'.join(lack[:5])}。"
+            "先点「生成资产卡」补齐外貌,再出定妆照。"
+        )
+    if not reported:
+        return (
+            f"模型这次没吐出可用的结果(要 {len(targets)} 位:{who}),"
+            "多半是输出被截断或渠道空转。已自动放大预算重试过,仍失败请重试一次;"
+            "反复如此就到「模型设置」把该配置的 max_tokens 调大,或换一个思考更省的模型。"
+        )
+    return (
+        f"模型返回的角色名对不上:它给的是「{'、'.join(reported[:5])}」,"
+        f"本书要的是「{who}」。请重试(或换个模型)。"
+    )

@@ -104,7 +104,9 @@ _TASK_MAX_TOKENS: dict[Task, int] = {
     Task.DRAMA_STORYBOARD: 8192,
     Task.DRAMA_PROMPT: 8192,
     Task.DRAMA_PLAN: 6000,
-    Task.DRAMA_ASSET: 5000,
+    # 资产卡(风格/角色/场景/定妆照)按批出,每条 100-160 字;推理模型的思考
+    # 还要再吃一大截,5000 实测会把定妆照 JSON 砍在半句话上(Unterminated string)
+    Task.DRAMA_ASSET: 8192,
     Task.DRAMA_PACK: 6000,
     Task.DRAMA_TRAILER: 8000,
 }

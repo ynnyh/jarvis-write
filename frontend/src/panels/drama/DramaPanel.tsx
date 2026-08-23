@@ -25,25 +25,10 @@ import { useJob } from "../../ui/useJob";
 import { toast } from "../../ui/Toaster";
 import { errMsg } from "../../pollJob";
 import EmptyState from "../../ui/EmptyState";
+import { CopyBtn, selectAll } from "../../ui/copy";
 import { DramaGuide, DramaProductionGuide } from "./DramaGuide";
 
 interface Props { pid: number }
-
-// 复制按钮(与 SubmissionPanel 同款;面板间不共享组件,各自内聚)
-function CopyBtn({ text, label = "复制" }: { text: string; label?: string }) {
-  const [done, setDone] = useState(false);
-  async function go() {
-    if (!text.trim()) { toast.err("内容为空", "没有可复制的内容"); return; }
-    try {
-      await navigator.clipboard.writeText(text);
-      setDone(true);
-      setTimeout(() => setDone(false), 1200);
-    } catch {
-      toast.err("复制失败", "请手动选中文本复制");
-    }
-  }
-  return <button className="btn-sm" onClick={go}>{done ? "✓ 已复制" : label}</button>;
-}
 
 // 记住用户上次选的生图站:换一格/刷新页面不用重选(全项目共用一个偏好)
 const PASTE_PLATFORM_KEY = "jarvis_drama_paste_platform";
@@ -80,11 +65,11 @@ function PasteBox({ paste, stale, rows = 5 }: {
         <CopyBtn text={v.main} label="复制整段" />
         {v.negative.trim() && <CopyBtn text={v.negative} label="复制负面词" />}
       </div>
-      <textarea rows={rows} readOnly value={v.main} />
+      <textarea rows={rows} readOnly value={v.main} onFocus={selectAll} />
       {v.negative.trim() && (
         <>
           <div className="card-head mb-2 mt-2"><span className="muted">负面词(粘到负面词框)</span></div>
-          <textarea rows={2} readOnly value={v.negative} />
+          <textarea rows={2} readOnly value={v.negative} onFocus={selectAll} />
         </>
       )}
       <p className="hint">{v.hint}</p>
@@ -422,11 +407,11 @@ function TrailerSection({ pid, episodes, trailer, onGenerated }: {
               </div>
               <div className="media-field">
                 <div className="card-head mb-2"><span className="muted">中文提示词(即梦/可灵)</span><CopyBtn text={s.prompt_cn} /></div>
-                <textarea rows={3} readOnly value={s.prompt_cn} />
+                <textarea rows={3} readOnly value={s.prompt_cn} onFocus={selectAll} />
               </div>
               <div className="media-field">
                 <div className="card-head mb-2"><span className="muted">英文提示词(Midjourney)</span><CopyBtn text={s.prompt_en} /></div>
-                <textarea rows={2} readOnly value={s.prompt_en} />
+                <textarea rows={2} readOnly value={s.prompt_en} onFocus={selectAll} />
               </div>
             </div>
           ))}
@@ -620,16 +605,21 @@ function AssetsSection({ pid, cards, scenes, onChanged }: {
   async function refPrompts() {
     setBusy(true); setErr(""); setStage("");
     try {
-      const r = await run<{ cards: DramaCharacterCard[]; generated: number }>(
+      const r = await run<{ cards: DramaCharacterCard[]; generated: number; assembled?: number }>(
         () => dramaApi.genRefPrompts(pid),
         { kind: `drama-refsheet-${pid}-all`, onStage: setStage },
       );
       if (r) {
         onChanged(r.cards, scenes);
+        // assembled = 模型没给、由引擎按「构图+外貌锚+画风锚」确定性拼的条数。
+        // 如实说出来:它照样能用,但用户有权知道哪几条不是 AI 写的、想重出可以重出。
+        const made = r.generated + (r.assembled || 0);
         toast.ok(
-          r.generated ? `${r.generated} 张定妆照提示词已就绪` : "都已经有了",
-          r.generated
-            ? "拿去生图站先出参考图,再上传回来"
+          made ? `${made} 张定妆照提示词已就绪` : "都已经有了",
+          made
+            ? (r.assembled
+                ? `其中 ${r.assembled} 张由引擎按外貌锚+画风锚拼好(模型这次没给),照样能用;想换写法点那张卡的「重出提示词」`
+                : "拿去生图站先出参考图,再上传回来")
             : "想重写某一张,点那张卡上的「重出提示词」",
         );
       }
@@ -705,12 +695,18 @@ function CharCardRow({ pid, card, onSaved }: {
   async function regenRef() {
     setRefBusy(true);
     try {
-      const r = await run<{ cards: DramaCharacterCard[]; generated: number }>(
+      const r = await run<{ cards: DramaCharacterCard[]; generated: number; assembled?: number }>(
         () => dramaApi.genRefPrompts(pid, [card.name]),
         { kind: `drama-refsheet-${pid}-${card.name}` },
       );
       const fresh = r?.cards.find((c) => c.id === card.id);
-      if (fresh) { onSaved(fresh); toast.ok(`${card.name} 的定妆照提示词已就绪`); }
+      if (fresh) {
+        onSaved(fresh);
+        toast.ok(
+          `${card.name} 的定妆照提示词已就绪`,
+          r?.assembled ? "模型这次没给,已由引擎按外貌锚+画风锚拼好" : "",
+        );
+      }
     } catch (e) { toast.err("出定妆照提示词失败", errMsg(e)); } finally { setRefBusy(false); }
   }
 

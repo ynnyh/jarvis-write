@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { AnthemPackage, api, CoverPackage, downloadFile, Project, SubmissionPackage } from "../api";
 import { useJob } from "../ui/useJob";
 import { toast } from "../ui/Toaster";
+import { CopyBtn, copyOrPrompt } from "../ui/copy";
 import { errMsg } from "../pollJob";
 
 interface Props { pid: number; project: Project; }
@@ -32,36 +33,8 @@ function loadJSON<T>(key: string): T | null {
   } catch { return null; }
 }
 
-// 复制:优先 Clipboard API,不可用时降级到 textarea + execCommand
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    try {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      const ok = document.execCommand("copy");
-      ta.remove();
-      return ok;
-    } catch { return false; }
-  }
-}
-
-function CopyBtn({ text, label = "复制" }: { text: string; label?: string }) {
-  const [done, setDone] = useState(false);
-  async function go() {
-    if (!text.trim()) { toast.err("内容为空", "没有可复制的内容"); return; }
-    const ok = await copyText(text);
-    if (ok) { setDone(true); setTimeout(() => setDone(false), 1200); }
-    else toast.err("复制失败", "请手动选中文本复制");
-  }
-  return <button className="btn-sm" onClick={go}>{done ? "✓ 已复制" : label}</button>;
-}
+// 复制:统一走 ui/copy(Clipboard API → execCommand → 手动复制弹层三层兜底,
+// HTTP 页面下 navigator.clipboard 不存在也照样复制得动)
 
 const SUMMARY_META: { key: "short" | "medium" | "long"; label: string; rows: number }[] = [
   { key: "short", label: "短简介", rows: 3 },
@@ -134,7 +107,7 @@ export default function SubmissionPanel({ pid, project }: Props) {
     patchPkg({ tags: state.pkg.tags.filter((x) => x !== t) });
   }
   async function copyTag(t: string) {
-    const ok = await copyText(t);
+    const ok = await copyOrPrompt(t, "标签");
     if (ok) toast.ok(`已复制标签「${t}」`, "可到平台逐个粘贴");
   }
 

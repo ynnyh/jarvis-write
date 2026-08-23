@@ -517,12 +517,17 @@ class LLMAdapter(abc.ABC):
 
 
 async def complete_text_with_budget(adapter, messages: list[LLMMessage]) -> str:
-    """调一次模型拿纯文本:空正文放大预算重试(最多 3 轮)+ 用量记账。
+    """调一次模型拿纯文本:空正文/被截断都放大预算重试(最多 3 轮)+ 用量记账。
 
     自己拼 messages 的入口(改稿讨论、架构讨论、润色讨论、灵感对话)都必须走这里,
     不要裸调 `complete()`:complete() 遇空正文是**抛** EmptyContentError,裸调用会
     在第一次空正文就把错误摔给用户,拿不到放大预算的第二、三次机会。
     安全过滤类的空正文(budget_bound=False)放大预算也没用,立即抛出。
+
+    **截断也要重试**:推理模型思考吃掉大半预算时,正文往往不是空的而是**吐了个开头
+    就被 max_tokens 砍断**(实测:定妆照 JSON 停在 `char 73`,报「Unterminated string」)。
+    只治空正文治不到这种,半截内容会一路流到下游解析失败,还错怪成别的原因。
+    三轮都截断就把**最长的那次**返回(总比无内容好),由调用方决定能不能用。
 
     写成模块级函数而不是只挂在 LLMAdapter 上:调用方大量使用鸭子类型的假适配器
     (测试里只实现 complete/ask),这里只依赖 `complete()` 与 `max_tokens`。
@@ -530,6 +535,7 @@ async def complete_text_with_budget(adapter, messages: list[LLMMessage]) -> str:
     original_max = adapter.max_tokens
     model = getattr(adapter, "model_name", "?")
     diag = ""
+    longest = ""  # 被截断但非空的最好一次(兜底返回,别让一次调用彻底白跑)
     try:
         for attempt in range(3):
             try:
@@ -546,15 +552,39 @@ async def complete_text_with_budget(adapter, messages: list[LLMMessage]) -> str:
                 continue
             LLMAdapter._record_usage(resp)
             content = (resp.content or "").strip()
+            # getattr:鸭子类型的假适配器(测试/自定义)可能没有这两个字段,
+            # 而本函数的契约是只依赖 complete() 与 max_tokens,不许因此炸掉
+            finish = str(getattr(resp, "finish_reason", "") or "")
             if content:
-                return content
+                if finish.lower() not in FINISH_TRUNCATED:
+                    return content
+                if len(content) > len(longest):
+                    longest = content
+                diag = (
+                    f"finish_reason={finish}, 正文 {len(content)} 字, "
+                    f"思考 {len(getattr(resp, 'reasoning', '') or '')} 字, "
+                    f"max_tokens={adapter.max_tokens}"
+                )
+                logger.warning(
+                    "正文被截断(model=%s, 第 %d/3 次): %s", model, attempt + 1, diag
+                )
+                if adapter.max_tokens >= 32768:
+                    break  # 预算已到顶,再翻倍也没有意义
+                adapter.max_tokens = min(adapter.max_tokens * 2, 32768)
+                continue
             # 适配器没归因出来的空正文(自定义/鸭子类型适配器可能走到)
             diag = (
-                f"finish_reason={resp.finish_reason or '未知'}, "
-                f"输出 {resp.completion_tokens} tokens"
+                f"finish_reason={finish or '未知'}, "
+                f"输出 {getattr(resp, 'completion_tokens', 0)} tokens"
             )
             logger.warning("空正文(model=%s, 第 %d/3 次): %s", model, attempt + 1, diag)
             adapter.max_tokens = min(adapter.max_tokens * 2, 32768)
+        if longest:
+            logger.warning(
+                "三轮均被截断,返回最长的一次(model=%s, %d 字): %s",
+                model, len(longest), diag,
+            )
+            return longest
         raise UpstreamError(
             f"模型连续 3 次返回空正文(model={model},输出预算已放大到 "
             f"{adapter.max_tokens})。诊断: {diag or '无'}。"

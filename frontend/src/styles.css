@@ -1770,6 +1770,13 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
   display: flex; justify-content: flex-end; gap: 10px;
   margin-top: 20px;
 }
+/* 手动复制兜底层:框要够大够宽,方便一眼看全 + Ctrl+C */
+.dlg-copy { width: 560px; }
+.dlg-copy-text {
+  width: 100%; margin-top: 12px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-sm);
+}
 
 .tc-wrap { position: relative; }
 .tc-badge {

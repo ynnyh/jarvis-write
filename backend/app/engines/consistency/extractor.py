@@ -42,6 +42,56 @@ def parse_llm_json(text: str) -> dict:
         return {}
 
 
+def salvage_json_objects(text: str) -> list[dict]:
+    """从(可能被截断的)输出里抢救出所有**完整**的叶子对象。
+
+    截断不是罕见事故:推理模型的思考吃掉大半 max_tokens,正文常停在半个字符串上,
+    `json.loads` 直接 Unterminated string,于是**整批结果全丢**——哪怕前面 3 条
+    已经写完了。这里退一步:按花括号配平逐个切出对象,只有最后那个半截的丢掉。
+    顺带也兼容「顶层是数组」和「围栏里混了解释文字」两种常见跑偏。
+
+    只取**叶子对象**(内部不再嵌套对象):批量契约都是
+    `{"key": [{扁平条目}, ...]}` 形状,取叶子恰好等于取数组元素,不会把
+    外层包装对象也当成一条结果。
+    """
+    s = (text or "").strip()
+    m = re.search(r"```(?:json)?\s*(.*?)(?:```|$)", s, re.DOTALL)
+    if m:
+        s = m.group(1).strip()
+    out: list[dict] = []
+    stack: list[list[int]] = []  # [起始下标, 内部已闭合的对象数]
+    in_str = False
+    esc = False
+    for i, ch in enumerate(s):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            stack.append([i, 0])
+        elif ch == "}" and stack:
+            start, children = stack.pop()
+            if stack:
+                stack[-1][1] += 1
+            if children:
+                continue  # 不是叶子:里头的条目已经单独收了
+            try:
+                obj = json.loads(s[start : i + 1])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(obj, dict):
+                out.append(obj)
+    if out:
+        logger.warning("JSON 抢救模式:从半截/异形输出里取出 %d 条完整对象", len(out))
+    return out
+
+
 def _coerce_int(raw: object, default: int = 0) -> int:
     """把 LLM 的 "31"/31/31.0/脏值收敛成非负 int;不可解析回落 default。"""
     try:

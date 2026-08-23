@@ -7,6 +7,7 @@ import LockScreen from "./pages/LockScreen";
 import HelpPage from "./pages/HelpPage";
 import { Toaster } from "./ui/Toaster";
 import { ConfirmHost } from "./ui/ConfirmDialog";
+import { CopyHost } from "./ui/copy";
 import CloseGuard from "./ui/CloseGuard";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { TaskCenterBadge, TaskCenterProvider } from "./ui/TaskCenter";
@@ -258,6 +259,8 @@ export default function App() {
       </div>
       <Toaster />
       <ConfirmHost />
+      {/* 复制兜底层:浏览器不给写剪贴板时(如用 http:// 打开)弹出已全选的文本 */}
+      <CopyHost />
       {/* 实时正文:后台任务里模型正在写的字逐字滚动(全局悬浮,跟着在跑的任务) */}
       <LiveDock />
       {/* 桌面关闭守卫:拦截 X,按后台任务/托盘偏好决定去向(非桌面自动不生效) */}
