@@ -615,6 +615,47 @@ def _add_drama_gender_column() -> None:
             logger.info("迁移:drama_character_cards 补 gender 列")
 
 
+def _add_drama_motion_columns() -> None:
+    """漫剧工坊:drama_shots 补 motion_cn / motion_en 两列(幂等)。
+
+    生图提示词直接拿去生视频是错的:图生视频的首帧已经把长相钉死,提示词里再
+    描述外貌会让模型把脸重画一遍。所以运动轨单列两栏,只写「怎么动」
+    (见 engines/drama/video.py)。存量行留空 → 引擎按运镜栏兜底拼一条,不影响可用。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "drama_shots" not in insp.get_table_names():
+            return  # create_all 会按新模型建表,无需补列
+        for col in ("motion_cn", "motion_en"):
+            if not _column_exists("drama_shots", col):
+                conn.execute(text(f"ALTER TABLE drama_shots ADD COLUMN {col} TEXT DEFAULT ''"))
+                logger.info("迁移:drama_shots 补 %s 列", col)
+
+
+def _add_drama_shot_asset_columns() -> None:
+    """漫剧工坊:drama_shots 补「挂素材 + 打勾」四列(幂等)。
+
+    assets = 挂回这一格的静帧([{kind,src,note}] JSON);clip_ref = 成片在哪(外链/文件名);
+    done_still / done_video = 这一格出图、生视频做完没有。一集几十格的手工活,没有
+    进度栏必然做丢或重做——这四列是那份「逐格施工单」的落点。
+    存量行:assets 留 NULL(读取一律走 common.shot_asset_list,当空列表处理),
+    打勾列默认 0(未做),不影响任何既有功能。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "drama_shots" not in insp.get_table_names():
+            return  # create_all 会按新模型建表,无需补列
+        for col, ddl in (
+            ("assets", "JSON"),
+            ("clip_ref", "VARCHAR(500) DEFAULT ''"),
+            ("done_still", "BOOLEAN DEFAULT 0"),
+            ("done_video", "BOOLEAN DEFAULT 0"),
+        ):
+            if not _column_exists("drama_shots", col):
+                conn.execute(text(f"ALTER TABLE drama_shots ADD COLUMN {col} {ddl}"))
+                logger.info("迁移:drama_shots 补 %s 列", col)
+
+
 def run_migrations() -> None:
     """启动时调用。幂等。"""
     _add_user_id_columns()
@@ -639,6 +680,8 @@ def run_migrations() -> None:
     _add_drama_episode_source_chapters_column()
     _add_drama_ref_sheet_columns()
     _add_drama_gender_column()
+    _add_drama_motion_columns()
+    _add_drama_shot_asset_columns()
     _disable_word_guard_default()
     _migrate_finalized_to_approved()
     # 先补加密老表存量明文 key,再拷到新表,保证 provider_configs 落库必为密文

@@ -23,14 +23,19 @@ GET    /api/projects/{id}/drama/episodes                  集列表
 POST   /api/projects/{id}/drama/episodes/plan             集数规划(async,覆盖范围内旧集)
 DELETE /api/projects/{id}/drama/episodes/{eid}            删一集(连分镜)
 GET    /api/projects/{id}/drama/episodes/{eid}            集详情(含分镜)
+GET    /api/projects/{id}/drama/episodes/{eid}/clips      视频段计划 ?limit_s=10(确定性,不调 LLM)
 POST   /api/projects/{id}/drama/episodes/{eid}/script     写剧本(async)
 POST   /api/projects/{id}/drama/episodes/{eid}/storyboard 拆分镜(async,覆盖式)
 POST   /api/projects/{id}/drama/episodes/{eid}/prompts    出三轨提示词(async)
 POST   /api/projects/{id}/drama/voice-cast/generate          声线选型卡(async,阶段 2)
 GET    /api/projects/{id}/drama/episodes/{eid}/pack          成片包(配音稿+剪辑清单)
 POST   /api/projects/{id}/drama/episodes/{eid}/pack          生成成片包(async)
-PATCH  /api/projects/{id}/drama/shots/{sid}               手动改分镜/提示词
+PATCH  /api/projects/{id}/drama/shots/{sid}               手动改分镜/提示词/运动轨/打勾
 POST   /api/projects/{id}/drama/shots/{sid}/prompt        只重出这一格提示词(async)
+POST   /api/projects/{id}/drama/shots/{sid}/asset         挂这一格的静帧(multipart)
+POST   /api/projects/{id}/drama/shots/{sid}/asset/link    贴这一格静帧的外链
+DELETE /api/projects/{id}/drama/shots/{sid}/asset/{i}     删一张静帧
+GET    /api/projects/{id}/drama/shots/{sid}/asset/{i}     读一张静帧(鉴权)
 GET    /api/projects/{id}/drama/episodes/{eid}/export     导出 ?format=md|csv|json|pack|srt
 """
 from __future__ import annotations
@@ -89,11 +94,14 @@ from app.engines.drama.common import (
     episode_dict,
     ref_image_list,
     scene_card_dict,
+    shot_asset_list,
+    shot_progress,
     shots_payload,
     style_card,
     style_card_dict,
 )
 from app.engines.drama.gender import VALID_GENDERS
+from app.engines.drama.video import CLIP_LIMIT_DEFAULT, clips_payload
 from app.jobs import list_running, spawn_job
 
 logger = logging.getLogger("jarvis-write.drama")
@@ -167,6 +175,13 @@ class ShotIn(BaseModel):
     prompt_cn: str | None = None
     prompt_en: str | None = None
     negative: str | None = None
+    # 运动轨(图生视频用):手改这两栏比重出整格快,尤其「幅度太大」这种小毛病
+    motion_cn: str | None = None
+    motion_en: str | None = None
+    # 施工进度:成片在哪(外链/本地文件名)+ 出图、生视频各自做完没有
+    clip_ref: str | None = None
+    done_still: bool | None = None
+    done_video: bool | None = None
 
 
 class ShotPromptIn(BaseModel):
@@ -177,7 +192,17 @@ class ShotPromptIn(BaseModel):
 
 # =============== 工具 ===============
 
+def _require_owner(db: Session, project_id: int) -> None:
+    """归属闸门:项目不存在或不属于当前用户 → 404(不泄露存在性)。
+
+    放在三个「取子资源」的助手里(集/分镜/角色卡),而不是各路由自己记着调——
+    子资源的路由多达十来条,漏一条就是别人能读、能删你的剧集。
+    """
+    get_project_or_404(db, project_id)
+
+
 def _get_episode(db: Session, project_id: int, episode_id: int) -> DramaEpisode:
+    _require_owner(db, project_id)
     ep = (
         db.query(DramaEpisode)
         .filter(DramaEpisode.id == episode_id, DramaEpisode.project_id == project_id)
@@ -189,6 +214,7 @@ def _get_episode(db: Session, project_id: int, episode_id: int) -> DramaEpisode:
 
 
 def _get_shot(db: Session, project_id: int, shot_id: int) -> DramaShot:
+    _require_owner(db, project_id)
     shot = (
         db.query(DramaShot)
         .join(DramaEpisode, DramaShot.episode_id == DramaEpisode.id)
@@ -201,6 +227,7 @@ def _get_shot(db: Session, project_id: int, shot_id: int) -> DramaShot:
 
 
 def _get_character(db: Session, project_id: int, card_id: int) -> DramaCharacterCard:
+    _require_owner(db, project_id)
     card = (
         db.query(DramaCharacterCard)
         .filter(
@@ -613,7 +640,38 @@ async def get_episode(project_id: int, episode_id: int, db: Session = Depends(ge
     return {
         "episode": episode_dict(ep),
         "shots": shots_payload(db, project_id, shots),
+        # 施工进度(静帧/视频各做完几格):一集几十格,进度得能一眼看见
+        "progress": shot_progress(shots),
     }
+
+
+@router.get("/episodes/{episode_id}/clips")
+async def get_episode_clips(
+    project_id: int,
+    episode_id: int,
+    limit_s: int = CLIP_LIMIT_DEFAULT,
+    db: Session = Depends(get_db),
+):
+    """视频段计划:把分镜格并成「一次生成一段」(不超过站点单次时长上限)。
+
+    视频站单次只能出 5-15 秒,而分镜格是 2-8 秒——实际做法是一次生成一段、
+    再在画布/时间线上拼。这一步全确定性(不调 LLM,改上限即时重算)。
+    """
+    ep = _get_episode(db, project_id, episode_id)
+    shots = (
+        db.query(DramaShot)
+        .filter(DramaShot.episode_id == ep.id)
+        .order_by(DramaShot.seq)
+        .all()
+    )
+    if not shots:
+        raise HTTPException(status_code=400, detail="这一集还没有分镜,先「拆分镜」。")
+    style = (
+        db.query(DramaStyleCard)
+        .filter(DramaStyleCard.project_id == project_id)
+        .first()
+    )
+    return {"plan": clips_payload(shots, style, limit_s)}
 
 
 @router.delete("/episodes/{episode_id}")
@@ -753,10 +811,17 @@ async def patch_shot(project_id: int, shot_id: int, body: ShotIn, db: Session = 
         shot.dialogue = body.dialogue
     if body.duration_s is not None:
         shot.duration_s = body.duration_s
-    for field in ("prompt_cn", "prompt_en", "negative"):
+    for field in ("prompt_cn", "prompt_en", "negative", "motion_cn", "motion_en"):
         value = getattr(body, field)
         if value is not None:
             setattr(shot, field, value)
+    if body.clip_ref is not None:
+        shot.clip_ref = clip(body.clip_ref, 500)
+    # 打勾栏:两个方向都要收(取消打勾也是正常操作),所以只判 None
+    if body.done_still is not None:
+        shot.done_still = bool(body.done_still)
+    if body.done_video is not None:
+        shot.done_video = bool(body.done_video)
     db.commit()
     return {"shot": shots_payload(db, project_id, [shot])[0]}
 
@@ -790,6 +855,109 @@ async def regen_shot_prompt(
             return await render_single_shot_prompt(session, proj, ep, row, note, progress)
 
     return {"job_id": spawn_job(kind, work)}
+
+
+# =============== 逐格挂素材(出好的静帧挂回那一格)===============
+
+@router.post("/shots/{shot_id}/asset")
+async def upload_shot_asset(
+    project_id: int,
+    shot_id: int,
+    file: UploadFile = File(...),
+    note: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    """把这一格出好的静帧挂回来(上传本地文件)。
+
+    为什么要挂回来:一集几十格,在本站之外一格一格出图,做到哪儿全靠人脑记 =
+    必然做丢或重做。挂上之后段计划里那一段的「首帧图已就位」会亮,也顺手打上勾。
+    """
+    shot = _get_shot(db, project_id, shot_id)
+    assets = shot_asset_list(shot)
+    if len(assets) >= storage.MAX_ASSETS_PER_SHOT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"一格最多挂 {storage.MAX_ASSETS_PER_SHOT} 张静帧,先删掉一张再传。",
+        )
+    data = await file.read(storage.MAX_IMAGE_BYTES + 1)
+    try:
+        rel = storage.save_shot_asset(project_id, shot_id, data, len(assets))
+    except storage.UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    shot.assets = assets + [{"kind": "upload", "src": rel, "note": clip(note, 100)}]
+    # 挂上第一张就等于这一格的图做完了,不用再手点一次勾(想撤销照样能取消勾)
+    shot.done_still = True
+    db.commit()
+    return {"shot": shots_payload(db, project_id, [shot])[0]}
+
+
+@router.post("/shots/{shot_id}/asset/link")
+async def link_shot_asset(
+    project_id: int, shot_id: int, body: RefLinkIn, db: Session = Depends(get_db)
+):
+    """贴这一格静帧的外链(生图站的图片地址)。
+
+    平台链接普遍带时效签名会失效,所以前端提示「建议下载后上传」——但不拦着用。
+    """
+    shot = _get_shot(db, project_id, shot_id)
+    assets = shot_asset_list(shot)
+    if len(assets) >= storage.MAX_ASSETS_PER_SHOT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"一格最多挂 {storage.MAX_ASSETS_PER_SHOT} 张静帧,先删掉一张再传。",
+        )
+    url = clip(body.url, 500)
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="请填 http/https 开头的图片地址。")
+    shot.assets = assets + [{"kind": "url", "src": url, "note": clip(body.note, 100)}]
+    shot.done_still = True
+    db.commit()
+    return {"shot": shots_payload(db, project_id, [shot])[0]}
+
+
+@router.delete("/shots/{shot_id}/asset/{index}")
+async def delete_shot_asset(
+    project_id: int, shot_id: int, index: int, db: Session = Depends(get_db)
+):
+    """删掉这一格挂着的一张静帧(上传的连文件一起删)。
+
+    删到一张不剩就把「出图做完」的勾取消掉——留着勾等于骗自己这一格做完了。
+    """
+    shot = _get_shot(db, project_id, shot_id)
+    assets = shot_asset_list(shot)
+    if not 0 <= index < len(assets):
+        raise HTTPException(status_code=404, detail="这张静帧不存在。")
+    gone = assets.pop(index)
+    if gone["kind"] == "upload":
+        storage.delete(gone["src"])
+    shot.assets = assets
+    if not assets:
+        shot.done_still = False
+    db.commit()
+    return {"shot": shots_payload(db, project_id, [shot])[0]}
+
+
+@router.get("/shots/{shot_id}/asset/{index}")
+async def read_shot_asset(
+    project_id: int, shot_id: int, index: int, db: Session = Depends(get_db)
+):
+    """读这一格上传的静帧(走鉴权,上传目录不挂静态服务)。"""
+    shot = _get_shot(db, project_id, shot_id)
+    assets = shot_asset_list(shot)
+    if not 0 <= index < len(assets) or assets[index]["kind"] != "upload":
+        raise HTTPException(status_code=404, detail="这张静帧不存在。")
+    try:
+        path = storage.resolve(assets[index]["src"])
+    except storage.UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="图片文件已丢失,请重新上传。")
+    return Response(
+        content=path.read_bytes(),
+        media_type=storage.content_type_of(assets[index]["src"]),
+        # 私有资产:允许浏览器本地缓存,但不许中间层/CDN 缓存
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
 
 
 # =============== 预告片(项目级,一条,重建覆盖) ===============

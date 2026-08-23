@@ -5,6 +5,7 @@
 // 阶段 2 补齐出片最后一块:声线选型 + 成片包(配音稿/剪辑清单/SRT 字幕)。
 import { useCallback, useEffect, useState } from "react";
 import {
+  ClipPlan,
   DRAMA_STATUS_CN,
   DramaBoardResult,
   DramaCharacterCard,
@@ -32,18 +33,26 @@ interface Props { pid: number }
 
 // 记住用户上次选的生图站:换一格/刷新页面不用重选(全项目共用一个偏好)
 const PASTE_PLATFORM_KEY = "jarvis_drama_paste_platform";
+// 视频站的偏好单独存:生图与生视频的 key 空间不同(oneframe/dualbox/mj vs i2v/i2v_en/t2v),
+// 共用一个键会互相把对方的选择顶掉。
+const VIDEO_PLATFORM_KEY = "jarvis_drama_video_platform";
+// 单次生成时长上限:各视频站不一样(5/10/15 秒),记住用户那家站的档位
+const CLIP_LIMIT_KEY = "jarvis_drama_clip_limit";
 
 /** 一键粘贴框:按用户的生图站给「整段能直接粘」的版本。
  *
  *  为什么不让用户自己拼:我们出的是三轨(中文/英文/负面),而生图站长相不一——
  *  只有一个描述框的站(GPT-image / 豆包 / 通义)没处放负面词,照原样复制等于把
  *  负面词丢了。拼装规则在后端(paste.py),导出手册用的是同一份,不会两边跑偏。
+ *
+ *  生视频那套粘贴版结构完全相同(video.py),所以这个组件同时伺候两边,
+ *  只是换个平台偏好键与标题。
  */
-function PasteBox({ paste, stale, rows = 5 }: {
-  paste?: PasteSet | null; stale?: boolean; rows?: number;
+function PasteBox({ paste, stale, rows = 5, storeKey = PASTE_PLATFORM_KEY, title = "一键粘贴 · 你用的生图站" }: {
+  paste?: PasteSet | null; stale?: boolean; rows?: number; storeKey?: string; title?: string;
 }) {
   const [plat, setPlat] = useState(
-    () => localStorage.getItem(PASTE_PLATFORM_KEY) || "oneframe",
+    () => localStorage.getItem(storeKey) || "oneframe",
   );
   if (!paste) return null;
   const keys = Object.keys(paste);
@@ -54,10 +63,10 @@ function PasteBox({ paste, stale, rows = 5 }: {
   return (
     <div className="media-field paste-box">
       <div className="card-head mb-2">
-        <span className="muted">一键粘贴 · 你用的生图站</span>
+        <span className="muted">{title}</span>
         <select value={key} onChange={(e) => {
           setPlat(e.target.value);
-          localStorage.setItem(PASTE_PLATFORM_KEY, e.target.value);
+          localStorage.setItem(storeKey, e.target.value);
         }}>
           {keys.map((k) => <option key={k} value={k}>{paste[k].label}</option>)}
         </select>
@@ -78,9 +87,12 @@ function PasteBox({ paste, stale, rows = 5 }: {
   );
 }
 
-/** 定妆照缩略图:读取端点要带 Authorization,<img src> 带不了头,所以取 blob 转本地 URL。 */
-function RefThumb({ pid, cid, index, img, onDelete }: {
-  pid: number; cid: number; index: number; img: DramaRefImage; onDelete: () => void;
+/** 图片缩略图(角色定妆照 / 分镜静帧):读取端点要带 Authorization,<img src> 带不了头,
+ *  所以取 blob 转本地 URL。owner 决定读哪条端点——两种资产的挂法/删法一模一样,
+ *  只是挂在角色卡上还是挂在分镜格上,不值得复制一份组件。 */
+function RefThumb({ pid, owner, id, index, img, alt = "定妆照", onDelete }: {
+  pid: number; owner: "card" | "shot"; id: number; index: number;
+  img: DramaRefImage; alt?: string; onDelete: () => void;
 }) {
   const [url, setUrl] = useState(img.kind === "url" ? img.src : "");
   const [bad, setBad] = useState(false);
@@ -89,16 +101,17 @@ function RefThumb({ pid, cid, index, img, onDelete }: {
     if (img.kind === "url") { setUrl(img.src); return; }
     let revoke = "";
     let alive = true;
-    dramaApi.refBlobUrl(pid, cid, index)
+    const read = owner === "card" ? dramaApi.refBlobUrl : dramaApi.shotAssetBlobUrl;
+    read(pid, id, index)
       .then((u) => { if (alive) { revoke = u; setUrl(u); } else URL.revokeObjectURL(u); })
       .catch(() => setBad(true));
     return () => { alive = false; if (revoke) URL.revokeObjectURL(revoke); };
-  }, [pid, cid, index, img.kind, img.src]);
+  }, [pid, owner, id, index, img.kind, img.src]);
 
   return (
     <div className="ref-thumb">
       {url && !bad
-        ? <img src={url} alt={img.note || "定妆照"} onError={() => setBad(true)} />
+        ? <img src={url} alt={img.note || alt} onError={() => setBad(true)} />
         : <div className="ref-thumb-bad">{bad ? "图片读不到" : "加载中…"}</div>}
       <div className="ref-thumb-foot">
         <span className="muted">{img.kind === "url" ? "外链" : "已上传"}</span>
@@ -863,8 +876,8 @@ function CharCardRow({ pid, card, onSaved }: {
         {draft.ref_images.length > 0 && (
           <div className="ref-thumbs">
             {draft.ref_images.map((img, i) => (
-              <RefThumb key={`${img.src}-${i}`} pid={pid} cid={card.id} index={i} img={img}
-                onDelete={() => void removeRef(i)} />
+              <RefThumb key={`${img.src}-${i}`} pid={pid} owner="card" id={card.id} index={i}
+                img={img} onDelete={() => void removeRef(i)} />
             ))}
           </div>
         )}
@@ -1048,6 +1061,15 @@ function EpisodeDetail({ pid, eid, hasStyle, onEpisodesChanged, onDeselect }: {
   const hasScript = !!episode?.script?.lines?.length;
   const sourceLabel = episode?.source_label || `第 ${episode?.source_chapter} 章`;
   const boardTotalS = shots.reduce((s, x) => s + x.duration_s, 0);
+  // 施工进度就地算(不等接口回):挂静帧/打勾都是即时改本地 shots,重取一次反而慢半拍
+  const stillsDone = shots.filter((s) => s.done_still).length;
+  const videosDone = shots.filter((s) => s.done_video).length;
+  // 段计划的重算信号:并段只看场景/角色/时长/台词这几栏,别的栏改了不必重取。
+  // 静帧挂没挂上也要带——段表的「首帧图已就位」直接读它。
+  const clipSig = shots
+    .map((s) => `${s.seq}:${s.scene_name}:${s.characters.join(",")}:${s.duration_s}`
+      + `:${s.dialogue ? 1 : 0}:${s.motion_cn || ""}:${s.done_still ? 1 : 0}${s.assets?.length ?? 0}`)
+    .join("|");
 
   return (
     <div className="card">
@@ -1152,16 +1174,24 @@ function EpisodeDetail({ pid, eid, hasStyle, onEpisodesChanged, onDeselect }: {
       {shots.some((s) => s.prompt_cn || s.prompt_en) && (
         <>
           <div className="card-head mb-2"><b>三轨提示词(即拿即用)</b>
+            {/* 逐格施工单的进度条:一集几十格,出到第几格得一眼看见 */}
+            <span className="badge">静帧 {stillsDone}/{shots.length}</span>
+            <span className="badge">视频 {videosDone}/{shots.length}</span>
             <span className="muted">
-              画风锚/角色锚已注入。复制中文提示词去即梦/可灵出图;某一格不满意就点「重出这格」
+              画风锚/角色锚已注入。复制中文提示词去即梦/可灵出图;出好的静帧挂回那一格,
+              做完打个勾——导出的施工单会带上这份进度
             </span></div>
           {shots.filter((s) => s.prompt_cn || s.prompt_en).map((s) => (
             <PromptRow key={s.id} pid={pid} shot={s} onSaved={(ns) => {
-              setShots(shots.map((x) => (x.id === ns.id ? ns : x)));
+              // 函数式更新:几十格挂图/打勾是连着点的,拿闭包里的旧 shots 算会把上一格的结果吞掉
+              setShots((prev) => prev.map((x) => (x.id === ns.id ? ns : x)));
             }} onRegenerated={() => { void reload(); void refreshList(); }} />
           ))}
         </>
       )}
+
+      {/* 视频段计划:一次生成一段,再在画布里拼(治视频站的单次时长上限) */}
+      {shots.length > 0 && <ClipPlanSection pid={pid} eid={eid} sig={clipSig} />}
 
       {/* 成片包(阶段 2):配音稿 + 剪辑清单 */}
       {pack && (
@@ -1235,6 +1265,111 @@ function EpisodeDetail({ pid, eid, hasStyle, onEpisodesChanged, onDeselect }: {
   );
 }
 
+/** 视频段计划:治「视频站一次最多 5-15 秒,分镜格却是 2-8 秒」。
+ *
+ *  真实做法是「一段生成一次,再在画布/剪映里首尾相接」,所以这里把相邻的格
+ *  按四条规则并成段(同场景 / 不引入新角色 / 不超上限 / 最多一条台词),
+ *  每段给首帧是哪一格、怎么动、几秒、要压什么字幕。上限换档即时重算(纯确定性)。
+ */
+function ClipPlanSection({ pid, eid, sig }: { pid: number; eid: number; sig: string }) {
+  const [limit, setLimit] = useState(() => Number(localStorage.getItem(CLIP_LIMIT_KEY)) || 10);
+  const [plan, setPlan] = useState<ClipPlan | null>(null);
+  const [err, setErr] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      setPlan((await dramaApi.getClips(pid, eid, limit)).plan);
+      setErr("");
+    } catch (e) { setErr(errMsg(e)); }
+  }, [pid, eid, limit]);
+
+  // sig 变了 = 分镜/运动轨改过,段计划跟着重算(时长一改,并段结果就不一样了)
+  useEffect(() => { void load(); }, [load, sig]);
+
+  function pickLimit(n: number) {
+    setLimit(n);
+    localStorage.setItem(CLIP_LIMIT_KEY, String(n));
+  }
+
+  const options = plan?.options?.length ? plan.options : [5, 10, 15];
+  const runs = plan ? plan.totals.segments + plan.totals.extra_runs : 0;
+
+  return (
+    <>
+      <div className="card-head mb-2">
+        <b>让它动起来:视频段计划</b>
+        <span className="muted">你那家视频站单次最多能出几秒?</span>
+        {options.map((n) => (
+          <button key={n} className={"chip" + (limit === n ? " on" : "")}
+            onClick={() => pickLimit(n)}>{n} 秒</button>
+        ))}
+      </div>
+      {err && <div className="msg-err">{err}</div>}
+      <p className="hint">
+        视频站单次只能出 {limit} 秒,而分镜格是 2-8 秒——所以按「一段生成一次」并好段,
+        你照段号顺序在画布/剪映里首尾相接就是成片。首帧图用该段第一格出好的静帧,
+        人物长相全靠它锁住;提示词里<b>刻意不写外貌</b>(写了模型会重画脸)。
+      </p>
+      {plan && (
+        <>
+          <p className="hint drama-next">
+            共 <b>{plan.totals.segments}</b> 段 · 合计 <b>{plan.totals.duration_s}</b> 秒 ·
+            要生成 <b>{runs}</b> 次 · 首帧图已就位{" "}
+            <b>{plan.totals.first_frames_ready}/{plan.totals.segments}</b> 段
+            {plan.totals.over_limit > 0
+              ? ` · ⚠ 其中 ${plan.totals.over_limit} 段单格就超过 ${limit} 秒,要靠尾帧续接`
+              : " · 每段一次出得完"}
+          </p>
+          <div className="tbl-wrap">
+            <table className="tbl">
+              <thead>
+                <tr><th>段</th><th>含分镜</th><th>场景</th><th>角色</th><th>秒</th><th>生成次数</th><th>首帧</th><th>首帧图</th><th>这一段怎么动</th></tr>
+              </thead>
+              <tbody>
+                {plan.segments.map((seg) => (
+                  <tr key={seg.index} className={seg.over_limit ? "row-warn" : ""}>
+                    <td>{seg.index}</td>
+                    <td>{seg.seqs.join("、")}</td>
+                    <td>{seg.scene_name}</td>
+                    <td>{seg.characters.join("、") || "(空镜)"}</td>
+                    <td>{seg.duration_s}</td>
+                    <td>{seg.runs}</td>
+                    <td>{seg.first_frame}</td>
+                    {/* 这一段能不能开工全看它:段首格的静帧挂上来了才有首帧图可传 */}
+                    <td>{seg.first_frame_ready ? "✓ 已挂" : "待出图"}</td>
+                    <td>{seg.motion}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {plan.segments.map((seg) => (
+            <div key={seg.index} className="sub-summary">
+              <div className="card-head mb-2">
+                <b>视频段 {seg.index}(分镜 {seg.seqs.join("、")} · {seg.duration_s}s)</b>
+                <span className="muted">首帧:{seg.first_frame}</span>
+                <span className="badge">{seg.first_frame_ready ? "首帧图已就位" : "首帧图还没挂"}</span>
+                {seg.over_limit && <span className="badge">要生成 {seg.runs} 次</span>}
+              </div>
+              {seg.split_hint && <div className="notice notice-warn">{seg.split_hint}</div>}
+              {!seg.first_frame_ready && (
+                <p className="hint">
+                  先把{seg.first_frame}出好、在上面那一格「挂静帧」挂回来,再拿这段提示词去视频站——
+                  没有首帧图就只能走文生视频,人物每段一张脸。
+                </p>
+              )}
+              <PasteBox paste={seg.paste} rows={7}
+                storeKey={VIDEO_PLATFORM_KEY} title="一键粘贴 · 你用的视频站" />
+              {seg.dialogue && <p className="hint">这一段的字幕/配音:{seg.dialogue}</p>}
+            </div>
+          ))}
+          <p className="hint">{plan.note}</p>
+        </>
+      )}
+    </>
+  );
+}
+
 function PromptRow({ pid, shot, onSaved, onRegenerated }: {
   pid: number; shot: DramaShot;
   onSaved: (s: DramaShot) => void;
@@ -1246,16 +1381,72 @@ function PromptRow({ pid, shot, onSaved, onRegenerated }: {
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  // 挂静帧那一条:上传/贴外链/删除都会把服务端的这一格整份换回来
+  const [assetBusy, setAssetBusy] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [link, setLink] = useState("");
 
   useEffect(() => { setDraft(shot); setDirty(false); }, [shot]);
 
-  async function save() {
+  async function save(quiet = false): Promise<boolean> {
     try {
       const r = await dramaApi.patchShot(pid, shot.id, draft);
       onSaved(r.shot);
       setDirty(false);
-      toast.ok(`镜头 ${shot.seq} 已保存`);
-    } catch (e) { toast.err("保存失败", errMsg(e)); }
+      if (!quiet) toast.ok(`镜头 ${shot.seq} 已保存`);
+      return true;
+    } catch (e) { toast.err("保存失败", errMsg(e)); return false; }
+  }
+
+  /** 挂素材/打勾之前先把手改的文字落库:这些操作都会用服务端返回的整份分镜刷掉 draft,
+   *  不先存就等于把用户刚敲的提示词悄悄吞了。
+   *
+   *  存失败就返回 false 让调用方**整个操作中止**——照样挂图等于「一句保存失败 + 你的改动
+   *  被服务端状态盖掉」,那还不如什么都没发生,让用户先把保存这一步弄好。 */
+  async function flush(): Promise<boolean> {
+    return dirty ? await save(true) : true;
+  }
+
+  async function pickStill(file: File | undefined) {
+    if (!file) return;
+    setAssetBusy(true);
+    try {
+      if (!await flush()) return;
+      onSaved((await dramaApi.uploadShotAsset(pid, shot.id, file)).shot);
+      toast.ok(`镜头 ${shot.seq} 的静帧已挂上`, "已自动勾上「静帧出好了」;这一段的首帧图就用它");
+    } catch (e) { toast.err("挂静帧失败", errMsg(e)); } finally { setAssetBusy(false); }
+  }
+
+  async function addStillLink() {
+    const url = link.trim();
+    if (!url) { setLinkOpen(false); return; }
+    setAssetBusy(true);
+    try {
+      if (!await flush()) return;
+      onSaved((await dramaApi.linkShotAsset(pid, shot.id, url)).shot);
+      setLink(""); setLinkOpen(false);
+      toast.ok("已记下静帧外链", "生图站链接常带时效,建议下载后改成上传");
+    } catch (e) { toast.err("保存外链失败", errMsg(e)); } finally { setAssetBusy(false); }
+  }
+
+  async function removeStill(index: number) {
+    if (!confirm("删掉这张静帧?")) return;
+    setAssetBusy(true);
+    try {
+      if (!await flush()) return;
+      onSaved((await dramaApi.deleteShotAsset(pid, shot.id, index)).shot);
+    } catch (e) { toast.err("删除失败", errMsg(e)); } finally { setAssetBusy(false); }
+  }
+
+  /** 两个打勾栏即点即存(进度条不该还要再点一次「保存」)。
+   *  连点要挡住:两条 PATCH 并发回来的顺序不保证,后到的那份会把勾态改回去。 */
+  async function tick(body: Partial<DramaShot>) {
+    if (assetBusy) return;
+    setAssetBusy(true);
+    try {
+      if (!await flush()) return;
+      onSaved((await dramaApi.patchShot(pid, shot.id, body)).shot);
+    } catch (e) { toast.err("记进度失败", errMsg(e)); } finally { setAssetBusy(false); }
   }
 
   /** 只重出这一格:整集重跑慢,还会盖掉别的格手改过的提示词。 */
@@ -1280,8 +1471,11 @@ function PromptRow({ pid, shot, onSaved, onRegenerated }: {
     <div className="sub-summary">
       <div className="card-head mb-2">
         <b>镜头 {draft.seq}({draft.shot_type}/{draft.camera}/{draft.duration_s}s)</b>
+        {/* 做到哪儿要能扫着看:几十格一格格翻,不标就得点开每一格数 */}
+        {draft.done_still && <span className="badge">静帧✓</span>}
+        {draft.done_video && <span className="badge">视频✓</span>}
         <span className="grow" />
-        {dirty && <button className="btn-sm primary" onClick={save}>保存</button>}
+        {dirty && <button className="btn-sm primary" onClick={() => void save()}>保存</button>}
         <button className="btn-sm" disabled={busy}
           title="只重生成这一格的提示词,别的格不动"
           onClick={() => (noteOpen ? void regen() : setNoteOpen(true))}>
@@ -1315,6 +1509,94 @@ function PromptRow({ pid, shot, onSaved, onRegenerated }: {
         <div className="card-head mb-2"><span className="muted">负面提示词</span><CopyBtn text={draft.negative} /></div>
         <textarea rows={2} value={draft.negative}
           onChange={(e) => { setDraft({ ...draft, negative: e.target.value }); setDirty(true); }} />
+      </div>
+      {/* 施工进度:出好的静帧挂回这一格 + 两个打勾栏。
+          一集几十格、出图出视频都在本站之外一格格做,做到哪儿全靠脑子记 = 必然做丢或重做。 */}
+      <div className="media-field">
+        <div className="card-head mb-2">
+          <span className="muted">这一格出好的静帧(挂上来,段计划的首帧图就算就位)</span>
+          <span className="grow" />
+          <label className="btn-sm" style={{ cursor: "pointer" }}>
+            挂静帧
+            <input type="file" accept="image/png,image/jpeg,image/webp" hidden disabled={assetBusy}
+              onChange={(e) => { void pickStill(e.target.files?.[0]); e.target.value = ""; }} />
+          </label>
+          <button className="btn-sm" disabled={assetBusy}
+            onClick={() => setLinkOpen(!linkOpen)}>贴外链</button>
+        </div>
+        {linkOpen && (
+          <div className="card-head mb-2">
+            <input value={link} placeholder="粘生图站的图片地址(http/https)"
+              onChange={(e) => setLink(e.target.value)} />
+            <button className="btn-sm primary" disabled={assetBusy}
+              onClick={() => void addStillLink()}>保存</button>
+          </div>
+        )}
+        {(draft.assets?.length ?? 0) > 0 ? (
+          <div className="ref-thumbs">
+            {(draft.assets || []).map((img, i) => (
+              <RefThumb key={`${img.src}-${i}`} pid={pid} owner="shot" id={shot.id} index={i}
+                img={img} alt={`镜头 ${draft.seq} 的静帧`} onDelete={() => void removeStill(i)} />
+            ))}
+          </div>
+        ) : (
+          <p className="hint">
+            还没挂静帧:拿上面的提示词去生图站出图(角色卡的定妆照当参考图),
+            出好的那张挂回这里——挂上就自动勾「静帧出好了」,视频段计划里这一段也会亮「首帧图已就位」。
+          </p>
+        )}
+        <div className="shot-ticks">
+          <label>
+            <input type="checkbox" checked={!!draft.done_still} disabled={assetBusy}
+              onChange={(e) => void tick({ done_still: e.target.checked })} />
+            静帧出好了
+          </label>
+          <label>
+            <input type="checkbox" checked={!!draft.done_video} disabled={assetBusy}
+              onChange={(e) => void tick({ done_video: e.target.checked })} />
+            视频出好了
+          </label>
+          <span className="muted">点一下就存,不用再点「保存」</span>
+        </div>
+        <div className="card-head mb-2">
+          <span className="muted">成片在哪(文件名/目录/外链,剪辑时按这个对号)</span>
+        </div>
+        <input value={draft.clip_ref || ""} placeholder="例:D:/漫剧/第1集/段3.mp4"
+          onChange={(e) => { setDraft({ ...draft, clip_ref: e.target.value }); setDirty(true); }} />
+        <p className="hint">
+          视频文件刻意不收上传——动辄几十 MB,一集就能吃满整个项目的配额,而剪辑本来就在你本机做,
+          站里记住「在哪」就够了(这一栏会一起写进导出的逐格施工单)。
+        </p>
+      </div>
+      {/* 运动轨:出好静帧之后就靠这一条把它动起来 */}
+      <div className="paste-box media-field">
+        <div className="card-head mb-2">
+          <b>让这一格动起来(图生视频)</b>
+          <span className="muted">先用上面的提示词出静帧,再把静帧当首帧图传进视频站</span>
+        </div>
+        <PasteBox paste={draft.video_paste} stale={dirty} rows={6}
+          storeKey={VIDEO_PLATFORM_KEY} title="一键粘贴 · 你用的视频站" />
+        <div className="media-field">
+          <div className="card-head mb-2">
+            <span className="muted">怎么动(中文)</span>
+            <CopyBtn text={draft.motion_cn || ""} />
+          </div>
+          <textarea rows={2} value={draft.motion_cn || ""}
+            placeholder="例:她抬手抹去刀锋上的雪,镜头缓推,幅度小"
+            onChange={(e) => { setDraft({ ...draft, motion_cn: e.target.value }); setDirty(true); }} />
+          <p className="hint">
+            只写「怎么动」——首帧图已经把长相钉死了,这里再写一遍外貌/服饰/画风,
+            模型会照着文字把脸重画一遍,人物一致性当场报废。动得太大就把幅度改小。
+          </p>
+        </div>
+        <div className="media-field">
+          <div className="card-head mb-2">
+            <span className="muted">怎么动(英文,Runway/Luma/Pika)</span>
+            <CopyBtn text={draft.motion_en || ""} />
+          </div>
+          <textarea rows={2} value={draft.motion_en || ""}
+            onChange={(e) => { setDraft({ ...draft, motion_en: e.target.value }); setDirty(true); }} />
+        </div>
       </div>
     </div>
   );

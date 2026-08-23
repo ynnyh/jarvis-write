@@ -231,8 +231,18 @@ def character_card_dict(card: DramaCharacterCard, style=None) -> dict:
 
 def ref_image_list(card: DramaCharacterCard) -> list[dict]:
     """定妆照条目清洗成 [{kind, src, note}](脏数据一律丢,前端不必设防)。"""
+    return _image_items(card.ref_images)
+
+
+def shot_asset_list(shot: DramaShot) -> list[dict]:
+    """这一格挂着的静帧,同定妆照一套结构(老库没这一列 → 空列表)。"""
+    return _image_items(getattr(shot, "assets", None))
+
+
+def _image_items(raw) -> list[dict]:
+    """上传/外链图条目的统一清洗:结构不对的一律丢掉。"""
     out: list[dict] = []
-    for item in (card.ref_images or []):
+    for item in (raw or []):
         if not isinstance(item, dict):
             continue
         src = str(item.get("src") or "").strip()
@@ -274,8 +284,8 @@ def episode_dict(ep: DramaEpisode) -> dict:
     }
 
 
-def shot_dict(shot: DramaShot, paste: dict | None = None) -> dict:
-    """分镜格序列化。paste 是按平台拼好的粘贴版(见 shots_payload)。"""
+def shot_dict(shot: DramaShot, paste: dict | None = None, video: dict | None = None) -> dict:
+    """分镜格序列化。paste = 生图粘贴版,video = 生视频粘贴版(见 shots_payload)。"""
     return {
         "id": shot.id,
         "episode_id": shot.episode_id,
@@ -290,17 +300,40 @@ def shot_dict(shot: DramaShot, paste: dict | None = None) -> dict:
         "prompt_cn": shot.prompt_cn,
         "prompt_en": shot.prompt_en,
         "negative": shot.negative,
+        # 运动轨:图生视频只吃这条(写外貌会让它重画脸,见 drama/video.py)
+        "motion_cn": shot.motion_cn or "",
+        "motion_en": shot.motion_en or "",
+        # 施工进度:出好的静帧挂回这一格 + 两个打勾栏(几十格的手工活,靠脑子记必丢)
+        "assets": shot_asset_list(shot),
+        "clip_ref": getattr(shot, "clip_ref", "") or "",
+        "done_still": bool(getattr(shot, "done_still", False)),
+        "done_video": bool(getattr(shot, "done_video", False)),
         "paste": paste,
+        "video_paste": video,
+    }
+
+
+def shot_progress(shots: list[DramaShot]) -> dict:
+    """一集的施工进度:静帧/视频各做完几格,以及挂了几张素材。
+
+    做成集级汇总而不是让前端自己数:导出手册、集详情、段计划三处都要用同一份口径。
+    """
+    return {
+        "shots": len(shots),
+        "stills_done": sum(1 for s in shots if getattr(s, "done_still", False)),
+        "videos_done": sum(1 for s in shots if getattr(s, "done_video", False)),
+        "assets": sum(len(shot_asset_list(s)) for s in shots),
     }
 
 
 def shots_payload(db: Session, project_id: int, shots: list[DramaShot]) -> list[dict]:
-    """一组分镜格 → 前端载荷(每格附「按平台粘贴版」)。
+    """一组分镜格 → 前端载荷(每格附「按平台粘贴版」:出图一套 + 生视频一套)。
 
     粘贴版在后端拼:导出手册与前端复制按钮共用同一套规则,不会两边各写一份跑偏。
     参考图指令只在该格出场角色**确实有定妆照**时才加,免得提示用户去传不存在的图。
     """
     from app.engines.drama.paste import shot_paste
+    from app.engines.drama.video import shot_video_paste
 
     style = style_card(db, project_id)
     by_name, by_alias = character_anchor_maps(db, project_id)
@@ -311,7 +344,9 @@ def shots_payload(db: Session, project_id: int, shots: list[DramaShot]) -> list[
             card = match_character(str(name), by_name, by_alias)
             if has_ref_image(card) and card.name not in refs:
                 refs.append(card.name)
-        out.append(shot_dict(s, paste=shot_paste(s, style, refs)))
+        out.append(
+            shot_dict(s, paste=shot_paste(s, style, refs), video=shot_video_paste(s, style))
+        )
     return out
 
 

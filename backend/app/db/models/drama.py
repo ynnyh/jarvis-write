@@ -178,6 +178,22 @@ class DramaShot(Base, TimestampMixin):
     prompt_cn: Mapped[str] = mapped_column(Text, default="")
     prompt_en: Mapped[str] = mapped_column(Text, default="")
     negative: Mapped[str] = mapped_column(Text, default="")
+    # ===== 运动轨(图生视频用)=====
+    # 只写「怎么动」:首帧图已经把长相钉死,提示词里再写外貌会让模型重画脸。
+    # 视频站单次时长有上限(5/10/15 秒),分段计划见 engines/drama/video.py。
+    motion_cn: Mapped[str] = mapped_column(Text, default="")
+    motion_en: Mapped[str] = mapped_column(Text, default="")
+    # ===== 施工进度(出好的素材挂回这一格 + 做完打勾)=====
+    # 一集几十格、要在本站之外一格一格出图出视频,做到哪儿全靠人脑记 = 必然做丢或重做。
+    # 所以静帧挂回原格(挂了才能在段计划里提示「这一段的首帧图已就位」),
+    # 两个打勾栏则是这份施工单的进度条。
+    # assets:[{kind:"upload"|"url", src, note}],最多 2 张(出图常出两版挑一版)。
+    assets: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    # 这一格/这一段的成片在哪:外链或本地文件名。视频刻意不收上传——动辄几十 MB,
+    # 一集就能吃满整个项目的上传配额,而剪辑本来就在你本机做,记住「在哪」就够了。
+    clip_ref: Mapped[str] = mapped_column(String(500), default="")
+    done_still: Mapped[bool] = mapped_column(Boolean, default=False)
+    done_video: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class DramaProductionPack(Base, TimestampMixin):

@@ -35,6 +35,32 @@ async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 
 // LLM 长任务(规划/剧本/分镜/提示词)统一超时:与 api.ts 的章节生成对齐
 const LLM_TIMEOUT = 900_000;
 
+function authHeaders(): Record<string, string> {
+  const tk = token.get();
+  return tk ? { Authorization: `Bearer ${tk}` } : {};
+}
+
+/** 上传一张图:multipart(不能手设 Content-Type,浏览器要自己带 boundary)。 */
+async function postImage<T>(path: string, file: File, note = ""): Promise<T> {
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("note", note);
+  const res = await fetch(path, { method: "POST", headers: authHeaders(), body: fd });
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try { const j = await res.json(); detail = j.detail ?? detail; } catch { /* ignore */ }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as T;
+}
+
+/** 读一张鉴权图 → 本地 blob URL(读取端点要 Authorization 头,<img src> 带不了)。 */
+async function imageBlobUrl(path: string): Promise<string> {
+  const res = await fetch(path, { headers: authHeaders() });
+  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+  return URL.createObjectURL(await res.blob());
+}
+
 // 画风方向(auto/comic_cn/anime_jp/render3d/live/ink_wash/cyber,后端 common.DRAMA_DIRECTIONS)
 export interface DramaDirection {
   key: string;
@@ -130,6 +156,58 @@ export interface DramaShot {
   negative: string;
   // 按平台拼好的粘贴版(后端算,导出手册与这里同一套规则);老响应可能没有
   paste?: PasteSet | null;
+  // 运动轨:图生视频只吃这一条(首帧图已锁长相,再写外貌会让模型重画脸)
+  motion_cn?: string;
+  motion_en?: string;
+  // 生视频的粘贴版:key = i2v / i2v_en / t2v(与出图那套同构,复用 PasteBox)
+  video_paste?: PasteSet | null;
+  // 施工进度:出好的静帧挂回这一格(段计划的首帧图就取段首格的这个),
+  // clip_ref 只记「成片在哪」(视频动辄几十 MB,刻意不收上传),两个勾是进度条
+  assets?: DramaRefImage[];
+  clip_ref?: string;
+  done_still?: boolean;
+  done_video?: boolean;
+}
+
+// 集级施工进度:一集几十格,做到哪儿要一眼看见(后端 common.shot_progress 算)
+export interface DramaShotProgress {
+  shots: number;
+  stills_done: number;
+  videos_done: number;
+  assets: number;
+}
+
+// 视频段:视频站单次只能出 5-15 秒,分镜格是 2-8 秒——所以要把相邻格并成「一次
+// 生成一段」,再在画布/剪映里按段号首尾相接(后端 engines/drama/video.py 算)。
+export interface ClipSegment {
+  index: number;         // 段号 = 拼接顺序
+  seqs: number[];        // 这一段包含哪几格
+  label: string;         // 「第 1-2 格」
+  scene_name: string;
+  characters: string[];
+  duration_s: number;    // 整段秒数(并段后的和)
+  runs: number;          // 实际要生成几次(超上限时 >1)
+  over_limit: boolean;   // 这一段超了单次上限
+  first_frame: string;   // 首帧用哪一格的静帧
+  // 那一格的静帧挂上来了没有:没挂这一段根本开不了工,所以段表直接标
+  first_frame_ready: boolean;
+  motion: string;        // 这一段怎么动(多格并段时串成一句)
+  dialogue: string;      // 这一段要压的字幕
+  split_hint: string;    // 超上限时的接法(尾帧续接);不超为空串
+  paste?: PasteSet | null;
+}
+export interface ClipPlan {
+  limit_s: number;       // 当前按哪个单次上限并的段
+  options: number[];     // 常见档位 [5, 10, 15]
+  segments: ClipSegment[];
+  totals: {
+    segments: number;
+    duration_s: number;
+    over_limit: number;
+    extra_runs: number;
+    first_frames_ready: number;  // 首帧图已就位的段数
+  };
+  note: string;          // 一句人话总结(几段/合计多少秒/哪几段要分两次)
 }
 
 export interface DramaMeta {
@@ -239,22 +317,9 @@ export const dramaApi = {
     req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/characters/ref-prompts`,
       { names }, LLM_TIMEOUT),
   // 上传定妆照:multipart(不能手设 Content-Type,浏览器要自己带 boundary)
-  uploadRef: async (pid: number, cid: number, file: File, note = "") => {
-    const fd = new FormData();
-    fd.append("file", file);
-    fd.append("note", note);
-    const headers: Record<string, string> = {};
-    const tk = token.get();
-    if (tk) headers["Authorization"] = `Bearer ${tk}`;
-    const res = await fetch(`/api/projects/${pid}/drama/characters/${cid}/reference`,
-      { method: "POST", headers, body: fd });
-    if (!res.ok) {
-      let detail = `HTTP ${res.status}`;
-      try { const j = await res.json(); detail = j.detail ?? detail; } catch { /* ignore */ }
-      throw new ApiError(res.status, detail);
-    }
-    return (await res.json()) as { card: DramaCharacterCard };
-  },
+  uploadRef: (pid: number, cid: number, file: File, note = "") =>
+    postImage<{ card: DramaCharacterCard }>(
+      `/api/projects/${pid}/drama/characters/${cid}/reference`, file, note),
   linkRef: (pid: number, cid: number, url: string, note = "") =>
     req<{ card: DramaCharacterCard }>(
       "POST", `/api/projects/${pid}/drama/characters/${cid}/reference/link`, { url, note }),
@@ -262,15 +327,8 @@ export const dramaApi = {
     req<{ card: DramaCharacterCard }>(
       "DELETE", `/api/projects/${pid}/drama/characters/${cid}/reference/${index}`),
   // 缩略图:读取端点要 Authorization 头,<img src> 带不了,只能取 blob 转本地 URL
-  refBlobUrl: async (pid: number, cid: number, index: number): Promise<string> => {
-    const headers: Record<string, string> = {};
-    const tk = token.get();
-    if (tk) headers["Authorization"] = `Bearer ${tk}`;
-    const res = await fetch(`/api/projects/${pid}/drama/characters/${cid}/reference/${index}`,
-      { headers });
-    if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
-    return URL.createObjectURL(await res.blob());
-  },
+  refBlobUrl: (pid: number, cid: number, index: number) =>
+    imageBlobUrl(`/api/projects/${pid}/drama/characters/${cid}/reference/${index}`),
 
   // 声线选型卡(阶段 2):给角色卡补 TTS 平台选型建议 + 朗读指示
   generateVoiceCast: (pid: number) =>
@@ -283,7 +341,7 @@ export const dramaApi = {
   deleteEpisode: (pid: number, eid: number) =>
     req<{ ok: boolean }>("DELETE", `/api/projects/${pid}/drama/episodes/${eid}`),
   getEpisode: (pid: number, eid: number) =>
-    req<{ episode: DramaEpisode; shots: DramaShot[] }>(
+    req<{ episode: DramaEpisode; shots: DramaShot[]; progress?: DramaShotProgress }>(
       "GET", `/api/projects/${pid}/drama/episodes/${eid}`),
   writeScript: (pid: number, eid: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/episodes/${eid}/script`, undefined, LLM_TIMEOUT),
@@ -293,10 +351,27 @@ export const dramaApi = {
     req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/episodes/${eid}/prompts`, undefined, LLM_TIMEOUT),
   patchShot: (pid: number, sid: number, body: Partial<DramaShot>) =>
     req<{ shot: DramaShot }>("PATCH", `/api/projects/${pid}/drama/shots/${sid}`, body),
+  // 视频段计划:按站点单次时长上限把分镜格并段(确定性,不调 LLM,改上限即时重算)
+  getClips: (pid: number, eid: number, limitS = 10) =>
+    req<{ plan: ClipPlan }>(
+      "GET", `/api/projects/${pid}/drama/episodes/${eid}/clips?limit_s=${limitS}`),
   // 单格重出提示词:只动这一格(整集重跑慢且会盖掉手改),note = 这一格的额外要求
   regenShotPrompt: (pid: number, sid: number, note = "") =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/shots/${sid}/prompt`,
       { note }, LLM_TIMEOUT),
+  // 逐格施工单的进度层:出好的静帧挂回这一格(挂上即自动勾「静帧」),
+  // 段计划的首帧图就取段首格挂的这张。视频不收上传,只在 clip_ref 记「成片在哪」。
+  uploadShotAsset: (pid: number, sid: number, file: File, note = "") =>
+    postImage<{ shot: DramaShot }>(
+      `/api/projects/${pid}/drama/shots/${sid}/asset`, file, note),
+  linkShotAsset: (pid: number, sid: number, url: string, note = "") =>
+    req<{ shot: DramaShot }>(
+      "POST", `/api/projects/${pid}/drama/shots/${sid}/asset/link`, { url, note }),
+  deleteShotAsset: (pid: number, sid: number, index: number) =>
+    req<{ shot: DramaShot }>(
+      "DELETE", `/api/projects/${pid}/drama/shots/${sid}/asset/${index}`),
+  shotAssetBlobUrl: (pid: number, sid: number, index: number) =>
+    imageBlobUrl(`/api/projects/${pid}/drama/shots/${sid}/asset/${index}`),
   // 成片包(阶段 2):配音稿 + 剪辑清单
   buildPack: (pid: number, eid: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/episodes/${eid}/pack`, undefined, LLM_TIMEOUT),
