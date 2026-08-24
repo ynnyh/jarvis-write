@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session
 from app.db.models import PromoPlan, PromoShot
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.drama.common import clip
+from app.engines.media.anchors import ensure_style_anchors
+from app.engines.media.segments import chunk_rows, group_by_limit
 from app.llm.router import Task, get_adapter_for
 from app.prompts.promo import PROMO_CHUNKS_PROMPT
 
@@ -21,28 +23,6 @@ VALID_CHUNK_S = (5, 10, 15)
 
 class PromoChunkError(ValueError):
     """切段的业务性错误(信息直接上屏)。"""
-
-
-def _group_shots(shots: list[PromoShot], chunk_s: int) -> list[list[PromoShot]]:
-    """镜头边界贪心聚段:装得下就装,装不下开新段;单镜头超限独立成段。"""
-    groups: list[list[PromoShot]] = []
-    cur: list[PromoShot] = []
-    cur_s = 0
-    for s in shots:
-        if cur and cur_s + s.duration_s > chunk_s:
-            groups.append(cur)
-            cur, cur_s = [], 0
-        cur.append(s)
-        cur_s += s.duration_s
-    if cur:
-        groups.append(cur)
-    return groups
-
-
-def _ensure_anchor(prompt: str, anchor: str, prefix: str) -> str:
-    if not anchor or anchor in prompt:
-        return prompt
-    return f"{prefix}{anchor}。{prompt}"
 
 
 def _chunks_block(groups: list[list[PromoShot]], start_s: list[int]) -> str:
@@ -68,13 +48,10 @@ async def build_chunks(
     if not shots:
         raise PromoChunkError("还没有分镜,先「拆分镜」再切段。")
 
-    groups = _group_shots(shots, chunk_s)
-    # 时间码(与 SRT/剪辑清单同一累计轴)
-    start_s: list[int] = []
-    t = 0
-    for g in groups:
-        start_s.append(t)
-        t += sum(s.duration_s for s in g)
+    groups = group_by_limit(shots, chunk_s)
+    # 确定性部分(时间码/超限标注/字幕对位)全部由 media.segments 出,与 SRT 同一累计轴
+    rows = chunk_rows(groups, chunk_s)
+    start_s = [r["start_s"] for r in rows]
 
     # ---- LLM 批量:每段视频提示词 + 首帧指引 + 拼接提示 ----
     progress(f"AI 正在写分段视频提示词({len(groups)} 段,每段 ≤{chunk_s}s)…")
@@ -96,24 +73,18 @@ async def build_chunks(
                 continue
 
     items = []
-    for i, g in enumerate(groups, start=1):
-        dur = sum(s.duration_s for s in g)
-        a = ann.get(i, {})
-        motion_cn = clip(a.get("motion_prompt_cn"), 800)
-        motion_en = clip(a.get("motion_prompt_en"), 600)
-        # 画风锚兜底(与三轨提示词同纪律)
-        motion_cn = _ensure_anchor(motion_cn, plan.style_cn, "【画风锚】")
-        motion_en = _ensure_anchor(motion_en, plan.style_en, "")
+    for row, g in zip(rows, groups):
+        a = ann.get(row["index"], {})
+        # 画风锚兜底(与三轨提示词同纪律,口径见 media.anchors)
+        motion_cn, motion_en = ensure_style_anchors(
+            clip(a.get("motion_prompt_cn"), 800),
+            clip(a.get("motion_prompt_en"), 600),
+            plan.style_cn,
+            plan.style_en,
+        )
         items.append(
             {
-                "index": i,
-                "start_s": start_s[i - 1],
-                "end_s": start_s[i - 1] + dur,
-                "duration_s": dur,
-                "over_limit": dur > chunk_s,
-                "shot_seqs": [s.seq for s in g],
-                "scenes": [s.scene_name for s in g if s.scene_name],
-                "subtitle": "\n".join(s.dialogue for s in g if s.dialogue),
+                **row,
                 "motion_prompt_cn": motion_cn,
                 "motion_prompt_en": motion_en,
                 "first_frame_hint": clip(a.get("first_frame_hint"), 200)

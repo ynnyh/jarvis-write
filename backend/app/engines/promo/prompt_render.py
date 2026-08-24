@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.db.models import PromoPlan, PromoShot
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.drama.common import clip
+from app.engines.media.anchors import ensure_style_anchors
 from app.llm.router import Task, get_adapter_for
 from app.prompts.promo import PROMO_SHOT_PROMPT_PROMPT
 
@@ -16,12 +17,6 @@ _CHUNK = 8
 
 class PromoPromptError(ValueError):
     """提示词渲染的业务性错误(信息直接上屏)。"""
-
-
-def _ensure_anchor(prompt: str, anchor: str, prefix: str) -> str:
-    if not anchor or anchor in prompt:
-        return prompt
-    return f"{prefix}{anchor}。{prompt}"
 
 
 def _landmark_anchor_block(shots: list[PromoShot], landmarks: list[dict]) -> str:
@@ -85,8 +80,7 @@ async def render_shot_prompts(db: Session, plan: PromoPlan, progress=lambda s: N
             if not prompt_cn and not prompt_en:
                 continue
             # 兜底注入:画风锚(中英)与负面基座,与漫剧同纪律
-            prompt_cn = _ensure_anchor(prompt_cn, plan.style_cn, "【画风锚】")
-            prompt_en = _ensure_anchor(prompt_en, plan.style_en, "")
+            prompt_cn, prompt_en = ensure_style_anchors(prompt_cn, prompt_en, plan.style_cn, plan.style_en)
             if plan.negative and plan.negative not in negative:
                 negative = f"{plan.negative},{negative}" if negative else plan.negative
             shot.prompt_cn = prompt_cn

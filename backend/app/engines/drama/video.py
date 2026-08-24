@@ -21,6 +21,7 @@ prompts/drama.py 的 SHOT_PROMPT_PROMPT),模型漏给时这里按运镜栏兜底
 from __future__ import annotations
 
 from app.engines.drama.common import clip
+from app.engines.media.segments import group_by_limit
 
 # 单次生成时长上限:各站常见档位(即梦/可灵多为 5-10 秒,Sora/Veo/Runway 到 15 秒)
 CLIP_LIMITS: tuple[int, ...] = (5, 10, 15)
@@ -226,23 +227,18 @@ def clip_plan(shots: list, limit_s: int = CLIP_LIMIT_DEFAULT) -> dict:
 
     产出的每段都标清:用哪一格的静帧当首帧、怎么动、几秒、要压什么字幕。
     单格本身就超上限的,不硬塞——标 over_limit 并给「同一首帧连生两段」的接法。
+
+    并段走 `media.segments.group_by_limit` 的公共贪心内核(边界只落在镜头边界上),
+    漫剧比宣传片/短片多三条内聚条件,靠 `can_join` 加严。
     """
     limit = normalize_limit(limit_s)
-    segments: list[dict] = []
-    cur: list = []
-    for s in shots:
-        if not cur:
-            cur = [s]
-            continue
-        acc = sum(x.duration_s or 0 for x in cur)
+
+    def can_join(cur: list, s, acc_s: int) -> bool:
         acc_dia = any((x.dialogue or "").strip() for x in cur)
-        if _same_group(cur[0], s, acc, limit, acc_dia):
-            cur.append(s)
-        else:
-            segments.append(_segment(len(segments) + 1, cur, limit))
-            cur = [s]
-    if cur:
-        segments.append(_segment(len(segments) + 1, cur, limit))
+        return _same_group(cur[0], s, acc_s, limit, acc_dia)
+
+    groups = group_by_limit(shots, limit, can_join=can_join)
+    segments = [_segment(i, g, limit) for i, g in enumerate(groups, start=1)]
 
     total_s = sum(seg["duration_s"] for seg in segments)
     over = [seg["index"] for seg in segments if seg["over_limit"]]
