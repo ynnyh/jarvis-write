@@ -24,6 +24,15 @@ frontend/dist/
 # 其它目录里的 node_modules(docs/ 下那份就有 96M,白白跟着上传构建上下文)
 **/node_modules/
 
+# 桌面版 Rust 构建产物:9.4G,是构建上下文的绝对大头(实测上下文 11.73GB)。
+# Dockerfile 只 COPY frontend/ backend/ CHANGELOG.md,它从来就没进过镜像,纯属白传。
+src-tauri/target/
+
+# 本地缓存与临时目录
+.pytest_cache/
+**/.pytest_cache/
+.zcode/
+
 # Git / IDE / OS
 .git/
 .gitignore
