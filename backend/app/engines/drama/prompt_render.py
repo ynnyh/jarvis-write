@@ -23,6 +23,7 @@ from app.engines.drama.common import (
 )
 from app.engines.drama.gender import gender_paren, gender_tag
 from app.engines.drama.video import motion_fallback
+from app.engines.media.anchors import ensure_style_anchors, merge_negative
 from app.llm.router import Task, get_adapter_for
 from app.prompts.drama import SHOT_PROMPT_PROMPT
 
@@ -77,13 +78,6 @@ def _anchor_blocks(
     return "\n".join(char_lines), "\n".join(scene_lines)
 
 
-def _ensure_anchor(shot_prompt: str, anchor: str, prefix: str) -> str:
-    """锚段兜底:LLM 输出里没含锚段时,确定性前置拼接。"""
-    if not anchor or anchor in shot_prompt:
-        return shot_prompt
-    return f"{prefix}{anchor}。{shot_prompt}"
-
-
 def _ensure_character_anchors(
     shot: DramaShot, prompt_cn: str, char_by_name, char_by_alias
 ) -> str:
@@ -126,12 +120,10 @@ def _write_prompts(
     negative = clip(item.get("negative"), 500)
     if not prompt_cn and not prompt_en:
         return False
-    # 兜底注入:画风锚 + 角色锚(中文);英文画风锚;负面词基座
-    prompt_cn = _ensure_anchor(prompt_cn, style.style_cn, "【画风锚】")
+    # 兜底注入:画风锚 + 角色锚(中文);英文画风锚;负面词基座(口径见 media.anchors)
+    prompt_cn, prompt_en = ensure_style_anchors(prompt_cn, prompt_en, style.style_cn, style.style_en)
     prompt_cn = _ensure_character_anchors(shot, prompt_cn, char_by_name, char_by_alias)
-    prompt_en = _ensure_anchor(prompt_en, style.style_en, "")
-    if style.negative and style.negative not in negative:
-        negative = f"{style.negative},{negative}" if negative else style.negative
+    negative = merge_negative(negative, style.negative)
     shot.prompt_cn = prompt_cn
     shot.prompt_en = prompt_en
     shot.negative = negative

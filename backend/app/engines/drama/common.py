@@ -3,6 +3,11 @@
 """漫剧引擎公共件:上下文拼装、LLM 输出裁剪、行序列化。
 
 只依赖 db 模型与 LLM 适配器,不碰 HTTP 概念(照 polish 引擎的分层惯例)。
+
+画风方向目录与 clip/coerce_int 这些**三条出片线共用**的件已挪进 `engines/media/`
+(directions / text)——这里从那边导入、对内继续用同名符号(漫剧内部几十处调用不动)。
+新代码请直接从 `media.*` 取:宣传片/情绪短片不是漫剧的下游,不该反向依赖这个模块
+(`tests/test_engine_conventions.py` 会挡)。
 """
 from __future__ import annotations
 
@@ -19,6 +24,12 @@ from app.db.models import (
     Outline,
     Project,
 )
+from app.engines.media.directions import (  # noqa: F401  漫剧内部沿用这些名字
+    VALID_DIRECTIONS,
+    direction_directive,
+    direction_label,
+)
+from app.engines.media.text import clip, coerce_int  # noqa: F401
 
 # 改编模式 → 提示词里的说明文案
 MODE_DESC = {
@@ -27,54 +38,9 @@ MODE_DESC = {
 }
 VALID_MODES = ("dialogue", "narration")
 
-# 画风方向目录:key 白名单 + 给 LLM 的方向硬约束 + 给用户的选择提示。
-# 真人写实保留但挂警示:AI 真人目前仍有恐怖谷痕迹,跨镜头一致性比动画系难得多。
-DRAMA_DIRECTIONS: list[dict] = [
-    {"key": "auto", "label": "AI 按书定", "directive": "按本书类型自选最合适的动画系画风(默认排除真人写实)",
-     "tip": ""},
-    {"key": "comic_cn", "label": "国漫厚涂", "directive": "国漫厚涂插画风:笔触沉稳、块面光影、剧场感构图",
-     "tip": ""},
-    {"key": "anime_jp", "label": "日系二次元", "directive": "日式动画赛璐璐风:线条干净、平涂上色、动画角色面容",
-     "tip": ""},
-    {"key": "render3d", "label": "3D 动画", "directive": "三维动画渲染风:国创3D剧场感,材质与光感细腻",
-     "tip": ""},
-    {"key": "live", "label": "真人写实", "directive": "真人实拍质感:电影感打光、写实皮肤材质、浅景深",
-     "tip": "AI 真人目前仍有恐怖谷痕迹,跨镜头一致性更难,建议先小范围试再铺量"},
-    {"key": "ink_wash", "label": "水墨国风", "directive": "水墨画风:留白构图、墨色浓淡、写意笔触",
-     "tip": ""},
-    {"key": "cyber", "label": "赛博霓虹", "directive": "赛博朋克霓虹风:高饱和冷暖对比、夜景光污染、金属质感",
-     "tip": ""},
-]
-_DIRECTION_MAP = {d["key"]: d for d in DRAMA_DIRECTIONS}
-VALID_DIRECTIONS = tuple(_DIRECTION_MAP)
-
-
-def direction_directive(key: str) -> str:
-    """方向 key → 给 LLM 的硬约束文案;未知 key 回落到 auto。"""
-    return (_DIRECTION_MAP.get(key) or _DIRECTION_MAP["auto"])["directive"]
-
-
-def direction_label(key: str) -> str:
-    return (_DIRECTION_MAP.get(key) or _DIRECTION_MAP["auto"])["label"]
-
-
 # 景别/运镜白名单(normalize 用,白名单外的值截短保留——LLM 偶尔写"大特写"也放行)
 SHOT_TYPES = ("远景", "全景", "中景", "近景", "特写")
 CAMERAS = ("固定", "推", "拉", "摇", "跟随", "环绕")
-
-
-def clip(s: object, width: int) -> str:
-    """LLM 字段裁剪:转字符串、去首尾空白、限长。"""
-    return str(s or "").strip()[:width]
-
-
-def coerce_int(raw: object, default: int, lo: int = 0, hi: int = 10**6) -> int:
-    """把 LLM 的 "4"/4.0/脏值收敛成 [lo, hi] 内的 int。"""
-    try:
-        n = int(float(str(raw).strip()))
-    except (TypeError, ValueError):
-        return default
-    return max(lo, min(hi, n))
 
 
 def concept_block(project: Project) -> str:

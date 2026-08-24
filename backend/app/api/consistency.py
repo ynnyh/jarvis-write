@@ -74,7 +74,7 @@ async def bible_snapshot(
         entities_count=ent_count,
         facts=[
             FactOut(
-                entity=bible._entity_name(f.entity_id),
+                entity=bible.entity_name(f.entity_id),
                 fact_type=f.fact_type,
                 content=f.content,
                 valid_from=f.valid_from,

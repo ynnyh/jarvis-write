@@ -1,10 +1,12 @@
 # app/engines/clips/common.py
 # -*- coding: utf-8 -*-
-"""情绪短片引擎公共件:主题目录、序列化、字典版切段(复用漫剧 SRT 内核的时间轴口径)。"""
+"""情绪短片引擎公共件:主题目录、序列化、字典版切段(时间轴口径同 media.subtitles)。"""
 from __future__ import annotations
 
 from app.db.models import MoodClip
-from app.engines.drama.common import coerce_int, direction_directive, direction_label
+from app.engines.media.directions import direction_directive, direction_label
+from app.engines.media.segments import plan_chunks
+from app.engines.media.text import coerce_int
 
 # 情绪主题目录:key 白名单 + 给提示词的「导演提示」(这个情绪怎么拍才戳)
 CLIP_THEMES: list[dict] = [
@@ -45,41 +47,11 @@ def shot_hint(duration_s: int) -> str:
     return "3-5 格,每格 2-6 秒" if duration_s <= 15 else "5-7 格,每格 2-6 秒"
 
 
-# =============== 切段(字典版,镜头边界贪心;时间轴与 SRT 同口径) ===============
+# =============== 切段(复用 media.segments 单点;时间轴与 SRT 同口径) ===============
 
 def group_chunks(shots: list[dict], chunk_s: int) -> list[dict]:
     """把分镜 dict 列表按镜头边界贪心聚段,返回带起止时间码的段列表。"""
-    groups: list[list[dict]] = []
-    cur: list[dict] = []
-    cur_s = 0
-    for s in shots:
-        d = int(s.get("duration_s") or 0)
-        if cur and cur_s + d > chunk_s:
-            groups.append(cur)
-            cur, cur_s = [], 0
-        cur.append(s)
-        cur_s += d
-    if cur:
-        groups.append(cur)
-
-    items = []
-    t = 0
-    for g in groups:
-        dur = sum(int(s.get("duration_s") or 0) for s in g)
-        items.append(
-            {
-                "index": len(items) + 1,
-                "start_s": t,
-                "end_s": t + dur,
-                "duration_s": dur,
-                "over_limit": dur > chunk_s,
-                "shot_seqs": [int(s.get("seq") or 0) for s in g],
-                "scenes": [s.get("scene_name") or "" for s in g if s.get("scene_name")],
-                "subtitle": "\n".join(s.get("dialogue") or "" for s in g if s.get("dialogue")),
-            }
-        )
-        t += dur
-    return items
+    return plan_chunks(shots, chunk_s)
 
 
 # =============== 序列化 ===============

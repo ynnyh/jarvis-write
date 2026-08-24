@@ -37,7 +37,7 @@ class PromoPlan(Base, TimestampMixin):
     # 选中的切入角度(keys,见 engines/promo/common.PROMO_ANGLES)
     angles: Mapped[list[Any]] = mapped_column(JSON, default=list)
     duration_s: Mapped[int] = mapped_column(Integer, default=90)
-    # 画风方向(复用漫剧的 DRAMA_DIRECTIONS;宣传片以空镜为主,默认实拍电影感 live)
+    # 画风方向(三线共用目录 media/directions.py;宣传片以空镜为主,默认实拍电影感 live)
     direction: Mapped[str] = mapped_column(String(40), default="live")
     # ===== 风格卡(内嵌一条,同漫剧画风锚语义)=====
     style_name: Mapped[str] = mapped_column(String(60), default="")

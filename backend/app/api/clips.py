@@ -36,7 +36,7 @@ from app.engines.clips import (
     pick_clip,
 )
 from app.engines.clips.common import STATUS_CN
-from app.engines.drama.common import VALID_DIRECTIONS
+from app.engines.media.directions import VALID_DIRECTIONS
 from app.jobs import list_running, spawn_job
 
 logger = logging.getLogger("jarvis-write.clips")
@@ -84,13 +84,13 @@ def _validate_common(theme: str, custom_theme: str, duration_s: int, direction: 
 
 @router.get("/meta")
 async def clips_meta():
-    from app.engines.drama.common import DRAMA_DIRECTIONS
+    from app.engines.media.directions import DIRECTIONS
 
     return {
         "themes": CLIP_THEMES,
         "durations": list(VALID_DURATIONS),
         "directions": [
-            {"key": d["key"], "label": d["label"], "tip": d["tip"]} for d in DRAMA_DIRECTIONS
+            {"key": d["key"], "label": d["label"], "tip": d["tip"]} for d in DIRECTIONS
         ],
         "status_cn": STATUS_CN,
     }

@@ -6,8 +6,6 @@
 """
 from __future__ import annotations
 
-import csv
-import io
 import json
 
 from app.db.models import (
@@ -28,6 +26,9 @@ from app.engines.drama.common import (
 )
 from app.engines.drama.paste import ref_sheet_paste, shot_paste
 from app.engines.drama.video import CLIP_LIMIT_DEFAULT, clips_payload, motion_tracks
+from app.engines.media.audio import audio_track_note
+from app.engines.media.subtitles import srt_blocks, srt_from_rows
+from app.engines.media.text import csv_text
 
 _STATUS_CN = {
     "planned": "已规划",
@@ -267,29 +268,28 @@ def export_csv(
     paste_oneframe 是「单框站直接粘贴版」(负面词已并入正文):
     批量出图的人普遍拿 Excel 一行行复制,没这列就得自己拼负面词。
     """
-    buf = io.StringIO()
-    writer = csv.writer(buf)
     # 逐格施工单:出图三栏 + 运动轨两栏 + 段号/生成次数 + 素材两栏 + 两个打勾栏。
     # 打勾栏取站内的真实状态而不是一律留空——在站里勾过的进度,导出来还要重勾一遍就白勾了。
-    writer.writerow(
-        ["seq", "scene_name", "characters", "shot_type", "camera", "duration_s",
-         "action_desc", "dialogue", "prompt_cn", "prompt_en", "negative",
-         "paste_oneframe", "motion_cn", "motion_en", "clip", "clip_seqs",
-         "clip_duration_s", "clip_runs", "paste_i2v", "still_asset", "clip_ref",
-         "done_still", "done_video"]
-    )
+    header = [
+        "seq", "scene_name", "characters", "shot_type", "camera", "duration_s",
+        "action_desc", "dialogue", "prompt_cn", "prompt_en", "negative",
+        "paste_oneframe", "motion_cn", "motion_en", "clip", "clip_seqs",
+        "clip_duration_s", "clip_runs", "paste_i2v", "still_asset", "clip_ref",
+        "done_still", "done_video",
+    ]
     # 段号按格反查:表是逐格的,而视频段是「几格并一段」,不给映射用户对不上号
     plan = clips_payload(shots, style, CLIP_LIMIT_DEFAULT)
     seg_of: dict[int, dict] = {}
     for seg in plan["segments"]:
         for q in seg["seqs"]:
             seg_of[q] = seg
+    rows: list[list] = []
     for s in shots:
         paste = shot_paste(s, style, _ref_names(s, cards or []))
         motion_cn, motion_en = motion_tracks(s)
         seg = seg_of.get(s.seq) or {}
         assets = shot_asset_list(s)
-        writer.writerow(
+        rows.append(
             [s.seq, s.scene_name, "、".join(s.characters or []), s.shot_type,
              s.camera, s.duration_s, s.action_desc, s.dialogue,
              s.prompt_cn, s.prompt_en, s.negative, paste["oneframe"]["main"],
@@ -302,7 +302,7 @@ def export_csv(
              "✓" if getattr(s, "done_still", False) else "",
              "✓" if getattr(s, "done_video", False) else ""]
         )
-    return "\ufeff" + buf.getvalue()
+    return csv_text(header, rows)
 
 
 def export_json(
@@ -337,43 +337,19 @@ def export_json(
 
 
 # =============== 阶段 2:字幕 / 成片包 ===============
-
-def _srt_ts(sec: float) -> str:
-    """秒 → SRT 时间码 HH:MM:SS,mmm。"""
-    ms = int(round(sec * 1000))
-    h, ms = divmod(ms, 3600_000)
-    m, ms = divmod(ms, 60_000)
-    s, ms = divmod(ms, 1000)
-    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-
-
-def _srt_blocks(items: list[tuple[int, str]]) -> str:
-    """(时长秒, 字幕文本) 序列 → 标准 SRT。有文本才有字幕条;空条时长仍计入时间轴。"""
-    blocks: list[str] = []
-    t = 0.0
-    idx = 0
-    for duration, text in items:
-        start, end = t, t + duration
-        t = end
-        text = (text or "").strip()
-        if not text:
-            continue
-        idx += 1
-        blocks.append(f"{idx}\n{_srt_ts(start)} --> {_srt_ts(end)}\n{text}\n")
-    return "\n".join(blocks)
-
+# SRT 内核(时间码 + 累计时间轴)已挪进 media.subtitles:三条出片线共用一份口径。
 
 def export_srt(shots: list[DramaShot]) -> str:
     """标准 SRT 字幕(剪映/PR 直接导入):时间轴按分镜时长累计,有台词才有字幕条。
 
     纯确定性输出——时间轴来自分镜表,和剪辑清单同一口径。
     """
-    return _srt_blocks([(s.duration_s, s.dialogue or "") for s in shots])
+    return srt_blocks([(s.duration_s, s.dialogue or "") for s in shots])
 
 
 def export_trailer_srt(shots: list[dict]) -> str:
     """预告片 SRT(dict 版 shots,与 export_srt 同一时间轴口径)。"""
-    return _srt_blocks([(int(s.get("duration_s") or 0), str(s.get("dialogue") or "")) for s in shots])
+    return srt_from_rows(shots)
 
 
 def export_trailer_markdown(project: Project, trailer: dict) -> str:
@@ -488,4 +464,7 @@ def export_pack_markdown(
         L.append("")
         L.append("> 出片顺序:先出角色定妆照(手册「角色卡」段) → 每格「定妆照当参考图 + 分镜提示词」出图"
                  " → 图生视频/加轻动 → 按配音稿合成语音 → 按剪辑清单拼接 → 压 SRT 字幕 → 铺 BGM。")
+        L.append("")
+        # 音频三轨说明:视频提示词里那句「不要人声」是分轨,不是静音(口径见 media.audio)
+        L.extend(audio_track_note())
     return "\n".join(L)

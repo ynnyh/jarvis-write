@@ -1,22 +1,19 @@
 # app/engines/clips/exporter.py
 # -*- coding: utf-8 -*-
-"""情绪短片导出:手卡 Markdown / SRT 字幕 / JSON。时间轴复用漫剧 SRT 内核。"""
+"""情绪短片导出:手卡 Markdown / SRT 字幕 / JSON。时间轴走 media 的 SRT 内核。"""
 from __future__ import annotations
 
 import json
 
 from app.db.models import MoodClip
-from app.engines.drama.exporter import _srt_blocks
 from app.engines.clips.common import clip_dict, theme_display
-
-
-def _srt_from_shots(shots: list[dict]) -> str:
-    return _srt_blocks([(int(s.get("duration_s") or 0), str(s.get("dialogue") or "")) for s in shots])
+from app.engines.media.audio import audio_track_note
+from app.engines.media.subtitles import srt_from_rows
 
 
 def export_srt(row: MoodClip) -> str:
     clip = row.clip or {}
-    return _srt_from_shots(clip.get("shots") or [])
+    return srt_from_rows(clip.get("shots") or [])
 
 
 def export_markdown(row: MoodClip) -> str:
@@ -97,6 +94,9 @@ def export_markdown(row: MoodClip) -> str:
                 )
             L.append("")
         L.append("> 出片:按段生成 → 画布拼接 → 压 SRT → 末格加金句字幕卡。")
+        L.append("")
+        # 音频口径:15s 短片常常一段就出完,这时模型自带音频直接可用(口径见 media.audio)
+        L.extend(audio_track_note(single_segment=len(chunks) <= 1))
     return "\n".join(L)
 
 

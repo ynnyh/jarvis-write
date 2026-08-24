@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.db.models import PromoPlan
 from app.engines.consistency.extractor import parse_llm_json
-from app.engines.drama.common import clip, direction_directive, direction_label
+from app.engines.media.directions import direction_directive, direction_label
+from app.engines.media.text import clip
 from app.engines.promo.common import angles_block
 from app.llm.router import Task, get_adapter_for
 from app.prompts.promo import PROMO_LANDMARK_PROMPT, PROMO_STYLE_PROMPT

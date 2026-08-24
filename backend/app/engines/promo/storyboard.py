@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import PromoPlan, PromoShot
 from app.engines.consistency.extractor import parse_llm_json
-from app.engines.drama.common import coerce_int
+from app.engines.media.text import coerce_int
 from app.engines.promo.common import shot_dict
 from app.llm.router import Task, get_adapter_for
 from app.prompts.promo import PROMO_STORYBOARD_PROMPT

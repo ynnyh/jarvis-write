@@ -22,6 +22,10 @@ logger = logging.getLogger("jarvis-write.bible")
 # 无上限会把 prompt 撑爆。critical 永不被砍,仅在总数超限时截 major/minor。
 _MAX_FACT_LINES = 40
 
+# 资源类事实:由 ledger.py 单独渲染成「角色资源账本」(自带闭集红线与预算),
+# 因此调用方注入硬约束块时会把这两类排除掉,避免同一条在 prompt 里出现两遍。
+RESOURCE_FACT_TYPES = ("possession", "ability")
+
 
 class BibleService:
     def __init__(self, db: Session, project_id: int):
@@ -105,12 +109,69 @@ class BibleService:
             q = q.filter(Fact.entity_id.in_(ids))
         return q.all()
 
-    def _entity_name(self, entity_id: int) -> str:
+    def _find_replaced_fact(self, entity_id: int, replaces: str) -> Fact | None:
+        """定位 replaces 指向的那条仍生效的旧事实(抽取要求抄原文,但常有细微出入)。
+
+        原先只做 content 精确相等,于是模型多写一个括号补注("持有半块干粮(张三给的)")
+        就收不了口——旧事实永久留在开区间,后续每章都把作废的事实当硬约束注入。
+        三级匹配沿用 foreshadow._find_by_description 的口径,越往后越宽容但歧义不猜:
+          1) 精确;2) 去空白后精确;3) 唯一子串命中才认账(≥4 字,已按实体收窄候选)。
+        """
+        rows = (
+            self.db.query(Fact)
+            .filter(
+                Fact.project_id == self.project_id,
+                Fact.entity_id == entity_id,
+                Fact.valid_until.is_(None),
+            )
+            .all()
+        )
+        for f in rows:
+            if f.content == replaces:
+                return f
+        norm = "".join(replaces.split())
+        for f in rows:
+            if "".join((f.content or "").split()) == norm:
+                return f
+        if len(norm) >= 4:
+            hits = [
+                f
+                for f in rows
+                if norm in "".join((f.content or "").split())
+                or "".join((f.content or "").split()) in norm
+            ]
+            if len(hits) == 1:
+                return hits[0]
+            if len(hits) > 1:
+                logger.info(
+                    "replaces 模糊匹配到 %d 条,歧义不猜、旧事实不收口:%s",
+                    len(hits), replaces,
+                )
+        return None
+
+    def retired_entity_ids(self) -> set[int]:
+        """本书已退场(retired=True)实体的 id 集合。
+
+        退场后其事实一律不再注入生成/门禁 prompt(历史数据保留)。
+        资源账本(ledger.py)与硬约束块共用这一口径,别各写一份。
+        """
+        return {
+            row.id
+            for row in self.db.query(Entity.id).filter(
+                Entity.project_id == self.project_id,
+                Entity.retired.is_(True),
+            )
+        }
+
+    def entity_name(self, entity_id: int) -> str:
         ent = self.db.get(Entity, entity_id)
         return ent.name if ent else f"实体{entity_id}"
 
     def hard_constraints_block(
-        self, chapter_number: int, entity_names: list[str] | None = None
+        self,
+        chapter_number: int,
+        entity_names: list[str] | None = None,
+        exclude_types: tuple[str, ...] = (),
     ) -> str:
         """渲染 Prompt 硬约束块:涉及角色在当前章的状态事实 + 出场人物相互关系。
 
@@ -118,15 +179,13 @@ class BibleService:
         作者退场某个人物后,后续生成不再受其状态约束;历史数据保留。
         关系行只在给了出场名单(entity_names)时注入,且仅注入
         双方都在名单内、当前有效的关系边,避免无关关系膨胀 prompt。
+        exclude_types:按 fact_type 排除(调用方传 RESOURCE_FACT_TYPES,把持有/能力
+        让给资源账本渲染),排除后仍无内容才回落到"暂无"提示语。
         """
         facts = self.query_facts_at(chapter_number, entity_names)
-        retired_ids = {
-            row.id
-            for row in self.db.query(Entity.id).filter(
-                Entity.project_id == self.project_id,
-                Entity.retired.is_(True),
-            )
-        }
+        if exclude_types:
+            facts = [f for f in facts if f.fact_type not in exclude_types]
+        retired_ids = self.retired_entity_ids()
         if retired_ids:
             facts = [f for f in facts if f.entity_id not in retired_ids]
         lines = []
@@ -145,7 +204,7 @@ class BibleService:
             for f in facts:
                 mark = "❗" if f.importance == "critical" else "·"
                 lines.append(
-                    f"{mark} {self._entity_name(f.entity_id)}:{f.content}"
+                    f"{mark} {self.entity_name(f.entity_id)}:{f.content}"
                     f"(自第{f.valid_from}章起)"
                 )
         if entity_names:
@@ -189,8 +248,8 @@ class BibleService:
         for e in sorted(edges, key=lambda r: r.id):
             if e.from_entity_id in ids and e.to_entity_id in ids:
                 lines.append(
-                    f"· 关系: {self._entity_name(e.from_entity_id)}"
-                    f"→{self._entity_name(e.to_entity_id)}: "
+                    f"· 关系: {self.entity_name(e.from_entity_id)}"
+                    f"→{self.entity_name(e.to_entity_id)}: "
                     f"{e.relation}(自第{e.valid_from}章起)"
                 )
         return lines
@@ -328,19 +387,18 @@ class BibleService:
             # 关闭被取代的旧事实区间
             replaces = (ch.get("replaces") or "").strip() if ch.get("replaces") else ""
             if replaces:
-                old = (
-                    self.db.query(Fact)
-                    .filter(
-                        Fact.project_id == self.project_id,
-                        Fact.entity_id == entity.id,
-                        Fact.content == replaces,
-                        Fact.valid_until.is_(None),
-                    )
-                    .first()
-                )
+                old = self._find_replaced_fact(entity.id, replaces)
                 if old:
                     old.valid_until = chapter_number - 1
                     stats["closed"] += 1
+                else:
+                    # 不静默:模型明说"这条取代了旧事实",却没落到任何一行上——
+                    # 旧事实会永远挂在开区间里(干粮吃完三章了账本还写着"持有半块干粮"),
+                    # 账本失真就是这么来的。留日志好定位是措辞出入还是模型编的。
+                    logger.warning(
+                        "第%d章 %s 的 replaces 未命中任何有效事实,旧事实未收口:%s",
+                        chapter_number, ent_name, replaces,
+                    )
 
             fact = Fact(
                 project_id=self.project_id,

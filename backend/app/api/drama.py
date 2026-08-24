@@ -84,7 +84,6 @@ from app.engines.drama import (
     write_episode_script,
 )
 from app.engines.drama.common import (
-    DRAMA_DIRECTIONS,
     MODE_DESC,
     VALID_DIRECTIONS,
     VALID_MODES,
@@ -102,6 +101,7 @@ from app.engines.drama.common import (
 )
 from app.engines.drama.gender import VALID_GENDERS
 from app.engines.drama.video import CLIP_LIMIT_DEFAULT, clips_payload
+from app.engines.media.directions import DIRECTIONS
 from app.jobs import list_running, spawn_job
 
 logger = logging.getLogger("jarvis-write.drama")
@@ -268,7 +268,7 @@ async def drama_meta(project_id: int, db: Session = Depends(get_db)):
         "approved_chapters": approved,
         "approved_count": len(approved),
         "modes": [{"key": k, "label": v} for k, v in MODE_DESC.items()],
-        "directions": DRAMA_DIRECTIONS,
+        "directions": DIRECTIONS,
     }
 
 

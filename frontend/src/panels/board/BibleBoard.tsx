@@ -4,6 +4,12 @@ import { api, BibleSnapshot, FactOut } from "../../api";
 import { IMP_BADGE, Props } from "./shared";
 import { errMsg } from "../../pollJob";
 
+// 资源类事实(持有/能力)在生成侧有一份专门的「角色资源账本」闭集约束
+// (后端 engines/consistency/ledger.py:不许凭空掏出、新增要交代来源、用掉要写明)。
+// 这里给它们标一枚类型 badge:账本里现在挂着什么作者得看得见——
+// 「三章前就该吃完的干粮还挂着」这种失真,只有人眼能一眼认出来。
+const TYPE_LABEL: Record<string, string> = { possession: "持有", ability: "会/能" };
+
 export default function BibleBoard({ pid, outlines }: Props) {
   const maxCh = outlines.length ? Math.max(...outlines.map((o) => o.chapter_number)) : 1;
   const [atChapter, setAtChapter] = useState(maxCh);
@@ -50,6 +56,7 @@ export default function BibleBoard({ pid, outlines }: Props) {
             {facts.map((f, i) => (
               <div key={i} className="fact-line">
                 <span className={"badge " + (IMP_BADGE[f.importance] ?? "")}>{f.importance}</span>
+                {TYPE_LABEL[f.fact_type] && <> <span className="badge">{TYPE_LABEL[f.fact_type]}</span></>}
                 {" "}{f.content}
                 <span className="muted">(第{f.valid_from}{f.valid_until ? `-${f.valid_until}` : " 章起"}章有效)</span>
               </div>

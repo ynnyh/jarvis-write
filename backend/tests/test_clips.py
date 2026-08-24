@@ -1,10 +1,12 @@
 # tests/test_clips.py
 # -*- coding: utf-8 -*-
-"""情绪短片工坊测试(批产三本子/三选一/锚段兜底/切段/金句溯源/导出,TestClient + mock LLM)。
+"""情绪短片工坊测试(两段式批产/三选一/锚段兜底/切段/金句溯源/导出,TestClient + mock LLM)。
 
 验证点:
 - CRUD 与归属隔离;非法主题/时长/方向 → 400
-- 批产:三个候选、归一化(镜头上限/时长收敛/切段分组)、画风锚兜底
+- 两段式批产:①一发定风格+三条切入,②每条切入各一发展开(断言调用次数,防退回单次大调用)
+- 归一化:镜头上限/时长收敛/切段分组、画风锚兜底、三个本子共用同一套画风
+- 容错:一条切入展开失败仍交付其余本子(带重试);少于 2 个则按失败上报
 - 三选一:pick 后 clip 落定、status=picked;无效序号 400
 - 小说衍生:无定稿章节 → 引导错误;金句 quote_source 不在正文节选 → cautions 标注(溯源红线)
 - 导出:md 手卡含金句/切段;srt 时间轴与分镜同轴
@@ -50,19 +52,51 @@ def _wait_job(client: TestClient, headers: dict, job_id: str, timeout: float = 3
         time.sleep(0.02)
 
 
-class _JsonAdapter:
-    def __init__(self, payload: dict):
-        self._raw = json.dumps(payload, ensure_ascii=False)
+class _PhaseAdapter:
+    """两段式桩:按提示词特征分流——①要 takes,②要 shots。
+
+    引擎每发都会 get_adapter_for 拿新实例(并发下不能共用,预算会互相篡改),
+    所以计数落在类属性上,便于断言「①一发 + ②三发」。
+    """
+
+    calls = {"takes": 0, "expand": 0}
+
+    def __init__(self, head: dict, expand: dict | list, fail_takes: set[str] | None = None):
+        self._head = head
+        self._expand = expand
+        self._fail = fail_takes or set()
+
+    @classmethod
+    def reset(cls):
+        cls.calls = {"takes": 0, "expand": 0}
 
     async def ask(self, prompt, system=None):
-        return self._raw
+        if '"takes"' in prompt:
+            type(self).calls["takes"] += 1
+            return json.dumps(self._head, ensure_ascii=False)
+        type(self).calls["expand"] += 1
+        # 指定切入展开必失败:验证「一发废了另外两发照样交付」
+        for name in self._fail:
+            if f"切入:{name}" in prompt:
+                raise RuntimeError(f"模拟 {name} 展开失败")
+        return json.dumps(self._expand, ensure_ascii=False)
 
 
-def _candidate(take: str, prompt_cn: str, quote: str = "") -> dict:
+def _take(name: str, quote: str = "") -> dict:
+    """①的一条切入(不含分镜)。"""
     return {
-        "take": take,
-        "logline": f"{take}的一支 15 秒短片",
+        "take": name,
+        "logline": f"{name}的一支 15 秒短片",
         "emotion_curve": "平静→屏息→空",
+        "punchline": "没说出口的,才最难消化。",
+        "hook_text": "他读了二十年她的遗书",
+        "quote_source": quote,
+    }
+
+
+def _expand(prompt_cn: str) -> dict:
+    """②的展开结果(台词 + 分镜三轨)。"""
+    return {
         "lines": [
             {"speaker": "旁白", "text": "有些话,隔了十年才说。", "action": "空教室,粉笔灰浮动"},
         ],
@@ -76,23 +110,23 @@ def _candidate(take: str, prompt_cn: str, quote: str = "") -> dict:
              "dialogue": "", "duration_s": 7,
              "prompt_cn": "黑板半擦的字特写,含水墨颗粒质感", "prompt_en": "half-erased blackboard closeup", "negative": ""},
         ],
-        "punchline": "没说出口的,才最难消化。",
-        "quote_source": quote,
-        "hook_text": "他读了二十年她的遗书",
     }
 
 
-_BATCH_REPLY = {
+_STYLE = {
     "style_name": "电影感实拍·冷蓝",
     "style_cn": "实拍电影感,冷蓝主色,自然光,胶片颗粒",
     "style_en": "cinematic live footage, cold blue tones, film grain",
     "negative": "文字,水印",
-    "clips": [
-        _candidate("未说出口的道歉", "空教室全景(故意漏画风锚)"),
-        _candidate("删掉的聊天记录", "手机屏幕特写,含实拍电影感,冷蓝主色,自然光,胶片颗粒"),
-        _candidate("空椅子", "长椅空了一半,含实拍电影感,冷蓝主色,自然光,胶片颗粒"),
-    ],
 }
+
+_HEAD = {
+    **_STYLE,
+    "takes": [_take("未说出口的道歉"), _take("删掉的聊天记录"), _take("空椅子")],
+}
+
+# 分镜故意漏画风锚 → 验证引擎兜底注入
+_EXPAND = _expand("空教室全景(故意漏画风锚)")
 
 
 def test_clips_generic_flow(client):
@@ -118,13 +152,16 @@ def test_clips_generic_flow(client):
     # 归属隔离
     assert client.get(f"/api/clips/{cid}", headers=other).status_code == 404
 
+    _PhaseAdapter.reset()
     with patch("app.engines.clips.batch.get_adapter_for",
-               return_value=_JsonAdapter(_BATCH_REPLY)):
+               return_value=_PhaseAdapter(_HEAD, _EXPAND)):
         r = client.post(f"/api/clips/{cid}/generate", headers=headers)
         job = _wait_job(client, headers, r.json()["job_id"])
     assert job["status"] == "done", job
     candidates = job["result"]["candidates"]
     assert len(candidates) == 3
+    # 两段式:①一发定风格与切入,②每条切入各一发(不再是一次大调用)
+    assert _PhaseAdapter.calls == {"takes": 1, "expand": 3}
     c0 = candidates[0]
     # 15s → 镜头上限 5(两格都保留);总时长 8+7=15 切一段
     assert len(c0["shots"]) == 2
@@ -179,14 +216,13 @@ def test_clips_novel_derived_grounding(client):
         s.commit()
 
     # 候选1 金句不在正文(编造) → 溯源警示;候选2 引用原句 → 干净
-    reply = dict(_BATCH_REPLY)
-    reply["clips"] = [
-        _candidate("编造金句", "空教室全景,含实拍电影感,冷蓝主色,自然光,胶片颗粒",
-                   quote="这句在正文里根本不存在"),
-        _candidate("真引用", "长椅空了一半,含实拍电影感,冷蓝主色,自然光,胶片颗粒",
-                   quote="纸角都磨圆了"),
-    ]
-    with patch("app.engines.clips.batch.get_adapter_for", return_value=_JsonAdapter(reply)):
+    head = {**_STYLE, "takes": [
+        _take("编造金句", quote="这句在正文里根本不存在"),
+        _take("真引用", quote="纸角都磨圆了"),
+    ]}
+    expand = _expand("空教室全景,含实拍电影感,冷蓝主色,自然光,胶片颗粒")
+    with patch("app.engines.clips.batch.get_adapter_for",
+               return_value=_PhaseAdapter(head, expand)):
         r = client.post(f"/api/clips/{cid}/generate", headers=headers)
         job = _wait_job(client, headers, r.json()["job_id"])
     assert job["status"] == "done", job
@@ -196,3 +232,57 @@ def test_clips_novel_derived_grounding(client):
     # 列表按项目过滤
     r = client.get(f"/api/clips?project_id={pid}", headers=headers)
     assert [c["id"] for c in r.json()["clips"]] == [cid]
+
+
+def test_one_take_failure_still_delivers_the_rest(client):
+    """②三发并行:一发展开失败,另外两个本子照样交付(旧实现是一截断全批白跑)。"""
+    headers = _auth(client, "clips_partial")
+    r = client.post("/api/clips", headers=headers,
+                    json={"theme": "regret", "duration_s": 15, "direction": "live"})
+    cid = r.json()["clip_row"]["id"]
+
+    _PhaseAdapter.reset()
+    with patch("app.engines.clips.batch.get_adapter_for",
+               return_value=_PhaseAdapter(_HEAD, _EXPAND, fail_takes={"空椅子"})):
+        r = client.post(f"/api/clips/{cid}/generate", headers=headers)
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    cands = job["result"]["candidates"]
+    assert [c["take"] for c in cands] == ["未说出口的道歉", "删掉的聊天记录"]
+    # 失败那条重试过:3 条切入 → 2 成功各 1 发 + 1 失败重试 2 发
+    assert _PhaseAdapter.calls == {"takes": 1, "expand": 4}
+
+
+def test_too_few_candidates_reports_error(client):
+    """只剩 1 个本子就没得「三选一」了,按失败上报而不是交付残次品。"""
+    headers = _auth(client, "clips_toofew")
+    r = client.post("/api/clips", headers=headers,
+                    json={"theme": "regret", "duration_s": 15, "direction": "live"})
+    cid = r.json()["clip_row"]["id"]
+
+    _PhaseAdapter.reset()
+    with patch("app.engines.clips.batch.get_adapter_for",
+               return_value=_PhaseAdapter(_HEAD, _EXPAND,
+                                          fail_takes={"删掉的聊天记录", "空椅子"})):
+        r = client.post(f"/api/clips/{cid}/generate", headers=headers)
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "error" and "过少" in job["error"]
+
+
+def test_style_card_is_shared_by_all_candidates(client):
+    """三个本子共用①定下的那一套画风锚(三选一后提示词口径必须一致)。"""
+    headers = _auth(client, "clips_style")
+    r = client.post("/api/clips", headers=headers,
+                    json={"theme": "regret", "duration_s": 15, "direction": "live"})
+    cid = r.json()["clip_row"]["id"]
+
+    _PhaseAdapter.reset()
+    with patch("app.engines.clips.batch.get_adapter_for",
+               return_value=_PhaseAdapter(_HEAD, _EXPAND)):
+        r = client.post(f"/api/clips/{cid}/generate", headers=headers)
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    row = client.get(f"/api/clips/{cid}", headers=headers).json()["clip_row"]
+    assert row["style_cn"] == _STYLE["style_cn"]
+    for c in job["result"]["candidates"]:
+        assert _STYLE["style_cn"] in c["shots"][0]["prompt_cn"]

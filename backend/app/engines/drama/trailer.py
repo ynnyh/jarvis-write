@@ -26,6 +26,7 @@ from app.engines.drama.common import (
     coerce_int,
     match_character,
 )
+from app.engines.media.anchors import ensure_style_anchors
 from app.llm.router import Task, get_adapter_for
 from app.prompts.drama import TRAILER_PROMPT
 
@@ -76,12 +77,6 @@ def _ep_block(db: Session, ep: DramaEpisode) -> str:
     return "\n".join(lines)
 
 
-def _ensure_anchor(prompt: str, anchor: str, prefix: str) -> str:
-    if not anchor or anchor in prompt:
-        return prompt
-    return f"{prefix}{anchor}。{prompt}"
-
-
 def _ensure_char_anchors(shot: dict, prompt_cn: str, by_name, by_alias) -> str:
     missing = []
     for name in shot.get("characters") or []:
@@ -106,8 +101,7 @@ def _normalize_shots(
         prompt_cn = clip(item.get("prompt_cn"), 1000)
         prompt_en = clip(item.get("prompt_en"), 700)
         negative = clip(item.get("negative"), 500)
-        prompt_cn = _ensure_anchor(prompt_cn, style.style_cn, "【画风锚】")
-        prompt_en = _ensure_anchor(prompt_en, style.style_en, "")
+        prompt_cn, prompt_en = ensure_style_anchors(prompt_cn, prompt_en, style.style_cn, style.style_en)
         shot = {
             "seq": len(out) + 1,
             "source_ep": coerce_int(item.get("source_ep"), 0, lo=0),

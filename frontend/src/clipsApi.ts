@@ -108,8 +108,9 @@ export const clipsApi = {
       headers: tk ? { Authorization: `Bearer ${tk}` } : {},
     }).then(async (res) => {
       if (!res.ok) {
+        // 兜底名必须保留 HTTP 状态:后端没给 detail 时抛空串,前端 toast 就弹一个空白框
         let detail = `HTTP ${res.status}`;
-        try { const j = await res.json(); detail = j.detail ?? ""; } catch { /* ignore */ }
+        try { const j = await res.json(); if (j.detail) detail = j.detail; } catch { /* ignore */ }
         throw new Error(detail);
       }
       const name = (res.headers.get("Content-Disposition") || "").split("filename*=UTF-8''")[1];

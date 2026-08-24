@@ -1,34 +1,30 @@
 # app/engines/promo/exporter.py
 # -*- coding: utf-8 -*-
-"""宣传片导出:拍摄手册 Markdown / 分镜 CSV / SRT 字幕(时间轴复用漫剧的确定性内核)。"""
+"""宣传片导出:拍摄手册 Markdown / 分镜 CSV / SRT 字幕(时间轴走 media 的确定性内核)。"""
 from __future__ import annotations
 
-import csv
-import io
 import json
 
 from app.db.models import PromoPlan, PromoShot
-from app.engines.drama.exporter import _srt_blocks  # 同 app 内复用确定性字幕内核
+from app.engines.media.audio import audio_track_note
+from app.engines.media.subtitles import srt_blocks
+from app.engines.media.text import csv_text
 from app.engines.promo.common import STATUS_CN, angle_labels
 
 
 def export_srt(shots: list[PromoShot]) -> str:
-    return _srt_blocks([(s.duration_s, s.dialogue or "") for s in shots])
+    return srt_blocks([(s.duration_s, s.dialogue or "") for s in shots])
 
 
 def export_csv(shots: list[PromoShot]) -> str:
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(
-        ["seq", "scene_name", "shot_type", "camera", "duration_s",
-         "action_desc", "dialogue", "prompt_cn", "prompt_en", "negative"]
-    )
-    for s in shots:
-        writer.writerow(
-            [s.seq, s.scene_name, s.shot_type, s.camera, s.duration_s,
-             s.action_desc, s.dialogue, s.prompt_cn, s.prompt_en, s.negative]
-        )
-    return "\ufeff" + buf.getvalue()
+    header = ["seq", "scene_name", "shot_type", "camera", "duration_s",
+              "action_desc", "dialogue", "prompt_cn", "prompt_en", "negative"]
+    rows = [
+        [s.seq, s.scene_name, s.shot_type, s.camera, s.duration_s,
+         s.action_desc, s.dialogue, s.prompt_cn, s.prompt_en, s.negative]
+        for s in shots
+    ]
+    return csv_text(header, rows)
 
 
 def export_markdown(plan: PromoPlan, shots: list[PromoShot]) -> str:
@@ -175,6 +171,9 @@ def export_markdown(plan: PromoPlan, shots: list[PromoShot]) -> str:
             L.append(str(pack["narration_full"]))
             L.append("")
         L.append("> 出片顺序:分镜提示词出图 → 图生视频/加轻动 → 解说词配音 → 按剪辑清单拼接 → 压 SRT 字幕 → 铺 BGM → 收束加 slogan 字幕。")
+        L.append("")
+        # 音频三轨说明:段视频提示词里那句「不要人声」是分轨,不是静音(口径见 media.audio)
+        L.extend(audio_track_note())
     return "\n".join(L)
 
 

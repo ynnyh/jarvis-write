@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { api, token, setUnauthorizedHandler, Me } from "./api";
 import { isDesktop } from "./desktop";
@@ -254,7 +254,10 @@ export default function App() {
       )}
       <div className="wrap">
         <ErrorBoundary>
-          <Outlet />
+          {/* 路由按需加载(见 main.tsx):切页时先出一行「加载中」,顶栏与全局层不动 */}
+          <Suspense fallback={<p className="muted">加载中…</p>}>
+            <Outlet />
+          </Suspense>
         </ErrorBoundary>
       </div>
       <Toaster />
