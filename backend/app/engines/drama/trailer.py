@@ -26,7 +26,7 @@ from app.engines.drama.common import (
     coerce_int,
     match_character,
 )
-from app.engines.media.anchors import ensure_style_anchors
+from app.engines.media.anchors import ensure_style_anchors, merge_negative
 from app.llm.router import Task, get_adapter_for
 from app.prompts.drama import TRAILER_PROMPT
 
@@ -100,6 +100,10 @@ def _normalize_shots(
             continue
         prompt_cn = clip(item.get("prompt_cn"), 1000)
         prompt_en = clip(item.get("prompt_en"), 700)
+        # LLM 漏写画面提示词时用分镜自身的景别/运镜/动作拼一条确定性兜底——
+        # 空着交给画风锚,会产出一条「只有风格锚、没有画面内容」的提示词
+        if not prompt_cn:
+            prompt_cn = f"{clip(item.get('shot_type'), 20)}/{clip(item.get('camera'), 20)}:{action}"
         negative = clip(item.get("negative"), 500)
         prompt_cn, prompt_en = ensure_style_anchors(prompt_cn, prompt_en, style.style_cn, style.style_en)
         shot = {
@@ -119,10 +123,7 @@ def _normalize_shots(
             "negative": negative,
         }
         shot["prompt_cn"] = _ensure_char_anchors(shot, shot["prompt_cn"], by_name, by_alias)
-        if style.negative and style.negative not in shot["negative"]:
-            shot["negative"] = (
-                f"{style.negative},{shot['negative']}" if shot["negative"] else style.negative
-            )
+        shot["negative"] = merge_negative(shot["negative"], style.negative)
         out.append(shot)
         if len(out) >= _MAX_SHOTS:
             break

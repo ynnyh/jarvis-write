@@ -336,9 +336,9 @@ select { cursor: pointer; }
 }
 .form-grid .field-full { grid-column: 1 / -1; }
 
-.field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.field { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
 .field > .fl { margin: 0; }                 /* 复用全站字段标签,去掉它自带的上边距 */
-.field > .fl .hint { margin-left: 6px; }    /* 标签后缀说明,不加粗 */
+.field > .fl .hint { margin-left: var(--sp-1); }  /* 标签后缀说明,不加粗 */
 .field-note { margin: 0; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.6; }
 
 .form-actions {
@@ -550,25 +550,71 @@ select { cursor: pointer; }
   .sync-ask-actions { justify-content: flex-end; }
 }
 
-/* ---------- 顶栏 ---------- */
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: var(--z-topbar);
-  background: var(--topbar-bg);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border-bottom: 1px solid var(--line);
-  padding: 0 var(--sp-6);
-  height: 54px;
-  display: flex;
-  align-items: center;
-  gap: 18px;
+/* ---------- 工作台外壳:左侧全局导航 + 右侧内容(2026-08 重构,旧顶栏退役) ----------
+   侧栏是纵向空间:一级入口一行一个带 active 态,底部常驻任务中心与用量——
+   顶栏横排放不下这些,三个工坊的入口此前只能埋在首页按钮堆里。 */
+.app-shell { display: flex; min-height: 100vh; align-items: stretch; }
+.app-side {
+  width: 224px; flex-shrink: 0;
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: var(--sp-4);
+  background: var(--surface); border-right: 1px solid var(--line);
+  padding: var(--sp-5) 12px;
 }
-.topbar .logo { font-weight: 700; font-size: var(--fs-lg); color: var(--text); letter-spacing: -0.01em; }
-.topbar .logo:hover { text-decoration: none; }
-.topbar .logo span { color: var(--brand); }
-.topbar a { font-size: var(--fs-sm); }
+/* 移动端 ☰ 抽屉形态(同一份 Sidebar):盖在内容上,点遮罩关闭 */
+.app-side-drawer {
+  position: fixed; inset: 0 auto 0 0; width: min(84vw, 300px);
+  z-index: 71; box-shadow: var(--shadow-lg);
+  animation: m-slide-in 0.18s ease-out;
+}
+/* 品牌名:必须是 block 而不是 column flex——`jarvis<span>·write</span>` 里的裸文本
+   在 flex 容器里会被包成独立的匿名 item,竖排后品牌名断成「jarvis / ·write」两行 */
+.side-brand {
+  display: block; padding: 0 10px;
+  font-weight: 700; font-size: var(--fs-lg); color: var(--text); letter-spacing: -0.01em;
+  text-decoration: none;
+}
+.side-brand:hover { text-decoration: none; }
+.side-brand span { color: var(--brand); }
+.side-brand small { display: block; margin-top: 2px; font-size: var(--fs-xs); font-weight: 400; color: var(--text-3); }
+.side-nav { display: flex; flex-direction: column; gap: 2px; }
+.side-link {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border-radius: var(--r-md); color: var(--text-2); font-size: var(--fs-md);
+  text-decoration: none; transition: background 0.12s, color 0.12s;
+}
+.side-link:hover { background: var(--surface-2); color: var(--text); text-decoration: none; }
+.side-link.on { background: var(--brand-weak); color: var(--brand); font-weight: 600; }
+.side-ico { width: 22px; text-align: center; flex-shrink: 0; }
+.side-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-tasks { padding: 0 10px; }
+.side-foot {
+  margin-top: auto; display: flex; flex-direction: column; align-items: flex-start;
+  gap: 6px; padding: var(--sp-3) 10px var(--sp-2); border-top: 1px solid var(--line);
+}
+.side-usage { color: var(--text-3); font-size: var(--fs-xs); }
+.side-user {
+  color: var(--text-2); font-size: var(--fs-sm);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.side-mini {
+  background: none; border: none; padding: 0; cursor: pointer; text-decoration: none;
+  color: var(--text-3); font-size: var(--fs-xs);
+}
+.side-mini:hover { color: var(--text); text-decoration: underline; }
+.app-main { flex: 1; min-width: 0; }
+/* 移动端精简顶条:☰ 唤出抽屉导航;桌面壳是横排,移动壳靠 767px 断点转竖排 */
+.m-shellbar {
+  position: sticky; top: 0; z-index: var(--z-topbar);
+  background: var(--topbar-bg); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+  height: 50px; display: flex; align-items: center; gap: 10px; padding: 0 var(--sp-3);
+}
+.m-shellbar-btn {
+  min-width: 44px; min-height: 44px; padding: 0 12px;
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--surface); color: var(--text-2); cursor: pointer; flex-shrink: 0;
+}
 
 /* ---------- 登录 / 注册页 ---------- */
 .auth-wrap {
@@ -1554,9 +1600,6 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 @media (max-width: 900px) {
   .wrap { padding: 14px 12px 64px; }
 
-  .topbar { padding: 0 12px; height: auto; min-height: 54px; flex-wrap: wrap; gap: 8px 14px; }
-  .topbar .muted { display: none; }
-
   /* 分步导航:左栏 → 顶部横向滑动条 */
   .workbench { flex-direction: column; gap: 12px; }
   .flow-nav {
@@ -1616,15 +1659,6 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
   .arch-discuss .rd-log { max-height: 60vh; }
   /* 宽表格:保持 table 布局(表头/内容列对齐),滚动交给 .tbl-wrap 容器 */
   table.tbl { white-space: nowrap; }
-
-  /* 顶栏:收紧间距;GitHub 链接在登录页/文档里也有入口,窄屏藏掉防破行 */
-  .topbar { padding: 8px 12px; gap: 8px 12px; align-items: center; }
-  .topbar-gh { display: none; }
-  /* 关掉弹性 spacer:否则它抢占首行空间,把链接挤到错乱的第二行。
-     去掉后所有项从左到右自然、整齐地流式换行(logo 在首,链接紧随)。 */
-  .topbar .grow { display: none; }
-  /* logo 独占首行,链接从第二行整齐排开,不再和 logo 挤在一起 */
-  .topbar .logo { flex-basis: 100%; }
 
   /* 项目页标题行:窄屏进一步收紧,badge 与「阅读全书」可整体换行居左 */
   .project-head { gap: 4px 8px; }
@@ -2050,9 +2084,6 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 .title-chip.sm { padding: 4px 10px; font-size: var(--fs-xs); }
 .onboard-nav { border-top: 1px solid var(--line); padding-top: 14px; }
 
-.flow-label { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
-.flow-sub { font-size: var(--fs-xs); opacity: 0.75; }
-
 .next-bar {
   display: flex;
   align-items: center;
@@ -2105,7 +2136,6 @@ html, body { max-width: 100%; overflow-x: hidden; }
   .genre-card { max-width: 100%; flex: 1 1 45%; }
   .entry-card { flex: 1 1 100%; }
   .stat-strip { flex-wrap: wrap; }
-  .topbar { flex-wrap: wrap; row-gap: 4px; }
   .toast-viewport { width: calc(100vw - 24px); right: 12px; }
 }
 
@@ -2537,53 +2567,55 @@ html, body { max-width: 100%; overflow-x: hidden; }
 }
 .wcard input[type="text"], .wcard input:not([type]), .wcard textarea { width: 100%; }
 
-/* ---------- 三区导航 / write 区三栏工作台(交互重构 B 阶段) ---------- */
-/* 区导航:开书/写作/全书横排 tab + 右侧设置入口,沿用 flow-step 的选中态语言 */
-.zone-nav {
-  display: flex;
-  gap: 8px;
-  align-items: stretch;
-  margin-bottom: 14px;
-  flex-wrap: wrap;
+/* ---------- 项目工作台:左侧项目导航 rail + 右侧推进区(2026-08 重构) ----------
+   旧 .zone-nav 是横排大 tab,占掉内容区一整行还只放得下三个入口;进 rail 后
+   setup 子步与 book 页签作为二级项挂在对应区下面,内容区首屏直接见正文。 */
+.pj-cols {
+  display: grid; grid-template-columns: 216px minmax(0, 1fr);
+  gap: var(--sp-5); align-items: start;
 }
-.zone-nav .grow { flex: 1; }
-.zone-tab {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 16px;
-  border-radius: var(--r-md);
-  border: 1px solid var(--line);
-  background: var(--surface);
-  cursor: pointer;
-  color: var(--text-2);
-  font-size: var(--fs-md);
-  box-shadow: var(--shadow-sm);
+.pj-rail {
+  position: sticky; top: var(--sp-4);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.pj-back {
+  display: flex; align-items: center; gap: 6px; margin-bottom: var(--sp-2);
+  background: none; border: none; padding: 6px 10px; border-radius: var(--r-md);
+  color: var(--text-3); font-size: var(--fs-sm); cursor: pointer;
+}
+.pj-back:hover { color: var(--text); background: var(--surface-2); }
+.pj-zone {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 10px; border: none; border-radius: var(--r-md);
+  background: none; color: var(--text-2); font-size: var(--fs-md);
+  text-align: left; cursor: pointer;
   transition: background 0.12s, color 0.12s;
 }
-.zone-tab:hover { background: var(--surface-2); color: var(--text); }
-.zone-tab.on { background: var(--brand); color: var(--on-brand); font-weight: 600; border-color: var(--brand); }
-.zone-tab.on:hover { background: var(--brand); }
-.zone-tab .no {
-  width: 22px; height: 22px;
-  border-radius: 50%;
-  background: var(--surface-2);
-  color: var(--text-2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--fs-xs);
-  font-weight: 700;
-  flex-shrink: 0;
+.pj-zone:hover { background: var(--surface-2); color: var(--text); }
+.pj-zone.on { background: var(--brand); color: var(--on-brand); font-weight: 600; }
+.pj-zone .no {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--surface-2); color: var(--text-2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--fs-xs); font-weight: 700; flex-shrink: 0;
 }
-.zone-tab.on .no { background: var(--on-brand-weak); color: var(--on-brand); }
-.zone-tab .dot {
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: var(--err);
-  flex-shrink: 0;
+.pj-zone.on .no { background: var(--on-brand-weak); color: var(--on-brand); }
+.pj-zone .dot { margin-left: auto; width: 7px; height: 7px; border-radius: 50%; background: var(--err); flex-shrink: 0; }
+.pj-zone-label { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; flex: 1; }
+.pj-zone-sub { font-size: var(--fs-xs); opacity: 0.75; }
+/* 二级项(开书子步 / 全书页签):挂在对应区下面,左边一根竖线表示从属 */
+.pj-subs {
+  margin: var(--sp-2) 0 var(--sp-3) 18px;
+  display: flex; flex-direction: column; gap: 1px;
+  border-left: 1px solid var(--line); padding-left: 10px;
 }
-.zone-gear { font-size: var(--fs-sm); }
+.pj-sub-tab {
+  display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+  border: none; border-radius: var(--r-sm); background: none;
+  color: var(--text-2); font-size: var(--fs-sm); text-align: left; cursor: pointer;
+}
+.pj-sub-tab:hover { background: var(--surface-2); color: var(--text); }
+.pj-sub-tab.on { background: var(--brand-weak); color: var(--brand); font-weight: 600; }
 
 /* ==========================================================================
    「正文即界面」P1(docs/10):write 区从三栏工作台改为单列居中正文。
@@ -2995,13 +3027,33 @@ html, body { max-width: 100%; overflow-x: hidden; }
 @keyframes m-rise { from { transform: translateY(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
 
 @media (max-width: 767px) {
+  /* 外壳转竖排:m-shellbar 在上,内容在下(桌面横排的侧栏此时不渲染) */
+  .app-shell { flex-direction: column; }
+
   /* write 区:单列正文;章级动作由章首状态卡 + 目录抽屉 + 章尾卡承接 */
   /* 底部给 AI 输入条(.m-ai-bar)让位,不遮章尾卡 */
   .write-main { padding-bottom: 76px; }
 
-  /* 区导航/项目头:窄屏紧凑,允许折行不溢出 */
-  .zone-tab { padding: 6px 10px; gap: 6px; }
-  .zone-tab .flow-sub { display: none; }
+  /* 项目 rail 退化为横向:一级区折行排布,二级页签横向滑动(与旧 chips 观感一致) */
+  .pj-cols { display: block; }
+  .pj-rail { position: static; flex-direction: row; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .pj-back { display: none; } /* write 区 m-topbar 已带「← 返回」 */
+  .pj-zone {
+    width: auto; padding: 6px 10px; gap: 6px;
+    border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow-sm);
+  }
+  .pj-zone.on { border-color: var(--brand); }
+  .pj-zone-sub { display: none; }
+  .pj-subs {
+    width: 100%; margin: 2px 0 4px; flex-direction: row; flex-wrap: nowrap;
+    overflow-x: auto; -webkit-overflow-scrolling: touch; padding: 0 0 2px;
+    border-left: none;
+  }
+  .pj-sub-tab {
+    flex-shrink: 0; padding: 6px 12px;
+    border: 1px solid var(--line); background: var(--surface); border-radius: var(--r-full);
+  }
+  .pj-sub-tab.on { border-color: var(--brand-line); }
 
   /* setup/book 页签 chips:横向滚动(单列堆叠由既有 ≤900px 规则负责) */
   .chips.board-tabs {
@@ -3065,13 +3117,15 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .cmdk-hint { padding: 16px; color: var(--text-3); font-size: var(--fs-sm); }
 
 /* 沉浸模式(F11,Esc 退出):class 挂在 write-zone,只留中栏正文。
-   区导航/项目头/统计条/引导条在 write-zone 之外,用 :has 从外层隐藏。 */
+   区导航/项目头/统计条在 write-zone 之外,用 :has 从外层隐藏;rail 隐藏时
+   网格同时收成单列,正文占满内容区。 */
 .write-zone.immersive .write-main { max-width: 860px; }
 body:has(.write-zone.immersive) .project-head,
 body:has(.write-zone.immersive) .stat-strip,
-body:has(.write-zone.immersive) .zone-nav,
+body:has(.write-zone.immersive) .pj-rail,
 body:has(.write-zone.immersive) .next-bar,
 body:has(.write-zone.immersive) .step-guide { display: none; }
+body:has(.write-zone.immersive) .pj-cols { grid-template-columns: minmax(0, 1fr); }
 
 /* ==========================================================================
    创作坐标(本书基因)/ 品味镜 —— 灵感工作区「定味道」锚 UI

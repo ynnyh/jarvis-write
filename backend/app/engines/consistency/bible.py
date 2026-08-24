@@ -19,7 +19,8 @@ from app.db.models import Entity, Fact, KnowledgeState, Relationship
 logger = logging.getLogger("jarvis-write.bible")
 
 # 单章硬约束块最多注入的状态事实行数:长篇里同一批角色的历史事实会累积,
-# 无上限会把 prompt 撑爆。critical 永不被砍,仅在总数超限时截 major/minor。
+# 无上限会把 prompt 撑爆。超限时按重要度排序截断(critical 排最前、优先保留,
+# critical 数量本身超限才会轮到被砍),minor 最先出局。
 _MAX_FACT_LINES = 40
 
 # 资源类事实:由 ledger.py 单独渲染成「角色资源账本」(自带闭集红线与预算),

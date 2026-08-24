@@ -13,6 +13,7 @@
 // 移动端:m-topbar(←/章题/阅读)+ 左右滑切章 + act 卡全屏 sheet。
 import { Outline } from "../api";
 import { qk } from "../hooks/queries";
+import Banner from "../ui/Banner";
 import Reader from "../components/Reader";
 import GenResultCard from "./chapters/GenResultCard";
 import VersionCompare from "./chapters/VersionCompare";
@@ -92,14 +93,14 @@ export default function WritePanel({ pid, outlines }: Props) {
   return (
     <div className={"write-zone" + (immersive ? " immersive" : "")}>
       {genJob && (
-        <div className="gen-banner">
-          <span className="spin" />
-          <span className="gen-banner-text">
-            {genJob.num === 0 || genJob.stage.startsWith("[")
+        <Banner
+          stage={
+            genJob.num === 0 || genJob.stage.startsWith("[")
               ? `连写队列进行中(${genJob.stage})`
-              : `第 ${genJob.num} 章生成中(${genJob.stage}),完成后可继续操作其他章节`}
-          </span>
-        </div>
+              : `第 ${genJob.num} 章生成中(${genJob.stage}),完成后可继续操作其他章节`
+          }
+          text=""
+        />
       )}
       {[...syncJobs.entries()].map(([num, stage]) => (
         <div className="sync-badge" key={num}>

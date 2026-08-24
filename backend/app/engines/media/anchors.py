@@ -13,6 +13,8 @@
 """
 from __future__ import annotations
 
+from app.engines.media.audio import strip_audio_words
+
 STYLE_PREFIX_CN = "【画风锚】"
 
 
@@ -40,9 +42,15 @@ def ensure_style_anchors(
 
 
 def merge_negative(negative: str, base: str) -> str:
-    """负面词合并:风格卡的通用负面词并进这一格的负面词,已包含则不重复。"""
+    """负面词合并:风格卡的通用负面词并进这一格的负面词,已包含则不重复。
+
+    合并结果顺手摘掉音频词(人声/配乐一类)——口径见 media.audio:音频只进
+    提示词正文,负面框是给画面用的,音频词混进来会被当成画面元素。
+    """
     base = (base or "").strip()
     negative = (negative or "").strip()
     if not base or base in negative:
-        return negative
-    return f"{base},{negative}" if negative else base
+        merged = negative
+    else:
+        merged = f"{base},{negative}" if negative else base
+    return strip_audio_words(merged)

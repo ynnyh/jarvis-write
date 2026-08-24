@@ -71,6 +71,22 @@ def test_audio_words_never_enter_the_negative_box():
     assert "music" not in v["i2v_en"]["negative"]
 
 
+def test_negative_box_audio_words_are_stripped_on_merge():
+    """LLM 自产的负面词里混进音频词,merge_negative 负责确定性摘掉(单点收口)。
+
+    只摘音频词,画面类负面词(多手多指/文字水印)一个不动。
+    """
+    from app.engines.media.anchors import merge_negative
+
+    assert merge_negative("人声,背景音乐,多手多指", "模糊,lowres") == "模糊,lowres,多手多指"
+    # 英文形态,大小写不敏感
+    assert merge_negative("Speech,voice-over,blurry", "") == "blurry"
+    # 全是音频词 → 空串
+    assert merge_negative("人声,配乐", "") == ""
+    # 风格卡基座里的音频词同样摘
+    assert merge_negative("多手多指", "背景音乐,文字水印") == "文字水印,多手多指"
+
+
 # =============== 导出手册的说明 ===============
 
 def test_note_explains_three_tracks_not_muting():

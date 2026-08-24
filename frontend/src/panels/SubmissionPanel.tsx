@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { AnthemPackage, api, CoverPackage, downloadFile, Project, SubmissionPackage } from "../api";
 import { useJob } from "../ui/useJob";
+import Banner from "../ui/Banner";
 import { toast } from "../ui/Toaster";
 import { CopyBtn, copyOrPrompt } from "../ui/copy";
 import { errMsg } from "../pollJob";
@@ -128,12 +129,7 @@ export default function SubmissionPanel({ pid, project }: Props) {
         <p className="card-desc">
           依据本书的概念、架构与大纲,一次产出标题、频道时空、标签、金句与简介;挑好微调后逐项复制到投稿表单。封面与主题曲提示词在下方单独生成。
         </p>
-        {busy && (
-          <div className="gen-banner">
-            <span className="spin" />
-            <span className="gen-banner-text">{stage || busy}</span>
-          </div>
-        )}
+        {busy && <Banner stage={stage} text={busy} />}
         {err && <div className="msg-err">{err}</div>}
         <div className="actions mt-2">
           <span className="muted">全书导出:</span>
@@ -306,9 +302,7 @@ function CoverCard({ pid }: { pid: number }) {
         提示词按「人物 → 场景 → 氛围 → 光影 → 构图 → 画风」六层写全细节,复制即可生成;
         画面差点意思就直接在框里改字微调,或点「重新生成」换一批。
       </p>
-      {busy && (
-        <div className="gen-banner"><span className="spin" /><span className="gen-banner-text">{stage || "AI 正在设计封面…"}</span></div>
-      )}
+      {busy && <Banner stage={stage} text="AI 正在设计封面…" />}
       {err && <div className="msg-err">{err}</div>}
       {!pkg && !busy && <p className="hint">还没生成。点上方按钮,约半分钟出 3 套方案。</p>}
       {pkg?.covers.map((c, i) => (
@@ -377,9 +371,7 @@ function AnthemCard({ pid }: { pid: number }) {
         「描述式」工具的框;「风格标签」(英文 + 中文对照)给 Suno、Udio 等「标签式」工具;歌词两边通用。
         描述里已写明曲风 / 情绪 / 人声 / 配器 / 节奏——想纯音乐就在工具里开「纯音乐」,想让 AI 代写词就开「智能歌词」。
       </p>
-      {busy && (
-        <div className="gen-banner"><span className="spin" /><span className="gen-banner-text">{stage || "AI 正在作词谱曲…"}</span></div>
-      )}
+      {busy && <Banner stage={stage} text="AI 正在作词谱曲…" />}
       {err && <div className="msg-err">{err}</div>}
       {!pkg && !busy && <p className="hint">还没生成。点上方按钮,约半分钟出一首。</p>}
       {pkg && (

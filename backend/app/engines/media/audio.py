@@ -27,6 +27,8 @@
 """
 from __future__ import annotations
 
+import re
+
 # 追加到视频提示词末尾的一行(中/英)。不支持音频的站会忽略,支持的照做。
 VIDEO_AUDIO_RULE_CN = (
     "【音频】只要环境音与动作音(风雨、脚步、器物、环境底噪),"
@@ -59,6 +61,24 @@ def _append_rule(prompt: str, rule: str, markers: tuple[str, ...]) -> str:
     if any(m.lower() in low for m in markers):
         return p
     return f"{p}\n{rule}"
+
+
+# 负面词框里要确定性摘掉的音频词:LLM 自产的负面词(clips/promo 的风格卡)也会混进
+# 「人声/背景音乐」——不生效还可能被图生视频模型当成画面元素(「人声」→ 画面里的人)。
+NEGATIVE_AUDIO_WORDS = (
+    "人声", "对白", "旁白", "歌词", "配音", "台词", "背景音乐", "配乐", "音乐",
+    "speech", "voice", "dialogue", "singing", "music",
+)
+
+
+def strip_audio_words(negative: str) -> str:
+    """负面词框只给画面用:逗号(中英)分隔的词条逐个对照,命中音频词即弃。"""
+    tokens = [t.strip() for t in re.split(r"[,，]", negative or "")]
+    kept = [
+        t for t in tokens
+        if t and not any(w in t.lower() for w in NEGATIVE_AUDIO_WORDS)
+    ]
+    return ",".join(kept)
 
 
 def audio_track_note(single_segment: bool = False) -> list[str]:

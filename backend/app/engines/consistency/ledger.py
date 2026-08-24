@@ -31,7 +31,8 @@ from app.engines.consistency.bible import RESOURCE_FACT_TYPES, BibleService
 logger = logging.getLogger("jarvis-write.ledger")
 
 # 账本块最多注入的行数:比状态事实的上限小一档——资源条目单条更短,且真正值得
-# 长期记住的关键资源本就不该有几十条。超限同样按 importance 砍,critical 永不被砍。
+# 长期记住的关键资源本就不该有几十条。超限按 importance 排序截断(critical 排最前、
+# 优先保留,critical 数量本身超上限才会轮到被砍),minor 最先出局。
 _MAX_RESOURCE_LINES = 24
 
 _RANK = {"critical": 0, "major": 1, "minor": 2}

@@ -26,6 +26,16 @@ class PromoChunkError(ValueError):
     """切段的业务性错误(信息直接上屏)。"""
 
 
+def _fallback_motion(g: list[PromoShot]) -> str:
+    """LLM 漏写某段的视频提示词时,用该段镜头自身的景别/运镜/动作拼一条确定性兜底。
+
+    必须在注入画风锚**之前**兜底:锚注入会把空串变成非空串,`ensure_audio_rules`
+    的「空提示词不追加」守卫就被绕过,最终产出一条只有画风锚+音频约束、
+    没有任何运动内容的提示词(见 media.audio._append_rule)。
+    """
+    return "；".join(f"镜头{s.seq}({s.shot_type}/{s.camera}):{s.action_desc}" for s in g)
+
+
 def _chunks_block(groups: list[list[PromoShot]], start_s: list[int]) -> str:
     rows = []
     for i, g in enumerate(groups):
@@ -76,9 +86,10 @@ async def build_chunks(
     items = []
     for row, g in zip(rows, groups):
         a = ann.get(row["index"], {})
-        # 画风锚兜底(与三轨提示词同纪律,口径见 media.anchors)
+        # 画风锚兜底(与三轨提示词同纪律,口径见 media.anchors);运动提示词漏写时
+        # 先用该段镜头拼确定性兜底,再注入锚(顺序不能反,见 _fallback_motion)
         motion_cn, motion_en = ensure_style_anchors(
-            clip(a.get("motion_prompt_cn"), 800),
+            clip(a.get("motion_prompt_cn"), 800) or _fallback_motion(g),
             clip(a.get("motion_prompt_en"), 600),
             plan.style_cn,
             plan.style_en,

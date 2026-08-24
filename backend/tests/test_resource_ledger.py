@@ -7,6 +7,8 @@
 第 20 章又戴回来、干粮吃完三章账本里还挂着「持有半块干粮」。
 """
 import logging
+import re
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -244,3 +246,30 @@ def test_prompts_carry_the_ledger_placeholder():
 
     for tpl in (CHAPTER_DRAFT_PROMPT, CHAPTER_FINALIZE_PROMPT, CONSISTENCY_CHECK_PROMPT):
         assert "{resource_ledger}" in tpl
+
+
+def test_hard_constraints_injections_exclude_resource_types():
+    """CLAUDE.md 硬规则的源码钉:注入 hard_constraints_block 的调用点必须传
+    exclude_types=RESOURCE_FACT_TYPES,否则同一条资源事实在 prompt 里出现两遍、
+    还抢 40 行的状态预算——回归时函数级测试全绿,只有扫调用点才咬得住。
+
+    唯一例外是章后抽取的对照清单(extractor.py):那里要让模型看见「持有…」
+    原文才抄得对 replaces,不许排除。
+    """
+    root = Path(__file__).resolve().parents[1]
+    call_rx = re.compile(r"hard_constraints_block\((?:[^()]|\([^()]*\))*\)", re.S)
+
+    for rel in ("app/engines/pipeline/chapter.py", "app/engines/consistency/checker.py"):
+        src = (root / rel).read_text(encoding="utf-8")
+        calls = call_rx.findall(src)
+        assert calls, f"{rel} 里找不到 hard_constraints_block 调用(接线变了?请更新本测试)"
+        for call in calls:
+            assert "exclude_types=RESOURCE_FACT_TYPES" in call, (
+                f"{rel} 有调用点漏了 exclude_types=RESOURCE_FACT_TYPES:\n{call}"
+            )
+
+    ext = (root / "app/engines/consistency/extractor.py").read_text(encoding="utf-8")
+    for call in call_rx.findall(ext):
+        assert "exclude_types" not in call, (
+            f"extractor 的对照清单是唯一例外,不许排除资源事实(要抄 replaces):\n{call}"
+        )

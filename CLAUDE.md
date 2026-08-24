@@ -29,6 +29,12 @@ cd backend  && python -m pytest -q
   工作台外壳用 `.wb-shell` / `.wb-cols` / `.wb-rail`(锚资产)/ `.wb-main`(推进区)——
   漫剧与宣传片共用这一套,别再新起一套 `xxx-cols`;注意别用旧的 `.workbench`(那是横向 flex)。
   **新页面里出现和 `ui/` 同名的本地组件,就是抄漏了。**
+- **应用外壳是「左侧全局导航 + 右侧内容」**(2026-08 重构,旧 `.topbar` 已退役):
+  一级入口只进 `ui/Sidebar.tsx` 的 `ENTRIES`(我的小说/情绪短片/宣传片工坊/指南/设置/管理),
+  别在页面里再造全局入口;外壳类名 `.app-shell` / `.app-side`(侧栏)/ `.app-main`,
+  移动端由 App 按 `useBreakpoint` 换成 `.m-shellbar` + ☰ 抽屉。
+  项目页内部用 `.pj-cols` / `.pj-rail`(壹开书/贰写作/叁全书/设置 + `.pj-subs` 二级项)——
+  项目内的导航进 rail,别再回到横排大 tab;`read` 区与沉浸模式(F11)不渲染 rail。
 - 新样式手写进 `styles.css`,只用现有令牌(`--sp-*`/`--fs-*`/`--ctl-h`/语义色),
   这样暗色主题自动跟着走;不引入 Tailwind/shadcn。
 - 中文注释,文件头一行说明 + 关键块讲清「为什么这么写」。

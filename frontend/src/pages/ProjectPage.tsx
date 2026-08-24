@@ -2,7 +2,7 @@
 // 区进 URL(/project/:id/:step,step 为区名);setup 子步 ?step=、book 页签 ?tab=、
 // 当前章 ?ch=、write 区动作卡 ?act= 全部进 URL,刷新/后退/分享不丢位置(?ctx= 已随参考抽屉废除)。
 // 旧八步链接(inspire/arch/outline/write/polish/refresh/board/publish)一律 <Navigate replace> 重定向。
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useProject, useArchitecture, useOutlines, useChapters, useInvalidateProject } from "../hooks/queries";
 import { useBreakpoint } from "../hooks/useBreakpoint";
@@ -23,7 +23,9 @@ import AuditPanel from "../panels/AuditPanel";
 import RefreshPanel from "../panels/RefreshPanel";
 import SubmissionPanel from "../panels/SubmissionPanel";
 import DramaPanel from "../panels/drama/DramaPanel";
-import { ClipsList } from "./ClipsPage";
+// 「投流」页签的列表件也按需加载:静态 import 会把 ClipsPage 模块并进本页的大 chunk,
+// 直访 /clips 路由的分包(main.tsx 里 React.lazy)就跟着失效
+const ClipsList = lazy(() => import("./ClipsPage").then((m) => ({ default: m.ClipsList })));
 import ProjectSettingsPanel from "../panels/ProjectSettingsPanel";
 import ReadPanel from "../panels/ReadPanel";
 import BookReader from "../components/BookReader";
@@ -335,135 +337,150 @@ export default function ProjectPage() {
 
   return (
     <>
-      {/* read 区是纯阅读页(对照窗/移动端用):不渲染项目头、统计条与区导航 */}
-      {zone !== "read" && (
-        <>
-          <h1 className="project-head"><span className="project-title-text">{project.title}</span>
-            <span className="badge">{PROJECT_STATUS_CN[project.status] ?? project.status}</span>
-            {project.genre && <span className="badge">{project.genre}</span>}
-            {chapters.length > 0 && (
-              <button className="primary read-book-btn" onClick={() => setReadingBook(true)}>
-                阅读全书
-              </button>
-            )}
-          </h1>
-          <div className="stat-strip">
-            <div className="stat">主题<b className="stat-topic">{project.topic || "(未定,先去开书区)"}</b></div>
-            <div className="stat">大纲<b>{outlines.length}/{project.target_chapters} 章</b></div>
-            <div className="stat">正文<b>{doneCount} 章 · {wordsTotal} 字</b></div>
-            {staleCount > 0 && <div className="stat">失配<b className="stat-alert">{staleCount} 章</b></div>}
-            {doneCount > 0 && (
-              <div className="stat">导出
-                <b className="stat-links">
-                  <a href={`/api/projects/${pid}/export/txt`}
-                    onClick={(e) => { e.preventDefault(); exportBook("export/txt", "txt"); }}>txt</a>
-                  {" · "}
-                  <a href={`/api/projects/${pid}/export/epub`}
-                    onClick={(e) => { e.preventDefault(); exportBook("export/epub", "epub"); }}>epub</a>
-                </b>
-              </div>
-            )}
-          </div>
-
-          {/* 区导航:开书 / 写作 / 全书 + 右侧设置入口(read 区经 URL 进入,不占 tab) */}
-          <div className="zone-nav">
+      {zone === "read" ? (
+        /* read 区是纯阅读页(对照窗/移动端用):不渲染项目头、统计条与 rail */
+        <div className="flow-main">
+          <ReadPanel pid={pid} outlines={outlines} />
+        </div>
+      ) : (
+        <div className="pj-cols">
+          {/* 左 rail:三区 + 本书设置,「现在在哪一步」由它常驻回答;
+              setup 子步与 book 页签是二级项,挂在对应区下面(移动端退化为横排) */}
+          <aside className="pj-rail">
+            <button type="button" className="pj-back" onClick={() => nav("/")}>← 我的小说</button>
             {(["setup", "write", "book"] as const).map((z) => (
               <button key={z} type="button"
-                className={"zone-tab" + (zone === z ? " on" : "")}
+                className={"pj-zone" + (zone === z ? " on" : "")}
                 onClick={() => gotoZone(z)}>
                 <span className="no">{zoneDone[z] ? "✓" : { setup: "壹", write: "贰", book: "叁" }[z]}</span>
-                <span className="flow-label">
+                <span className="pj-zone-label">
                   {{ setup: "开书", write: "写作", book: "全书" }[z]}
-                  {zoneSub[z] && <span className="flow-sub">{zoneSub[z]}</span>}
+                  {zoneSub[z] && <span className="pj-zone-sub">{zoneSub[z]}</span>}
                 </span>
                 {z === "write" && staleCount > 0 && <span className="dot" title="有章节与新大纲不符" />}
               </button>
             ))}
-            <div className="grow" />
-            <button type="button" className={"zone-tab zone-gear" + (zone === "settings" ? " on" : "")}
+            {zone === "setup" && (
+              <div className="pj-subs">
+                {SETUP_STEPS.map((s) => (
+                  <button key={s.key} type="button"
+                    className={"pj-sub-tab" + (setupStep === s.key ? " on" : "")}
+                    onClick={() => setSetupStep(s.key)}>
+                    {setupDone[s.key] ? "✓ " : ""}{s.label}
+                    <span className="muted"> {setupSub[s.key]}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {zone === "book" && (
+              <div className="pj-subs">
+                {BOOK_TABS.map((t) => (
+                  <button key={t.key} type="button"
+                    className={"pj-sub-tab" + (bookTab === t.key ? " on" : "")}
+                    onClick={() => setBookTab(t.key)}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button type="button"
+              className={"pj-zone" + (zone === "settings" ? " on" : "")}
               title="字数守卫 / 审校把关 / 世界观硬规则"
               onClick={() => gotoZone("settings")}>
-              ⚙︎ 设置
+              <span className="no">⚙</span>
+              <span className="pj-zone-label">本书设置</span>
             </button>
-          </div>
-        </>
-      )}
+          </aside>
 
-      <div className="flow-main">
-        {suggestion && zone !== "read" && zone !== suggestion.zone && (
-          <div className="next-bar">
-            <span>💡 {suggestion.text}</span>
-            <button className="btn-sm primary" onClick={() => nav(suggestion.path)}>
-              {suggestion.btn}
-            </button>
-          </div>
-        )}
-        {guide && (
-          <StepGuide guide={guide} next={setupNext?.label}
-            onNext={setupNext ? () => {
-              if (setupNext.to === "write") gotoZone("write");
-              else setSetupStep(setupNext.to);
-            } : undefined} />
-        )}
-
-        {zone === "setup" && (
-          <>
-            <div className="chips board-tabs">
-              {SETUP_STEPS.map((s) => (
-                <button key={s.key} type="button"
-                  className={"chip" + (setupStep === s.key ? " on" : "")}
-                  onClick={() => setSetupStep(s.key)}>
-                  {setupDone[s.key] ? "✓ " : ""}{s.label}
-                  <span className="muted"> {setupSub[s.key]}</span>
+          {/* 右列:项目头 + 统计条 + 当前区内容 */}
+          <div className="flow-main">
+            <h1 className="project-head"><span className="project-title-text">{project.title}</span>
+              <span className="badge">{PROJECT_STATUS_CN[project.status] ?? project.status}</span>
+              {project.genre && <span className="badge">{project.genre}</span>}
+              {chapters.length > 0 && (
+                <button className="primary read-book-btn" onClick={() => setReadingBook(true)}>
+                  阅读全书
                 </button>
-              ))}
+              )}
+            </h1>
+            <div className="stat-strip">
+              <div className="stat">主题<b className="stat-topic">{project.topic || "(未定,先去开书区)"}</b></div>
+              <div className="stat">大纲<b>{outlines.length}/{project.target_chapters} 章</b></div>
+              <div className="stat">正文<b>{doneCount} 章 · {wordsTotal} 字</b></div>
+              {staleCount > 0 && <div className="stat">失配<b className="stat-alert">{staleCount} 章</b></div>}
+              {doneCount > 0 && (
+                <div className="stat">导出
+                  <b className="stat-links">
+                    <a href={`/api/projects/${pid}/export/txt`}
+                      onClick={(e) => { e.preventDefault(); exportBook("export/txt", "txt"); }}>txt</a>
+                    {" · "}
+                    <a href={`/api/projects/${pid}/export/epub`}
+                      onClick={(e) => { e.preventDefault(); exportBook("export/epub", "epub"); }}>epub</a>
+                  </b>
+                </div>
+              )}
             </div>
-            {setupStep === "inspire" && <InspirePanel project={project} onChanged={reload} onGotoStep={setSetupStep} />}
-            {setupStep === "arch" && <ArchPanel project={project} arch={arch ?? null} onChanged={reload} hasContent={!!arch || doneCount > 0} />}
-            {setupStep === "outline" && (
-              <OutlinePanel pid={pid} project={project} outlines={outlines} hasArch={!!arch} onChanged={reload}
-                onGotoStep={(s) => { if (s === "write") gotoZone("write"); else setSetupStep(s); }} />
+
+            {suggestion && zone !== suggestion.zone && (
+              <div className="next-bar">
+                <span>💡 {suggestion.text}</span>
+                <button className="btn-sm primary" onClick={() => nav(suggestion.path)}>
+                  {suggestion.btn}
+                </button>
+              </div>
             )}
-          </>
-        )}
+            {guide && (
+              <StepGuide guide={guide} next={setupNext?.label}
+                onNext={setupNext ? () => {
+                  if (setupNext.to === "write") gotoZone("write");
+                  else setSetupStep(setupNext.to);
+                } : undefined} />
+            )}
 
-        {zone === "write" && (
-          outlines.length
-            ? <WritePanel pid={pid} outlines={outlines} />
-            : <EmptyState>先在「开书 → 大纲」生成章节蓝图,才能开始写作。</EmptyState>
-        )}
+            {zone === "setup" && (
+              <>
+                {setupStep === "inspire" && <InspirePanel project={project} onChanged={reload} onGotoStep={setSetupStep} />}
+                {setupStep === "arch" && <ArchPanel project={project} arch={arch ?? null} onChanged={reload} hasContent={!!arch || doneCount > 0} />}
+                {setupStep === "outline" && (
+                  <OutlinePanel pid={pid} project={project} outlines={outlines} hasArch={!!arch} onChanged={reload}
+                    onGotoStep={(s) => { if (s === "write") gotoZone("write"); else setSetupStep(s); }} />
+                )}
+              </>
+            )}
 
-        {zone === "book" && (
-          <>
-            <div className="chips board-tabs">
-              {BOOK_TABS.map((t) => (
-                <button key={t.key} type="button"
-                  className={"chip" + (bookTab === t.key ? " on" : "")}
-                  onClick={() => setBookTab(t.key)}>
-                  {t.label}
-                </button>
-              ))}
-            </div>
-            {(bookTab === "overview" || bookTab === "characters" || bookTab === "bible" || bookTab === "foreshadow") && (
+            {zone === "write" && (
               outlines.length
-                ? <BoardPanel pid={pid} outlines={outlines} tab={bookTab}
-                    onGotoChapter={(n) => {
-                      // 看板点章节格子 → 写作区 + ch 进 URL(write 区按 URL 打开该章)
-                      nav(`/project/${pid}/write?ch=${n}`);
-                    }} />
-                : <EmptyState>生成章节后,这里会展示故事圣经与伏笔追踪。</EmptyState>
+                ? <WritePanel pid={pid} outlines={outlines} />
+                : <EmptyState>先在「开书 → 大纲」生成章节蓝图,才能开始写作。</EmptyState>
             )}
-            {bookTab === "publish" && <SubmissionPanel pid={pid} project={project} />}
-            {bookTab === "drama" && <DramaPanel pid={pid} />}
-            {bookTab === "clips" && <ClipsList projectId={pid} />}
-            {bookTab === "audit" && <AuditPanel pid={pid} project={project} />}
-            {bookTab === "refresh" && <RefreshPanel pid={pid} />}
-          </>
-        )}
 
-        {zone === "settings" && <ProjectSettingsPanel pid={pid} project={project} />}
-        {zone === "read" && <ReadPanel pid={pid} outlines={outlines} />}
-      </div>
+            {zone === "book" && (
+              <>
+                {(bookTab === "overview" || bookTab === "characters" || bookTab === "bible" || bookTab === "foreshadow") && (
+                  outlines.length
+                    ? <BoardPanel pid={pid} outlines={outlines} tab={bookTab}
+                        onGotoChapter={(n) => {
+                          // 看板点章节格子 → 写作区 + ch 进 URL(write 区按 URL 打开该章)
+                          nav(`/project/${pid}/write?ch=${n}`);
+                        }} />
+                    : <EmptyState>生成章节后,这里会展示故事圣经与伏笔追踪。</EmptyState>
+                )}
+                {bookTab === "publish" && <SubmissionPanel pid={pid} project={project} />}
+                {bookTab === "drama" && <DramaPanel pid={pid} />}
+                {bookTab === "clips" && (
+                  <Suspense fallback={<p className="muted">加载中…</p>}>
+                    <ClipsList projectId={pid} />
+                  </Suspense>
+                )}
+                {bookTab === "audit" && <AuditPanel pid={pid} project={project} />}
+                {bookTab === "refresh" && <RefreshPanel pid={pid} />}
+              </>
+            )}
+
+            {zone === "settings" && <ProjectSettingsPanel pid={pid} project={project} />}
+          </div>
+        </div>
+      )}
 
       {readingBook && chapters.length > 0 && (
         <BookReader

@@ -6,7 +6,7 @@
 // - 只读请求不该带 Content-Type(带了在某些代理上会被当成有 body 的请求);
 // - 导出文件名走 `filename*=UTF-8''` 编码,不解码就是一串百分号;缺头要有兜底名;
 // - 导出失败必须给出非空错误消息,否则前端 toast 弹一个空白框(等于什么都没说)。
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { clipsApi } from "../clipsApi";
 import { token } from "../api";
@@ -15,6 +15,9 @@ beforeEach(() => {
   localStorage.clear();
   vi.restoreAllMocks();
 });
+// stubGlobal 的清理:restoreAllMocks 只还原 spyOn,不还原全局 stub——
+// 不补这一句,本文件的 fetch/URL stub 会串进同进程后续所有测试文件
+afterEach(() => vi.unstubAllGlobals());
 
 function okFetch(payload: unknown = { clip_row: { id: 1 } }) {
   const mockFetch = vi.fn().mockResolvedValue({ ok: true, json: async () => payload });
@@ -32,10 +35,11 @@ function catchAnchors() {
     return el;
   });
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-  vi.stubGlobal("URL", Object.assign(URL, {
-    createObjectURL: vi.fn().mockReturnValue("blob:fake"),
-    revokeObjectURL: vi.fn(),
-  }));
+  // 用子类挂 mock:直接 Object.assign(URL,…) 是在改真实构造器,mock 会永久留在全局
+  vi.stubGlobal("URL", class extends URL {
+    static createObjectURL = vi.fn().mockReturnValue("blob:fake");
+    static revokeObjectURL = vi.fn();
+  });
   return created;
 }
 

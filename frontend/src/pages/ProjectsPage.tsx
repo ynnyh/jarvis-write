@@ -72,8 +72,7 @@ export default function ProjectsPage() {
     <>
       <div className="page-head">
         <h1>我的小说</h1>
-        <button onClick={() => nav("/clips")}>⚡ 情绪短片</button>
-        <button onClick={() => nav("/promo")}>🎬 宣传片工坊</button>
+        {/* 三个工坊的入口在左侧全局导航(ui/Sidebar);这里只留本书创作的主行动 */}
         <button className="primary" onClick={() => nav("/new")}>+ 新建小说</button>
       </div>
 

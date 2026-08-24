@@ -286,3 +286,31 @@ def test_style_card_is_shared_by_all_candidates(client):
     assert row["style_cn"] == _STYLE["style_cn"]
     for c in job["result"]["candidates"]:
         assert _STYLE["style_cn"] in c["shots"][0]["prompt_cn"]
+
+
+def test_norm_shots_falls_back_to_action_when_prompt_missing():
+    """LLM 漏写画面提示词:用分镜自身的景别/运镜/动作兜底,别交给画风锚造出
+    一条「只有风格锚、没有画面内容」的提示词。"""
+    from app.engines.clips.batch import _norm_shots
+
+    shots = _norm_shots(
+        [{"action_desc": "她低头", "shot_type": "近景", "camera": "固定", "duration_s": 3}],
+        {"style_cn": "国风", "style_en": "ink", "negative": ""},
+        5,
+    )
+    assert shots[0]["prompt_cn"] == "【画风锚】国风。近景/固定:她低头"
+
+
+def test_norm_takes_blanks_generic_placeholder_quote():
+    """通用入口的占位文案「(通用入口留空)」不许被模型逐字回填后原样入库
+    (会跟着导出手卡印出「金句原句:(通用入口留空)」)。"""
+    from app.engines.clips.batch import _norm_takes
+
+    takes = _norm_takes(
+        {"takes": [
+            {"logline": "x", "quote_source": "(通用入口留空)"},
+            {"logline": "y", "quote_source": "「回头」他说"},
+        ]}
+    )
+    assert takes[0]["quote_source"] == ""
+    assert takes[1]["quote_source"] == "「回头」他说"  # 真金句不动

@@ -51,8 +51,14 @@ describe("前端约定门禁", () => {
     const uiExports = new Set<string>();
     for (const f of FILES.filter((f) => isUiLayer(f.path))) {
       for (const m of f.text.matchAll(/export\s+(?:default\s+)?function\s+([A-Z]\w+)/g)) uiExports.add(m[1]);
+      // 也认 const 箭头组件形态:ui/ 哪天换写法,判据不能跟着失明
+      for (const m of f.text.matchAll(/export\s+(?:default\s+)?const\s+([A-Z]\w+)\s*[=:]/g)) uiExports.add(m[1]);
     }
     expect(uiExports.size).toBeGreaterThan(5); // 自检:正则确实匹配到了 ui/ 的导出
+    // 自检:关键共用件必须在清单里——正则失效时这里先红,而不是判据静默放空
+    for (const key of ["CopyBtn", "Banner", "EmptyState", "StepBar"]) {
+      expect(uiExports.has(key), `ui/ 里没扫到 ${key}(导出清单失效?)`).toBe(true);
+    }
 
     const bad: string[] = [];
     for (const f of FILES.filter((f) => !isUiLayer(f.path))) {
@@ -65,10 +71,13 @@ describe("前端约定门禁", () => {
 
   it("不许用原生 confirm/alert,一律走 ui/ConfirmDialog", () => {
     // 理由:原生弹窗在 Tauri 桌面端观感割裂,也带不了正文说明与 danger 语义。
+    // 两段正则:后者专堵 `window.confirm(`/`window.alert(`——前者的 `[^.\w]` 排掉了
+    // 属性调用前缀,对最直白的 window. 写法反而失明。
     const bad: string[] = [];
     for (const f of FILES) {
       for (const { no, line } of codeLines(f.text)) {
-        if (/(?:^|[^.\w])(?:confirm|alert)\s*\(/.test(line)) bad.push(`${f.path}:${no}`);
+        if (/(?:^|[^.\w])(?:confirm|alert)\s*\(/.test(line)
+          || /window\s*\.\s*(?:confirm|alert)\s*\(/.test(line)) bad.push(`${f.path}:${no}`);
       }
     }
     expect(bad, `请改用 confirmDialog({ title, body, danger }):\n${bad.join("\n")}`).toEqual([]);

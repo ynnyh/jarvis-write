@@ -7,7 +7,7 @@
 //   尤其「没等到 done」不能当成功返回空回复(那会把空白气泡落库);
 // - 导出的文件名走 `filename*=UTF-8''` 百分号编码,不解码就得到一串 %E8%A5%BF...;
 //   缺这个头时还得有兜底名,否则浏览器存成无扩展名文件。
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { promoApi } from "../promoApi";
 import { token } from "../api";
@@ -16,6 +16,9 @@ beforeEach(() => {
   localStorage.clear();
   vi.restoreAllMocks();
 });
+// stubGlobal 的清理:restoreAllMocks 只还原 spyOn,不还原全局 stub——
+// 不补这一句,本文件的 fetch/URL stub 会串进同进程后续所有测试文件
+afterEach(() => vi.unstubAllGlobals());
 
 /** 把若干字符串片段做成一个可读流响应(片段边界 = 网络分片边界) */
 function sseRes(chunks: string[]) {
@@ -92,10 +95,11 @@ describe("导出下载", () => {
   function stubDownload(headers: Record<string, string>) {
     const clicks = vi.fn();
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(clicks);
-    vi.stubGlobal("URL", Object.assign(URL, {
-      createObjectURL: vi.fn().mockReturnValue("blob:fake"),
-      revokeObjectURL: vi.fn(),
-    }));
+    // 用子类挂 mock:直接 Object.assign(URL,…) 是在改真实构造器,mock 会永久留在全局
+    vi.stubGlobal("URL", class extends URL {
+      static createObjectURL = vi.fn().mockReturnValue("blob:fake");
+      static revokeObjectURL = vi.fn();
+    });
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       headers: { get: (k: string) => headers[k] ?? null },

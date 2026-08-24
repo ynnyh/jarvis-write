@@ -375,3 +375,19 @@ def test_promo_chunks(client):
     items5 = job["result"]["chunks"]["items"]
     assert [i["shot_seqs"] for i in items5] == [[1], [2], [3]]
     assert items5[2]["over_limit"] is True and items5[0]["over_limit"] is False
+
+    # 漏写运动提示词的段:先用该段镜头拼确定性兜底再注入锚与音频口径——
+    # 反过来(先注入锚)会绕过「空提示词不追加」守卫,产出一条只有约束没有内容的提示词
+    with patch("app.engines.promo.chunks.get_adapter_for",
+               return_value=_JsonAdapter({"chunks": [
+                   {"index": 1, "motion_prompt_cn": "", "motion_prompt_en": ""},
+                   {"index": 2, "motion_prompt_cn": "城墙根早点摊,油条下锅,含实拍电影感",
+                    "motion_prompt_en": "breakfast stall, cinematic live footage"},
+               ]})):
+        r = client.post(f"/api/promos/{pid}/chunks", headers=headers, json={"chunk_s": 15})
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    m = job["result"]["chunks"]["items"][0]["motion_prompt_cn"]
+    assert "镜头1" in m and "镜头2" in m     # 分镜自身的动作进了提示词(不是光秃秃的约束)
+    assert "【画风锚】" in m                 # 锚仍注入
+    assert "【音频】" in m                   # 音频口径跟着注入

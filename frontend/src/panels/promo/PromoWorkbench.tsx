@@ -32,6 +32,7 @@ export default function PromoWorkbench({ pid, meta }: {
       const r = await promoApi.get(pid);
       setPlan(r.plan);
       setShots(r.shots);
+      setLoadErr("");
     } catch (e) { setLoadErr(errMsg(e)); }
   }, [pid]);
   useEffect(() => { void reload(); }, [reload]);
@@ -39,7 +40,13 @@ export default function PromoWorkbench({ pid, meta }: {
   const jobs = usePromoJobs(pid, reload);
 
   if (plan === null && !loadErr) return <p className="muted">加载中…</p>;
-  if (plan === null) return <div className="msg-err">{loadErr}</div>;
+  // 首屏加载失败不能是一页死胡同:给重试入口(成功路径也会清掉 loadErr,不让旧错误赖着)
+  if (plan === null) return (
+    <div className="msg-err">
+      {loadErr}
+      <div className="mt-2"><button className="btn" onClick={() => void reload()}>重试</button></div>
+    </div>
+  );
 
   const brief = plan.brief as PromoBrief;
   const hasBrief = !!brief?.positioning;

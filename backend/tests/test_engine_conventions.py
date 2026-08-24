@@ -52,6 +52,20 @@ def _hits(files: list[Path], pattern: str) -> list[str]:
     return out
 
 
+def _line_import_pattern(names: list[str]) -> str:
+    """匹配把 `names` 里的线 import 进来的三种写法。
+
+    第三种 `from app.engines import drama` 最容易漏:它不带点号路径,
+    只匹配 `from app.engines.<line>` 的正则对它完全失明。
+    """
+    alt = "|".join(names)
+    return (
+        rf"from app\.engines\.({alt})\b"
+        rf"|import app\.engines\.({alt})\b"
+        rf"|from app\.engines import [^\n]*\b({alt})\b"
+    )
+
+
 # =============== ① 出片线之间不许互相 import ===============
 
 def test_lines_do_not_import_each_other():
@@ -59,8 +73,7 @@ def test_lines_do_not_import_each_other():
     offenders: list[str] = []
     for name, targets in LINES.items():
         others = [n for n in LINES if n != name]
-        pattern = r"from app\.engines\.(" + "|".join(others) + r")\b|import app\.engines\.(" + "|".join(others) + r")\b"
-        offenders += _hits(_py_files(targets), pattern)
+        offenders += _hits(_py_files(targets), _line_import_pattern(others))
     assert not offenders, (
         "出片线之间互相 import 了(共用的确定性件请挪进 app/engines/media/,"
         "各线自己的业务口径不要跨线复用):\n" + "\n".join(offenders)
@@ -70,9 +83,7 @@ def test_lines_do_not_import_each_other():
 # =============== ② media 是叶子:不许反向依赖任何一条线 ===============
 
 def test_media_does_not_depend_on_any_line():
-    offenders = _hits(
-        _py_files([MEDIA]), r"from app\.engines\.(drama|promo|clips)\b|import app\.engines\.(drama|promo|clips)\b"
-    )
+    offenders = _hits(_py_files([MEDIA]), _line_import_pattern(["drama", "promo", "clips"]))
     assert not offenders, (
         "app/engines/media/ 反向依赖了某条出片线——它必须是叶子(只含三线共用的"
         "确定性口径,不含任何一条线的业务):\n" + "\n".join(offenders)

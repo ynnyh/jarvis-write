@@ -46,6 +46,9 @@ _TAKES = 3
 _MIN_CANDIDATES = 2
 # 单条切入展开失败后再试一次(整发重来:LLM 上一次可能吐了半截 JSON)
 _EXPAND_ATTEMPTS = 2
+# 通用入口的 quote_hint 占位文案:模型常把它逐字回填进 quote_source,
+# 原样入库会跟着导出手卡印出「金句原句:(通用入口留空)」,归一化时摘掉。
+_GENERIC_QUOTE_PLACEHOLDER = "(通用入口留空)"
 
 
 class ClipBatchError(ValueError):
@@ -107,6 +110,13 @@ def _norm_shots(raw, style: dict, max_seq_cap: int) -> list[dict]:
         prompt_cn = str(item.get("prompt_cn") or "").strip()[:800]
         prompt_en = str(item.get("prompt_en") or "").strip()[:600]
         negative = str(item.get("negative") or "").strip()[:400]
+        # LLM 漏写画面提示词时用分镜自身的景别/运镜/动作拼一条确定性兜底——
+        # 空着交给画风锚,会产出一条「只有风格锚、没有画面内容」的提示词
+        if not prompt_cn:
+            prompt_cn = (
+                f"{str(item.get('shot_type') or '').strip()}"
+                f"/{str(item.get('camera') or '').strip()}:{action}"
+            )
         # 画风锚/负面词兜底(与漫剧、宣传片同一口径,见 media.anchors)
         prompt_cn, prompt_en = ensure_style_anchors(
             prompt_cn, prompt_en, style.get("style_cn") or "", style.get("style_en") or ""
@@ -153,6 +163,9 @@ def _norm_takes(data: dict) -> list[dict]:
         logline = str(item.get("logline") or "").strip()[:200]
         if not logline:
             continue
+        quote_source = str(item.get("quote_source") or "").strip()[:300]
+        if quote_source == _GENERIC_QUOTE_PLACEHOLDER:
+            quote_source = ""
         takes.append(
             {
                 "take": str(item.get("take") or "").strip()[:60] or f"切入{len(takes) + 1}",
@@ -160,7 +173,7 @@ def _norm_takes(data: dict) -> list[dict]:
                 "emotion_curve": str(item.get("emotion_curve") or "").strip()[:120],
                 "punchline": str(item.get("punchline") or "").strip()[:60],
                 "hook_text": str(item.get("hook_text") or "").strip()[:60],
-                "quote_source": str(item.get("quote_source") or "").strip()[:300],
+                "quote_source": quote_source,
             }
         )
         if len(takes) >= _TAKES:
@@ -328,7 +341,7 @@ async def generate_batch(db: Session, clip: MoodClip, progress=lambda s: None) -
                 quote_hint=(
                     "本子核心金句在正文里的原句(逐字摘自节选;轻度改写时原句也照抄在此)"
                     if excerpts
-                    else "(通用入口留空)"
+                    else _GENERIC_QUOTE_PLACEHOLDER
                 ),
                 grounding_rule=grounding,
             )

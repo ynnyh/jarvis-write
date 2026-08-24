@@ -2,6 +2,7 @@ import { Suspense, useEffect, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { api, token, setUnauthorizedHandler, Me } from "./api";
 import { isDesktop } from "./desktop";
+import { useBreakpoint } from "./hooks/useBreakpoint";
 import LoginPage from "./pages/LoginPage";
 import LockScreen from "./pages/LockScreen";
 import HelpPage from "./pages/HelpPage";
@@ -10,11 +11,10 @@ import { ConfirmHost } from "./ui/ConfirmDialog";
 import { CopyHost } from "./ui/copy";
 import CloseGuard from "./ui/CloseGuard";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
+import Sidebar from "./ui/Sidebar";
 import { TaskCenterBadge, TaskCenterProvider } from "./ui/TaskCenter";
 import { LiveDock } from "./ui/LiveDock";
 import UpdateBanner from "./ui/UpdateBanner";
-
-const GH_URL = "https://github.com/ynnyh/jarvis-write";
 
 // 应用锁(仅桌面单机模式):解锁标记存 sessionStorage——刷新同标签页不重输,
 // 关掉重开要重输。锁屏时不渲染主界面(见下方 locked 分支)。
@@ -155,6 +155,11 @@ export default function App() {
     setLocked(true);
   }
 
+  // 移动端侧栏抽屉开关(桌面端侧栏常驻,不用它);切路由随手关上,别挡内容
+  const { isMobile } = useBreakpoint();
+  const [sideOpen, setSideOpen] = useState(false);
+  useEffect(() => { setSideOpen(false); }, [location.pathname]);
+
   if (booting) {
     return <div className="auth-wrap"><span className="spin" /></div>;
   }
@@ -218,47 +223,51 @@ export default function App() {
 
   return (
     <TaskCenterProvider enabled={!!me}>
-      <div className="topbar">
-        <Link to="/" className="logo">jarvis<span>·write</span></Link>
-        <span className="muted">AI 长篇小说工作台</span>
-        <div className="grow" />
-        <TaskCenterBadge />
-        {tokens && <span className="muted" title="累计 LLM 用量">{tokens}</span>}
-        <Link to="/">首页</Link>
-        {!isLocal && me.is_admin && <Link to="/admin">管理</Link>}
-        <Link to="/help">指南</Link>
-        {/* 设置改走 SPA 路由(同窗切换):既含模型设置,也含桌面版「关于&更新」。
-            桌面 WebView2 不处理 target=_blank,SPA 内路由天然规避新开窗问题。 */}
-        <Link to="/settings">设置</Link>
-        {/* 「立即锁定」:仅桌面单机且已设锁时出现,不必重启 app 才能锁 */}
-        {isLocal && hasLock && (
-          <button className="linkbtn" title="立即锁定,需输入密码才能重新进入" onClick={lockNow}>锁定</button>
+      {/* 工作台外壳:左侧一级导航常驻,右侧内容(旧 topbar 退役,入口收进 ui/Sidebar)。
+          桌面=常驻侧栏;移动端=精简顶条 + ☰ 全屏抽屉,组件同一份。 */}
+      <div className="app-shell">
+        {!isMobile && (
+          <aside className="app-side">
+            <Sidebar me={me} isLocal={isLocal} hasLock={hasLock} tokens={tokens}
+              onLock={lockNow} onLogout={logout} />
+          </aside>
         )}
-        {isLocal ? (
-          // 桌面单机:GitHub 经后端 open-link 交系统浏览器(WebView2 不开新标签页)。
-          <a className="topbar-gh" href={GH_URL}
-            onClick={(e) => { e.preventDefault(); api.openLink(GH_URL).catch(() => {}); }}>GitHub</a>
-        ) : (
-          <a className="topbar-gh" href={GH_URL} target="_blank" rel="noreferrer">GitHub</a>
+        {isMobile && (
+          <>
+            <div className="m-shellbar">
+              <button className="m-shellbar-btn" title="菜单" onClick={() => setSideOpen(true)}>☰</button>
+              <Link to="/" className="side-brand">jarvis<span>·write</span></Link>
+              <div className="grow" />
+              <TaskCenterBadge />
+            </div>
+            {sideOpen && (
+              <>
+                <div className="m-overlay" onClick={() => setSideOpen(false)} />
+                <aside className="app-side app-side-drawer">
+                  <Sidebar me={me} isLocal={isLocal} hasLock={hasLock} tokens={tokens}
+                    onLock={lockNow} onLogout={logout} />
+                </aside>
+              </>
+            )}
+          </>
         )}
-        {/* local 单机免登录:不显示账号名与退出 */}
-        {!isLocal && <span className="muted" title={me.is_admin ? "管理员" : "用户"}>{me.username}</span>}
-        {!isLocal && <button className="linkbtn" onClick={logout}>退出</button>}
-      </div>
-      <UpdateBanner />
-      {llmConfigured === false && (
-        <div className="llm-banner">
-          还没有配置模型——大部分功能需要模型才能工作。
-          <Link to="/settings" className="llm-banner-link">去「设置」配置你的 key →</Link>
+        <div className="app-main">
+          <UpdateBanner />
+          {llmConfigured === false && (
+            <div className="llm-banner">
+              还没有配置模型——大部分功能需要模型才能工作。
+              <Link to="/settings" className="llm-banner-link">去「设置」配置你的 key →</Link>
+            </div>
+          )}
+          <div className="wrap">
+            <ErrorBoundary>
+              {/* 路由按需加载(见 main.tsx):切页时先出一行「加载中」,侧栏与全局层不动 */}
+              <Suspense fallback={<p className="muted">加载中…</p>}>
+                <Outlet />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
         </div>
-      )}
-      <div className="wrap">
-        <ErrorBoundary>
-          {/* 路由按需加载(见 main.tsx):切页时先出一行「加载中」,顶栏与全局层不动 */}
-          <Suspense fallback={<p className="muted">加载中…</p>}>
-            <Outlet />
-          </Suspense>
-        </ErrorBoundary>
       </div>
       <Toaster />
       <ConfirmHost />

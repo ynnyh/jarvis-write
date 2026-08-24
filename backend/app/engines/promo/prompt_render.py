@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import PromoPlan, PromoShot
 from app.engines.consistency.extractor import parse_llm_json
-from app.engines.media.anchors import ensure_style_anchors
+from app.engines.media.anchors import ensure_style_anchors, merge_negative
 from app.engines.media.text import clip
 from app.llm.router import Task, get_adapter_for
 from app.prompts.promo import PROMO_SHOT_PROMPT_PROMPT
@@ -79,10 +79,9 @@ async def render_shot_prompts(db: Session, plan: PromoPlan, progress=lambda s: N
             negative = clip(item.get("negative"), 500)
             if not prompt_cn and not prompt_en:
                 continue
-            # 兜底注入:画风锚(中英)与负面基座,与漫剧同纪律
+            # 兜底注入:画风锚(中英)与负面基座,与漫剧同纪律(负面词合并只走 media.anchors 一处)
             prompt_cn, prompt_en = ensure_style_anchors(prompt_cn, prompt_en, plan.style_cn, plan.style_en)
-            if plan.negative and plan.negative not in negative:
-                negative = f"{plan.negative},{negative}" if negative else plan.negative
+            negative = merge_negative(negative, plan.negative)
             shot.prompt_cn = prompt_cn
             shot.prompt_en = prompt_en
             shot.negative = negative
