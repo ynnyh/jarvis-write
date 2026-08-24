@@ -7,19 +7,8 @@ import { useJob } from "../ui/useJob";
 import { toast } from "../ui/Toaster";
 import { errMsg } from "../pollJob";
 import EmptyState from "../ui/EmptyState";
-
-export function CopyBtn({ text, label = "复制" }: { text: string; label?: string }) {
-  const [done, setDone] = useState(false);
-  async function go() {
-    if (!text.trim()) { toast.err("内容为空", "没有可复制的内容"); return; }
-    try {
-      await navigator.clipboard.writeText(text);
-      setDone(true);
-      setTimeout(() => setDone(false), 1200);
-    } catch { toast.err("复制失败", "请手动选中文本复制"); }
-  }
-  return <button className="btn-sm" onClick={go}>{done ? "✓ 已复制" : label}</button>;
-}
+import { CopyBtn } from "../ui/copy";
+import { confirmDialog } from "../ui/ConfirmDialog";
 
 function useClipsMeta() {
   const [meta, setMeta] = useState<{ themes: ClipTheme[]; durations: number[]; directions: ClipDirection[] } | null>(null);
@@ -88,59 +77,69 @@ export function ClipsList({ projectId }: { projectId: number | null }) {
             ? "AI 读你的定稿章节,挑最戳人的金句与名场面,一次产 3 个不同切入的投流本子——核心金句必须出自正文,引擎会逐句溯源校验。"
             : "选个情绪命题(遗憾/争吵/爱情/童趣…),AI 一次给 3 个不同切入的本子:钩子开场 → 情绪蓄势 → 金句收尾,每格带三轨提示词与切段,拿去即梦/剪映直接出片。"}
         </p>
-        <div className="card-head mb-2 plan-form">
+        <div className="form-grid">
           {!novelMode && (
-            <label>主题
-              <span className="chips">
+            <div className="field field-full">
+              <span className="fl">情绪命题<span className="hint">选一个,或用自定义</span></span>
+              <div className="chips">
                 {(meta?.themes ?? []).map((t) => (
                   <button key={t.key} type="button"
                     className={"chip" + (theme === t.key ? " on" : "")}
+                    aria-pressed={theme === t.key}
                     onClick={() => { setTheme(t.key); setCustom(""); }}>{t.label}</button>
                 ))}
                 <button type="button"
                   className={"chip custom" + (!theme && custom ? " on" : "")}
+                  aria-pressed={!theme && !!custom}
                   onClick={() => setTheme("")}>自定义</button>
-              </span>
-            </label>
+              </div>
+            </div>
           )}
           {!theme && !novelMode && (
-            <label>自定义主题
-              <input value={custom} maxLength={40} placeholder="如「毕业前夜」"
+            <div className="field field-full">
+              <label className="fl" htmlFor="clip-custom">自定义主题</label>
+              <input id="clip-custom" value={custom} maxLength={40} placeholder="如「毕业前夜」"
                 onChange={(e) => setCustom(e.target.value)} />
-            </label>
+            </div>
           )}
           {novelMode && (
-            <label>情绪侧重(可选,影响选材倾向)
-              <select value={theme} onChange={(e) => setTheme(e.target.value)}>
+            <div className="field">
+              <label className="fl" htmlFor="clip-mood">
+                情绪侧重<span className="hint">可选,影响选材倾向</span>
+              </label>
+              <select id="clip-mood" value={theme} onChange={(e) => setTheme(e.target.value)}>
                 <option value="">AI 按书自动挑</option>
                 {(meta?.themes ?? []).map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
               </select>
-            </label>
+            </div>
           )}
-          <label>时长
-            <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
+          <div className="field">
+            <label className="fl" htmlFor="clip-duration">时长</label>
+            <select id="clip-duration" value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
               <option value={15}>15 秒</option>
               <option value={30}>30 秒</option>
             </select>
-          </label>
-          <label>画风
-            <select value={direction} onChange={(e) => setDirection(e.target.value)}>
+          </div>
+          <div className="field">
+            <label className="fl" htmlFor="clip-direction">画风</label>
+            <select id="clip-direction" value={direction} onChange={(e) => setDirection(e.target.value)}>
               {(meta?.directions ?? []).map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
             </select>
-          </label>
-        </div>
-        <div className="media-field">
-          <div className="card-head mb-2">
-            <span className="muted">一句话灵感(可选,如「异地恋的最后一通电话」)</span>
           </div>
-          <input value={inspiration} maxLength={60}
-            onChange={(e) => setInspiration(e.target.value)}
-            placeholder={novelMode ? "如「主打男女主第一次对峙」(不填则 AI 自动挑)" : "不填则 AI 自由发挥"} />
+          <div className="field field-full">
+            <label className="fl" htmlFor="clip-inspire">
+              一句话灵感<span className="hint">可选</span>
+            </label>
+            <input id="clip-inspire" value={inspiration} maxLength={60}
+              onChange={(e) => setInspiration(e.target.value)}
+              placeholder={novelMode ? "如「主打男女主第一次对峙」(不填则 AI 自动挑)" : "如「异地恋的最后一通电话」(不填则 AI 自由发挥)"} />
+          </div>
         </div>
-        <div className="actions mt-2">
+        <div className="form-actions">
           <button className="primary" disabled={busy} onClick={create}>
-            产 3 个本子(三选一)
+            {busy ? "正在建…" : "产 3 个本子(三选一)"}
           </button>
+          <span className="form-actions-tip">三个本子切入各不相同;都不满意可以整批换。</span>
         </div>
       </section>
 
@@ -157,10 +156,17 @@ export function ClipsList({ projectId }: { projectId: number | null }) {
             <span className="grow" />
             <button className="btn-sm" onClick={(e) => {
               e.stopPropagation();
-              if (confirm("删除这条短片企划?")) {
-                void clipsApi.remove(r.id).then(reload)
-                  .catch((err) => toast.err("删除失败", errMsg(err)));
-              }
+              void (async () => {
+                const ok = await confirmDialog({
+                  title: "删除这条短片企划?",
+                  body: "三个本子与已选定的手卡都会一起删掉,不可恢复。",
+                  confirmText: "确认删除",
+                  danger: true,
+                });
+                if (!ok) return;
+                try { await clipsApi.remove(r.id); await reload(); }
+                catch (err) { toast.err("删除失败", errMsg(err)); }
+              })();
             }}>删除</button>
           </div>
           {(r.clip as ClipCard).logline && <div className="muted">{(r.clip as ClipCard).logline}</div>}

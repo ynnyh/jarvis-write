@@ -134,7 +134,8 @@ export function selectAll(e: FocusEvent<HTMLTextAreaElement | HTMLInputElement>)
   e.currentTarget.select();
 }
 
-/** 复制按钮:成功就地变「✓ 已复制」,失败自动弹手动复制层(不会走进死胡同)。 */export function CopyBtn({ text, label = "复制", title }: {
+/** 复制按钮:成功就地变「✓ 已复制」,失败自动弹手动复制层(不会走进死胡同)。 */
+export function CopyBtn({ text, label = "复制", title }: {
   text: string; label?: string; title?: string;
 }) {
   const [done, setDone] = useState(false);

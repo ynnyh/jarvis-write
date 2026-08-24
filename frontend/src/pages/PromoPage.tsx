@@ -16,19 +16,8 @@ import { useJob } from "../ui/useJob";
 import { toast } from "../ui/Toaster";
 import { errMsg } from "../pollJob";
 import EmptyState from "../ui/EmptyState";
-
-function CopyBtn({ text, label = "复制" }: { text: string; label?: string }) {
-  const [done, setDone] = useState(false);
-  async function go() {
-    if (!text.trim()) { toast.err("内容为空", "没有可复制的内容"); return; }
-    try {
-      await navigator.clipboard.writeText(text);
-      setDone(true);
-      setTimeout(() => setDone(false), 1200);
-    } catch { toast.err("复制失败", "请手动选中文本复制"); }
-  }
-  return <button className="btn-sm" onClick={go}>{done ? "✓ 已复制" : label}</button>;
-}
+import { CopyBtn } from "../ui/copy";
+import { confirmDialog } from "../ui/ConfirmDialog";
 
 function Banner({ stage, text }: { stage: string; text: string }) {
   return (
@@ -83,43 +72,52 @@ function PromoList() {
           城市 / 景区 / 品牌都能做:先选个大概角度和画风,建完进工作台和 AI 策划总监
           <b>多轮研讨</b>把方向聊透,收敛成创作简报后再生成解说词与分镜——先聊后做,不一版定稿。
         </p>
-        <div className="media-field">
-          <div className="card-head mb-2"><span className="muted">主题(如「西安」)</span></div>
-          <input value={subject} maxLength={60}
-            onChange={(e) => setSubject(e.target.value)}
-            placeholder="城市 / 景区 / 品牌" />
-        </div>
-        <div className="card-head mb-2 plan-form">
-          <label>角度(可多选,研讨中还会细调)
-            <span className="chips">
+        <div className="form-grid">
+          <div className="field field-full">
+            <label className="fl" htmlFor="promo-subject">
+              主题<span className="hint">城市 / 景区 / 品牌都行,如「西安」</span>
+            </label>
+            <input id="promo-subject" value={subject} maxLength={60}
+              onChange={(e) => setSubject(e.target.value)}
+              placeholder="西安" />
+          </div>
+          <div className="field field-full">
+            <span className="fl">角度<span className="hint">可多选,研讨中还会细调</span></span>
+            <div className="chips">
               {(meta?.angles ?? []).map((a) => (
                 <button key={a.key} type="button"
                   className={"chip" + (angles.includes(a.key) ? " on" : "")}
+                  aria-pressed={angles.includes(a.key)}
                   onClick={() => setAngles(angles.includes(a.key)
                     ? angles.filter((x) => x !== a.key) : [...angles, a.key])}>
                   {a.label}
                 </button>
               ))}
-            </span>
-          </label>
-        </div>
-        <div className="card-head mb-2 plan-form">
-          <label>时长
-            <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
+            </div>
+          </div>
+          <div className="field">
+            <label className="fl" htmlFor="promo-duration">成片时长</label>
+            <select id="promo-duration" value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
               <option value={60}>60 秒</option>
               <option value={90}>90 秒</option>
               <option value={120}>2 分钟</option>
               <option value={180}>3 分钟</option>
             </select>
-          </label>
-          <label>画风
-            <select value={direction} onChange={(e) => setDirection(e.target.value)}>
+          </div>
+          <div className="field">
+            <label className="fl" htmlFor="promo-direction">画风</label>
+            <select id="promo-direction" value={direction} onChange={(e) => setDirection(e.target.value)}>
               {(meta?.directions ?? []).map((d) => (
                 <option key={d.key} value={d.key}>{d.label}</option>
               ))}
             </select>
-          </label>
-          <button className="primary" disabled={busy} onClick={create}>建企划,开始研讨</button>
+          </div>
+        </div>
+        <div className="form-actions">
+          <button className="primary" disabled={busy} onClick={create}>
+            {busy ? "建企划中…" : "建企划,开始研讨"}
+          </button>
+          <span className="form-actions-tip">这些都是研讨的起点,进工作台后还能改。</span>
         </div>
       </div>
 
@@ -135,9 +133,17 @@ function PromoList() {
             <span className="grow" />
             <button className="btn-sm" onClick={(e) => {
               e.stopPropagation();
-              if (confirm(`删除企划「${p.title || p.subject}」?`)) {
-                void promoApi.remove(p.id).then(reload).catch((err) => toast.err("删除失败", errMsg(err)));
-              }
+              void (async () => {
+                const ok = await confirmDialog({
+                  title: `删除企划「${p.title || p.subject}」?`,
+                  body: "研讨记录、简报、分镜与提示词都会一起删掉,不可恢复。",
+                  confirmText: "确认删除",
+                  danger: true,
+                });
+                if (!ok) return;
+                try { await promoApi.remove(p.id); await reload(); }
+                catch (err) { toast.err("删除失败", errMsg(err)); }
+              })();
             }}>删除</button>
           </div>
         </div>
@@ -368,7 +374,7 @@ function PromoWorkspace({ pid }: { pid: number }) {
             {(plan.pack as { checklist?: unknown[] }).checklist ? "重建成片包" : "出成片包"}
           </button>
         </div>
-        <div className="card-head mb-2 plan-form">
+        <div className="card-head mb-2">
           <span className="muted">导出:</span>
           <button className="btn-sm" onClick={() => exp("md")}>拍摄手册</button>
           <button className="btn-sm" disabled={shots.length === 0} onClick={() => exp("csv")}>分镜CSV</button>
@@ -446,47 +452,63 @@ function PlanForm({ pid, plan, meta, onSaved }: {
     <section className="card">
       <div className="card-head">
         <h3 className="grow">① 企划信息 <span className="muted">研讨的输入</span></h3>
-        {dirty && <button className="btn-sm primary" onClick={save}>保存修改</button>}
       </div>
-      <div className="card-head mb-2 plan-form">
-        <label>主题 <input value={draft.subject} maxLength={60}
-          onChange={(e) => { setDraft({ ...draft, subject: e.target.value }); setDirty(true); }} /></label>
-        <label>企划名 <input value={draft.title} maxLength={60} placeholder="如「西安·烟火食事」"
-          onChange={(e) => { setDraft({ ...draft, title: e.target.value }); setDirty(true); }} /></label>
-        <label>时长
-          <select value={draft.duration_s} onChange={(e) => { setDraft({ ...draft, duration_s: Number(e.target.value) }); setDirty(true); }}>
+      <div className="form-grid">
+        <div className="field">
+          <label className="fl" htmlFor="pf-subject">主题</label>
+          <input id="pf-subject" value={draft.subject} maxLength={60}
+            onChange={(e) => { setDraft({ ...draft, subject: e.target.value }); setDirty(true); }} />
+        </div>
+        <div className="field">
+          <label className="fl" htmlFor="pf-title">企划名</label>
+          <input id="pf-title" value={draft.title} maxLength={60} placeholder="如「西安·烟火食事」"
+            onChange={(e) => { setDraft({ ...draft, title: e.target.value }); setDirty(true); }} />
+        </div>
+        <div className="field">
+          <label className="fl" htmlFor="pf-duration">成片时长</label>
+          <select id="pf-duration" value={draft.duration_s}
+            onChange={(e) => { setDraft({ ...draft, duration_s: Number(e.target.value) }); setDirty(true); }}>
             <option value={60}>60 秒</option><option value={90}>90 秒</option>
             <option value={120}>2 分钟</option><option value={180}>3 分钟</option>
           </select>
-        </label>
-        <label>画风
-          <select value={draft.direction} onChange={(e) => { setDraft({ ...draft, direction: e.target.value }); setDirty(true); }}>
+        </div>
+        <div className="field">
+          <label className="fl" htmlFor="pf-direction">画风</label>
+          <select id="pf-direction" value={draft.direction}
+            onChange={(e) => { setDraft({ ...draft, direction: e.target.value }); setDirty(true); }}>
             {(meta?.directions ?? []).map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
           </select>
-        </label>
-      </div>
-      <div className="card-head mb-2 plan-form">
-        <label>角度(多选)
-          <span className="chips">
+        </div>
+        <div className="field field-full">
+          <span className="fl">角度<span className="hint">可多选</span></span>
+          <div className="chips">
             {(meta?.angles ?? []).map((a) => (
               <button key={a.key} type="button"
                 className={"chip" + (draft.angles.includes(a.key) ? " on" : "")}
+                aria-pressed={draft.angles.includes(a.key)}
                 onClick={() => {
                   setDraft({ ...draft, angles: draft.angles.includes(a.key)
                     ? draft.angles.filter((x) => x !== a.key) : [...draft.angles, a.key] });
                   setDirty(true);
                 }}>{a.label}</button>
             ))}
-          </span>
-        </label>
-      </div>
-      <div className="media-field">
-        <div className="card-head mb-2">
-          <span className="muted">素材点(史实/数据/slogan——解说词的唯一事实来源,拿不准的宁可不写)</span>
+          </div>
         </div>
-        <textarea rows={4} value={draft.material_notes}
-          placeholder="如:回民街头汤凌晨四点开熬;城墙明代扩建;slogan 候选「长安烟火,不散」"
-          onChange={(e) => { setDraft({ ...draft, material_notes: e.target.value }); setDirty(true); }} />
+        <div className="field field-full">
+          <label className="fl" htmlFor="pf-material">素材点</label>
+          <p className="field-note">
+            史实 / 数据 / slogan——解说词的唯一事实来源,拿不准的宁可不写。
+          </p>
+          <textarea id="pf-material" rows={4} value={draft.material_notes}
+            placeholder="如:回民街头汤凌晨四点开熬;城墙明代扩建;slogan 候选「长安烟火,不散」"
+            onChange={(e) => { setDraft({ ...draft, material_notes: e.target.value }); setDirty(true); }} />
+        </div>
+      </div>
+      <div className="form-actions">
+        <button className="primary" disabled={!dirty} onClick={save}>保存修改</button>
+        <span className="form-actions-tip">
+          {dirty ? "有未保存的修改。" : "已是保存状态——改动后这里会亮起。"}
+        </span>
       </div>
     </section>
   );

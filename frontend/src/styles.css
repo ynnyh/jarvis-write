@@ -315,6 +315,41 @@ select { cursor: pointer; }
 .input-row input.input-md { flex: none; }
 .input-row button { flex-shrink: 0; margin-left: 0; }
 
+/* ---------- 表单区块(新建/编辑表单的统一骨架) ----------
+   踩过的坑:表单曾拿 .card-head 拼行——那是「标题 + 按钮」的一行 flex,
+   标签与控件被塞进同一行抢宽度,窗口一窄就把「时长」竖着拆成两行,
+   主按钮也混在字段中间。新建/编辑表单一律用这套骨架,别再拿 card-head 凑:
+     .form-grid  两列自适应(移动端单列),.field-full 独占一行
+     .field      标签在上、控件在下,标签永不与控件抢宽度
+     .form-actions 底部动作条,主按钮和字段之间有分界 */
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-4) var(--sp-5);
+  align-items: start;
+  /* 表单不跟着宽屏一起摊开:两列各约 370px,控件填满自己那格,
+     左右边缘对齐才像一张「设计过的表单」,而不是几个孤零零的控件 */
+  max-width: 760px;
+  margin-bottom: var(--sp-4);
+}
+.form-grid .field-full { grid-column: 1 / -1; }
+
+.field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.field > .fl { margin: 0; }                 /* 复用全站字段标签,去掉它自带的上边距 */
+.field > .fl .hint { margin-left: 6px; }    /* 标签后缀说明,不加粗 */
+.field-note { margin: 0; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.6; }
+
+.form-actions {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3);
+  padding-top: var(--sp-4); border-top: 1px solid var(--line);
+}
+.form-actions button + button { margin-left: 0; }  /* 用 gap,不叠全局 button+button 的外边距 */
+.form-actions-tip { color: var(--text-3); font-size: var(--fs-xs); line-height: 1.6; }
+
+@media (max-width: 640px) {
+  .form-grid { grid-template-columns: 1fr; gap: var(--sp-3); }
+}
+
 /* ---------- 卡片 / 版面 ---------- */
 .wrap { max-width: 1080px; margin: 0 auto; padding: var(--sp-6) var(--sp-5) 80px; }
 
@@ -3091,7 +3126,8 @@ body:has(.write-zone.immersive) .step-guide { display: none; }
 .ep-row.ep-on { border-color: var(--accent, var(--line-2)); box-shadow: 0 0 0 1px var(--accent, transparent) inset; }
 /* 规划表单:一行排开(窄屏自动换行) */
 .plan-form { flex-wrap: wrap; gap: 10px; }
-.plan-form label { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--text-2); }
+/* 标签绝不许竖着断字(「时长」曾被挤成两行);长了整块换行,不切字 */
+.plan-form label { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--text-2); white-space: nowrap; }
 .plan-form select, .plan-form input[type="number"] {
   padding: 4px 8px; border: 1px solid var(--line); border-radius: var(--r-sm, 6px);
   background: var(--surface); color: var(--text);

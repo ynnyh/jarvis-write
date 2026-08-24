@@ -27,6 +27,7 @@ import { toast } from "../../ui/Toaster";
 import { errMsg } from "../../pollJob";
 import EmptyState from "../../ui/EmptyState";
 import { CopyBtn, selectAll } from "../../ui/copy";
+import { confirmDialog } from "../../ui/ConfirmDialog";
 import { DramaGuide, DramaProductionGuide } from "./DramaGuide";
 
 interface Props { pid: number }
@@ -726,7 +727,12 @@ function CharCardRow({ pid, card, onSaved }: {
 
   /** 只重出这一张卡:按上面拍板的性别重写外貌/服饰/声线(锁定的卡也覆盖)。 */
   async function regenCard() {
-    if (dirty && !confirm("这张卡有还没保存的修改,重出会用 AI 的新版本覆盖。继续?")) return;
+    if (dirty && !await confirmDialog({
+      title: "这张卡有还没保存的修改",
+      body: "重出会用 AI 的新版本覆盖你改的内容。",
+      confirmText: "覆盖重出",
+      danger: true,
+    })) return;
     setCardBusy(true);
     try {
       const r = await run<{ card: DramaCharacterCard }>(
@@ -786,7 +792,7 @@ function CharCardRow({ pid, card, onSaved }: {
   }
 
   async function removeRef(index: number) {
-    if (!confirm("删掉这张定妆照?")) return;
+    if (!await confirmDialog({ title: "删掉这张定妆照?", confirmText: "删除", danger: true })) return;
     try {
       const r = await dramaApi.deleteRef(pid, card.id, index);
       onSaved(r.card);
@@ -935,7 +941,12 @@ function PlanSection({ pid, approved, episodes, onChanged, selectedId, onSelect 
   }
 
   async function remove(eid: number) {
-    if (!confirm("删除这一集(连分镜)?")) return;
+    if (!await confirmDialog({
+      title: "删除这一集?",
+      body: "这一集的分镜、提示词与已挂的静帧都会一起删掉,不可恢复。",
+      confirmText: "确认删除",
+      danger: true,
+    })) return;
     try {
       await dramaApi.deleteEpisode(pid, eid);
       const fresh = await dramaApi.getEpisodes(pid);
@@ -1430,7 +1441,7 @@ function PromptRow({ pid, shot, onSaved, onRegenerated }: {
   }
 
   async function removeStill(index: number) {
-    if (!confirm("删掉这张静帧?")) return;
+    if (!await confirmDialog({ title: "删掉这张静帧?", confirmText: "删除", danger: true })) return;
     setAssetBusy(true);
     try {
       if (!await flush()) return;
