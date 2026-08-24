@@ -3,7 +3,7 @@
 """美术风格卡:项目级画风锁定段,注入每条分镜提示词(全片统一,借鉴 LumenX 可控美术指导)。
 
 画风方向(direction)由用户显式拍板(动画系默认推荐,真人写实挂警示),
-方向目录见 common.DRAMA_DIRECTIONS;recommend_directions 按书的内容荐前三个方向
+方向目录见 media/directions.py;recommend_directions 按书的内容荐前三个方向
 (带理由与优先级),AI 荐、用户选,荐完仍可无视。
 """
 from __future__ import annotations
@@ -13,14 +13,16 @@ from sqlalchemy.orm import Session
 from app.db.models import DramaStyleCard, Project
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.drama.common import (
-    DRAMA_DIRECTIONS,
-    VALID_DIRECTIONS,
     clip,
     concept_block,
-    direction_directive,
-    direction_label,
     style_card_dict,
     style_memo_block,
+)
+from app.engines.media.directions import (
+    DIRECTIONS,
+    VALID_DIRECTIONS,
+    direction_directive,
+    direction_label,
 )
 from app.llm.router import Task, get_adapter_for
 from app.prompts.drama import DIRECTION_RECOMMEND_PROMPT, STYLE_PROMPT
@@ -76,7 +78,7 @@ async def recommend_directions(
     """按书的题材/基调/场景推荐前 3 个画风方向(带理由,按优先级排序)。"""
     progress("AI 正在按本书气质推荐画风方向…")
     directions_block = "\n".join(
-        f"{d['key']} | {d['label']} | {d['directive']}" for d in DRAMA_DIRECTIONS
+        f"{d['key']} | {d['label']} | {d['directive']}" for d in DIRECTIONS
     )
     adapter = get_adapter_for(Task.DRAMA_ASSET, timeout=300)
     prompt = DIRECTION_RECOMMEND_PROMPT.format(
@@ -90,7 +92,7 @@ async def recommend_directions(
     raw = await adapter.ask(prompt)
     data = parse_llm_json(raw)
 
-    by_key = {d["key"]: d for d in DRAMA_DIRECTIONS}
+    by_key = {d["key"]: d for d in DIRECTIONS}
     out: list[dict] = []
     seen: set[str] = set()
     for item in (data.get("recommendations") or []):

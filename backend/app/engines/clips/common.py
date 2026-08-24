@@ -1,11 +1,12 @@
 # app/engines/clips/common.py
 # -*- coding: utf-8 -*-
-"""情绪短片引擎公共件:主题目录、序列化、字典版切段(复用漫剧 SRT 内核的时间轴口径)。"""
+"""情绪短片引擎公共件:主题目录、序列化、字典版切段(时间轴口径同 media.subtitles)。"""
 from __future__ import annotations
 
 from app.db.models import MoodClip
-from app.engines.drama.common import coerce_int, direction_directive, direction_label
+from app.engines.media.directions import direction_directive, direction_label
 from app.engines.media.segments import plan_chunks
+from app.engines.media.text import coerce_int
 
 # 情绪主题目录:key 白名单 + 给提示词的「导演提示」(这个情绪怎么拍才戳)
 CLIP_THEMES: list[dict] = [

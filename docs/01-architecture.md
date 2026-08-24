@@ -87,6 +87,7 @@ backend/
 │   │   │   └── chapter.py       # 逐章生成
 │   │   ├── consistency/         # B. 长程一致性引擎
 │   │   │   ├── bible.py         # 时序故事圣经（查询/更新）
+│   │   │   ├── ledger.py        # 角色资源账本（possession/ability 专用视图）
 │   │   │   ├── foreshadow.py    # 伏笔调度器
 │   │   │   ├── extractor.py     # 章节后状态/事实抽取
 │   │   │   └── checker.py       # 一致性校验
@@ -96,9 +97,19 @@ backend/
 │   │   │   └── regenerate.py    # 级联重生成
 │   │   ├── polish/              # D. 润色引擎
 │   │   │   └── polisher.py
-│   │   └── tendency/            # E. 倾向拼装器
-│   │       ├── catalog.py       # 内置标签目录
-│   │       └── assembler.py     # 标签 → Prompt 片段
+│   │   ├── tendency/            # E. 倾向拼装器
+│   │   │   ├── catalog.py       # 内置标签目录
+│   │   │   └── assembler.py     # 标签 → Prompt 片段
+│   │   ├── media/               # F. 三条出片线的共用内核（叶子，不许反向依赖任一条线）
+│   │   │   ├── segments.py      # 切段与时间码（段边界只落在镜头边界上）
+│   │   │   ├── subtitles.py     # SRT 时间码与累计时间轴
+│   │   │   ├── anchors.py       # 画风锚 / 负面词兜底
+│   │   │   ├── audio.py         # 音频分轨口径（环境音归模型，人声/BGM 后期铺）
+│   │   │   ├── directions.py    # 画风方向目录（三线同一份，加一档三线都多一项）
+│   │   │   └── text.py          # LLM 脏值收敛 + 带 BOM 的 CSV
+│   │   ├── drama/               # 出片线①漫剧（风格卡→资产卡→集→剧本→分镜→三轨提示词）
+│   │   ├── promo/               # 出片线②宣传片（命题短视频）
+│   │   └── clips/               # 出片线③情绪短片（一次产三本子三选一）
 │   ├── prompts/                 # 所有 Prompt 模板（借鉴雪花写作法）
 │   ├── api/                     # 路由
 │   │   ├── projects.py

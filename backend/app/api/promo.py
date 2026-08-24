@@ -64,7 +64,7 @@ from app.engines.promo.common import (
     plan_dict,
     shot_dict,
 )
-from app.engines.drama.common import VALID_DIRECTIONS
+from app.engines.media.directions import VALID_DIRECTIONS
 from app.api.sse import STREAM_HEADERS, sse_event
 from app.jobs import list_running, spawn_job
 
@@ -165,13 +165,13 @@ def _plan_job(plan_id: int, action: str, engine_fn):
 
 @router.get("/meta")
 async def promo_meta():
-    from app.engines.drama.common import DRAMA_DIRECTIONS
+    from app.engines.media.directions import DIRECTIONS
 
     return {
         "angles": PROMO_ANGLES,
         "directions": [
             {"key": d["key"], "label": d["label"], "tip": d["tip"]}
-            for d in DRAMA_DIRECTIONS
+            for d in DIRECTIONS
         ],
     }
 

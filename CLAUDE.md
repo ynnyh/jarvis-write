@@ -65,7 +65,15 @@ cd backend  && python -m pytest -q
   切段与时间码用 `media.segments`(`group_by_limit` / `chunk_rows` / `plan_chunks`,
   更严的内聚条件传 `can_join` 加严,漫剧就是这么做的),画风锚与负面词兜底用
   `media.anchors`(`ensure_style_anchors` / `merge_negative`),音频分轨用
-  `media.audio`(`ensure_audio_rules` 追进视频提示词 / `audio_track_note` 写进导出手册)。
+  `media.audio`(`ensure_audio_rules` 追进视频提示词 / `audio_track_note` 写进导出手册),
+  字幕用 `media.subtitles`(`srt_blocks` / `srt_from_rows`),画风方向目录用
+  `media.directions`(`DIRECTIONS` / `VALID_DIRECTIONS` / `direction_directive`),
+  脏值收敛与带 BOM 的 CSV 用 `media.text`(`clip` / `coerce_int` / `csv_text`)。
   三条口径全站一致:段边界只落在镜头边界上;单格超上限独立成段并标 `over_limit`,不静默截断;
   音频**分轨不静音**——环境音让视频模型出,人声与 BGM 整片后期铺,
   且音频词只进提示词正文、**不许进负面词框**(那个框各站是给画面用的)。
+- 引擎分层的**依赖方向是单向的**:三条线都往 `media/` 看,`media/` 是叶子不许反向 import;
+  **三条线之间也不许互相 import**(宣传片/短片不是漫剧的下游——历史上它们跨模块拿过
+  `drama.exporter` 的私有 SRT 函数,口径就此分叉)。这四条判据由
+  `backend/tests/test_engine_conventions.py` 扫源码把关,**没有豁免清单**:
+  被拦住时只有两条出路——把共用件挪进 `media/`,或者证明判据本身写错了。

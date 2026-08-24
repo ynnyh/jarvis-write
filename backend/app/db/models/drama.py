@@ -34,7 +34,7 @@ class DramaStyleCard(Base, TimestampMixin):
         ForeignKey("projects.id", ondelete="CASCADE"), unique=True, index=True
     )
     style_name: Mapped[str] = mapped_column(String(60), default="")
-    # 画风方向(auto/comic_cn/anime_jp/render3d/live/ink_wash/cyber,见 common.DRAMA_DIRECTIONS):
+    # 画风方向(auto/comic_cn/anime_jp/render3d/live/ink_wash/cyber,见 media/directions.py):
     # 用户显式选定的艺术方向,风格卡生成时的硬约束——动画系为默认推荐,
     # 真人写实保留但前端挂「恐怖谷/一致性更难」提示
     direction: Mapped[str] = mapped_column(String(40), default="auto")

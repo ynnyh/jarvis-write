@@ -38,7 +38,7 @@ class MoodClip(Base, TimestampMixin):
     custom_theme: Mapped[str] = mapped_column(String(120), default="")
     # 15 / 30 秒
     duration_s: Mapped[int] = mapped_column(Integer, default=15)
-    # 画风方向(复用漫剧 DRAMA_DIRECTIONS)
+    # 画风方向(三线共用目录:engines/media/directions.py)
     direction: Mapped[str] = mapped_column(String(40), default="live")
     # 一句话灵感种子(如「异地恋的最后一通电话」),可空
     inspiration: Mapped[str] = mapped_column(Text, default="")

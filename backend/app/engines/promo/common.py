@@ -2,19 +2,14 @@
 # -*- coding: utf-8 -*-
 """宣传片引擎公共件:角度目录、行序列化。
 
-裁剪/整数收敛等纯函数复用漫剧侧的(common.py 里本就是通用件);
-画风方向目录直接复用 DRAMA_DIRECTIONS(宣传片默认 live:空镜为主无恐怖谷)。
+裁剪/整数收敛等脏值收敛小件走 `media.text`,画风方向目录走 `media.directions`
+(宣传片默认 live:空镜为主无恐怖谷)——三条出片线共用一份,不从漫剧那边转引。
 """
 from __future__ import annotations
 
 from app.db.models import PromoPlan, PromoShot
-from app.engines.drama.common import (
-    DRAMA_DIRECTIONS,
-    clip,  # noqa: F401 — 引擎各模块经此处转引
-    coerce_int,  # noqa: F401
-    direction_directive,
-    direction_label,
-)
+from app.engines.media.directions import direction_directive, direction_label
+from app.engines.media.text import clip, coerce_int  # noqa: F401 — 引擎各模块经此处转引
 
 # 宣传片切入角度目录:key 白名单 + 给提示词的方向描述
 PROMO_ANGLES: list[dict] = [

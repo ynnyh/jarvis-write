@@ -21,9 +21,10 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Chapter, DramaCharacterCard, MoodClip, Project
 from app.engines.consistency.extractor import parse_llm_json
-from app.engines.drama.common import coerce_int, direction_directive
 from app.engines.clips.common import group_chunks, shot_hint, theme_label
 from app.engines.media.anchors import ensure_style_anchors, merge_negative
+from app.engines.media.directions import direction_directive
+from app.engines.media.text import coerce_int
 from app.llm.router import Task, get_adapter_for
 from app.prompts.clips import (
     CLIPS_EXPAND_PROMPT,
