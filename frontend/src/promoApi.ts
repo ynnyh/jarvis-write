@@ -213,7 +213,12 @@ export const promoApi = {
     return fetch(`/api/promos/${id}/export?format=${format}`, {
       headers: tk ? { Authorization: `Bearer ${tk}` } : {},
     }).then(async (res) => {
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        // 与 clipsApi 同一口径:优先后端 detail,没有就留 HTTP 状态(别抛空消息)
+        let detail = `HTTP ${res.status}`;
+        try { const j = await res.json(); if (j.detail) detail = j.detail; } catch { /* ignore */ }
+        throw new Error(detail);
+      }
       const name = (res.headers.get("Content-Disposition") || "").split("filename*=UTF-8''")[1];
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
