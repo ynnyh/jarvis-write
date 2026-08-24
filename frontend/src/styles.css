@@ -181,6 +181,8 @@ a:focus-visible,
 .mt-3 { margin-top: var(--sp-3); }
 .mt-4 { margin-top: var(--sp-4); }
 .mb-2 { margin-bottom: var(--sp-2); }
+/* 整段文本(解说稿/配音稿)要保留换行:别再逐处写 style={{whiteSpace:"pre-wrap"}} */
+.pre-wrap { white-space: pre-wrap; }
 .mb-3 { margin-bottom: var(--sp-3); }
 .muted { color: var(--text-2); font-size: var(--fs-sm); }
 .meta-line { color: var(--text-2); font-size: var(--fs-xs); margin-top: var(--sp-1); }
@@ -3124,15 +3126,6 @@ body:has(.write-zone.immersive) .step-guide { display: none; }
 .ep-row { cursor: pointer; transition: border-color 0.15s; }
 .ep-row:hover { border-color: var(--line-2); }
 .ep-row.ep-on { border-color: var(--accent, var(--line-2)); box-shadow: 0 0 0 1px var(--accent, transparent) inset; }
-/* 规划表单:一行排开(窄屏自动换行) */
-.plan-form { flex-wrap: wrap; gap: 10px; }
-/* 标签绝不许竖着断字(「时长」曾被挤成两行);长了整块换行,不切字 */
-.plan-form label { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--text-2); white-space: nowrap; }
-.plan-form select, .plan-form input[type="number"] {
-  padding: 4px 8px; border: 1px solid var(--line); border-radius: var(--r-sm, 6px);
-  background: var(--surface); color: var(--text);
-}
-.plan-form input[type="number"] { width: 64px; }
 /* 单集动作条:按钮组不换行错乱 */
 .ep-actions { flex-wrap: wrap; gap: 8px; }
 /* 剧本行:说话人加粗 + 画面提示弱化 */
@@ -3140,49 +3133,60 @@ body:has(.write-zone.immersive) .step-guide { display: none; }
 .script-line b { color: var(--text); }
 .script-line .muted { margin-left: 8px; font-size: var(--fs-xs); }
 
-/* ===== 漫剧工作台:管线步骤条 + 资产侧栏/主区双栏(≥901px),移动端单列 ===== */
-.drama-steps {
+/* ===== 工作台外壳(漫剧 / 宣传片共用):管线步骤条 + 资产侧栏/主区双栏(≥901px),移动端单列 =====
+   两个工坊都是「一条线性管线 + 一批要随时回头看的锚资产」,所以外壳做成通用的 wb-*:
+   步骤条见 ui/StepBar.tsx,侧栏放锚资产(素材点/画风/角色/地标),主区放正在推进的那几步。
+   窄屏回落单列时是「侧栏在前、主区在后」:漫剧的侧栏正好是最前面两步,顺序天然对;
+   宣传片的侧栏是 ①素材点 + ③视觉锚(②研讨要宽度,只能在主区),单列时会读成 1→3→2→4…
+   ——步骤条常驻顶栏、点一下就跳到那一步,这点跳序换来的是「锚资产始终在手边」。 */
+/* 外壳:不做布局(步骤条与双栏竖着排就对了),留个类名是为了别再撞上老的
+   .workbench —— 那个是旧三栏工作台的横向 flex(`.flow-main` 还在 ProjectPage 用),
+   套上去会把步骤条和双栏排成并列三列。 */
+.wb-shell { min-width: 0; }
+.wb-steps {
   overflow-x: auto; scrollbar-width: none;
   position: sticky; top: 0; z-index: 5;
   background: var(--bg, var(--surface)); padding: 6px 0;
 }
-.drama-steps::-webkit-scrollbar { display: none; }
-.drama-cols { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
-.drama-rail { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.drama-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.wb-steps::-webkit-scrollbar { display: none; }
+.wb-cols { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
+.wb-rail { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.wb-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 /* 桌面:侧栏 348px 常驻可滚动,主区自适应;窄屏自动回落单列(顺序天然正确:资产→切集→流水线→预告片) */
 @media (min-width: 901px) {
-  .drama-cols { grid-template-columns: 348px minmax(0, 1fr); }
-  .drama-rail {
+  .wb-cols { grid-template-columns: 348px minmax(0, 1fr); }
+  .wb-rail {
     position: sticky; top: 48px;
     max-height: calc(100vh - 64px); overflow-y: auto;
     padding-right: 4px;
   }
 }
 /* 侧栏内的卡片收紧一点(信息密度高于主区) */
-.drama-rail .card { margin: 0; }
-.drama-rail textarea { font-size: var(--fs-sm); }
+.wb-rail .card { margin: 0; }
+.wb-rail textarea { font-size: var(--fs-sm); }
+/* 侧栏只有 348px:表单骨架在这里必须收成单列,两列会把 select 挤成 160px */
+.wb-rail .form-grid { grid-template-columns: 1fr; gap: var(--sp-3); max-width: none; }
 
 /* 侧栏卡片头排版:标题独占一行(副标题另起一行小字),按钮收成两枚一行的整齐网格,
    不再和标题在同一行互相挤压换行 */
-.drama-rail .card > .card-head { row-gap: 8px; }
-.drama-rail .card > .card-head > h3 {
+.wb-rail .card > .card-head { row-gap: 8px; }
+.wb-rail .card > .card-head > h3 {
   flex: 1 0 100%; min-width: 0; line-height: 1.35;
 }
-.drama-rail .card > .card-head > h3 .muted {
+.wb-rail .card > .card-head > h3 .muted {
   display: block; font-size: var(--fs-xs); font-weight: 400; margin-top: 2px;
 }
-.drama-rail .card > .card-head > button {
+.wb-rail .card > .card-head > button {
   flex: 1 1 calc(50% - 5px); min-width: 0;
   justify-content: center; padding: 6px 8px; font-size: var(--fs-sm);
 }
-.drama-rail .card > .card-head > button:only-child { flex-basis: 100%; }
+.wb-rail .card > .card-head > button:only-child { flex-basis: 100%; }
 /* 侧栏里的 chips 缩一号,方向七个也能两行排下 */
-.drama-rail .chips { gap: 6px; }
-.drama-rail .chips .chip { padding: 4px 10px; font-size: var(--fs-xs); white-space: nowrap; }
+.wb-rail .chips { gap: 6px; }
+.wb-rail .chips .chip { padding: 4px 10px; font-size: var(--fs-xs); white-space: nowrap; }
 /* 角色卡等子卡头部:允许换行但收紧行距,锁名不折行 */
-.drama-rail .sub-summary .card-head { row-gap: 6px; }
-.drama-rail .sub-summary .card-head > b { white-space: nowrap; }
+.wb-rail .sub-summary .card-head { row-gap: 6px; }
+.wb-rail .sub-summary .card-head > b { white-space: nowrap; }
 
 /* 画风方向:推荐条目(竖排小卡,含理由)+ 真人写实警示 */
 .dir-rec {
@@ -3194,7 +3198,7 @@ body:has(.write-zone.immersive) .step-guide { display: none; }
 .dir-rec.on { border-color: var(--accent, var(--line-2)); background: var(--surface); }
 .dir-rec b { color: var(--text); }
 .dir-rec .muted { font-size: var(--fs-xs); line-height: 1.5; }
-.drama-warn-tip { color: var(--warn); font-size: var(--fs-xs); }
+.warn-tip { color: var(--warn); font-size: var(--fs-xs); }
 .drama-compliance { border-top: 1px dashed var(--line); padding-top: 8px; margin-top: 10px; }
 .drama-compliance b { color: var(--warn); }
 
@@ -3259,16 +3263,16 @@ body:has(.write-zone.immersive) .step-guide { display: none; }
   background: var(--surface-2); font-size: var(--fs-xs);
 }
 /* 步骤条:✓ 已完成的弱化,▸ 当前步用品牌色高亮(.chip.on 已给底色,这里补描边强调) */
-.drama-steps .chip.done { color: var(--text-3); border-style: dashed; }
-.drama-steps .chip.done:hover { color: var(--brand); }
-.drama-steps .chip[aria-current="true"] { box-shadow: 0 0 0 1px var(--brand) inset; }
+.wb-steps .chip.done { color: var(--text-3); border-style: dashed; }
+.wb-steps .chip.done:hover { color: var(--brand); }
+.wb-steps .chip[aria-current="true"] { box-shadow: 0 0 0 1px var(--brand) inset; }
 /* 「现在做这步」指针行:整段是给人读的指令,不能缩成 hint 的小字;
    不用 flex——句中的 <b>/文案片段会被切成独立 flex item,中间凭空多出间隙 */
-.drama-next {
+.wb-next {
   margin: 0 0 10px;
   color: var(--text-2); font-size: var(--fs-sm); line-height: 1.9;
 }
-.drama-next b { color: var(--brand); }
-.drama-next .btn-sm { margin-left: 8px; vertical-align: baseline; }
+.wb-next b { color: var(--brand); }
+.wb-next .btn-sm { margin-left: 8px; vertical-align: baseline; }
 /* 未选集时的占位卡:虚线框提示「先点一集」 */
 .drama-pick-hint { border-style: dashed; }

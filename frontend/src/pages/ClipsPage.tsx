@@ -7,6 +7,7 @@ import { useJob } from "../ui/useJob";
 import { toast } from "../ui/Toaster";
 import { errMsg } from "../pollJob";
 import EmptyState from "../ui/EmptyState";
+import Banner from "../ui/Banner";
 import { CopyBtn } from "../ui/copy";
 import { confirmDialog } from "../ui/ConfirmDialog";
 
@@ -236,9 +237,7 @@ function ClipWorkspace({ cid }: { cid: number }) {
             {candidates.length ? "换一批" : "产 3 个本子"}
           </button>
         </div>
-        {busy && (
-          <div className="gen-banner"><span className="spin" /><span className="gen-banner-text">{stage || "AI 正在产三个本子…"}</span></div>
-        )}
+        {busy && <Banner stage={stage} text="AI 正在产三个本子…" />}
         {err && <div className="msg-err">{err}</div>}
         {candidates.map((c, i) => (
           <div key={i} className={"sub-summary ep-row" + (row.chosen === i ? " ep-on" : "")}>
@@ -253,7 +252,7 @@ function ClipWorkspace({ cid }: { cid: number }) {
             {c.emotion_curve && <div className="muted">情绪曲线:{c.emotion_curve}</div>}
             {c.punchline && <div><b>金句:</b>{c.punchline}</div>}
             {c.quote_source && <div className="muted">原句:{c.quote_source}</div>}
-            {c.cautions?.length > 0 && <div className="drama-warn-tip">⚠ {c.cautions.join(";")}</div>}
+            {c.cautions?.length > 0 && <div className="warn-tip">⚠ {c.cautions.join(";")}</div>}
             <div className="muted">
               {c.shots.length} 格 · {c.shots.reduce((s, x) => s + x.duration_s, 0)}s · 切 {c.chunks.length} 段
             </div>
@@ -333,7 +332,7 @@ export function ClipHandcard({ card, onExport }: {
           {card.chunks.map((c) => (
             <div key={c.index} className="hint">
               <b>段 {c.index}</b>({c.start_s}-{c.end_s}s · 镜头 {c.shot_seqs.join("、")})
-              {c.over_limit && <span className="drama-warn-tip"> ⚠超限</span>}
+              {c.over_limit && <span className="warn-tip"> ⚠超限</span>}
               {c.subtitle && <span className="muted"> 字幕:{c.subtitle.replace(/\n/g, " / ")}</span>}
             </div>
           ))}

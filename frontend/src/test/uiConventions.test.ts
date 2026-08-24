@@ -7,7 +7,8 @@
 // 一挤就把「时长」竖着拆成两行)。公约写在 CLAUDE.md 里靠人记,测试才靠得住。
 //
 // 源码用 import.meta.glob(?raw) 读进来,不依赖 node fs(本前端没装 @types/node)。
-// LEGACY 允许清单只准变短不准变长:里面是尚未整改的旧文件,新文件一律不许进。
+// 四条判据现在都没有豁免清单了(原先 .card-head 那条挂着 DramaPanel 待整改,已在 P1-4 清掉)。
+// 以后再加豁免就是给复发开门:要么整改,要么这条判据本身写错了,别加名单。
 import { describe, expect, it } from "vitest";
 
 const RAW = import.meta.glob(["../**/*.ts", "../**/*.tsx", "!../test/**", "!../**/*.d.ts"], {
@@ -76,11 +77,31 @@ describe("前端约定门禁", () => {
   it("不许拿 .card-head 拼表单行(用 .form-grid/.field/.form-actions)", () => {
     // .card-head 是「标题 + 右侧按钮」的一行 flex:标签与控件在里面抢宽度,
     // 窄窗口下中文标签会被竖着断字,主按钮也混进字段中间。
-    const LEGACY = ["panels/drama/DramaPanel.tsx"]; // 待整改(P1-4 一并处理),只准变短
-    const bad = FILES
-      .filter((f) => !LEGACY.includes(f.path))
-      .filter((f) => /className="[^"]*card-head[^"]*plan-form/.test(f.text))
-      .map((f) => f.path);
+    //
+    // 判据分两条:
+    // 1) 旧写法 .card-head + .plan-form 已全部整改、CSS 也删了,这条防它复活;
+    // 2) 结构判据——card-head 开头的元素里紧接着出现字段标记(.fl / .field / .field-full),
+    //    就是在拿标题行当表单行。只看 card-head 之后 3 行(表单行的标签与控件必然贴着写),
+    //    同一行就闭合的 card-head 直接跳过(那 3 行是它的兄弟节点,不算)。
+    const bad: string[] = [];
+    for (const f of FILES) {
+      if (/className="[^"]*card-head[^"]*plan-form/.test(f.text)) bad.push(`${f.path}(.plan-form 复活了)`);
+      const lines = f.text.split("\n");
+      lines.forEach((line, i) => {
+        const head = /className="([^"]*)"/.exec(line);
+        if (!head || !head[1].split(/\s+/).includes("card-head")) return;
+        if (line.includes("</div>")) return; // 单行闭合,后面是兄弟节点
+        for (let j = i; j < Math.min(i + 4, lines.length); j++) {
+          for (const m of lines[j].matchAll(/className="([^"]*)"/g)) {
+            if (j === i && m.index === head.index) continue;
+            const t = m[1].split(/\s+/);
+            if (t.includes("fl") || t.includes("field") || t.includes("field-full")) {
+              bad.push(`${f.path}:${i + 1}(第 ${j + 1} 行的 .${m[1]} 是字段,不该在 card-head 里)`);
+            }
+          }
+        }
+      });
+    }
     expect(bad, `表单请用 .form-grid/.field/.form-actions 骨架:\n${bad.join("\n")}`).toEqual([]);
   });
 });

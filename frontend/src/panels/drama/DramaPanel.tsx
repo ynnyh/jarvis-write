@@ -26,6 +26,8 @@ import { useJob } from "../../ui/useJob";
 import { toast } from "../../ui/Toaster";
 import { errMsg } from "../../pollJob";
 import EmptyState from "../../ui/EmptyState";
+import Banner from "../../ui/Banner";
+import StepBar, { Step } from "../../ui/StepBar";
 import { CopyBtn, selectAll } from "../../ui/copy";
 import { confirmDialog } from "../../ui/ConfirmDialog";
 import { DramaGuide, DramaProductionGuide } from "./DramaGuide";
@@ -122,12 +124,6 @@ function RefThumb({ pid, owner, id, index, img, alt = "定妆照", onDelete }: {
   );
 }
 
-function Banner({ stage, text }: { stage: string; text: string }) {
-  return (
-    <div className="gen-banner"><span className="spin" /><span className="gen-banner-text">{stage || text}</span></div>
-  );
-}
-
 /** 选中这一集时,「单集流水线」还差哪一步(状态 → 该点哪个按钮的人话)。 */
 function nextEpisodeTodo(ep: DramaEpisode): string {
   const at = `第 ${ep.ep_index} 集`;
@@ -187,7 +183,7 @@ export default function DramaPanel({ pid }: Props) {
 
   // 管线步骤状态(步骤条 + 各区小标);第一个未完成的就是「现在做这步」
   const selected = episodes.find((e) => e.id === selectedId) ?? null;
-  const steps = [
+  const steps: Step[] = [
     { key: "style", label: "风格卡", done: !!style?.style_cn,
       todo: "定全片画风:选个方向,点「AI 定美术风格」。" },
     { key: "assets", label: "角色/场景卡", done: cards.length > 0,
@@ -203,43 +199,19 @@ export default function DramaPanel({ pid }: Props) {
     { key: "trailer", label: "预告片", done: !!trailer,
       todo: "可选:从各集高能素材混剪一条宣传片。" },
   ];
-  const current = steps.find((s) => !s.done) ?? null;
-
-  function jump(key: string) {
-    document.getElementById(`drama-step-${key}`)
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
 
   return (
-    <div className="drama-workbench">
+    <div className="wb-shell">
       <DramaGuide />
 
-      {/* 管线步骤条:✓ 已完成 / ▸ 现在做这步 / 序号 未开始;点按滚动到对应区 */}
-      <div className="chips drama-steps" role="tablist">
-        {steps.map((s, i) => (
-          <button key={s.key} type="button"
-            className={"chip" + (s.done ? " done" : "") + (current?.key === s.key ? " on" : "")}
-            aria-current={current?.key === s.key}
-            onClick={() => jump(s.key)}>
-            {s.done ? "✓ " : current?.key === s.key ? "▸ " : `${i + 1} `}{s.label}
-          </button>
-        ))}
-      </div>
-      {current ? (
-        <p className="hint drama-next">
-          <b>现在做这步:{current.label}</b> —— {current.todo}
-          <button type="button" className="btn-sm" onClick={() => jump(current.key)}>去这一步</button>
-        </p>
-      ) : (
-        <p className="hint drama-next">
-          五步都走完了 👏 导出拍摄手册,照下面的「出片指引」去出图/配音/剪辑;
-          想做下一批章节就回 ③ 换个章节范围再切集。
-        </p>
-      )}
+      <StepBar steps={steps} anchorPrefix="drama-step" allDone={<>
+        五步都走完了 👏 导出拍摄手册,照下面的「出片指引」去出图/配音/剪辑;
+        想做下一批章节就回 ③ 换个章节范围再切集。
+      </>} />
 
-      <div className="drama-cols">
+      <div className="wb-cols">
         {/* 资产侧栏:桌面常驻左侧(sticky),移动端随流单列 */}
-        <aside className="drama-rail">
+        <aside className="wb-rail">
           <div id="drama-step-style">
             <StyleSection pid={pid} style={style} directions={meta.directions} onSaved={setStyle} />
           </div>
@@ -250,7 +222,7 @@ export default function DramaPanel({ pid }: Props) {
         </aside>
 
         {/* 主区:切集 → 单集流水线 → 预告片 */}
-        <div className="drama-main">
+        <div className="wb-main">
           <div id="drama-step-plan">
             <PlanSection pid={pid} approved={meta.approved_chapters}
               episodes={episodes}
@@ -347,28 +319,38 @@ function TrailerSection({ pid, episodes, trailer, onGenerated }: {
       {episodes.length === 0 ? (
         <p className="hint">先「切集」,有了集才能混剪预告片。</p>
       ) : (
-        <div className="card-head mb-2 plan-form">
-          <label>从第
-            <select value={fromEp} onChange={(e) => { const v = Number(e.target.value); setFromEp(v); if (toEp < v) setToEp(v); }}>
-              {epNums.map((n) => <option key={n} value={n}>{n}</option>)}
-            </select> 集
-          </label>
-          <label>到第
-            <select value={toEp} onChange={(e) => { const v = Number(e.target.value); setToEp(v); if (fromEp > v) setFromEp(v); }}>
-              {epNums.map((n) => <option key={n} value={n}>{n}</option>)}
-            </select> 集
-          </label>
-          <label>时长
-            <select value={targetS} onChange={(e) => setTargetS(Number(e.target.value))}>
-              <option value={30}>30 秒</option>
-              <option value={45}>45 秒</option>
-              <option value={60}>60 秒</option>
-            </select>
-          </label>
-          <button className="primary" disabled={busy} onClick={generate}>
-            {trailer ? "重新混剪" : "AI 混剪预告片"}
-          </button>
-        </div>
+        <>
+          <div className="form-grid">
+            <div className="field">
+              <label className="fl" htmlFor="tr-from">从第几集</label>
+              <select id="tr-from" value={fromEp}
+                onChange={(e) => { const v = Number(e.target.value); setFromEp(v); if (toEp < v) setToEp(v); }}>
+                {epNums.map((n) => <option key={n} value={n}>第 {n} 集</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label className="fl" htmlFor="tr-to">到第几集</label>
+              <select id="tr-to" value={toEp}
+                onChange={(e) => { const v = Number(e.target.value); setToEp(v); if (fromEp > v) setFromEp(v); }}>
+                {epNums.map((n) => <option key={n} value={n}>第 {n} 集</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label className="fl" htmlFor="tr-dur">预告片时长</label>
+              <select id="tr-dur" value={targetS} onChange={(e) => setTargetS(Number(e.target.value))}>
+                <option value={30}>30 秒</option>
+                <option value={45}>45 秒</option>
+                <option value={60}>60 秒</option>
+              </select>
+            </div>
+          </div>
+          <div className="form-actions">
+            <button className="primary" disabled={busy} onClick={generate}>
+              {trailer ? "重新混剪" : "AI 混剪预告片"}
+            </button>
+            <span className="form-actions-tip">从这几集里挑高能素材,重新混剪会覆盖上一条。</span>
+          </div>
+        </>
       )}
       {busy && <Banner stage={stage} text="AI 正在混剪预告片…" />}
       {err && <div className="msg-err">{err}</div>}
@@ -525,7 +507,7 @@ function StyleSection({ pid, style, directions, onSaved }: {
               onClick={() => setDirection(r.key)}>
               <b>{r.priority === 1 ? "★ " : ""}{r.label}</b>
               <span className="muted">{r.reason}</span>
-              {r.tip && <span className="drama-warn-tip">⚠ {r.tip}</span>}
+              {r.tip && <span className="warn-tip">⚠ {r.tip}</span>}
             </button>
           ))}
         </div>
@@ -541,9 +523,9 @@ function StyleSection({ pid, style, directions, onSaved }: {
           </button>
         ))}
       </div>
-      {dirInfo?.tip && <p className="hint drama-warn-tip">⚠ {dirInfo.tip}</p>}
+      {dirInfo?.tip && <p className="hint warn-tip">⚠ {dirInfo.tip}</p>}
       {!style && !busy && (
-        <p className="hint drama-next">
+        <p className="hint wb-next">
           <b>第一步就在这儿:</b>拿不定方向就先点「AI 荐方向」看它怎么说,
           定好后点「AI 定美术风格」——没有这张卡,后面的「出提示词」会被拦下。
         </p>
@@ -964,30 +946,39 @@ function PlanSection({ pid, approved, episodes, onChanged, selectedId, onSelect 
         选已定稿的章节范围,按短剧节奏切成一集集(默认一集约 90 秒):每集独立小冲突 + 开场钩子 +
         结尾卡点。重新规划会替换所选范围内的旧集,范围外不动。
       </p>
-      <div className="card-head mb-2 plan-form">
-        <label>从第
-          <select value={from} onChange={(e) => { const v = Number(e.target.value); setFrom(v); if (to < v) setTo(v); }}>
-            {approved.map((n) => <option key={n} value={n}>{n}</option>)}
-          </select> 章
-        </label>
-        <label>到第
-          <select value={to} onChange={(e) => { const v = Number(e.target.value); setTo(v); if (from > v) setFrom(v); }}>
-            {approved.map((n) => <option key={n} value={n}>{n}</option>)}
-          </select> 章
-        </label>
-        <label>模式
-          <select value={mode} onChange={(e) => setMode(e.target.value)}>
+      <div className="form-grid">
+        <div className="field">
+          <label className="fl" htmlFor="dp-from">从第几章</label>
+          <select id="dp-from" value={from}
+            onChange={(e) => { const v = Number(e.target.value); setFrom(v); if (to < v) setTo(v); }}>
+            {approved.map((n) => <option key={n} value={n}>第 {n} 章</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label className="fl" htmlFor="dp-to">到第几章</label>
+          <select id="dp-to" value={to}
+            onChange={(e) => { const v = Number(e.target.value); setTo(v); if (from > v) setFrom(v); }}>
+            {approved.map((n) => <option key={n} value={n}>第 {n} 章</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label className="fl" htmlFor="dp-mode">演绎方式</label>
+          <select id="dp-mode" value={mode} onChange={(e) => setMode(e.target.value)}>
             <option value="dialogue">对白演绎</option>
             <option value="narration">口播解说</option>
           </select>
-        </label>
-        <label>单集约
-          <input type="number" min={30} max={180} value={duration}
-            onChange={(e) => setDuration(Number(e.target.value) || 90)} /> 秒
-        </label>
+        </div>
+        <div className="field">
+          <label className="fl" htmlFor="dp-dur">单集时长<span className="hint">秒</span></label>
+          <input id="dp-dur" type="number" min={30} max={180} value={duration}
+            onChange={(e) => setDuration(Number(e.target.value) || 90)} />
+        </div>
+      </div>
+      <div className="form-actions">
         <button className="primary" disabled={busy} onClick={plan}>
           {episodes.length ? "重新规划" : "切集"}
         </button>
+        <span className="form-actions-tip">重新规划只替换所选范围内的旧集,范围外的不动。</span>
       </div>
       {busy && <Banner stage={stage} text="AI 正在切集(钩子/卡点)…" />}
       {err && <div className="msg-err">{err}</div>}
@@ -1123,7 +1114,7 @@ function EpisodeDetail({ pid, eid, hasStyle, onEpisodesChanged, onDeselect }: {
         <button className="btn-sm" disabled={!shots.length} onClick={() => exp("json")}>JSON</button>
       </div>
       {/* 现在该点哪个 / 为什么点不动:按状态只说一句 */}
-      {!busy && <p className="hint drama-next">{episode ? nextEpisodeTodo(episode) : ""}
+      {!busy && <p className="hint wb-next">{episode ? nextEpisodeTodo(episode) : ""}
         {!hasScript && <> 剧本取的是<b>{sourceLabel}</b>的正文,那几章没定稿就会报错。</>}
         {shots.length > 0 && !hasStyle && <> ⚠ 还没定美术风格卡,「出提示词」会被拦下——先回 ① 定画风。</>}
       </p>}
@@ -1241,7 +1232,7 @@ function EpisodeDetail({ pid, eid, hasStyle, onEpisodesChanged, onDeselect }: {
           {pack.narration_full && (
             <div className="sub-summary">
               <div className="card-head mb-2"><b>整段口播(粘给 TTS 一把梭)</b><CopyBtn text={pack.narration_full} /></div>
-              <div className="script-line" style={{ whiteSpace: "pre-wrap" }}>{pack.narration_full}</div>
+              <div className="script-line pre-wrap">{pack.narration_full}</div>
             </div>
           )}
           {pack.checklist.length > 0 && (
@@ -1323,7 +1314,7 @@ function ClipPlanSection({ pid, eid, sig }: { pid: number; eid: number; sig: str
       </p>
       {plan && (
         <>
-          <p className="hint drama-next">
+          <p className="hint wb-next">
             共 <b>{plan.totals.segments}</b> 段 · 合计 <b>{plan.totals.duration_s}</b> 秒 ·
             要生成 <b>{runs}</b> 次 · 首帧图已就位{" "}
             <b>{plan.totals.first_frames_ready}/{plan.totals.segments}</b> 段

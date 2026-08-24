@@ -12,7 +12,8 @@ cd backend  && python -m pytest -q
 
 其中 `frontend/src/test/uiConventions.test.ts` 是**版面公约门禁**:扫全量源码,挡住下面四类复发
 (裸 `navigator.clipboard` / 影子组件 / 原生 `confirm`·`alert` / `.card-head` 当表单行)。
-它的 `LEGACY` 允许清单**只准变短不准变长**——新文件一律不许进,旧文件整改完就从清单里删掉。
+四条判据现在**都没有豁免清单**(`.card-head` 那条原先挂着 `DramaPanel.tsx`,已整改清空)。
+被它拦住时**只有两条出路:整改,或者证明判据本身写错了**——别加豁免名单,那等于给复发开门。
 
 ## 前端版面公约(反复踩过的坑,新页面照抄这里,别自己发明)
 
@@ -24,7 +25,10 @@ cd backend  && python -m pytest -q
 - **能复用就别手写**:复制按钮用 `ui/copy` 的 `CopyBtn`(三层兜底,HTTP 页面照样能复制——
   裸调 `navigator.clipboard` 在 `http://IP:8080` 下必失败,线上就是这么部署的);
   空态用 `ui/EmptyState`;确认框用 `ui/ConfirmDialog` 的 `confirmDialog`(别用原生 `confirm`);
-  长任务用 `ui/useJob`。**新页面里出现和 `ui/` 同名的本地组件,就是抄漏了。**
+  长任务用 `ui/useJob` + `ui/Banner`(跑批横幅);出片线的管线步骤条用 `ui/StepBar`,
+  工作台外壳用 `.wb-shell` / `.wb-cols` / `.wb-rail`(锚资产)/ `.wb-main`(推进区)——
+  漫剧与宣传片共用这一套,别再新起一套 `xxx-cols`;注意别用旧的 `.workbench`(那是横向 flex)。
+  **新页面里出现和 `ui/` 同名的本地组件,就是抄漏了。**
 - 新样式手写进 `styles.css`,只用现有令牌(`--sp-*`/`--fs-*`/`--ctl-h`/语义色),
   这样暗色主题自动跟着走;不引入 Tailwind/shadcn。
 - 中文注释,文件头一行说明 + 关键块讲清「为什么这么写」。
