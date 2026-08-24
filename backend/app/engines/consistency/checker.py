@@ -24,8 +24,9 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Chapter, ChapterIssue, ChapterState, Project
 from app.engines.common import constitution_block
-from app.engines.consistency.bible import BibleService
+from app.engines.consistency.bible import RESOURCE_FACT_TYPES, BibleService
 from app.engines.consistency.extractor import parse_llm_json
+from app.engines.consistency.ledger import ledger_block
 from app.engines.editorial import content_hash
 from app.engines.pipeline.handoff import _fresh_contract, format_contract_block
 from app.engines.timeline import timeline_block
@@ -98,12 +99,19 @@ async def check_chapter(
     检查失败(LLM 异常/解析失败)返回空列表并告警,不阻塞流程。
     """
     bible = BibleService(db, project_id)
-    active_facts = bible.hard_constraints_block(chapter_number)
+    active_facts = bible.hard_constraints_block(
+        chapter_number, exclude_types=RESOURCE_FACT_TYPES
+    )
+    # 资源账本单独一块喂门禁(与草稿/定稿看到的是同一份渲染):它才让「凭空掏出道具」
+    # 「送出去的东西又戴回来」有可对照的清单——混在 active_facts 里模型分不出哪条是资源。
+    resource_ledger = ledger_block(bible, chapter_number)
     prev_contract, prev_tail = _prev_chapter_context(db, project_id, chapter_number)
-    has_bible = not active_facts.startswith("(暂无")
+    # 资源账本也算"有可对照的事实源":分流后,一本只登记了持有/能力的书 active_facts 会是
+    # "(暂无…)",但账本里明明有东西——这时仍要查,不能被降级路径吞掉。
+    has_bible = not active_facts.startswith("(暂无") or bool(resource_ledger)
     if not has_bible and not prev_contract and not prev_tail:
         return []  # 第一章且圣经为空:没有任何可对照的事实源
-    if not has_bible:
+    if active_facts.startswith("(暂无"):
         # 圣经为空 → 降级为"仅对照上章"(docs/08 §5.4.1),不再直接跳过
         active_facts = "(故事圣经暂无有效事实,本次仅对照上一章契约与结尾原文)"
 
@@ -116,6 +124,7 @@ async def check_chapter(
     prompt = CONSISTENCY_CHECK_PROMPT.format(
         active_facts=active_facts,
         known_roster=bible.known_roster_block(chapter_number),
+        resource_ledger=resource_ledger,
         constitution=constitution,
         prev_contract=prev_contract or "(无上一章契约——未提取或正文已改动失效)",
         prev_tail=prev_tail or "(无上一章结尾原文,本章可能是第一章)",

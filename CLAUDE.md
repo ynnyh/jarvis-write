@@ -56,6 +56,11 @@ cd backend  && python -m pytest -q
 - 长任务走 `jobs.spawn_job` + `list_running` 去重,worker 里**自己开 `SessionLocal`**,
   别跨 LLM 调用持有请求级 session(`database is locked` 的老根因)。
 - 建表靠 `Base.metadata.create_all`(新表自动建);**改已有表的列必须在 `app/migrate.py` 里补 ALTER**。
+- 资源类事实(`possession` / `ability`)归 `consistency/ledger.py` 的**角色资源账本**渲染:
+  往 prompt 注入 `hard_constraints_block` 时**必须传 `exclude_types=RESOURCE_FACT_TYPES`**
+  (草稿/定稿/门禁三处都是),否则同一条在 prompt 里出现两遍、还抢 40 行的状态预算。
+  唯一例外是**章后抽取**的对照清单(`extractor.py`)——那里要让模型看见「持有…」原文才抄得对
+  `replaces`,不排除。账本为空返回空串(开篇零影响),红线要有存量才咬得住。
 - 三条出片线(漫剧/宣传片/情绪短片)的**确定性共用件放 `app/engines/media/`**,别再各写一份:
   切段与时间码用 `media.segments`(`group_by_limit` / `chunk_rows` / `plan_chunks`,
   更严的内聚条件传 `can_join` 加严,漫剧就是这么做的),画风锚与负面词兜底用

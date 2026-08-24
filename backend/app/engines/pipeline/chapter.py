@@ -16,7 +16,12 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Chapter, ChapterSummary, Outline, Project, WritingCard
 from app.engines.common import chapter_architecture_brief, get_outline
-from app.engines.consistency import BibleService, ForeshadowScheduler
+from app.engines.consistency import (
+    RESOURCE_FACT_TYPES,
+    BibleService,
+    ForeshadowScheduler,
+    ledger_block,
+)
 from app.engines.consistency.checker import (
     blockers_of,
     check_chapter,
@@ -460,7 +465,14 @@ async def generate_chapter(
     # ---- 一致性引擎:硬约束 + 伏笔提醒 + 重复检测 ----
     bible = BibleService(db, project.id)
     hard_constraints = bible.hard_constraints_block(
-        chapter_number, [str(c) for c in outline.characters_involved]
+        chapter_number,
+        [str(c) for c in outline.characters_involved],
+        exclude_types=RESOURCE_FACT_TYPES,
+    )
+    # 角色资源账本(P2):持有/能力两类事实从硬约束里分流出来单独渲染,自带闭集红线
+    # (不许凭空掏出关键道具、新增要交代来源、用掉要写明)。空账本 → 空串,开篇几章零影响。
+    resource_ledger = ledger_block(
+        bible, chapter_number, [str(c) for c in outline.characters_involved]
     )
     # 已登场角色名册(闭集约束):防「凭空冒出常驻角色」(如大院一直写空荡荡,第8章却蹦出
     # 一个每天伺候起居的仆役)。与 hard_constraints 互补——后者只列本章涉及人物的状态,
@@ -514,6 +526,7 @@ async def generate_chapter(
             handoff_contract=handoff_block,
             hard_constraints=hard_constraints,
             known_roster=known_roster,
+            resource_ledger=resource_ledger,
             foreshadow_reminders=foreshadow_reminders,
             device_reminders=device_reminders,
             avoid_repetition=avoid_repetition,
@@ -546,6 +559,7 @@ async def generate_chapter(
             chapter_summary=outline.summary,
             rolling_summary=rolling,
             known_roster=known_roster,
+            resource_ledger=resource_ledger,
             draft_text=d,
             flavor_hits=flavor_hits,
             # 定稿额外注入「AI 腔→人话」配对反例(给 pattern 比给 rule 有效);草稿不注入
