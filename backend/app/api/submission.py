@@ -17,7 +17,7 @@ from app.db.models import Outline, Project
 from app.db.session import get_db
 from app.engines.consistency.extractor import parse_llm_json
 from app.jobs import list_running, spawn_job
-from app.llm.factory import create_llm_adapter, resolve_default_provider
+from app.llm.router import Task, get_adapter_for
 from app.prompts.submission import SUBMISSION_PROMPT
 
 logger = logging.getLogger("jarvis-write.submission")
@@ -116,7 +116,7 @@ def _normalize(data: dict) -> dict:
 
 async def _generate_impl(db: Session, project: Project) -> dict:
     prompt = _build_prompt(db, project)
-    adapter = create_llm_adapter(resolve_default_provider(), max_tokens=2500, timeout=180)
+    adapter = get_adapter_for(Task.SUBMISSION, max_tokens=2500, timeout=180)
     try:
         raw = await adapter.ask(prompt)
     except Exception as exc:  # noqa: BLE001
@@ -139,7 +139,7 @@ async def generate_submission(project_id: int, db: Session = Depends(get_db)):
             return {"job_id": jid}
 
     prompt = _build_prompt(db, project)
-    adapter = create_llm_adapter(resolve_default_provider(), max_tokens=2500, timeout=180)
+    adapter = get_adapter_for(Task.SUBMISSION, max_tokens=2500, timeout=180)
 
     async def work(progress):
         progress("AI 正在生成投稿包(标题/标签/金句/简介/封面)")

@@ -20,12 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.db.session import get_db
-from app.llm.factory import (
-    available_providers,
-    create_llm_adapter,
-    resolve_default_provider,
-    resolve_provider_config,
-)
+from app.llm.factory import available_providers, create_llm_adapter
 from app.schemas.system import (
     HealthResponse,
     PingLLMRequest,
@@ -92,22 +87,21 @@ async def open_link(req: OpenLinkRequest) -> dict:
 )
 async def ping_llm(req: PingLLMRequest) -> PingLLMResponse:
     """给模型发一个 prompt，拿回复。"""
-    provider = (req.provider or resolve_default_provider()).lower()
-
-    if not resolve_provider_config(provider)["api_key"]:
-        raise HTTPException(
-            status_code=400,
-            detail=f"provider '{provider}' 尚未配置 api_key,请到设置页填写。",
-        )
-
-    adapter = create_llm_adapter(provider)
+    # 显式指定协议 → 按协议名冒烟(旧用法,专门用来点某一大类);
+    # 不指定 → 用「当前生效的那套配置」,而**不是**默认档的协议名:
+    # 同一协议下有多套配置时,按协议名只会取到创建最早的那套,用户在设置页
+    # 标「默认」的那套会被悄悄丢掉(书名生成 403 就是这么来的)。
+    # 未配置 key 时工厂层统一抛 400,这里不再自己预检一遍。
+    adapter = (
+        create_llm_adapter(req.provider.lower()) if req.provider else create_llm_adapter()
+    )
     try:
         resp = await adapter.complete(adapter.to_messages(req.prompt))
     except Exception as exc:  # noqa: BLE001 — 冒烟接口,直接把错误暴露给调用方
         raise HTTPException(status_code=502, detail=f"调用模型失败: {exc}") from exc
 
     return PingLLMResponse(
-        provider=provider,
+        provider=adapter.interface_format,
         model=resp.model,
         reply=resp.content,
         prompt_tokens=resp.prompt_tokens,

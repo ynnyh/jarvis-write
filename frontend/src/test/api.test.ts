@@ -96,6 +96,41 @@ describe("req 请求行为", () => {
     await expect(api.me()).rejects.toThrow("HTTP 500");
   });
 
+  // fetch 对断网/连接被掐一律只给 "Failed to fetch",原样上屏用户无从判断;
+  // 线上起名就吃过这个(见 api.ts 的 netError)。
+  it("fetch 抛错(断网/连接被掐)翻成人话,不是 Failed to fetch", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+
+    await expect(api.me()).rejects.toThrow("网络请求失败");
+    await expect(api.me()).rejects.not.toThrow("Failed to fetch");
+  });
+
+  it("超时(自己 abort)给出等了多久的提示", async () => {
+    // 真实 fetch 在 abort 时抛 AbortError;这里模拟成 signal.aborted 已置位后抛错
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((_url, opts) => {
+      Object.defineProperty(opts.signal, "aborted", { value: true, configurable: true });
+      return Promise.reject(new DOMException("The operation was aborted.", "AbortError"));
+    }));
+
+    await expect(api.me()).rejects.toThrow("请求超时");
+  });
+
+  it("正文读一半断了 → 网络错误;服务端返非 JSON → 可解析提示", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => { throw new TypeError("network error"); },
+    }));
+    await expect(api.me()).rejects.toThrow("网络请求失败");
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => { throw new SyntaxError("Unexpected token <"); },
+    }));
+    await expect(api.me()).rejects.toThrow("无法解析");
+  });
+
   it("POST 请求带 JSON body 和 Content-Type", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,

@@ -100,7 +100,7 @@ def test_cover_generate_full_flow(client):
     p = _create_project(client, headers)
     _set_topic(client, headers, p["id"])
 
-    with patch("app.api.media.create_llm_adapter", return_value=_JsonAdapter(_COVER_REPLY)):
+    with patch("app.api.media.get_adapter_for", return_value=_JsonAdapter(_COVER_REPLY)):
         r = client.post(f"/api/projects/{p['id']}/cover/generate", headers=headers)
         assert r.status_code == 200, r.text
         job_id = r.json()["job_id"]
@@ -124,7 +124,7 @@ def test_anthem_generate_full_flow(client):
     p = _create_project(client, headers, "主题曲书")
     _set_topic(client, headers, p["id"])
 
-    with patch("app.api.media.create_llm_adapter", return_value=_JsonAdapter(_ANTHEM_REPLY)):
+    with patch("app.api.media.get_adapter_for", return_value=_JsonAdapter(_ANTHEM_REPLY)):
         r = client.post(f"/api/projects/{p['id']}/anthem/generate", headers=headers)
         assert r.status_code == 200, r.text
         job = _wait_job(client, headers, r.json()["job_id"])

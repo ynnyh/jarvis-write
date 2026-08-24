@@ -151,7 +151,18 @@ def get_config_by_id(config_id: int) -> dict:
 def resolve_provider_config(provider: str) -> dict:
     """【旧接口兼容】某协议的 {api_key, base_url, model}。
 
-    数据库里该协议的任一配置优先(取创建最早的一套),空字段回落 .env。
+    数据库里该协议的任一配置优先(**取创建最早的一套**),空字段回落 .env。
+
+    ⚠ 这个「取最早一套」的语义只对「.env 里一个协议一套配置」的老世界成立。
+    cc-switch 之后同一协议可以有多套命名配置(几个中转站 + 官方各一套),
+    此时它取到的很可能不是用户标了「默认」的那套。所以**不要拿协议名当配置用**:
+    要当前生效的配置就走 `resolve_tier_config` / `create_llm_adapter()` 无参形态,
+    要指定某一套就传 `config_id`。曾经有个 `resolve_default_provider()`
+    (返回默认档的协议名)专门用来喂这个函数,书名/简介/封面/主题曲/投稿包
+    这几条线因此永远打到最早那套中转站——用户在设置页换成官方 DeepSeek 也没用,
+    报错还是那个中转站的 Cloudflare 挑战页(HTTP 403 "Just a moment...")。
+    该函数已删除,别再加回来;它唯一的正当用途(读默认档协议名做断言)用
+    `resolve_tier_config("quality")["interface_format"]` 表达。
     """
     settings = get_settings()
     env_cfg = settings.provider(provider)
@@ -163,11 +174,6 @@ def resolve_provider_config(provider: str) -> dict:
         "base_url": db_cfg.get("base_url") or env_cfg.base_url,
         "model": db_cfg.get("model") or env_cfg.model,
     }
-
-
-def resolve_default_provider() -> str:
-    """【旧接口兼容】当前生效的默认 provider 名 = quality 档配置的协议。"""
-    return resolve_tier_config("quality")["interface_format"]
 
 
 def create_llm_adapter(

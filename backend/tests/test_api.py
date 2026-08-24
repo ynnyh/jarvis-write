@@ -209,7 +209,7 @@ def test_title_suggestion_ok(client):
 
     headers = _setup_user_with_key(client, "title_user")
     with patch(
-        "app.api.projects.naming.create_llm_adapter",
+        "app.api.projects.naming.get_adapter_for",
         return_value=_TitleAdapter("1. 霓虹深渊\n2. 《芯片猎人》\n- 深渊之下\n\n"),
     ):
         r = client.post(
@@ -222,7 +222,11 @@ def test_title_suggestion_ok(client):
 
 
 def test_title_suggestion_requires_key(client):
-    """未配置任何 key 时返回 400,并提示去设置页。"""
+    """未配置任何 key 时返回 400,并提示去设置页。
+
+    文案由工厂层统一给(端点自己那份预检已删——它走的是「按协议名取最早一套」的
+    旧路径,和真正发请求用的配置会分叉)。
+    """
     headers = _auth(_register(client, "title_nokey")["token"])
     r = client.post(
         "/api/projects/title-suggestion",
@@ -230,7 +234,8 @@ def test_title_suggestion_requires_key(client):
         json={"topic": "随便", "genre": ""},
     )
     assert r.status_code == 400
-    assert "尚未配置模型" in r.json()["detail"]
+    assert "API key" in r.json()["detail"]
+    assert "模型设置" in r.json()["detail"]
 
 
 def test_title_suggestion_llm_failure(client):
@@ -243,7 +248,7 @@ def test_title_suggestion_llm_failure(client):
         async def ask(self, prompt, system=None):
             raise RuntimeError("connection refused")
 
-    with patch("app.api.projects.naming.create_llm_adapter", return_value=_BoomAdapter()):
+    with patch("app.api.projects.naming.get_adapter_for", return_value=_BoomAdapter()):
         r = client.post(
             "/api/projects/title-suggestion",
             headers=headers,
@@ -253,7 +258,7 @@ def test_title_suggestion_llm_failure(client):
     assert "connection refused" in r.json()["detail"]
 
     with patch(
-        "app.api.projects.naming.create_llm_adapter", return_value=_TitleAdapter("\n  \n")
+        "app.api.projects.naming.get_adapter_for", return_value=_TitleAdapter("\n  \n")
     ):
         r = client.post(
             "/api/projects/title-suggestion",
@@ -262,6 +267,40 @@ def test_title_suggestion_llm_failure(client):
         )
     assert r.status_code == 502
     assert "没有返回可用书名" in r.json()["detail"]
+
+
+def test_title_suggestion_async_ok(client):
+    """异步版起名(前端走的这条):立即拿 job_id,job 完成后 result 里是解析好的候选。
+
+    同步版要把 HTTP 连接挂满一整轮 LLM 调用,链路空闲超时一掐,浏览器只吐一句
+    `Failed to fetch`,后端日志里连请求都没有。未配置 key 时仍然同步抛 400,
+    而不是建一个必然失败的 job。
+    """
+    from unittest.mock import patch
+
+    headers = _setup_user_with_key(client, "title_async_user")
+    with patch(
+        "app.api.projects.naming.get_adapter_for",
+        return_value=_TitleAdapter("1. 霓虹深渊\n2. 《芯片猎人》\n"),
+    ):
+        r = client.post(
+            "/api/projects/title-suggestion-async",
+            headers=headers,
+            json={"topic": "义体维修师捡到罪证芯片", "genre": "赛博朋克"},
+        )
+        assert r.status_code == 200, r.text
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    assert job["result"]["titles"] == ["霓虹深渊", "芯片猎人"]
+
+    nokey = _auth(_register(client, "title_async_nokey")["token"])
+    r = client.post(
+        "/api/projects/title-suggestion-async",
+        headers=nokey,
+        json={"topic": "随便", "genre": ""},
+    )
+    assert r.status_code == 400
+    assert "API key" in r.json()["detail"]
 
 
 # ---------- provider 配置状态(前端引导横幅用) ----------
@@ -300,10 +339,20 @@ def _with_uid(client: TestClient, headers: dict, fn):
         current_user_id.reset(tok)
 
 
+def _default_format() -> str:
+    """当前生效(quality 档)那套配置的协议名。
+
+    原来有个 `resolve_default_provider()` 干这事,但它被用来「按协议名造适配器」,
+    同协议多套配置时会取到创建最早的那套而不是标了默认的那套(书名生成 403 的根因),
+    所以连函数一起删了。这里只读协议名做断言,直接问档位配置。
+    """
+    from app.llm.factory import resolve_tier_config
+
+    return resolve_tier_config("quality")["interface_format"]
+
+
 def test_default_provider_falls_back_to_only_configured(client):
     """只配了 openai(非默认)→ 回落到 openai,而不是死用 .env 的 deepseek。"""
-    from app.llm.factory import resolve_default_provider
-
     headers = _auth(_register(client, "fb_openai_only")["token"])
     r = client.post(
         "/api/settings/providers",
@@ -312,13 +361,11 @@ def test_default_provider_falls_back_to_only_configured(client):
     )
     assert r.status_code == 200, r.text
 
-    assert _with_uid(client, headers, resolve_default_provider) == "openai"
+    assert _with_uid(client, headers, _default_format) == "openai"
 
 
 def test_default_provider_prefers_db_default(client):
     """DB 标了 is_default 的优先于回落:openai 有 key,deepseek 标默认 → deepseek。"""
-    from app.llm.factory import resolve_default_provider
-
     headers = _auth(_register(client, "fb_db_default")["token"])
     r = client.post(
         "/api/settings/providers",
@@ -339,7 +386,7 @@ def test_default_provider_prefers_db_default(client):
     )
     assert r.status_code == 200, r.text
 
-    assert _with_uid(client, headers, resolve_default_provider) == "deepseek"
+    assert _with_uid(client, headers, _default_format) == "deepseek"
 
 
 def test_generate_without_any_key_returns_400(client):
@@ -399,7 +446,7 @@ def test_provider_status_covers_all_protocols(client):
 def test_anthropic_native_config_resolves_and_builds(client):
     """anthropic 原生协议:能存、被选默认、造出 AnthropicAdapter。"""
     from app.llm.anthropic import AnthropicAdapter
-    from app.llm.factory import create_llm_adapter, resolve_default_provider
+    from app.llm.factory import create_llm_adapter
 
     headers = _auth(_register(client, "anthropic_native")["token"])
     _add_provider(
@@ -412,7 +459,7 @@ def test_anthropic_native_config_resolves_and_builds(client):
         "/api/settings/providers/status", headers=headers
     ).json()["providers"]["anthropic"] is True
 
-    assert _with_uid(client, headers, resolve_default_provider) == "anthropic"
+    assert _with_uid(client, headers, _default_format) == "anthropic"
     adapter = _with_uid(client, headers, lambda: create_llm_adapter("anthropic"))
     assert isinstance(adapter, AnthropicAdapter)
     assert adapter.interface_format == "anthropic"
@@ -422,7 +469,7 @@ def test_anthropic_native_config_resolves_and_builds(client):
 def test_openai_compatible_config_resolves_and_builds(client):
     """通用卡 openai-compatible:能存、被选默认、造出 OpenAICompatibleAdapter 本尊
     (而非 deepseek/openai 子类)。"""
-    from app.llm.factory import create_llm_adapter, resolve_default_provider
+    from app.llm.factory import create_llm_adapter
     from app.llm.openai_compatible import OpenAICompatibleAdapter
 
     headers = _auth(_register(client, "oai_compat")["token"])
@@ -436,9 +483,7 @@ def test_openai_compatible_config_resolves_and_builds(client):
         "/api/settings/providers/status", headers=headers
     ).json()["providers"]["openai-compatible"] is True
 
-    assert _with_uid(
-        client, headers, resolve_default_provider
-    ) == "openai-compatible"
+    assert _with_uid(client, headers, _default_format) == "openai-compatible"
     adapter = _with_uid(
         client, headers, lambda: create_llm_adapter("openai-compatible")
     )
@@ -1235,7 +1280,7 @@ def test_synopsis_generate_ok(client):
             captured["prompt"] = prompt
             return "  一趟险镖,箱中藏着惊天秘密;落魄镖师从此卷入江湖漩涡。  "
 
-    with patch("app.api.projects.naming.create_llm_adapter", return_value=_SynAdapter()):
+    with patch("app.api.projects.naming.get_adapter_for", return_value=_SynAdapter()):
         r = client.post(f"/api/projects/{p['id']}/synopsis", headers=headers)
     assert r.status_code == 200, r.text
     assert r.json()["synopsis"] == "一趟险镖,箱中藏着惊天秘密;落魄镖师从此卷入江湖漩涡。"

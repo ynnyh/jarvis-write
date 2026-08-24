@@ -186,6 +186,54 @@ def test_adapter_uses_config_overrides(client):
     assert adapter2.max_tokens == 100
 
 
+def test_default_config_wins_over_earliest_of_same_protocol(client):
+    """同协议多套配置:生效的必须是标了「默认」的那套,不是创建最早的那套。
+
+    这是线上 403 的形状,也是先前所有档位测试都没覆盖的那一格(它们的默认配置
+    恰好就是第一套,取最早/取默认结果一样,分叉看不出来)。老代码把「默认档的
+    协议名」喂给按协议名取配置的旧接口,于是永远打到该协议里**创建最早**的那套
+    中转站——用户在设置页把默认换成官方 DeepSeek 也没用,报错还是那个中转站的
+    Cloudflare 挑战页(HTTP 403 "Just a moment...")。所以这里专门把默认那套排在
+    后面,再把三条入口逐个钉住。
+    """
+    from app.llm.factory import create_llm_adapter, resolve_tier_config
+    from app.llm.router import Task, get_adapter_for
+
+    headers, _ = _auth(client, "cfg_default_wins")
+    relay = _create(
+        client, headers, name="中转站", interface_format="openai-compatible",
+        base_url="https://relay.example.com", model="relay-model",
+    )
+    official = _create(
+        client, headers, name="官方", interface_format="openai-compatible",
+        base_url="https://api.official.example.com/v1", model="official-model",
+    )
+    assert relay["id"] < official["id"]  # 先建的是中转站(自动成了默认)
+    # PUT 是整体替换(base_url 省略即清空),所以带全字段
+    r = client.put(
+        f"/api/settings/providers/{official['id']}",
+        headers=headers,
+        json={
+            "interface_format": "openai-compatible",
+            "base_url": "https://api.official.example.com/v1",
+            "model": "official-model",
+            "is_default": True,
+        },
+    )
+    assert r.status_code == 200, r.text
+
+    assert _with_uid(client, headers, resolve_tier_config)["id"] == official["id"]
+    # 无参 create_llm_adapter 与任务路由 get_adapter_for 都必须落在默认那套上
+    for make in (create_llm_adapter, lambda: get_adapter_for(Task.TITLE)):
+        adapter = _with_uid(client, headers, make)
+        assert adapter.base_url == "https://api.official.example.com/v1"
+        assert adapter.model_name == "official-model"
+    # 反向钉一句:按协议名取的是最早那套(旧接口的语义没变),
+    # 所以它不能被用来造「当前默认」的适配器——这正是那个 403 的成因。
+    legacy = _with_uid(client, headers, lambda: create_llm_adapter("openai-compatible"))
+    assert legacy.base_url == "https://relay.example.com"
+
+
 # ---------- 老表迁移 ----------
 
 def test_migrate_old_provider_settings_to_configs(client):

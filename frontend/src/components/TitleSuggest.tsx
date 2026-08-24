@@ -2,7 +2,7 @@
 // 主题为空也可用:后端会按类型/自由发挥盲出候选
 import { useEffect, useRef, useState } from "react";
 import { api, Concept } from "../api";
-import { errMsg } from "../pollJob";
+import { errMsg, pollJob } from "../pollJob";
 
 interface Props {
   topic: string;                  // 主题/灵感(可空)
@@ -32,7 +32,9 @@ export default function TitleSuggest({ topic, genre, concept, onPick }: Props) {
     if (busy) return;
     setBusy(true); setErr("");
     try {
-      const r = await api.suggestTitle(topic.trim(), (genre ?? "").trim(), concept);
+      // 后台任务 + 轮询:POST 毫秒级返回,长活在服务端跑,轮询单次抖动会自动重试
+      const { job_id } = await api.suggestTitleAsync(topic.trim(), (genre ?? "").trim(), concept);
+      const r = await pollJob<{ titles: string[] }>(job_id, { intervalMs: 1500 });
       setTitles(r.titles);
       setOpen(true);
     } catch (e) {

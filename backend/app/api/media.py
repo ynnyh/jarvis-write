@@ -22,7 +22,7 @@ from app.db.models import Project
 from app.db.session import get_db
 from app.engines.consistency.extractor import parse_llm_json
 from app.jobs import list_running, spawn_job
-from app.llm.factory import create_llm_adapter, resolve_default_provider
+from app.llm.router import Task, get_adapter_for
 from app.prompts.media import ANTHEM_PROMPT, COVER_PROMPT
 
 logger = logging.getLogger("jarvis-write.media")
@@ -67,7 +67,7 @@ async def generate_cover(project_id: int, db: Session = Depends(get_db)):
 
     prompt = COVER_PROMPT.format(**_build_context_blocks(db, project))
     # 提示词要求写细(中文六层 150-250 字 × 3 套 + 英文版),给足输出额度
-    adapter = create_llm_adapter(resolve_default_provider(), max_tokens=4000, timeout=180)
+    adapter = get_adapter_for(Task.COVER, max_tokens=4000, timeout=180)
 
     async def work(progress):
         progress("AI 正在设计封面提示词(3 套风格)")
@@ -102,7 +102,7 @@ async def generate_anthem(project_id: int, db: Session = Depends(get_db)):
 
     prompt = ANTHEM_PROMPT.format(**_build_context_blocks(db, project))
     # 中文音乐描述 + 歌词 + 逐条中文对照,输出额度比默认略宽
-    adapter = create_llm_adapter(resolve_default_provider(), max_tokens=3500, timeout=180)
+    adapter = get_adapter_for(Task.ANTHEM, max_tokens=3500, timeout=180)
 
     async def work(progress):
         progress("AI 正在创作主题曲(音乐描述 + 歌词 + 风格标签)")

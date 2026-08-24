@@ -45,6 +45,14 @@ class Task(str, Enum):
     PROMO_PACK = "promo_pack"           # 宣传片成片包标注
     PROMO_CHUNKS = "promo_chunks"       # 宣传片生成切段(视频提示词)
     CLIPS_BATCH = "clips_batch"         # 情绪短片批产(三本子一次出)
+    # 书籍元信息类短任务。这几条原先绕开本路由、直接按「协议名」造适配器,
+    # 于是永远取到该协议里**创建最早**的那套配置,用户在设置页标「默认」的那套被丢掉
+    # (症状:换成官方 DeepSeek 也没用,请求照旧打到最早那个中转站)。
+    TITLE = "title"                     # 书名候选
+    SYNOPSIS = "synopsis"               # 书籍简介
+    COVER = "cover"                     # 封面提示词
+    ANTHEM = "anthem"                   # 主题曲提示词(Suno)
+    SUBMISSION = "submission"           # 投稿包(标题/标签/金句/简介/封面)
 
 
 class Tier(str, Enum):
@@ -82,6 +90,13 @@ _TASK_TIER: dict[Task, Tier] = {
     Task.PROMO_PACK: Tier.QUALITY,
     Task.PROMO_CHUNKS: Tier.QUALITY,
     Task.CLIPS_BATCH: Tier.QUALITY,
+    # 书籍元信息:书名/简介/投稿包是门面活,一次性、字数少,上强档不心疼。
+    # **必须显式列出**——`_TASK_TIER.get(task, Tier.FAST)` 缺省是快档,漏一条就是静默降档。
+    Task.TITLE: Tier.QUALITY,
+    Task.SYNOPSIS: Tier.QUALITY,
+    Task.COVER: Tier.QUALITY,
+    Task.ANTHEM: Tier.QUALITY,
+    Task.SUBMISSION: Tier.QUALITY,
 }
 
 # 任务 -> 采样温度。创作类任务要发散(高温),判断/抽取/压缩类要稳准(低温)。

@@ -23,6 +23,20 @@ export class ApiError extends Error {
   }
 }
 
+/** 把 fetch 的网络层失败翻成人话。
+ *  fetch 对「连不上 / 被中途掐断 / 请求超时」一律只给一句 `TypeError: Failed to fetch`,
+ *  原样上屏用户没法判断是自己断网、是等太久,还是服务挂了——线上就吃过这个:起名的
+ *  同步长请求被链路掐断,页面只显示 "Failed to fetch",后端日志里连这条请求都没有。
+ *  status 用 0 表示「压根没拿到 HTTP 状态」,调用方按 status 分流的逻辑(如 409)不受影响。 */
+function netError(timedOut: boolean, timeoutMs: number): ApiError {
+  return new ApiError(
+    0,
+    timedOut
+      ? `请求超时:等了 ${Math.round(timeoutMs / 1000)} 秒没有响应。服务可能正忙,请稍后重试。`
+      : "网络请求失败:连不上服务器,或连接被中途掐断。请检查网络后重试。",
+  );
+}
+
 async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 30000): Promise<T> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -31,12 +45,18 @@ async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 
     if (body) headers["Content-Type"] = "application/json";
     const tk = token.get();
     if (tk) headers["Authorization"] = `Bearer ${tk}`;
-    const res = await fetch(BASE + path, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-      signal: ctrl.signal,
-    });
+    let res: Response;
+    try {
+      res = await fetch(BASE + path, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: ctrl.signal,
+      });
+    } catch {
+      // 连 HTTP 状态都没拿到:自己 abort 的(超时)/ 断网 / 连接被掐
+      throw netError(ctrl.signal.aborted, timeoutMs);
+    }
     if (!res.ok) {
       if (res.status === 401) {
         token.clear();
@@ -49,7 +69,15 @@ async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 
       } catch { /* ignore */ }
       throw new ApiError(res.status, detail);
     }
-    return (await res.json()) as T;
+    try {
+      return (await res.json()) as T;
+    } catch (e) {
+      // 响应头到了但正文没读完:仍是连接层断的;SyntaxError 例外(服务端返了非 JSON)
+      if (e instanceof SyntaxError) {
+        throw new ApiError(res.status, "服务返回了无法解析的内容,请重试。");
+      }
+      throw netError(ctrl.signal.aborted, timeoutMs);
+    }
   } finally {
     clearTimeout(timer);
   }
@@ -716,9 +744,12 @@ export const api = {
   testProvider: (id: number) =>
     req<{ ok: boolean; provider: string; model?: string; reply?: string; error?: string; warnings?: string[] }>(
       "POST", `/api/settings/providers/${id}/test`, undefined, 200000),
-  suggestTitle: (topic: string, genre: string, concept?: Concept | null) =>
-    req<{ titles: string[] }>("POST", "/api/projects/title-suggestion",
-      { topic, genre, concept: concept ?? null }, 60000),
+  // AI 起名走后台任务:返回 job_id,调用方用 pollJob 取 { titles }。
+  // 同步版(/title-suggestion)还在后端留着给旧客户端,但前端不再用它——一轮起名
+  // 是分钟级 LLM 调用,把连接挂那么久,链路空闲超时一掐就只剩一句 Failed to fetch。
+  suggestTitleAsync: (topic: string, genre: string, concept?: Concept | null) =>
+    req<{ job_id: string }>("POST", "/api/projects/title-suggestion-async",
+      { topic, genre, concept: concept ?? null }),
 
   listProjects: () => req<Project[]>("GET", "/api/projects"),
   createProject: (p: Partial<Project>) => req<Project>("POST", "/api/projects", p),

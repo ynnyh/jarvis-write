@@ -319,11 +319,12 @@ export function useOnboarding() {
     const sig = calcTitleSig(project?.topic ?? "", (tendency.genre as string) ?? "", concept);
     setTitleBusy(true); setErr(""); setTitleIdeas(null);
     try {
-      const r = await api.suggestTitle(
+      const { job_id } = await api.suggestTitleAsync(
         (project?.topic ?? "") + (feedback ? `(命名偏好:${feedback})` : ""),
         (tendency.genre as string) ?? "",
         conceptIsEmpty(concept) ? null : concept,
       );
+      const r = await pollJob<{ titles: string[] }>(job_id, { intervalMs: 1500 });
       setTitleIdeas(r.titles);
       setTitleSig(sig);
     } catch (e) { setErr(errMsg(e)); setTitleIdeas([]); } finally { setTitleBusy(false); }
