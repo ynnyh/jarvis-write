@@ -21,6 +21,9 @@ backend/scripts/_*.txt
 frontend/node_modules/
 frontend/dist/
 
+# 其它目录里的 node_modules(docs/ 下那份就有 96M,白白跟着上传构建上下文)
+**/node_modules/
+
 # Git / IDE / OS
 .git/
 .gitignore
