@@ -7,6 +7,7 @@ import json
 
 from app.db.models import MoodClip
 from app.engines.drama.exporter import _srt_blocks
+from app.engines.media.audio import audio_track_note
 from app.engines.clips.common import clip_dict, theme_display
 
 
@@ -97,6 +98,9 @@ def export_markdown(row: MoodClip) -> str:
                 )
             L.append("")
         L.append("> 出片:按段生成 → 画布拼接 → 压 SRT → 末格加金句字幕卡。")
+        L.append("")
+        # 音频口径:15s 短片常常一段就出完,这时模型自带音频直接可用(口径见 media.audio)
+        L.extend(audio_track_note(single_segment=len(chunks) <= 1))
     return "\n".join(L)
 
 

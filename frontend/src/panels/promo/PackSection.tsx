@@ -73,6 +73,12 @@ export default function PackSection({ pid, plan, shotCount, jobs, onBuild }: {
               <div className="script-line pre-wrap">{pack.narration_full}</div>
             </div>
           )}
+          {/* 「AI 视频不是自带声音吗」——常见疑问,把分轨的理由摊在解说稿旁边 */}
+          <p className="hint">
+            解说为什么要自己配:视频模型自带的人声不保证一字不差念你的稿(slogan 与金句会被改写),
+            分段生成的人声在拼接处音色语速还会跳。它给的环境音/动作音留着用,只有<b>人声与 BGM</b>
+            是整片后期铺。
+          </p>
           <div className="tbl-wrap">
             <table className="tbl">
               <thead>

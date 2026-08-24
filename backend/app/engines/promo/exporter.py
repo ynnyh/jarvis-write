@@ -9,6 +9,7 @@ import json
 
 from app.db.models import PromoPlan, PromoShot
 from app.engines.drama.exporter import _srt_blocks  # 同 app 内复用确定性字幕内核
+from app.engines.media.audio import audio_track_note
 from app.engines.promo.common import STATUS_CN, angle_labels
 
 
@@ -175,6 +176,9 @@ def export_markdown(plan: PromoPlan, shots: list[PromoShot]) -> str:
             L.append(str(pack["narration_full"]))
             L.append("")
         L.append("> 出片顺序:分镜提示词出图 → 图生视频/加轻动 → 解说词配音 → 按剪辑清单拼接 → 压 SRT 字幕 → 铺 BGM → 收束加 slogan 字幕。")
+        L.append("")
+        # 音频三轨说明:段视频提示词里那句「不要人声」是分轨,不是静音(口径见 media.audio)
+        L.extend(audio_track_note())
     return "\n".join(L)
 
 

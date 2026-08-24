@@ -21,6 +21,7 @@ prompts/drama.py 的 SHOT_PROMPT_PROMPT),模型漏给时这里按运镜栏兜底
 from __future__ import annotations
 
 from app.engines.drama.common import clip
+from app.engines.media.audio import VIDEO_AUDIO_RULE_CN, VIDEO_AUDIO_RULE_EN
 from app.engines.media.segments import group_by_limit
 
 # 单次生成时长上限:各站常见档位(即梦/可灵多为 5-10 秒,Sora/Veo/Runway 到 15 秒)
@@ -136,16 +137,19 @@ def video_paste(
         f"【怎么动】{motion_cn}",
         f"【镜头】{(camera or '固定').strip()},竖屏 {ratio}",
         f"【时长】{dur}",
+        VIDEO_AUDIO_RULE_CN,
         f"【不要出现】{neg}",
     )
     i2v_en_main = _join(
         f"{motion_en}, {camera_en(camera)}, vertical {ratio}, "
-        f"{max(1, int(duration_s or 0))}s, keep the first frame's character and style"
+        f"{max(1, int(duration_s or 0))}s, keep the first frame's character and style, "
+        f"{VIDEO_AUDIO_RULE_EN}"
     )
     t2v_main = _join(
         (prompt_cn or "").strip(),
         f"【怎么动】{motion_cn}",
         f"【时长】{dur}",
+        VIDEO_AUDIO_RULE_CN,
         f"【不要出现】{neg}",
     )
     t2v_hint = (

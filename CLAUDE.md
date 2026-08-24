@@ -59,5 +59,8 @@ cd backend  && python -m pytest -q
 - 三条出片线(漫剧/宣传片/情绪短片)的**确定性共用件放 `app/engines/media/`**,别再各写一份:
   切段与时间码用 `media.segments`(`group_by_limit` / `chunk_rows` / `plan_chunks`,
   更严的内聚条件传 `can_join` 加严,漫剧就是这么做的),画风锚与负面词兜底用
-  `media.anchors`(`ensure_style_anchors` / `merge_negative`)。
-  两条口径全站一致:段边界只落在镜头边界上;单格超上限独立成段并标 `over_limit`,不静默截断。
+  `media.anchors`(`ensure_style_anchors` / `merge_negative`),音频分轨用
+  `media.audio`(`ensure_audio_rules` 追进视频提示词 / `audio_track_note` 写进导出手册)。
+  三条口径全站一致:段边界只落在镜头边界上;单格超上限独立成段并标 `over_limit`,不静默截断;
+  音频**分轨不静音**——环境音让视频模型出,人声与 BGM 整片后期铺,
+  且音频词只进提示词正文、**不许进负面词框**(那个框各站是给画面用的)。

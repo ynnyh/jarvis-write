@@ -14,6 +14,7 @@ from app.db.models import PromoPlan, PromoShot
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.drama.common import clip
 from app.engines.media.anchors import ensure_style_anchors
+from app.engines.media.audio import ensure_audio_rules
 from app.engines.media.segments import chunk_rows, group_by_limit
 from app.llm.router import Task, get_adapter_for
 from app.prompts.promo import PROMO_CHUNKS_PROMPT
@@ -82,6 +83,9 @@ async def build_chunks(
             plan.style_cn,
             plan.style_en,
         )
+        # 音频分轨兜底:段视频只出环境音,人声与 BGM 后期整片铺(口径与理由见 media.audio)。
+        # 不加这句,Veo 一类会给每段自己编一版对白/配乐,拼起来两层人声、音乐错拍。
+        motion_cn, motion_en = ensure_audio_rules(motion_cn, motion_en)
         items.append(
             {
                 **row,

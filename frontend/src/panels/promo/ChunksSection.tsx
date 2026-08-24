@@ -55,6 +55,12 @@ export default function ChunksSection({ plan, shotCount, jobs, onBuild }: {
             <b>{items.length} 段 · 每段 ≤{plan.chunks.chunk_s}s</b>
             <span className="muted">按段号顺序首尾相接</span>
           </div>
+          {/* 每条提示词末尾都带着音频那句(后端 media.audio 统一追加),这里说清它不是「静音」 */}
+          <p className="hint">
+            提示词末尾那句「只要环境音、不要人声与背景音乐」<b>不是让你静音</b>:环境音/动作音
+            留给视频模型出(它擅长这个),人声与 BGM 在 ⑥-2 按配音稿和配乐列整片铺——
+            分段各自带人声与音乐,拼接处的音色和拍子必然断。
+          </p>
           {items.map((c) => (
             <div key={c.index} className="sub-summary">
               <div className="card-head mb-2">

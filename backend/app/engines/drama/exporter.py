@@ -28,6 +28,7 @@ from app.engines.drama.common import (
 )
 from app.engines.drama.paste import ref_sheet_paste, shot_paste
 from app.engines.drama.video import CLIP_LIMIT_DEFAULT, clips_payload, motion_tracks
+from app.engines.media.audio import audio_track_note
 
 _STATUS_CN = {
     "planned": "已规划",
@@ -488,4 +489,7 @@ def export_pack_markdown(
         L.append("")
         L.append("> 出片顺序:先出角色定妆照(手册「角色卡」段) → 每格「定妆照当参考图 + 分镜提示词」出图"
                  " → 图生视频/加轻动 → 按配音稿合成语音 → 按剪辑清单拼接 → 压 SRT 字幕 → 铺 BGM。")
+        L.append("")
+        # 音频三轨说明:视频提示词里那句「不要人声」是分轨,不是静音(口径见 media.audio)
+        L.extend(audio_track_note())
     return "\n".join(L)
