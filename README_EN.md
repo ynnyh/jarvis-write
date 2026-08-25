@@ -72,9 +72,9 @@ Beyond writing and editing — the "Book → Comic Drama" tab turns approved cha
 - **Voice compliance red line**: voice casting describes timbre characteristics and points to **licensed platform voice libraries** — never clone, never name-imitate a real person's voice; confirm commercial licensing before publishing
 - **Same "prompts only" philosophy**: no generation models attached, zero new config — image/video models iterate fast and bill per shot, orchestration and know-how are what we do
 
-## 📣⚡ Promo Workshop & Mood-Clips Workshop: a production desk beyond novels
+## 📣⚡🎂 Promo Workshop & Mood-Clips Workshop & Birthday-Wishes Workshop: a production desk beyond novels
 
-Two more workshops now share the same production pipeline (anchor consistency / three-track prompts / chunking / SRT):
+Three more workshops now share the same production pipeline (anchor consistency / three-track prompts / chunking / SRT):
 
 **📣 Promo Workshop (cities / scenic areas / brands)** — talk it through first, then generate:
 
@@ -86,6 +86,13 @@ Two more workshops now share the same production pipeline (anchor consistency / 
 
 - **Generic entry**: ten emotion themes (regret / quarrel / love / childhood / longing / loneliness / healing / heroic / farewell / reunion); each run produces **3 clips with genuinely different takes** (hook → build → punchline caption card), every take shipping three-track prompts, chunks and SRT — short-video is an A/B game, don't polish one draft
 - **Novel-derived entry** (Book → "Ad Clips" tab): pulls punchlines and money shots from your approved chapters into book-marketing clips, with **quote grounding** — every quote must cite its original sentence from your prose and is verified by substring match; fabrications get flagged on the spot. It reads your book and quotes your words — that's the gap a generic AI chat can't close
+
+**🎂 Birthday-Wishes Workshop (30/60s, honoree-customized)** — fill in a honoree profile, get three takes per run:
+
+- **Structured honoree profile**: the honoree's name (the greeting must call them by it) / relationship / milestone (1st birthday, coming-of-age, big 60th) / 2-5 concrete memory notes (scenes, inside jokes, catchphrases) / who's sending — that's where all the customization comes from. Six tones (prank / tearjerker / warm daily / surprise reveal / hype milestone / adorable) each carry a **three-act rhythm contract** (name-drop or hook in the first 3 seconds → memory montage grounded in concrete objects → climax frozen on the candle-blowing / hug frame)
+- **Kid-oriented style packs (six built-in worlds)**: Peppa-style flat doodle animation / Ultraman-style tokusatsu hero / 3D rescue-team / dinosaur world / fairytale castle / little astronaut — each pack bundles a strong art anchor + world scene vocabulary + a **protagonist-insertion directive**: the birthday kid stars inside that world in every single shot (transforms into a little hero fighting beside the giant, captains the dog rescue team…). Copyright posture matches the ghibli precedent (labels hint "same vibe", prompts describe aesthetics only, never IP names); upload the kid's photo as reference for image-to-video and they appear inside that world
+- **Memory grounding**: storyboards must land on the memory notes you gave; the engine checks each one by keyword overlap and flags anything it can't verify into a "please confirm" list — the worst thing a custom video can do is invent memories that never happened
+- **Per-chunk tooling guide**: the handcard and shoot board label each chunk with the recommended path — plain chunks go text-to-video, **memory-montage chunks take a real photo of the honoree into image-to-video** (prompts already include "preserve the facial features and build from the reference photo"), and if you want the photo itself to speak the greeting, do that line in a lip-sync tool separately. Same "prompts only, no generation models" philosophy — you still render in Jimeng / Kling / CapCut
 
 ## Key Features
 

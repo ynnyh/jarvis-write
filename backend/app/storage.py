@@ -16,6 +16,7 @@
 
 目录:<上传根>/drama/<project_id>/<card_id>-<n>.<ext>(项目资产);
     <上传根>/clips/<clip_id>/<段号>-<n>.<ext>(短片出片参考图);
+    <上传根>/birthday/<wish_id>/<段号>-<n>.<ext>(生日祝福出片参考图,多为寿星真实照片);
 上传根默认取 SQLite 库所在目录下的 uploads/(Docker 里就是数据卷 /srv/data/uploads,随卷一起备份)。
 """
 from __future__ import annotations
@@ -34,6 +35,7 @@ MAX_REFS_PER_SEGMENT = 3               # 短片出片工作台每段最多 3 张
 MAX_ASSETS_PER_SHOT = 2                # 每格分镜最多挂 2 张静帧(出两版挑一版)
 MAX_PROJECT_UPLOAD_BYTES = 80 * 1024 * 1024  # 单项目上传总量上限 80MB
 MAX_CLIP_UPLOAD_BYTES = 20 * 1024 * 1024     # 短片参考图上限 20MB(短片未必挂项目,单独限量)
+MAX_WISH_UPLOAD_BYTES = 20 * 1024 * 1024     # 祝福片参考图上限 20MB(同理按 wish 号单独限量)
 
 # 文件头 → 扩展名(WebP 还要校验第 8-12 字节的 "WEBP")
 _SIGNATURES: tuple[tuple[bytes, str], ...] = (
@@ -44,9 +46,10 @@ _SIGNATURES: tuple[tuple[bytes, str], ...] = (
 _CONTENT_TYPES = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}
 # 两种资产共用一个项目目录,所以分镜静帧的文件名带 shot 前缀:
 # 角色卡 id 与分镜 id 来自不同表,同一个数字完全可能撞上(卡 7 与第 7 格)。
-# 短片出片工作台的参考图进 clips/<clip_id>/(短片不必挂项目,独占目录,按 clip 号隔离)。
+# 短片出片工作台的参考图进 clips/<clip_id>/(短片不必挂项目,独占目录,按 clip 号隔离);
+# 祝福片同理进 birthday/<wish_id>/(回忆杀段的寿星真实照片是人物一致性锚点,同一定位)。
 _REL_RE = re.compile(
-    r"^(?:drama/\d+/(?:shot)?\d+-\d+|clips/\d+/\d+-\d+)\.(png|jpg|webp)$"
+    r"^(?:drama/\d+/(?:shot)?\d+-\d+|clips/\d+/\d+-\d+|birthday/\d+/\d+-\d+)\.(png|jpg|webp)$"
 )
 
 
@@ -99,6 +102,11 @@ def clip_usage_bytes(clip_id: int) -> int:
     return _dir_usage(upload_root() / "clips" / str(int(clip_id)))
 
 
+def wish_usage_bytes(wish_id: int) -> int:
+    """某祝福片已占用的参考图空间(字节)。"""
+    return _dir_usage(upload_root() / "birthday" / str(int(wish_id)))
+
+
 def save_character_ref(project_id: int, card_id: int, data: bytes, taken: int) -> str:
     """保存一张定妆照,返回相对路径(存进 DramaCharacterCard.ref_images)。
 
@@ -129,6 +137,17 @@ def save_clip_ref(clip_id: int, segment_index: int, data: bytes, taken: int) -> 
     return _save_image(
         "clips", clip_id, str(int(segment_index)), data, taken,
         "参考图", MAX_CLIP_UPLOAD_BYTES, clip_usage_bytes(clip_id),
+    )
+
+
+def save_wish_ref(wish_id: int, segment_index: int, data: bytes, taken: int) -> str:
+    """保存生日祝福出片工作台的一张段级参考图(多为寿星真实照片),返回相对路径。
+
+    与短片参考图同一定位:图生视频的人物一致性锚点,按 wish 号独占 birthday/ 目录。
+    """
+    return _save_image(
+        "birthday", wish_id, str(int(segment_index)), data, taken,
+        "参考图", MAX_WISH_UPLOAD_BYTES, wish_usage_bytes(wish_id),
     )
 
 
@@ -201,6 +220,11 @@ def delete_project_dir(project_id: int) -> int:
 def delete_clip_dir(clip_id: int) -> int:
     """删掉某短片的整个参考图目录,返回删掉的文件数(删短片时调用,理由同项目)。"""
     return _delete_owner_dir("clips", clip_id)
+
+
+def delete_wish_dir(wish_id: int) -> int:
+    """删掉某祝福片的整个参考图目录,返回删掉的文件数(删祝福片时调用,理由同项目)。"""
+    return _delete_owner_dir("birthday", wish_id)
 
 
 def _delete_owner_dir(area: str, owner_id: int) -> int:

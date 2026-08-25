@@ -15,6 +15,7 @@ const ProjectPage = React.lazy(() => import("./pages/ProjectPage"));
 const OnboardingFlow = React.lazy(() => import("./pages/OnboardingFlow"));
 const PromoPage = React.lazy(() => import("./pages/PromoPage"));
 const ClipsPage = React.lazy(() => import("./pages/ClipsPage"));
+const BirthdayPage = React.lazy(() => import("./pages/BirthdayPage"));
 const AdminPage = React.lazy(() => import("./pages/AdminPage"));
 const SettingsPage = React.lazy(() => import("./pages/SettingsPage"));
 // HelpPage 不拆:未登录也能看(App 里直接渲染),拆了要多一层 Suspense 才不闪
@@ -46,6 +47,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             {/* 情绪短片 / 灵感工坊:clips 列表与三选一工作台,共用 ClipsPage(按路径分 mode) */}
             <Route path="clips/:id?" element={<ClipsPage />} />
             <Route path="inspire/:id?" element={<ClipsPage />} />
+            {/* 生日祝福:寿星定制祝福片,独立线(自有表/引擎/手卡出片盘) */}
+            <Route path="birthday/:id?" element={<BirthdayPage />} />
             <Route path="admin" element={<AdminPage />} />
             <Route path="help" element={<HelpPage />} />
             <Route path="settings" element={<SettingsPage />} />

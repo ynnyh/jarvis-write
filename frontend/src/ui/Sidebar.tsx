@@ -15,6 +15,7 @@ const ENTRIES = [
   { to: "/clips", ico: "⚡", label: "情绪短片" },
   { to: "/inspire", ico: "💡", label: "灵感工坊" },
   { to: "/promo", ico: "🎬", label: "宣传片工坊" },
+  { to: "/birthday", ico: "🎂", label: "生日祝福" },
   { to: "/help", ico: "📖", label: "使用指南" },
   { to: "/settings", ico: "⚙︎", label: "设置" },
 ];

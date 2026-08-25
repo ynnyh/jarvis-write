@@ -45,6 +45,7 @@ class Task(str, Enum):
     PROMO_PACK = "promo_pack"           # 宣传片成片包标注
     PROMO_CHUNKS = "promo_chunks"       # 宣传片生成切段(视频提示词)
     CLIPS_BATCH = "clips_batch"         # 情绪短片批产(三本子一次出)
+    BIRTHDAY_BATCH = "birthday_batch"   # 生日祝福批产(三本子一次出)
     # 书籍元信息类短任务。这几条原先绕开本路由、直接按「协议名」造适配器,
     # 于是永远取到该协议里**创建最早**的那套配置,用户在设置页标「默认」的那套被丢掉
     # (症状:换成官方 DeepSeek 也没用,请求照旧打到最早那个中转站)。
@@ -90,6 +91,8 @@ _TASK_TIER: dict[Task, Tier] = {
     Task.PROMO_PACK: Tier.QUALITY,
     Task.PROMO_CHUNKS: Tier.QUALITY,
     Task.CLIPS_BATCH: Tier.QUALITY,
+    # 生日祝福批产:寿星定制要才气与专属梗,同情绪短片上强档
+    Task.BIRTHDAY_BATCH: Tier.QUALITY,
     # 书籍元信息:书名/简介/投稿包是门面活,一次性、字数少,上强档不心疼。
     # **必须显式列出**——`_TASK_TIER.get(task, Tier.FAST)` 缺省是快档,漏一条就是静默降档。
     Task.TITLE: Tier.QUALITY,
@@ -130,6 +133,7 @@ _TASK_TEMPERATURE: dict[Task, float] = {
     Task.PROMO_PACK: 0.4,
     Task.PROMO_CHUNKS: 0.5,    # 运动叙事要连贯
     Task.CLIPS_BATCH: 0.85,   # 情绪短片要才气与钩子
+    Task.BIRTHDAY_BATCH: 0.85,  # 生日祝福要专属梗与钩子,同样要发散
 }
 
 
@@ -161,6 +165,7 @@ _TASK_MAX_TOKENS: dict[Task, int] = {
     Task.PROMO_PACK: 6000,
     Task.PROMO_CHUNKS: 6000,
     Task.CLIPS_BATCH: 8000,
+    Task.BIRTHDAY_BATCH: 8000,
 }
 
 

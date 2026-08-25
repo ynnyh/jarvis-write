@@ -3356,6 +3356,11 @@ body:has(.write-zone.immersive) .pj-cols { grid-template-columns: minmax(0, 1fr)
 /* 工作台里的生成参数折叠区(建后可调:时长/画风/导向) */
 .clip-params { margin-bottom: 12px; }
 
+/* ===== 生日祝福:手卡寿星资料卡的回忆点清单 ===== */
+/* 出片时贴在手卡旁逐条核对「这条回忆有没有被分镜落实」——定制片的施工基准 */
+.bday-mems { margin: 4px 0 0; padding-left: 18px; }
+.bday-mems li { margin: 2px 0; }
+
 /* ==========================================================================
    本书四层状态条(ProjectPage)
    概念 → 架构 → 大纲 → 正文 常驻一行:哪层挂旧版本当场标红,点某层直接跳转。

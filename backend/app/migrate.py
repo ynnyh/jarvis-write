@@ -724,6 +724,23 @@ def _add_mood_clip_mode_column() -> None:
             logger.info("迁移:mood_clips 补 mode 列")
 
 
+def _add_birthday_pack_column() -> None:
+    """生日祝福:birthday_wishes 补 pack 列(风格包,幂等)。
+
+    儿童向角色世界风格包(佩奇式简笔动画/奥特曼式特摄英雄…):包自带强画风锚、
+    世界观场景词与「寿星作为主角进入该世界」指令。存量行默认空(不用包,行为零变化)。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "birthday_wishes" not in insp.get_table_names():
+            return  # create_all 会按新模型建表,无需补列
+        if not _column_exists("birthday_wishes", "pack"):
+            conn.execute(
+                text("ALTER TABLE birthday_wishes ADD COLUMN pack VARCHAR(40) NOT NULL DEFAULT ''")
+            )
+            logger.info("迁移:birthday_wishes 补 pack 列")
+
+
 def _add_architecture_concept_stale_column() -> None:
     """小说架构:architecture 补 concept_stale 列(概念变更→建议重生成,幂等)。
 
@@ -791,6 +808,7 @@ def run_migrations() -> None:
     _add_provider_thinking_mode_column()
     _add_mood_clip_steering_columns()
     _add_mood_clip_mode_column()
+    _add_birthday_pack_column()
     _add_architecture_concept_stale_column()
     _add_project_outline_stale_column()
     _disable_word_guard_default()

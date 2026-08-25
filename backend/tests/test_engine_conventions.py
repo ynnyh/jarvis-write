@@ -21,11 +21,12 @@ from pathlib import Path
 
 APP = Path(__file__).resolve().parents[1] / "app"
 
-# 三条出片线各自的目录 + 接口层
+# 出片线各自的目录 + 接口层
 LINES = {
     "drama": [APP / "engines" / "drama", APP / "api" / "drama.py"],
     "promo": [APP / "engines" / "promo", APP / "api" / "promo.py"],
     "clips": [APP / "engines" / "clips", APP / "api" / "clips.py"],
+    "birthday": [APP / "engines" / "birthday", APP / "api" / "birthday.py"],
 }
 MEDIA = APP / "engines" / "media"
 
@@ -83,7 +84,7 @@ def test_lines_do_not_import_each_other():
 # =============== ② media 是叶子:不许反向依赖任何一条线 ===============
 
 def test_media_does_not_depend_on_any_line():
-    offenders = _hits(_py_files([MEDIA]), _line_import_pattern(["drama", "promo", "clips"]))
+    offenders = _hits(_py_files([MEDIA]), _line_import_pattern(["drama", "promo", "clips", "birthday"]))
     assert not offenders, (
         "app/engines/media/ 反向依赖了某条出片线——它必须是叶子(只含三线共用的"
         "确定性口径,不含任何一条线的业务):\n" + "\n".join(offenders)
