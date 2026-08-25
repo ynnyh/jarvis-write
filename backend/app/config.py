@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     default_temperature: float = 0.7
     default_max_tokens: int = 8192
     default_timeout: int = 600
+    # 思考模式默认关闭:V4 系模型(如 deepseek-v4-flash)思考默认开且 effort=high,
+    # 结构化长契约会思考数万 token 吃光 max_tokens(实测空正文+翻倍重试,分钟级白跑);
+    # 关闭后同样任务秒级出全文。需要推理的可在「模型设置」按配置强制 low/high/max。
+    default_thinking_mode: str = "disabled"
 
     # ===== 运行模式(桌面版 local vs 服务器 server) =====
     # server(默认):多用户 + JWT 登录 + 邀请码,线上部署用,行为与既有一致。

@@ -68,6 +68,8 @@ class ProviderConfigOut(BaseModel):
     model: str
     timeout: int
     max_tokens: int
+    # 思考模式:空串=跟随全局默认(关);low/high/max=按配置强制
+    thinking_mode: str = ""
     is_default: bool
     is_default_fast: bool
     default_base_url: str
@@ -86,8 +88,19 @@ class ProviderConfigIn(BaseModel):
     model: str = ""
     timeout: int = Field(default=0, ge=0, le=3600, description="0=跟随全局")
     max_tokens: int = Field(default=0, ge=0, le=200000, description="0=跟随全局/任务默认")
+    thinking_mode: str = Field(
+        default="", description="空=跟随全局默认(关思考);low/high/max=强制"
+    )
     is_default: bool | None = None
     is_default_fast: bool | None = None
+
+
+def _norm_thinking_mode(mode: str) -> str:
+    """归一到 ''/low/high/max;"off"/"disabled" 视为空串(跟随全局默认=关)。"""
+    value = (mode or "").strip().lower()
+    if value in ("", "low", "high", "max"):
+        return value
+    return ""
 
 
 def _out(row: ProviderConfig, plain_key: str, *, cloudflare: bool = False) -> ProviderConfigOut:
@@ -102,6 +115,7 @@ def _out(row: ProviderConfig, plain_key: str, *, cloudflare: bool = False) -> Pr
         model=row.model,
         timeout=row.timeout or 0,
         max_tokens=row.max_tokens or 0,
+        thinking_mode=getattr(row, "thinking_mode", "") or "",
         is_default=row.is_default,
         is_default_fast=row.is_default_fast,
         default_base_url=preset["base_url"],
@@ -224,6 +238,7 @@ async def create_provider_config(
         model=req.model.strip(),
         timeout=req.timeout,
         max_tokens=req.max_tokens,
+        thinking_mode=_norm_thinking_mode(req.thinking_mode),
     )
     db.add(row)
     db.flush()
@@ -267,6 +282,7 @@ async def update_provider_config(
     row.model = req.model.strip()
     row.timeout = req.timeout
     row.max_tokens = req.max_tokens
+    row.thinking_mode = _norm_thinking_mode(req.thinking_mode)
     _apply_default_flags(db, user, row, req)
 
     db.commit()

@@ -23,11 +23,25 @@ from app.llm.base import (
     as_text,
     check_upstream,
     strip_think,
+    thinking_param_rejected,
 )
 
 logger = logging.getLogger("jarvis-write.llm")
 
 _HINT = "确认 Base URL 含 /v1 且渠道支持 OpenAI 协议"
+
+# 模型名里出现这些片段 → 视为思考/推理系模型,思考控制参数才有下发的意义
+# (对非推理模型发 thinking 只会白挨 400)。用户在配置里显式指定时不走这道
+# 启发式(thinking_forced),照顾被中转站改名的模型。
+_REASONING_NAME_HINTS = (
+    "deepseek", "v4", "v3", "reasoner", "r1", "think", "qwq", "qwen3",
+    "glm", "kimi", "grok", "gpt-5", "o1", "o3", "o4",
+)
+
+
+def _looks_reasoning(model_name: str) -> bool:
+    name = (model_name or "").lower()
+    return any(h in name for h in _REASONING_NAME_HINTS)
 
 
 def _reasoning_of(message: dict) -> str:
@@ -51,6 +65,29 @@ class OpenAICompatibleAdapter(LLMAdapter):
             "Content-Type": "application/json",
         }
 
+    def _thinking_control(self) -> dict:
+        """思考控制参数(disabled → thinking.type;low/high/max → reasoning_effort)。
+
+        为什么默认关:V4 系(deepseek-v4-flash 等)思考默认开且 effort=high,我们的
+        结构化长契约会触发数万 token 思考、吃光 max_tokens → 空正文 + 翻倍重试,
+        分钟级白跑(实测同一提示词:思考开 1 分钟后空正文,关闭后 6.8 秒出全文)。
+        - 渠道已拒收过该参数(complete() 里的 400 自动撤销)→ 不再下发;
+        - 跟随默认值时只对模型名像推理系的下发,显式指定(thinking_forced)不受限。
+        """
+        mode = self.thinking_mode
+        if not mode:
+            return {}
+        base = self.base_url or getattr(self, "default_base_url", "")
+        if thinking_param_rejected(base, self.model_name):
+            return {}
+        if not (self.thinking_forced or _looks_reasoning(self.model_name)):
+            return {}
+        if mode == "disabled":
+            return {"thinking": {"type": "disabled"}}
+        if mode in ("low", "high", "max"):
+            return {"reasoning_effort": mode}
+        return {}
+
     def _payload(self, messages: list[LLMMessage], stream: bool) -> dict:
         payload = {
             "model": self.model_name,
@@ -59,6 +96,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
             "max_tokens": self.max_tokens,
             "stream": stream,
         }
+        payload.update(self._thinking_control())
         if stream:
             # 要一份流尾 usage,否则走流式就没法记 token 账。渠道不认这个参数时
             # 会回 400,complete() 会自动回落非流式(那条路照样有 usage)。

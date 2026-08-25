@@ -506,6 +506,7 @@ export interface ProviderConfigOut {
   model: string;
   timeout: number;      // 0 = 跟随全局
   max_tokens: number;   // 0 = 跟随全局/任务默认
+  thinking_mode: string; // "" = 跟随全局默认(关思考);low/high/max = 按配置强制
   is_default: boolean;
   is_default_fast: boolean;
   default_base_url: string;
@@ -522,6 +523,7 @@ export interface ProviderConfigIn {
   model?: string;
   timeout?: number;
   max_tokens?: number;
+  thinking_mode?: string;
   is_default?: boolean | null;
   is_default_fast?: boolean | null;
 }

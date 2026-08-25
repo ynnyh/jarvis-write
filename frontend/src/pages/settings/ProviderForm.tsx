@@ -16,6 +16,7 @@ export function ProviderForm({ editing, onSaved, onCancel }: {
   const [model, setModel] = useState(editing?.model || "");
   const [timeout_, setTimeout_] = useState(String(editing?.timeout ?? 0));
   const [maxTokens, setMaxTokens] = useState(String(editing?.max_tokens ?? 0));
+  const [thinkingMode, setThinkingMode] = useState(editing?.thinking_mode ?? "");
   const [busy, setBusy] = useState(false);
 
   const cur = CATEGORY_BY_KEY[category];
@@ -32,6 +33,7 @@ export function ProviderForm({ editing, onSaved, onCancel }: {
         model: model.trim(),
         timeout: Math.max(0, parseInt(timeout_, 10) || 0),
         max_tokens: Math.max(0, parseInt(maxTokens, 10) || 0),
+        thinking_mode: thinkingMode,
       };
       const saved = editing
         ? await api.updateProvider(editing.id, body)
@@ -128,7 +130,7 @@ export function ProviderForm({ editing, onSaved, onCancel }: {
 
       <details style={{ marginTop: 12 }}>
         <summary className="fld-hint" style={{ cursor: "pointer" }}>
-          高级选项(超时 / max_tokens,0 = 跟随全局)
+          高级选项(超时 / max_tokens / 思考模式)
         </summary>
         <div className="fld-row" style={{ marginTop: 8 }}>
           <div className="fld">
@@ -150,6 +152,19 @@ export function ProviderForm({ editing, onSaved, onCancel }: {
               placeholder="0"
               spellCheck={false}
             />
+          </div>
+          <div className="fld">
+            <label className="fl">思考模式</label>
+            <select value={thinkingMode} onChange={(e) => setThinkingMode(e.target.value)}>
+              <option value="">关闭(默认,快)</option>
+              <option value="low">低</option>
+              <option value="high">高</option>
+              <option value="max">最大</option>
+            </select>
+            <div className="fld-hint">
+              V4 系模型思考默认开且档位高,长契约会思考数万 token 吃光输出预算
+              (空正文/分钟级白跑),所以这里默认关闭;需要推理质量再开。
+            </div>
           </div>
         </div>
       </details>

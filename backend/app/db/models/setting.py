@@ -48,7 +48,9 @@ class ProviderConfig(Base, TimestampMixin):
     - is_default: quality 档(架构/定稿/抽取等重活)用的配置,全用户唯一;
     - is_default_fast: fast 档(草稿/摘要/校验)用的配置,全用户唯一,
       未设置时 fast 档回落到 quality 档配置;
-    - timeout / max_tokens: 0 = 跟随全局 default_* 与任务级默认。
+    - timeout / max_tokens: 0 = 跟随全局 default_* 与任务级默认;
+    - thinking_mode: 思考模式控制,空串 = 跟随全局默认(关思考,
+      见 config.default_thinking_mode);low/high/max = 按配置强制指定。
     """
 
     __tablename__ = "provider_configs"
@@ -64,5 +66,6 @@ class ProviderConfig(Base, TimestampMixin):
     model: Mapped[str] = mapped_column(String(100), default="")
     timeout: Mapped[int] = mapped_column(Integer, default=0)
     max_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    thinking_mode: Mapped[str] = mapped_column(String(10), default="", server_default="")
     is_default: Mapped[bool] = mapped_column(default=False)
     is_default_fast: Mapped[bool] = mapped_column(default=False)

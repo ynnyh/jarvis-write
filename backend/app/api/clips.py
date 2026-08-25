@@ -188,6 +188,14 @@ async def pick(clip_id: int, body: PickIn, db: Session = Depends(get_db)):
 @router.delete("/{clip_id}")
 async def delete_clip(clip_id: int, db: Session = Depends(get_db)):
     row = _get_clip(db, clip_id)
+    # 生成中拒绝删除:任务收尾要 UPDATE 这一行,行没了会 StaleDataError,
+    # 几分钟的批产白跑还报一条费解的错(线上实测 21 分钟后崩在收尾)。
+    for _jid, job in list_running("clips-gen-"):
+        if job["kind"] == f"clips-gen-{clip_id}":
+            raise HTTPException(
+                status_code=409,
+                detail="这条短片正在生成中,等它跑完再删除(刷新页面可看进度)。",
+            )
     db.delete(row)
     db.commit()
     return {"ok": True}

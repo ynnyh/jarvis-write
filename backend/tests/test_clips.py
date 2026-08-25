@@ -314,3 +314,33 @@ def test_norm_takes_blanks_generic_placeholder_quote():
     )
     assert takes[0]["quote_source"] == ""
     assert takes[1]["quote_source"] == "「回头」他说"  # 真金句不动
+
+
+def test_delete_rejected_while_generating(client):
+    """生成中拒绝删除:任务收尾 UPDATE 这一行,行没了会 StaleDataError,
+    几分钟批产白跑还报一条费解的错(线上实测 21 分钟后崩在收尾)。"""
+    from app import jobs as jobs_mod
+
+    headers = _auth(client, "clips_delguard")
+    r = client.post("/api/clips", headers=headers,
+                    json={"theme": "regret", "duration_s": 15, "direction": "live"})
+    cid = r.json()["clip_row"]["id"]
+
+    kind = f"clips-gen-{cid}"
+    jid = f"fake{cid:04d}"
+    with jobs_mod._LOCK:
+        jobs_mod._JOBS[jid] = {
+            "kind": kind, "status": "running", "owner_id": None,
+            "stage": "生成中", "result": None, "error": None,
+        }
+    try:
+        r = client.delete(f"/api/clips/{cid}", headers=headers)
+        assert r.status_code == 409
+        assert "正在生成" in r.json()["detail"]
+        # 任务结束后可正常删除
+        with jobs_mod._LOCK:
+            jobs_mod._JOBS.pop(jid, None)
+        assert client.delete(f"/api/clips/{cid}", headers=headers).status_code == 200
+    finally:
+        with jobs_mod._LOCK:
+            jobs_mod._JOBS.pop(jid, None)

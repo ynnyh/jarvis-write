@@ -667,6 +667,25 @@ def _add_drama_shot_asset_columns() -> None:
                 logger.info("迁移:drama_shots 补 %s 列", col)
 
 
+def _add_provider_thinking_mode_column() -> None:
+    """provider_configs 补 thinking_mode 列(幂等)。
+
+    V4 系模型(deepseek-v4-flash 等)思考默认开且 effort=high,结构化长契约
+    (分镜/蓝图/提取的 JSON)会触发数万 token 思考吃光 max_tokens → 空正文 +
+    翻倍重试分钟级白跑。全局默认改为关思考,这列给「某套配置要强制开思考」
+    留按配置覆盖的口子(low/high/max)。空串 = 跟随全局默认。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "provider_configs" not in insp.get_table_names():
+            return  # create_all 会按新模型建表,无需补列
+        if not _column_exists("provider_configs", "thinking_mode"):
+            conn.execute(
+                text("ALTER TABLE provider_configs ADD COLUMN thinking_mode VARCHAR(10) DEFAULT ''")
+            )
+            logger.info("迁移:provider_configs 补 thinking_mode 列")
+
+
 def run_migrations() -> None:
     """启动时调用。幂等。"""
     _add_user_id_columns()
@@ -694,6 +713,7 @@ def run_migrations() -> None:
     _add_drama_gender_column()
     _add_drama_motion_columns()
     _add_drama_shot_asset_columns()
+    _add_provider_thinking_mode_column()
     _disable_word_guard_default()
     _migrate_finalized_to_approved()
     # 先补加密老表存量明文 key,再拷到新表,保证 provider_configs 落库必为密文

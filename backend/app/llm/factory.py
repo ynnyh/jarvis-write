@@ -58,6 +58,7 @@ def _row_to_config(row) -> dict:
         "model": row.model,
         "timeout": row.timeout or 0,
         "max_tokens": row.max_tokens or 0,
+        "thinking_mode": getattr(row, "thinking_mode", "") or "",
         "is_default": row.is_default,
         "is_default_fast": row.is_default_fast,
     }
@@ -104,6 +105,7 @@ def _env_config(provider: str) -> dict:
         "model": env.model,
         "timeout": 0,
         "max_tokens": 0,
+        "thinking_mode": "",
         "is_default": False,
         "is_default_fast": False,
     }
@@ -186,6 +188,7 @@ def create_llm_adapter(
     temperature: float | None = None,
     max_tokens: int | None = None,
     timeout: int | None = None,
+    thinking_mode: str | None = None,
 ) -> LLMAdapter:
     """造一个适配器。
 
@@ -197,7 +200,9 @@ def create_llm_adapter(
     api_key 为空时抛 HTTPException(400)——让 FastAPI 返回清晰错误,
     而不是带着空 Bearer 头发请求(那会变成难以排查的 500)。
 
-    timeout / max_tokens 覆盖优先级:显式参数 > 配置里的值 > 全局 default_*。
+    timeout / max_tokens / thinking_mode 覆盖优先级:显式参数 > 配置里的值 >
+    全局 default_*。thinking_mode 显式指定(参数或配置列)时 thinking_forced=True,
+    不受"模型名像推理系才下发"的启发式限制(照顾被中转站改名的模型)。
     """
     settings = get_settings()
 
@@ -219,6 +224,7 @@ def create_llm_adapter(
             "interface_format": provider,
             "timeout": db_cfg.get("timeout", 0),
             "max_tokens": db_cfg.get("max_tokens", 0),
+            "thinking_mode": db_cfg.get("thinking_mode", ""),
         }
     else:
         cfg = resolve_tier_config("quality")
@@ -239,6 +245,16 @@ def create_llm_adapter(
             ),
         )
 
+    # 思考模式:显式参数 > 配置列("" 视为未指定)> 全局默认(默认 disabled,
+    # 见 config.default_thinking_mode 的注释——V4 系思考默认开且 effort=high,
+    # 会吃光输出预算)。显式来源才置 forced。
+    forced = thinking_mode is not None or bool(cfg.get("thinking_mode"))
+    resolved_thinking = (
+        thinking_mode
+        if thinking_mode is not None
+        else (cfg.get("thinking_mode") or settings.default_thinking_mode)
+    )
+
     return adapter_cls(
         api_key=resolved_key,
         base_url=base_url if base_url is not None else cfg["base_url"],
@@ -256,6 +272,8 @@ def create_llm_adapter(
             if timeout is not None
             else (cfg.get("timeout") or settings.default_timeout)
         ),
+        thinking_mode=resolved_thinking,
+        thinking_forced=forced,
     )
 
 

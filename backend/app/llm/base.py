@@ -223,6 +223,34 @@ async def with_retries(call, *, attempts: int = 3, base_delay: float = 2.0, on_r
         f"上游连续 {attempts} 次调用失败,最后错误: {_describe_exc(last)}",
         retryable=True,
     ) from last
+# 渠道明确拒收思考控制参数的现场记录:(base_url, model) → 不再下发该参数。
+# 适配器是按次创建的,不落模块级记不住,同一渠道每次调用都要白挨一个 400。
+_THINKING_REJECTED: set[tuple[str, str]] = set()
+
+# 400 响应里出现这些字样、且我们发了思考参数 → 判为参数不被渠道接受
+# (OpenAI 官方对未知参数回 "Unknown parameter",各家网关措辞不一,取宽交集)
+_PARAM_REJECT_MARKERS = (
+    "thinking", "reasoning", "unknown", "unexpected", "unsupported",
+    "not support", "parameter", "extra", "多余", "不支持", "无效参数",
+)
+
+
+def thinking_param_rejected(base_url: str, model: str) -> bool:
+    """该 (渠道, 模型) 是否已被判定拒收思考参数(payload 据此跳过注入)。"""
+    return (base_url or "", model) in _THINKING_REJECTED
+
+
+def remember_thinking_rejected(base_url: str, model: str) -> None:
+    _THINKING_REJECTED.add((base_url or "", model))
+
+
+def _is_param_rejection(exc: "UpstreamError", sent_thinking: bool) -> bool:
+    if not sent_thinking or exc.status != 400:
+        return False
+    text = str(exc).lower()
+    return any(m in text for m in _PARAM_REJECT_MARKERS)
+
+
 Role = Literal["system", "user", "assistant"]
 
 
@@ -279,6 +307,8 @@ class LLMAdapter(abc.ABC):
         temperature: float = 0.7,
         max_tokens: int = 4096,
         timeout: int = 600,
+        thinking_mode: str = "",
+        thinking_forced: bool = False,
     ) -> None:
         self.api_key = api_key
         self.model_name = model_name
@@ -286,6 +316,12 @@ class LLMAdapter(abc.ABC):
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.timeout = timeout
+        # 思考模式控制:""(跟随默认,即 config.default_thinking_mode)/disabled/low/high/max。
+        # 只对识别得出的推理系模型下发参数(见 openai_compatible._looks_reasoning),
+        # Anthropic/Gemini 原生协议适配器暂不消费该字段。
+        # thinking_forced:用户在配置里显式指定(非跟随默认)——此时不受模型名启发式限制。
+        self.thinking_mode = thinking_mode
+        self.thinking_forced = thinking_forced
         # 瞬时错误重试:次数与退避基数(秒)。置 1 即关闭重试。
         self.retry_attempts = 3
         self.retry_base_delay = 2.0
@@ -323,6 +359,17 @@ class LLMAdapter(abc.ABC):
             except EmptyContentError:
                 raise
             except UpstreamError as exc:
+                # 渠道不认思考控制参数(400 参数错):撤掉参数记下渠道,重发一次。
+                # 必须排在"回落非流式"之前——参数问题换流式/非流式都会一样 400。
+                if _is_param_rejection(exc, sent_thinking=bool(self.thinking_mode)):
+                    logger.info(
+                        "渠道拒收思考参数(%s),撤掉参数重发: %s",
+                        self.model_name, exc,
+                    )
+                    remember_thinking_rejected(self.base_url or "", self.model_name)
+                    self.thinking_mode = ""
+                    exc.retryable = True
+                    raise
                 # 瞬时错/鉴权错换成非流式也一样,交给外层重试或直接抛
                 if exc.retryable or exc.status in (401, 403):
                     raise
