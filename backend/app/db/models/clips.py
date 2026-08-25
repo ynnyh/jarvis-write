@@ -33,7 +33,9 @@ class MoodClip(Base, TimestampMixin):
     source_project_id: Mapped[int | None] = mapped_column(
         ForeignKey("projects.id", ondelete="SET NULL"), index=True
     )
-    # 情绪主题 key(见 engines/clips/common.CLIP_THEMES)或空=自定义
+    # 工坊类型:mood=情绪短片(主题=CLIP_THEMES),play=灵感工坊(主题=CLIPS_PLAYS 玩法)
+    mode: Mapped[str] = mapped_column(String(20), default="mood", server_default="mood")
+    # 主题 key(见 engines/clips/common 目录)或空=自定义
     theme: Mapped[str] = mapped_column(String(40), default="")
     custom_theme: Mapped[str] = mapped_column(String(120), default="")
     # 15 / 30 秒

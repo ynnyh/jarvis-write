@@ -708,6 +708,22 @@ def _add_mood_clip_steering_columns() -> None:
                 logger.info("迁移:mood_clips 补 %s 列", col)
 
 
+def _add_mood_clip_mode_column() -> None:
+    """灵感工坊:mood_clips 补 mode 列(工坊类型,幂等)。
+
+    mood=情绪短片(默认),play=灵感工坊(玩法命题)。存量行默认 mood,行为零变化。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "mood_clips" not in insp.get_table_names():
+            return  # create_all 会按新模型建表,无需补列
+        if not _column_exists("mood_clips", "mode"):
+            conn.execute(
+                text("ALTER TABLE mood_clips ADD COLUMN mode VARCHAR(20) NOT NULL DEFAULT 'mood'")
+            )
+            logger.info("迁移:mood_clips 补 mode 列")
+
+
 def run_migrations() -> None:
     """启动时调用。幂等。"""
     _add_user_id_columns()
@@ -737,6 +753,7 @@ def run_migrations() -> None:
     _add_drama_shot_asset_columns()
     _add_provider_thinking_mode_column()
     _add_mood_clip_steering_columns()
+    _add_mood_clip_mode_column()
     _disable_word_guard_default()
     _migrate_finalized_to_approved()
     # 先补加密老表存量明文 key,再拷到新表,保证 provider_configs 落库必为密文

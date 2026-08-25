@@ -32,6 +32,8 @@ from app.prompts.clips import (
     CLIPS_GENERIC_CONTEXT,
     CLIPS_GROUNDING_RULE,
     CLIPS_NOVEL_CONTEXT,
+    CLIPS_PLAY_CONTEXT,
+    CLIPS_PROMPT_DETAILS,
     CLIPS_STRUCTURE_RULES,
     CLIPS_TAKES_PROMPT,
     expand_feedback_block,
@@ -103,6 +105,31 @@ def _concept_line(project: Project) -> str:
 
 # =============== 归一化 ===============
 
+def _norm_character_cards(shots: list[dict]) -> list[dict]:
+    """从分镜聚合角色定妆卡:按角色名分组,合并该角色出现的所有镜头的外貌描段。
+
+    为什么从 shots 聚合而不是信展开的顶层字段:编辑保存(PUT /clip)只回传
+    {"lines","shots"} 再走 `_build_candidate`,顶层字段会在那里丢;从 character_desc
+    重建,存了一段时间后再编辑也不会没角色卡。
+    """
+    merged: dict[str, list[str]] = {}
+    order: list[str] = []
+    for s in shots:
+        names = [str(x).strip() for x in (s.get("characters") or []) if str(x or "").strip()]
+        desc = str(s.get("character_desc") or "").strip()
+        if not desc:
+            continue
+        for name in names:
+            if name in ("", "旁白"):
+                continue
+            if name not in merged:
+                merged[name] = []
+                order.append(name)
+            if desc not in merged[name]:
+                merged[name].append(desc)
+    return [{"name": name[:40], "desc": "\n".join(merged[name])[:1200]} for name in order]
+
+
 def _norm_shots(raw, style: dict, max_seq_cap: int) -> list[dict]:
     out = []
     for item in (raw or []):
@@ -111,9 +138,10 @@ def _norm_shots(raw, style: dict, max_seq_cap: int) -> list[dict]:
         action = str(item.get("action_desc") or "").strip()
         if not action:
             continue
-        prompt_cn = str(item.get("prompt_cn") or "").strip()[:800]
-        prompt_en = str(item.get("prompt_en") or "").strip()[:600]
-        negative = str(item.get("negative") or "").strip()[:400]
+        prompt_cn = str(item.get("prompt_cn") or "").strip()[:1200]
+        prompt_en = str(item.get("prompt_en") or "").strip()[:800]
+        negative = str(item.get("negative") or "").strip()[:500]
+        character_desc = str(item.get("character_desc") or "").strip()[:600]
         # LLM 漏写画面提示词时用分镜自身的景别/运镜/动作拼一条确定性兜底——
         # 空着交给画风锚,会产出一条「只有风格锚、没有画面内容」的提示词
         if not prompt_cn:
@@ -133,6 +161,7 @@ def _norm_shots(raw, style: dict, max_seq_cap: int) -> list[dict]:
                 "characters": [
                     str(c).strip() for c in (item.get("characters") or []) if str(c or "").strip()
                 ][:2],
+                "character_desc": character_desc,
                 "action_desc": action[:200],
                 "shot_type": str(item.get("shot_type") or "").strip()[:20],
                 "camera": str(item.get("camera") or "").strip()[:20],
@@ -240,6 +269,7 @@ def _build_candidate(
         "emotion_curve": take.get("emotion_curve", ""),
         "lines": _norm_lines(expanded.get("lines")),
         "shots": shots,
+        "character_cards": _norm_character_cards(shots),
         "punchline": take.get("punchline", ""),
         "chunks": group_chunks(shots, 15),
         "hook_text": take.get("hook_text", ""),
@@ -284,8 +314,9 @@ def _build_context(db: Session, clip: MoodClip) -> tuple[str, str, str]:
         return context, excerpts, CLIPS_GROUNDING_RULE
 
     if not (clip.theme or clip.custom_theme.strip()):
-        raise ClipBatchError("先选一个情绪主题(或填自定义主题)。")
-    context = CLIPS_GENERIC_CONTEXT.format(
+        raise ClipBatchError("先选一个主题(或填自定义主题)。")
+    context_tpl = CLIPS_PLAY_CONTEXT if (getattr(clip, "mode", "mood") or "mood") == "play" else CLIPS_GENERIC_CONTEXT
+    context = context_tpl.format(
         theme_label=theme_label(clip),
         duration_s=clip.duration_s,
         direction_directive=directive,
@@ -314,6 +345,7 @@ async def _expand_one(
         context_block=context,
         structure_rules=CLIPS_STRUCTURE_RULES,
         cliche_blacklist=CLIPS_CLICHE_BLACKLIST,
+        prompt_details=CLIPS_PROMPT_DETAILS,
         style_cn=style["style_cn"] or "(未给出,请自行统一并保持三条一致)",
         style_en=style["style_en"],
         negative=style["negative"],

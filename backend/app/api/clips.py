@@ -24,9 +24,6 @@ from app.auth import assert_project_owner, get_current_user
 from app.db.models import MoodClip, Project
 from app.db.session import get_db
 from app.engines.clips import (
-    CLIP_THEMES,
-    VALID_DURATIONS,
-    VALID_THEMES,
     ClipBatchError,
     clip_dict,
     export_json,
@@ -37,13 +34,19 @@ from app.engines.clips import (
     reexpand_batch,
 )
 from app.engines.clips.common import (
+    CLIP_THEMES,
+    CLIPS_PLAYS,
     DIALOGUE_STYLES,
     INTENSITIES,
     PACINGS,
     STATUS_CN,
     VALID_DIALOGUE_STYLES,
+    VALID_DURATIONS,
     VALID_INTENSITIES,
+    VALID_MODES,
     VALID_PACINGS,
+    VALID_PLAYS,
+    VALID_THEMES,
 )
 from app.engines.media.directions import VALID_DIRECTIONS
 from app.jobs import list_running, spawn_job
@@ -54,6 +57,7 @@ router = APIRouter(prefix="/api/clips", tags=["clips"], dependencies=[Depends(ge
 
 
 class ClipCreateIn(BaseModel):
+    mode: str = "mood"
     theme: str = ""
     custom_theme: str = ""
     duration_s: int = Field(default=15)
@@ -105,11 +109,15 @@ def _get_clip(db: Session, clip_id: int) -> MoodClip:
     return row
 
 
-def _validate_common(theme: str, custom_theme: str, duration_s: int, direction: str) -> None:
-    if theme and theme not in VALID_THEMES:
-        raise HTTPException(status_code=400, detail=f"未知主题:{theme}")
+def _validate_common(theme: str, custom_theme: str, duration_s: int, direction: str, mode: str = "mood") -> None:
+    if mode not in VALID_MODES:
+        raise HTTPException(status_code=400, detail=f"未知工坊类型:{mode}")
+    valid = VALID_PLAYS if mode == "play" else VALID_THEMES
+    kind = "玩法" if mode == "play" else "情绪主题"
+    if theme and theme not in valid:
+        raise HTTPException(status_code=400, detail=f"未知{kind}:{theme}")
     if not theme and not custom_theme.strip():
-        raise HTTPException(status_code=400, detail="选一个情绪主题,或填自定义主题。")
+        raise HTTPException(status_code=400, detail=f"选一个{kind}或填自定义主题。")
     if duration_s not in VALID_DURATIONS:
         raise HTTPException(status_code=400, detail="时长只支持 15/30 秒。")
     if direction not in VALID_DIRECTIONS:
@@ -144,6 +152,7 @@ async def clips_meta():
 
     return {
         "themes": CLIP_THEMES,
+        "plays": CLIPS_PLAYS,
         "durations": list(VALID_DURATIONS),
         "directions": [
             {"key": d["key"], "label": d["label"], "tip": d["tip"]} for d in DIRECTIONS
@@ -156,11 +165,13 @@ async def clips_meta():
 
 
 @router.get("")
-async def list_clips(project_id: int | None = None, db: Session = Depends(get_db)):
+async def list_clips(project_id: int | None = None, mode: str | None = None, db: Session = Depends(get_db)):
     from app.auth import current_user_id
 
     uid = current_user_id.get()
     q = db.query(MoodClip).filter(MoodClip.user_id == uid)
+    if mode is not None:
+        q = q.filter(MoodClip.mode == mode)
     if project_id is not None:
         q = q.filter(MoodClip.source_project_id == project_id)
     rows = q.order_by(MoodClip.updated_at.desc()).limit(100).all()
@@ -171,7 +182,7 @@ async def list_clips(project_id: int | None = None, db: Session = Depends(get_db
 async def create_clip(body: ClipCreateIn, db: Session = Depends(get_db)):
     from app.auth import current_user_id
 
-    _validate_common(body.theme, body.custom_theme, body.duration_s, body.direction)
+    _validate_common(body.theme, body.custom_theme, body.duration_s, body.direction, body.mode)
     if body.source_project_id is not None:
         project = db.get(Project, body.source_project_id)
         if project is None:
@@ -180,6 +191,7 @@ async def create_clip(body: ClipCreateIn, db: Session = Depends(get_db)):
     row = MoodClip(
         user_id=current_user_id.get(),
         source_project_id=body.source_project_id,
+        mode=body.mode,
         theme=body.theme,
         custom_theme=body.custom_theme.strip()[:120],
         duration_s=body.duration_s,

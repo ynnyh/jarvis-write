@@ -29,6 +29,26 @@ CLIP_THEMES: list[dict] = [
 _THEME_MAP = {t["key"]: t for t in CLIP_THEMES}
 VALID_THEMES = tuple(_THEME_MAP)
 
+# 灵感工坊玩法目录:key 白名单 + 「导演提示」(含强画风锚的风格化措辞——避免直接点名
+# 有版权的品牌/IP 名,改成描述画风质感,模型更稳也不会往临幕原片跑)。
+CLIPS_PLAYS: list[dict] = [
+    {"key": "ghibli", "label": "治愈手绘", "directive": "治愈系手绘动画质感:手绘动画笔触、明快配色(透明天空蓝/云白/草地绿),飞行与被风推动的意象;2D 细腻帧画,线条干净圆润"},
+    {"key": "clay", "label": "黏土定格", "directive": "黏土/布偶定格动画质感:手作感、忽快忽慢的定格停顿、表面能看到指纹与棉絮,光顺暖;玩偶表情夸张呆萌"},
+    {"key": "cyber", "label": "赛博雨夜", "directive": "赛博朋克霓虹都市雨夜:青紫粉撞色霓虹、雨线、逆光剪影、玻璃反光与积水倒影;夜景高对比、高饱和"},
+    {"key": "pixel", "label": "像素复古", "directive": "8-bit/16-bit 像素游戏质感、复古 CRT 色调、粒子噪点与扫描线,卷轴式镜头,角色像素小人穿插"},
+    {"key": "hk", "label": "港风胶片", "directive": "老港片胶片质感:暖黄+青色调、手持画面微晃、胶片颗粒,街市霓虹招牌与烟火气,高饱和低密度"},
+    {"key": "bw", "label": "黑白胶片", "directive": "黑白纪实摄影/胶片:颗粒与灰阶层次、强侧光、去彩色,靠明暗与构图说话,人物剪影分明"},
+    {"key": "watercolor", "label": "水彩绘本", "directive": "手绘水彩绘本质感:纸纹、晕染、留白、通透浅色调,边缘柔和,像被一页一页翻开的绘本"},
+    {"key": "papercut", "label": "剪纸皮影", "directive": "剪纸/皮影戏质感:平面多层剪纸、镂空纹理、暖色背光,光影边界清晰,有民间工艺的装饰味"},
+    {"key": "miniature", "label": "微缩玩具", "directive": "微缩模型/玩具屋视角:极浅景深、逼真材质但物件尺寸像手办,人物像小玩具,带摆拍的趣味"},
+    {"key": "timelapse", "label": "延时奇观", "directive": "延时摄影质感:天空云层与城市光线推移、宏大空镜、稳定机位,时间被压缩的流动感"},
+    {"key": "animal", "label": "动物拟人", "directive": "动物拟人日常:穿人类衣物的卡通动物、有着人类的生活场景,温馨自然、自带反差萌"},
+    {"key": "nonsense", "label": "荒诞脑洞", "directive": "荒诞即兴/黑色幽默:普通日常场景里塞一件极不合理的事,反差爽感、一本正经地荒谬"},
+]
+_PLAY_MAP = {t["key"]: t for t in CLIPS_PLAYS}
+VALID_PLAYS = tuple(_PLAY_MAP)
+VALID_MODES = ("mood", "play")
+
 VALID_DURATIONS = (15, 30)
 
 # ---- 导向维度(用户可细化的"方向"):目录 key 白名单 + label(前端展示) ----
@@ -56,9 +76,27 @@ VALID_PACINGS = tuple(t["key"] for t in PACINGS)
 VALID_INTENSITIES = tuple(t["key"] for t in INTENSITIES)
 
 
+def _clip_mode(clip: MoodClip) -> str:
+    """工坊类型:mood=情绪短片,play=灵感玩法;存量行(None)按 mood 兜底。"""
+    return getattr(clip, "mode", "mood") or "mood"
+
+
 def theme_label(clip: MoodClip) -> str:
     """主题显示:目录 key → 标签+导演提示;自定义 → 原文 + 兜底导演提示
-    (自定义主题没有目录 directive 可靠,不补一句"落地成具体场景"就常拍成抽象意象)。"""
+    (自定义主题没有目录 directive 可靠,不补一句"落地成具体场景"就常拍成抽象意象)。
+
+    按工坊类型分流:灵感工坊(mode=play)查玩法目录,玩法 directive 含强画风锁定。"""
+    if _clip_mode(clip) == "play":
+        if clip.theme in _PLAY_MAP:
+            p = _PLAY_MAP[clip.theme]
+            return f"{p['label']}({p['directive']})"
+        custom = clip.custom_theme.strip()
+        if not custom:
+            return "(未定)"
+        return (
+            f"{custom}(自定义灵感玩法:锁定画风质感与玩法,拍出辨识度,"
+            "可以猎奇、可以有反差,别拍成平铺直叙)"
+        )
     if clip.theme in _THEME_MAP:
         t = _THEME_MAP[clip.theme]
         return f"{t['label']}({t['directive']})"
@@ -88,6 +126,10 @@ def steering_block(clip: MoodClip) -> str:
 
 def theme_display(clip: MoodClip) -> str:
     """列表用短标签。"""
+    if _clip_mode(clip) == "play":
+        if clip.theme in _PLAY_MAP:
+            return _PLAY_MAP[clip.theme]["label"]
+        return clip.custom_theme.strip() or "自定义玩法"
     if clip.theme in _THEME_MAP:
         return _THEME_MAP[clip.theme]["label"]
     return clip.custom_theme.strip() or "自定义"
@@ -118,6 +160,7 @@ def clip_dict(row: MoodClip, with_candidates: bool = True) -> dict:
     d = {
         "id": row.id,
         "source_project_id": row.source_project_id,
+        "mode": _clip_mode(row),
         "theme": row.theme,
         "custom_theme": row.custom_theme,
         "theme_display": theme_display(row),

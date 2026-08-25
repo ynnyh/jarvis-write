@@ -55,6 +55,15 @@ def export_markdown(row: MoodClip) -> str:
         for l in lines:
             L.append(f"- **{l.get('speaker', '')}**:{l.get('text', '')}")
         L.append("")
+    cards = clip.get("character_cards") or []
+    if cards:
+        L.append("## 角色定妆卡(参考图用)")
+        L.append("")
+        L.append("> 复制每张卡的描述去文生图出定妆图,再上传作参考图,人物才不会漂。")
+        L.append("")
+        for c in cards:
+            L.append(f"- **{c.get('name', '')}**:{c.get('desc', '')}")
+        L.append("")
     if shots:
         L.append("## 分镜")
         L.append("")

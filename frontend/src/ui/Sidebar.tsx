@@ -13,6 +13,7 @@ const GH_URL = "https://github.com/ynnyh/jarvis-write";
 const ENTRIES = [
   { to: "/", ico: "📚", label: "我的小说" },
   { to: "/clips", ico: "⚡", label: "情绪短片" },
+  { to: "/inspire", ico: "💡", label: "灵感工坊" },
   { to: "/promo", ico: "🎬", label: "宣传片工坊" },
   { to: "/help", ico: "📖", label: "使用指南" },
   { to: "/settings", ico: "⚙︎", label: "设置" },

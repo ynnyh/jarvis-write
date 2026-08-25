@@ -43,8 +43,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="project/:id/:step?" element={<ProjectPage />} />
             {/* 宣传片工坊(独立于小说项目):/promo 列表,/promo/5 工作台 */}
             <Route path="promo/:id?" element={<PromoPage />} />
-            {/* 情绪短片(通用命题):/clips 列表,/clips/7 三选一工作台;小说衍生走项目内「投流」页签 */}
+            {/* 情绪短片 / 灵感工坊:clips 列表与三选一工作台,共用 ClipsPage(按路径分 mode) */}
             <Route path="clips/:id?" element={<ClipsPage />} />
+            <Route path="inspire/:id?" element={<ClipsPage />} />
             <Route path="admin" element={<AdminPage />} />
             <Route path="help" element={<HelpPage />} />
             <Route path="settings" element={<SettingsPage />} />

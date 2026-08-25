@@ -35,6 +35,7 @@ export interface ClipShot {
   seq: number;
   scene_name: string;
   characters: string[];
+  character_desc?: string;
   action_desc: string;
   shot_type: string;
   camera: string;
@@ -43,6 +44,11 @@ export interface ClipShot {
   prompt_cn: string;
   prompt_en: string;
   negative: string;
+}
+
+export interface ClipCharacterCard {
+  name: string;
+  desc: string;
 }
 
 export interface ClipChunk {
@@ -57,6 +63,7 @@ export interface ClipCard {
   emotion_curve: string;
   lines: { speaker: string; text: string; action?: string }[];
   shots: ClipShot[];
+  character_cards?: ClipCharacterCard[];
   punchline: string;
   chunks: ClipChunk[];
   hook_text: string;
@@ -67,6 +74,7 @@ export interface ClipCard {
 export interface MoodClip {
   id: number;
   source_project_id: number | null;
+  mode: string;
   theme: string;
   custom_theme: string;
   theme_display: string;
@@ -92,14 +100,18 @@ export interface MoodClip {
 export const clipsApi = {
   meta: () =>
     req<{
-      themes: ClipTheme[]; durations: number[]; directions: ClipDirection[];
+      themes: ClipTheme[]; plays: ClipTheme[]; durations: number[]; directions: ClipDirection[];
       dialogue_styles: SteeringOption[]; pacings: SteeringOption[]; intensities: SteeringOption[];
     }>("GET", "/api/clips/meta"),
-  list: (projectId?: number) =>
-    req<{ clips: MoodClip[] }>(
-      "GET", `/api/clips${projectId ? `?project_id=${projectId}` : ""}`),
+  list: (projectId?: number, mode?: string) => {
+    const qs = new URLSearchParams();
+    if (projectId) qs.set("project_id", String(projectId));
+    if (mode) qs.set("mode", mode);
+    const q = qs.toString();
+    return req<{ clips: MoodClip[] }>("GET", `/api/clips${q ? `?${q}` : ""}`);
+  },
   create: (body: {
-    theme?: string; custom_theme?: string; duration_s: number; direction: string;
+    mode?: string; theme?: string; custom_theme?: string; duration_s: number; direction: string;
     inspiration?: string; source_project_id?: number;
     dialogue_style?: string; pacing?: string; intensity?: string; style_hints?: string;
   }) => req<{ clip_row: MoodClip }>("POST", "/api/clips", body),
