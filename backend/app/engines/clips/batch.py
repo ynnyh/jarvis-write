@@ -21,17 +21,21 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Chapter, DramaCharacterCard, MoodClip, Project
 from app.engines.consistency.extractor import parse_llm_json
-from app.engines.clips.common import group_chunks, shot_hint, theme_label
+from app.engines.clips.common import group_chunks, shot_hint, steering_block, theme_label
 from app.engines.media.anchors import ensure_style_anchors, merge_negative
 from app.engines.media.directions import direction_directive
 from app.engines.media.text import coerce_int
 from app.llm.router import Task, get_adapter_for
 from app.prompts.clips import (
+    CLIPS_CLICHE_BLACKLIST,
     CLIPS_EXPAND_PROMPT,
     CLIPS_GENERIC_CONTEXT,
     CLIPS_GROUNDING_RULE,
     CLIPS_NOVEL_CONTEXT,
+    CLIPS_STRUCTURE_RULES,
     CLIPS_TAKES_PROMPT,
+    expand_feedback_block,
+    takes_feedback_block,
 )
 
 logger = logging.getLogger(__name__)
@@ -250,12 +254,14 @@ def _build_context(db: Session, clip: MoodClip) -> tuple[str, str, str]:
     """按入口拼背景块。返回 (背景块, 正文节选, 金句红线块)。
 
     节选只在小说衍生入口非空——它同时是「要不要做金句溯源校验」的开关。
+    steering_block(台词风格/节奏/情绪浓度/氛围关键词)对两段提示词同时生效。
     """
     inspiration_block = (
         f"【用户灵感种子(三个本子都要围着它生长,不可偏离)】{clip.inspiration.strip()}\n"
         if clip.inspiration.strip()
         else ""
     )
+    steering = steering_block(clip)
     directive = direction_directive(clip.direction or "live")
 
     if clip.source_project_id:
@@ -272,6 +278,7 @@ def _build_context(db: Session, clip: MoodClip) -> tuple[str, str, str]:
             characters_block=characters,
             duration_s=clip.duration_s,
             direction_directive=directive,
+            steering_block=steering,
             inspiration_block=inspiration_block,
         )
         return context, excerpts, CLIPS_GROUNDING_RULE
@@ -282,13 +289,15 @@ def _build_context(db: Session, clip: MoodClip) -> tuple[str, str, str]:
         theme_label=theme_label(clip),
         duration_s=clip.duration_s,
         direction_directive=directive,
+        steering_block=steering,
         inspiration_block=inspiration_block,
     )
     return context, "", ""
 
 
 async def _expand_one(
-    take: dict, style: dict, duration_s: int, context: str, grounding: str, excerpts: str
+    take: dict, style: dict, duration_s: int, context: str, grounding: str, excerpts: str,
+    feedback: str = "",
 ) -> dict | None:
     """把一条切入展开成完整本子。整发重试 `_EXPAND_ATTEMPTS` 次,仍不成返回 None。
 
@@ -298,9 +307,13 @@ async def _expand_one(
 
     只收普通值、不收 ORM 行:并发协程里碰 ORM 属性,一旦属性已过期就会三条一起
     触发懒加载查询打同一个 session——`database is locked` 的老根因就是这么来的。
+
+    feedback:单条重拍时的用户意见,注入提示词(切入与画风不变,只重展开)。
     """
     prompt = CLIPS_EXPAND_PROMPT.format(
         context_block=context,
+        structure_rules=CLIPS_STRUCTURE_RULES,
+        cliche_blacklist=CLIPS_CLICHE_BLACKLIST,
         style_cn=style["style_cn"] or "(未给出,请自行统一并保持三条一致)",
         style_en=style["style_en"],
         negative=style["negative"],
@@ -310,6 +323,7 @@ async def _expand_one(
         punchline=take.get("punchline") or "(未给出,请自拟一句戳心收尾)",
         duration_s=duration_s,
         shot_hint=shot_hint(duration_s),
+        feedback_block=expand_feedback_block(feedback),
         grounding_rule=grounding,
     )
     for attempt in range(1, _EXPAND_ATTEMPTS + 1):
@@ -327,17 +341,27 @@ async def _expand_one(
     return None
 
 
-async def generate_batch(db: Session, clip: MoodClip, progress=lambda s: None) -> dict:
-    """两段式产三个本子:①定风格 + 三条切入,②三发并行展开。"""
+async def generate_batch(
+    db: Session, clip: MoodClip, progress=lambda s: None, feedback: str = ""
+) -> dict:
+    """两段式产三个本子:①定风格 + 三条切入,②三发并行展开。
+
+    feedback:换一批时的用户意见——连同上一批三条切入的摘要进①的提示词,
+    这批要避开旧方向、落实意见;首跑传空。
+    """
     context, excerpts, grounding = _build_context(db, clip)
 
     # ---- ① 风格卡 + 三条切入(小输出,一发)----
-    progress("AI 正在定画风、想 3 个不同切入…")
+    progress("AI 正在定画风、想 3 个不同切入…" if not feedback.strip()
+             else "AI 正在按你的意见想 3 个新切入…")
     adapter = get_adapter_for(Task.CLIPS_BATCH, timeout=300)
     head = parse_llm_json(
         await adapter.ask(
             CLIPS_TAKES_PROMPT.format(
                 context_block=context,
+                structure_rules=CLIPS_STRUCTURE_RULES,
+                cliche_blacklist=CLIPS_CLICHE_BLACKLIST,
+                feedback_block=takes_feedback_block(clip.candidates or [], feedback),
                 quote_hint=(
                     "本子核心金句在正文里的原句(逐字摘自节选;轻度改写时原句也照抄在此)"
                     if excerpts
@@ -381,6 +405,52 @@ async def generate_batch(db: Session, clip: MoodClip, progress=lambda s: None) -
     clip.status = "generated"
     db.commit()
     return {"candidates": candidates, "style_name": clip.style_name}
+
+
+async def reexpand_batch(
+    db: Session, clip: MoodClip, index: int, feedback: str, progress=lambda s: None
+) -> dict:
+    """单条重拍:保持风格卡与该条切入不变,只重新展开分镜(可带用户意见)。
+
+    换一批(整批重来)与单条重拍的分工:切入方向不对 → 换一批带意见;
+    方向对但执行差(分镜平/台词多/提示词弱)→ 重拍这条。
+    重拍的是已选定的那条时,chosen 重置为未选——内容变了必须重新确认,不静默替换手卡。
+    """
+    candidates = list(clip.candidates or [])
+    if not (0 <= index < len(candidates)):
+        raise ClipBatchError(f"候选序号无效:{index}(共 {len(candidates)} 个)")
+    old = candidates[index]
+    take = {
+        "take": old.get("take") or f"切入{index + 1}",
+        "logline": old.get("logline") or "",
+        "emotion_curve": old.get("emotion_curve") or "",
+        "punchline": old.get("punchline") or "",
+        "hook_text": old.get("hook_text") or "",
+        "quote_source": old.get("quote_source") or "",
+    }
+    style = {
+        "style_cn": clip.style_cn or "",
+        "style_en": clip.style_en or "",
+        "negative": clip.negative or "",
+    }
+    context, excerpts, grounding = _build_context(db, clip)
+    progress(f"AI 正在重拍「{take['take']}」…")
+    cand = await _expand_one(
+        take, style, clip.duration_s, context, grounding, excerpts, feedback=feedback
+    )
+    if cand is None:
+        raise ClipBatchError(
+            f"「{take['take']}」重拍失败(分镜没出来),原候选保持不变,请重试。"
+        )
+    candidates[index] = cand
+    clip.candidates = candidates
+    if clip.chosen == index:
+        # 重拍的是已选定条:旧手卡对应的内容已被替换,必须重新三选一
+        clip.chosen = -1
+        clip.clip = {}
+        clip.status = "generated"
+    db.commit()
+    return {"candidates": candidates}
 
 
 def pick_clip(db: Session, clip: MoodClip, index: int) -> dict:

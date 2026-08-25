@@ -3330,3 +3330,23 @@ body:has(.write-zone.immersive) .pj-cols { grid-template-columns: minmax(0, 1fr)
 .wb-next .btn-sm { margin-left: 8px; vertical-align: baseline; }
 /* 未选集时的占位卡:虚线框提示「先点一集」 */
 .drama-pick-hint { border-style: dashed; }
+
+/* ===== 情绪短片:候选分镜预览 / 重拍意见 / 手卡编辑态 ===== */
+/* 候选卡展开的分镜预览:与手卡同款表格,但整体缩进一级、上加细分界 */
+.clip-preview { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.clip-preview .tbl { font-size: var(--fs-xs); }
+/* 手卡编辑态:台词一行(角色窄列 + 正文宽列 + 删除) */
+.clip-edit-line { display: flex; gap: 8px; margin-bottom: 6px; align-items: center; }
+.clip-edit-line .clip-edit-who { flex: 0 0 96px; }
+.clip-edit-line input { flex: 1; }
+/* 分镜编辑的四小格(场景/景别/运镜/秒) */
+.clip-edit-grid {
+  display: grid; grid-template-columns: 2fr 1fr 1fr 72px;
+  gap: 8px; margin-bottom: 6px;
+}
+.clip-edit-grid + textarea,
+.clip-edit-grid ~ input,
+.clip-edit-grid ~ textarea { margin-bottom: 6px; }
+@media (max-width: 640px) { .clip-edit-grid { grid-template-columns: 1fr 1fr; } }
+/* 工作台里的生成参数折叠区(建后可调:时长/画风/导向) */
+.clip-params { margin-bottom: 12px; }

@@ -25,6 +25,17 @@ DIRECTIONS: list[dict] = [
      "tip": ""},
     {"key": "cyber", "label": "赛博霓虹", "directive": "赛博朋克霓虹风:高饱和冷暖对比、夜景光污染、金属质感",
      "tip": ""},
+    # 情绪短片特调的五档(手作/怀旧系与情绪命题天然亲;三条线共用,增量无破坏)
+    {"key": "watercolor", "label": "手绘水彩绘本", "directive": "手绘水彩绘本风:纸纹底、透明叠色、淡彩留白,温柔手作感",
+     "tip": "治愈/思念/童趣类命题最搭"},
+    {"key": "crayon", "label": "蜡笔涂鸦", "directive": "蜡笔涂鸦风:粗粝笔触、儿童画配色、歪歪扭扭的线条,天真笨拙感",
+     "tip": "童趣/回忆视角好使"},
+    {"key": "papercut", "label": "剪纸拼贴", "directive": "剪纸拼贴风:层叠纸片、硬边剪影、手工质感,舞台式空间",
+     "tip": ""},
+    {"key": "claymation", "label": "黏土定格", "directive": "黏土定格动画风:柔软塑形质感、指纹痕迹、微缩场景、逐帧手感",
+     "tip": ""},
+    {"key": "film_grain", "label": "胶片怀旧颗粒", "directive": "胶片怀旧风:35mm 颗粒、褪色偏色、漏光与划痕、旧照片般的温润",
+     "tip": "回忆/遗憾类命题氛围直接拉满"},
 ]
 _DIRECTION_MAP = {d["key"]: d for d in DIRECTIONS}
 VALID_DIRECTIONS = tuple(_DIRECTION_MAP)

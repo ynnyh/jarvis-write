@@ -1,12 +1,17 @@
 # app/engines/clips/common.py
 # -*- coding: utf-8 -*-
-"""情绪短片引擎公共件:主题目录、序列化、字典版切段(时间轴口径同 media.subtitles)。"""
+"""情绪短片引擎公共件:主题/导向维度目录、序列化、字典版切段(时间轴口径同 media.subtitles)。"""
 from __future__ import annotations
 
 from app.db.models import MoodClip
 from app.engines.media.directions import direction_directive, direction_label
 from app.engines.media.segments import plan_chunks
 from app.engines.media.text import coerce_int
+from app.prompts.clips import (
+    dialogue_style_rule,
+    intensity_rule,
+    pacing_rule,
+)
 
 # 情绪主题目录:key 白名单 + 给提示词的「导演提示」(这个情绪怎么拍才戳)
 CLIP_THEMES: list[dict] = [
@@ -26,13 +31,59 @@ VALID_THEMES = tuple(_THEME_MAP)
 
 VALID_DURATIONS = (15, 30)
 
+# ---- 导向维度(用户可细化的"方向"):目录 key 白名单 + label(前端展示) ----
+# directive 进提示词的部分由 prompts.clips 的 *_rule 函数给(硬约束文案)。
+DIALOGUE_STYLES: list[dict] = [
+    {"key": "auto", "label": "AI 定"},
+    {"key": "voiceover", "label": "旁白独白"},
+    {"key": "dialogue", "label": "对白主导"},
+    {"key": "silent", "label": "无台词"},
+]
+PACINGS: list[dict] = [
+    {"key": "auto", "label": "AI 定"},
+    {"key": "hook_first", "label": "爆点前置"},
+    {"key": "slow_burn", "label": "层层蓄势"},
+    {"key": "twist_end", "label": "结尾反转"},
+]
+INTENSITIES: list[dict] = [
+    {"key": "auto", "label": "AI 定"},
+    {"key": "restrained", "label": "克制留白"},
+    {"key": "standard", "label": "标准"},
+    {"key": "intense", "label": "浓烈直给"},
+]
+VALID_DIALOGUE_STYLES = tuple(t["key"] for t in DIALOGUE_STYLES)
+VALID_PACINGS = tuple(t["key"] for t in PACINGS)
+VALID_INTENSITIES = tuple(t["key"] for t in INTENSITIES)
+
 
 def theme_label(clip: MoodClip) -> str:
-    """主题显示:目录 key → 标签+导演提示;自定义 → 原文。"""
+    """主题显示:目录 key → 标签+导演提示;自定义 → 原文 + 兜底导演提示
+    (自定义主题没有目录 directive 可靠,不补一句"落地成具体场景"就常拍成抽象意象)。"""
     if clip.theme in _THEME_MAP:
         t = _THEME_MAP[clip.theme]
         return f"{t['label']}({t['directive']})"
-    return clip.custom_theme.strip() or "(未定)"
+    custom = clip.custom_theme.strip()
+    if not custom:
+        return "(未定)"
+    return f"{custom}(自由命题:落地成具体场景与人物关系,别拍成抽象意象)"
+
+
+def steering_block(clip: MoodClip) -> str:
+    """用户导向维度 → 提示词硬约束块(两段共用:auto 的维度不出行,零影响)。"""
+    rules = [
+        dialogue_style_rule(getattr(clip, "dialogue_style", "") or ""),
+        pacing_rule(getattr(clip, "pacing", "") or ""),
+        intensity_rule(getattr(clip, "intensity", "") or ""),
+    ]
+    hints = (getattr(clip, "style_hints", "") or "").strip()
+    if hints:
+        rules.append(
+            f"**氛围关键词(必须自然融入画风卡与各格提示词的氛围)**:{hints}"
+        )
+    rules = [r for r in rules if r]
+    if not rules:
+        return ""
+    return "【导向(用户指定,硬约束)】" + ";".join(rules) + "\n"
 
 
 def theme_display(clip: MoodClip) -> str:
@@ -74,6 +125,10 @@ def clip_dict(row: MoodClip, with_candidates: bool = True) -> dict:
         "direction": row.direction or "live",
         "direction_label": direction_label(row.direction or "live"),
         "inspiration": row.inspiration,
+        "dialogue_style": getattr(row, "dialogue_style", "") or "auto",
+        "pacing": getattr(row, "pacing", "") or "auto",
+        "intensity": getattr(row, "intensity", "") or "auto",
+        "style_hints": getattr(row, "style_hints", "") or "",
         "style_name": row.style_name,
         "style_cn": row.style_cn,
         "style_en": row.style_en,

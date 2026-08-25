@@ -344,3 +344,147 @@ def test_delete_rejected_while_generating(client):
     finally:
         with jobs_mod._LOCK:
             jobs_mod._JOBS.pop(jid, None)
+
+
+# ---------- 导向维度(细化"方向")与提示词强化 ----------
+
+class _CaptureAdapter(_PhaseAdapter):
+    """在两段式桩上记录每次收到的提示词(断言注入用)。"""
+    prompts: list[str] = []
+
+    @classmethod
+    def reset(cls):
+        super().reset()
+        cls.prompts = []
+
+    async def ask(self, prompt, system=None):
+        self.prompts.append(prompt)
+        return await super().ask(prompt, system)
+
+
+def _mk_clip(client, headers, extra=None):
+    body = {"theme": "healing", "duration_s": 15, "direction": "watercolor"}
+    body.update(extra or {})
+    r = client.post("/api/clips", headers=headers, json=body)
+    assert r.status_code == 200, r.text
+    return r.json()["clip_row"]["id"]
+
+
+def test_steering_fields_roundtrip_and_injection(client):
+    """四个导向维度:建卡回显、非法值 400、硬约束与氛围关键词进两段提示词,
+    结构铁律与俗套黑名单必须出现在正文里(早年只写在 docstring,模型看不见)。"""
+    headers = _auth(client, "clips_steer")
+    r = client.post("/api/clips", headers=headers, json={
+        "theme": "healing", "duration_s": 15, "direction": "watercolor",
+        "dialogue_style": "silent", "pacing": "twist_end", "intensity": "restrained",
+        "style_hints": "雨夜便利店、暖光"})
+    assert r.status_code == 200
+    row = r.json()["clip_row"]
+    assert row["dialogue_style"] == "silent"
+    assert row["pacing"] == "twist_end"
+    assert row["intensity"] == "restrained"
+    assert row["style_hints"] == "雨夜便利店、暖光"
+
+    r = client.post("/api/clips", headers=headers, json={
+        "theme": "healing", "duration_s": 15, "direction": "live", "dialogue_style": "nope"})
+    assert r.status_code == 400
+
+    cid = row["id"]
+    _CaptureAdapter.reset()
+    with patch("app.engines.clips.batch.get_adapter_for",
+               return_value=_CaptureAdapter(_HEAD, _EXPAND)):
+        r = client.post(f"/api/clips/{cid}/generate", headers=headers, json={})
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    takes_prompt = _CaptureAdapter.prompts[0]
+    assert "无台词" in takes_prompt
+    assert "结尾反转" in takes_prompt
+    assert "克制留白" in takes_prompt
+    assert "雨夜便利店、暖光" in takes_prompt
+    assert "结构铁律" in takes_prompt and "第一格 2 秒内钩住" in takes_prompt
+    assert "俗套黑名单" in takes_prompt
+    # ②的展开提示词同样带铁律与导向块(与①同一份 context)
+    assert "结构铁律" in _CaptureAdapter.prompts[1]
+    assert "无台词" in _CaptureAdapter.prompts[1]
+
+
+def test_generate_feedback_reaches_takes_prompt(client):
+    """换一批带意见:上一批切入摘要 + 用户意见进①提示词,这批避开旧方向。"""
+    headers = _auth(client, "clips_fb")
+    cid = _mk_clip(client, headers)
+
+    _CaptureAdapter.reset()
+    with patch("app.engines.clips.batch.get_adapter_for",
+               return_value=_CaptureAdapter(_HEAD, _EXPAND)):
+        r = client.post(f"/api/clips/{cid}/generate", headers=headers, json={})
+        assert _wait_job(client, headers, r.json()["job_id"])["status"] == "done"
+        base = len(_CaptureAdapter.prompts)
+        r = client.post(f"/api/clips/{cid}/generate", headers=headers,
+                        json={"feedback": "金句太鸡汤,要更扎心的"})
+        assert _wait_job(client, headers, r.json()["job_id"])["status"] == "done"
+    second_takes = _CaptureAdapter.prompts[base]
+    assert "用户意见" in second_takes and "金句太鸡汤" in second_takes
+    assert "上一批" in second_takes and "未说出口的道歉" in second_takes
+    assert "用户意见" not in _CaptureAdapter.prompts[0]  # 首跑无反馈块
+
+
+def test_reexpand_replaces_target_only(client):
+    """单条重拍:只换目标条的分镜,切入/画风与其他候选不动;重拍已选条则重置三选一。"""
+    headers = _auth(client, "clips_reexp")
+    cid = _mk_clip(client, headers)
+    _PhaseAdapter.reset()
+    with patch("app.engines.clips.batch.get_adapter_for",
+               return_value=_PhaseAdapter(_HEAD, _EXPAND)):
+        r = client.post(f"/api/clips/{cid}/generate", headers=headers, json={})
+        assert _wait_job(client, headers, r.json()["job_id"])["status"] == "done"
+    row = client.get(f"/api/clips/{cid}", headers=headers).json()["clip_row"]
+    before0 = row["candidates"][0]
+    assert client.post(f"/api/clips/{cid}/pick", headers=headers, json={"index": 1}).status_code == 200
+
+    _CaptureAdapter.reset()
+    with patch("app.engines.clips.batch.get_adapter_for",
+               return_value=_CaptureAdapter(_HEAD, _expand("重拍后的分镜锚"))):
+        r = client.post(f"/api/clips/{cid}/reexpand", headers=headers,
+                        json={"index": 1, "feedback": "台词砍半"})
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    # 重拍意见进了②的提示词;①没被重跑
+    assert any("用户对本条的意见" in p and "台词砍半" in p for p in _CaptureAdapter.prompts)
+    assert _CaptureAdapter.calls["takes"] == 0
+
+    row = client.get(f"/api/clips/{cid}", headers=headers).json()["clip_row"]
+    assert "重拍后的分镜锚" in row["candidates"][1]["shots"][0]["prompt_cn"]
+    assert row["candidates"][0]["shots"][0]["prompt_cn"] == before0["shots"][0]["prompt_cn"]
+    # 重拍的是已选条(原 chosen=1):重置为未选,必须重新三选一
+    assert row["chosen"] == -1 and row["status"] == "generated"
+
+
+def test_save_clip_card_recalc_and_sync(client):
+    """手卡编辑保存:归一化入库、切段按新分镜重算、候选同步;未选定时拒绝。"""
+    headers = _auth(client, "clips_save")
+    cid = _mk_clip(client, headers)
+    r = client.put(f"/api/clips/{cid}/clip", headers=headers, json={"card": {"shots": []}})
+    assert r.status_code == 400  # 未选定不能编辑
+
+    _PhaseAdapter.reset()
+    with patch("app.engines.clips.batch.get_adapter_for",
+               return_value=_PhaseAdapter(_HEAD, _EXPAND)):
+        r = client.post(f"/api/clips/{cid}/generate", headers=headers, json={})
+        assert _wait_job(client, headers, r.json()["job_id"])["status"] == "done"
+    assert client.post(f"/api/clips/{cid}/pick", headers=headers, json={"index": 0}).status_code == 200
+
+    card = client.get(f"/api/clips/{cid}", headers=headers).json()["clip_row"]["clip"]
+    card["punchline"] = "改过的金句。"
+    card["shots"] = card["shots"][:1]
+    card["shots"][0]["duration_s"] = 4
+    card["lines"] = [{"speaker": "旁白", "text": "改过的台词", "action": ""}]
+    r = client.put(f"/api/clips/{cid}/clip", headers=headers, json={"card": card})
+    assert r.status_code == 200, r.text
+    row = r.json()["clip_row"]
+    saved = row["clip"]
+    assert saved["punchline"] == "改过的金句。"
+    assert len(saved["shots"]) == 1 and saved["shots"][0]["duration_s"] == 4
+    # 切段按新分镜重算:一格 4s → 一段
+    assert len(saved["chunks"]) == 1 and saved["chunks"][0]["end_s"] == 4
+    # 候选与手卡保持同步
+    assert row["candidates"][0]["punchline"] == "改过的金句。"

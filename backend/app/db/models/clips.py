@@ -42,6 +42,15 @@ class MoodClip(Base, TimestampMixin):
     direction: Mapped[str] = mapped_column(String(40), default="live")
     # 一句话灵感种子(如「异地恋的最后一通电话」),可空
     inspiration: Mapped[str] = mapped_column(Text, default="")
+    # ===== 导向维度(用户可细化的"方向",auto=AI 自定;目录见 engines/clips/common.py)=====
+    # 台词风格:auto/voiceover(旁白独白)/dialogue(对白主导)/silent(无台词)
+    dialogue_style: Mapped[str] = mapped_column(String(20), default="auto", server_default="auto")
+    # 节奏:auto/hook_first(爆点前置)/slow_burn(层层蓄势)/twist_end(结尾反转)
+    pacing: Mapped[str] = mapped_column(String(20), default="auto", server_default="auto")
+    # 情绪浓度:auto/restrained(克制留白)/standard/intense(浓烈直给)
+    intensity: Mapped[str] = mapped_column(String(20), default="auto", server_default="auto")
+    # 氛围关键词自由文本(≤80 字,注入风格卡:如「雨夜便利店、暖光、旧磁带」),可空
+    style_hints: Mapped[str] = mapped_column(String(160), default="", server_default="")
     # ===== 风格卡(批产时一并生成,三个候选共用)=====
     style_name: Mapped[str] = mapped_column(String(60), default="")
     style_cn: Mapped[str] = mapped_column(Text, default="")

@@ -28,6 +28,8 @@ async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 
 
 export interface ClipTheme { key: string; label: string; directive: string }
 export interface ClipDirection { key: string; label: string; tip: string }
+/** 导向维度目录项(台词风格/节奏/情绪浓度同形) */
+export interface SteeringOption { key: string; label: string }
 
 export interface ClipShot {
   seq: number;
@@ -72,6 +74,10 @@ export interface MoodClip {
   direction: string;
   direction_label: string;
   inspiration: string;
+  dialogue_style: string;
+  pacing: string;
+  intensity: string;
+  style_hints: string;
   style_name: string;
   style_cn: string;
   style_en: string;
@@ -85,22 +91,33 @@ export interface MoodClip {
 
 export const clipsApi = {
   meta: () =>
-    req<{ themes: ClipTheme[]; durations: number[]; directions: ClipDirection[] }>(
-      "GET", "/api/clips/meta"),
+    req<{
+      themes: ClipTheme[]; durations: number[]; directions: ClipDirection[];
+      dialogue_styles: SteeringOption[]; pacings: SteeringOption[]; intensities: SteeringOption[];
+    }>("GET", "/api/clips/meta"),
   list: (projectId?: number) =>
     req<{ clips: MoodClip[] }>(
       "GET", `/api/clips${projectId ? `?project_id=${projectId}` : ""}`),
   create: (body: {
     theme?: string; custom_theme?: string; duration_s: number; direction: string;
     inspiration?: string; source_project_id?: number;
+    dialogue_style?: string; pacing?: string; intensity?: string; style_hints?: string;
   }) => req<{ clip_row: MoodClip }>("POST", "/api/clips", body),
   get: (id: number) => req<{ clip_row: MoodClip }>("GET", `/api/clips/${id}`),
-  patch: (id: number, body: { inspiration?: string; duration_s?: number; direction?: string }) =>
-    req<{ clip_row: MoodClip }>("PATCH", `/api/clips/${id}`, body),
-  generate: (id: number) =>
-    req<{ job_id: string }>("POST", `/api/clips/${id}/generate`, undefined, LLM_TIMEOUT),
+  patch: (id: number, body: {
+    inspiration?: string; duration_s?: number; direction?: string;
+    dialogue_style?: string; pacing?: string; intensity?: string; style_hints?: string;
+  }) => req<{ clip_row: MoodClip }>("PATCH", `/api/clips/${id}`, body),
+  generate: (id: number, feedback?: string) =>
+    req<{ job_id: string }>(
+      "POST", `/api/clips/${id}/generate`, feedback ? { feedback } : {}, LLM_TIMEOUT),
+  reexpand: (id: number, index: number, feedback?: string) =>
+    req<{ job_id: string }>(
+      "POST", `/api/clips/${id}/reexpand`, { index, feedback: feedback || "" }, LLM_TIMEOUT),
   pick: (id: number, index: number) =>
     req<{ clip_row: MoodClip }>("POST", `/api/clips/${id}/pick`, { index }),
+  saveCard: (id: number, card: ClipCard) =>
+    req<{ clip_row: MoodClip }>("PUT", `/api/clips/${id}/clip`, { card }),
   remove: (id: number) => req<{ ok: boolean }>("DELETE", `/api/clips/${id}`),
   export: (id: number, format: "md" | "srt" | "json") => {
     const tk = token.get();
