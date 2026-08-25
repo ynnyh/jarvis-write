@@ -288,6 +288,11 @@ export interface Project {
   // 列表页进度聚合(仅 GET /projects 填充)
   written_chapters?: number;
   total_words?: number;
+  // 架构状态(只读派生):是否已有架构 / 架构是否仍挂在旧概念上(建议重新生成)
+  has_architecture?: boolean;
+  architecture_stale?: boolean;
+  // 架构已重写、但大纲仍挂在旧架构上(True=建议重铺蓝图或清空重来)
+  outline_stale?: boolean;
   // 卷纲(滚动规划指南针,长书才有)
   macro_plan?: { start: number; end: number; goal: string }[] | null;
   // 文风备忘(随书累积的文风基线;翻新面板可手动编辑,后续生成以此为底继续累积)
@@ -301,6 +306,8 @@ export interface Project {
 export interface Architecture {
   core_seed: string; character_dynamics: string;
   world_building: string; plot_architecture: string; version: number;
+  // 概念变更后置 true(架构仍挂在旧概念上);重新生成架构后复位 false
+  concept_stale?: boolean;
 }
 export interface Outline {
   id: number; chapter_number: number; title: string; chapter_role: string;
@@ -776,6 +783,10 @@ export const api = {
     req<Project>("PATCH", `/api/projects/${id}`, { title }),
   deleteProject: (id: number) =>
     req<{ ok: boolean; deleted_chapters: number }>("DELETE", `/api/projects/${id}`),
+  // 清空已写正文与大纲(保留架构/概念/DNA/简介):架构重写后「从新架构重来」用的破坏性操作
+  resetProjectContent: (id: number) =>
+    req<{ ok: boolean; deleted_chapters: number; content_reset: boolean }>(
+      "DELETE", `/api/projects/${id}/content`),
   // 本项目正在运行的后台任务(切走再回来时重新接上轮询)
   runningJobs: (id: number) =>
     req<{ jobs: { job_id: string; kind: string; stage: string }[] }>(
@@ -795,8 +806,8 @@ export const api = {
   ) => sseStream(`/api/jobs/${jobId}/live?cursor=${cursor}`, { method: "GET" }, onFrame, signal),
 
   // ---- 异步 job 版长任务(返回 job_id,配合 pollJob/任务中心) ----
-  inspireAsync: (spark: string, tendency: Tendency, count = 4, dna: StoryDNA | null = null) =>
-    req<{ job_id: string }>("POST", "/api/inspire/async", { spark, tendency, count, dna }),
+  inspireAsync: (spark: string, tendency: Tendency, count = 4, dna: StoryDNA | null = null, avoid?: Concept | null) =>
+    req<{ job_id: string }>("POST", "/api/inspire/async", { spark, tendency, count, dna, avoid: avoid && !conceptIsEmpty(avoid) ? avoid : undefined }),
   refineConceptAsync: (concept: Concept, directive: string, tendency: Tendency = {}, dna: StoryDNA | null = null) =>
     req<{ job_id: string }>("POST", "/api/inspire/refine-async", { concept, directive, tendency, dna }),
   polishChapterAsync: (pid: number, n: number, tendency: Tendency, directive = "") =>
@@ -816,8 +827,8 @@ export const api = {
   generateAnthemAsync: (pid: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/anthem/generate`, {}),
 
-  inspire: (spark: string, tendency: Tendency, count = 4, dna: StoryDNA | null = null) =>
-    req<{ ideas: Concept[] }>("POST", "/api/inspire", { spark, tendency, count, dna }, LLM_TIMEOUT),
+  inspire: (spark: string, tendency: Tendency, count = 4, dna: StoryDNA | null = null, avoid?: Concept | null) =>
+    req<{ ideas: Concept[] }>("POST", "/api/inspire", { spark, tendency, count, dna, avoid: avoid && !conceptIsEmpty(avoid) ? avoid : undefined }, LLM_TIMEOUT),
   refineConcept: (concept: Concept, directive: string, tendency: Tendency = {}, dna: StoryDNA | null = null) =>
     req<RefineResult>("POST", "/api/inspire/refine", { concept, directive, tendency, dna }, LLM_TIMEOUT),
   chatConcept: (messages: ChatTurn[], concept: Concept | null, tendency: Tendency = {}, dna: StoryDNA | null = null) =>

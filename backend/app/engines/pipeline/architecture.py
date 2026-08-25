@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Architecture, Project
+from app.db.models import Architecture, Chapter, Outline, Project
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import render_style_block
 from app.llm.base import LLMAdapter, LLMMessage, complete_text_with_budget
@@ -183,6 +183,7 @@ def save_architecture(
 ) -> Architecture:
     """架构落库:已有则覆盖并 version+1,否则新建。"""
     arch = project.architecture
+    prev_text = ""
     if arch is None:
         arch = Architecture(project_id=project.id, version=1)
         # 通过关系赋值,同时更新 session 里已缓存的 project.architecture
@@ -190,15 +191,55 @@ def save_architecture(
         db.add(arch)
     else:
         arch.version += 1
+        prev_text = "\n".join(
+            (arch.core_seed, arch.character_dynamics, arch.world_building, arch.plot_architecture)
+        )
 
     arch.core_seed = result.core_seed
     arch.character_dynamics = result.character_dynamics
     arch.world_building = result.world_building
     arch.plot_architecture = result.plot_architecture
+    # 已按（可能刚换过的）最新概念重生成，消退「基于旧概念」标记
+    arch.concept_stale = False
+
+    # 架构真正重写(内容变了)且已有大纲 → 整组大纲落到旧架构上:标 outline_stale,
+    # 并把已写正文标失配,前端大纲页据此让作者选「重铺/清空」。首次建架构无大纲则跳过。
+    if arch.version > 1:
+        new_text = "\n".join(
+            (
+                arch.core_seed,
+                arch.character_dynamics,
+                arch.world_building,
+                arch.plot_architecture,
+            )
+        )
+        old_text = prev_text
+        if new_text.strip() != (old_text or "").strip() and _has_outlines(db, project.id):
+            project.outline_stale = True
+            _mark_written_chapters_stale(db, project.id)
 
     project.status = "outlining"
     db.flush()
     return arch
+
+
+def _has_outlines(db: Session, project_id: int) -> bool:
+    return (
+        db.query(Outline.id)
+        .filter(Outline.project_id == project_id)
+        .first()
+        is not None
+    )
+
+
+def _mark_written_chapters_stale(db: Session, project_id: int) -> None:
+    """架构换了,旧正文本体对不上了:把所有已写章(有 final_content)标失配。"""
+    db.query(Chapter).filter(
+        Chapter.project_id == project_id, Chapter.final_content != ""
+    ).update(
+        {Chapter.is_stale: True, Chapter.status: "stale"},
+        synchronize_session=False,
+    )
 
 
 # =============== 架构研讨(对话式,聊清楚不满意在哪 → 蒸馏成额外要求)===============

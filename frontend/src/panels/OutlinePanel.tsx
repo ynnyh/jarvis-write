@@ -141,6 +141,26 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
     } finally { if (!ctrl.signal.aborted) setBusy(""); }
   }
 
+  // 清空已写正文与大纲(保留架构/概念/DNA/简介等「上流输入」):架构重写后想从新架构整篇
+  // 重来时的最后手段。破坏性操作,弹窗确认,防止误点把已写好的书冲掉。
+  async function resetContentAll() {
+    const total = outlines.length;
+    const ok = await confirmDialog({
+      title: "清空正文与大纲,从新架构重来?",
+      body: `会删除已写的全部章节与 ${total} 章蓝图(含正文历史/摘要/事实账本/伏笔,不可恢复)。架构、概念、DNA、简介、手法卡会保留。要重写成新架构的版本,通常需要这么做。`,
+      confirmText: "清空并重来",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy("正在清空正文与大纲…"); setErr(""); setFlash("");
+    try {
+      const r = await api.resetProjectContent(pid);
+      await onChanged();
+      setShowGen(true); setEditingNum(null); setImpact(null);
+      setFlash(`已清空:删除了 ${r.deleted_chapters} 章正文。已打开「生成蓝图」,按新架构重新开始。`);
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
+  }
+
   function startEdit(o: Outline) {
     setEditingNum(o.chapter_number);
     setExpanded((prev) => new Set(prev).add(o.chapter_number));
@@ -301,6 +321,22 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
           每章都可直接编辑。动了情节的"大改"会自动分析下游影响,由你决定级联范围——不会出现"这里改了那里还是旧的"。
           {target > 40 && !outlines.length && "长篇采用滚动规划:先出全书卷纲定方向,蓝图只铺第一卷,写到卷尾再按实际剧情展开下一卷——远期章节不再空洞跑偏。"}
         </div>
+        {project?.outline_stale && outlines.length > 0 && (
+          <div className="card card-warn mt-3">
+            <b>⚠ 架构已重新生成,这份蓝图还挂在旧架构上</b>
+            <div className="card-desc mt-1">
+              你重写了顶层架构,但下面的章节蓝图(以及据此写出的正文)仍是按旧架构生成的,已经对不上了。二选一:重新铺蓝图,或清空正文与大纲从新架构重来。
+            </div>
+            <div className="actions mt-2">
+              <button className="primary" disabled={!!busy} onClick={() => setShowGen(true)}>
+                按新架构重铺蓝图
+              </button>
+              <button className="btn-danger" disabled={!!busy} onClick={resetContentAll}>
+                清空正文与蓝图,从新架构重来
+              </button>
+            </div>
+          </div>
+        )}
         {showMacro && !!project?.macro_plan?.length && (
           <div className="macro-plan mt-3">
             {project.macro_plan.map((s, i) => (

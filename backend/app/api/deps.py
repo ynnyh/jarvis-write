@@ -11,7 +11,10 @@ from app.auth import assert_project_owner
 from app.db.models import (
     Architecture,
     Chapter,
+    ChapterIssue,
+    ChapterState,
     ChapterSummary,
+    ChapterVersion,
     DramaCharacterCard,
     DramaEpisode,
     DramaProductionPack,
@@ -100,3 +103,54 @@ def delete_project_cascade(db: Session, project: Project) -> int:
     storage.delete_project_dir(project_id)
 
     return deleted_chapters
+
+
+def reset_project_content(db: Session, project: Project) -> int:
+    """清空「已写正文与大纲」及以旧正文为源抽取的派生数据,可据此从新架构重来。
+
+    保留:架构 / 概念 / DNA / 宪法 / 简介 / 全局倾向 / 手法卡 / 卷纲 / 文风备忘。
+    这些是创作期的「上流输入」,架构重写后仍有参考价值;真正对不上的是正文与大纲。
+    派生数据(摘要 / 事实账本 / 伏笔 / 章节契约 / 正文历史)都由旧正文抽取,一并清掉,
+    避免残留旧设定误导后续生成。状态复位到 outlining(等用户重铺蓝图)。返回删的章节数。
+    """
+    project_id = project.id
+
+    chapter_ids = [
+        row.id
+        for row in db.query(Chapter.id).filter(Chapter.project_id == project_id)
+    ]
+    if chapter_ids:
+        # 这些表按 chapter_id 挂靠;SQLite 默认不开外键,先删引用再删章本体
+        for model in (ChapterVersion, ChapterState, ChapterIssue):
+            db.query(model).filter(model.chapter_id.in_(chapter_ids)).delete(
+                synchronize_session=False
+            )
+    outline_ids = [
+        row.id
+        for row in db.query(Outline.id).filter(Outline.project_id == project_id)
+    ]
+    if outline_ids:
+        db.query(OutlineVersion).filter(
+            OutlineVersion.outline_id.in_(outline_ids)
+        ).delete(synchronize_session=False)
+
+    db.query(ChapterSummary).filter(
+        ChapterSummary.project_id == project_id
+    ).delete(synchronize_session=False)
+    for model in (
+        KnowledgeState,
+        Fact,
+        Relationship,
+        Entity,
+        Foreshadowing,
+        Outline,
+        Chapter,
+    ):
+        db.query(model).filter(model.project_id == project_id).delete(
+            synchronize_session=False
+        )
+
+    project.status = "outlining"
+    project.outline_stale = False
+    db.commit()
+    return len(chapter_ids)

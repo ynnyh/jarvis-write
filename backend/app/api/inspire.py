@@ -67,6 +67,8 @@ class InspireRequest(BaseModel):
     count: int = Field(default=4, ge=2, le=6)
     # 故事 DNA / 本书基因(坐标卡产出):注入生成 + 驱动题材硬门
     dna: StoryDNA | None = None
+    # 上一版跑偏的概念:注入「本轮绝对不沿用这些设定的方向」,让重出的一批明显不同
+    avoid: Concept | None = None
 
 
 class InspireResponse(BaseModel):
@@ -80,7 +82,8 @@ def _dna_of(dna: StoryDNA | None) -> StoryDNA:
 
 
 async def _generate_ideas(
-    req: InspireRequest, dna_block: str, count: int, avoid_labels: tuple[str, ...] = ()
+    req: InspireRequest, dna_block: str, count: int,
+    avoid_labels: tuple[str, ...] = (), avoid_concept: Concept | None = None,
 ) -> tuple[list[Concept], str]:
     """生成一批概念:味道锚追加进 style_block(不占模板占位符);重生时叠加「本轮绝不能有」。
 
@@ -93,6 +96,15 @@ async def _generate_ideas(
             "\n【上一轮生成跑偏了,本轮绝对不能再出现以下套路元素】:"
             + "、".join(sorted(avoid_labels))
             + "\n"
+        )
+    if avoid_concept is not None and not avoid_concept.is_empty():
+        # 推倒重来:把旧概念的关键设定喂进去当「本轮不要的方向」,逼模型打散重想。
+        # 不注入 topic 一句话(那本来就窄),注入的是概念细项,差异才拉得开。
+        style_block += (
+            "\n【上一版故事概念已确认跑偏,本轮请彻底换方向,绝对不要再沿用以下设定】\n"
+            + avoid_concept.render()
+            + "\n【要求】主角身份 / 世界观背景 / 核心冲突 / 核心钩子 都别落在上面的老设定"
+              "框架里——彻底打散,重想一批不一样的故事。\n"
         )
     prompt = INSPIRE_PROMPT.format(
         spark=req.spark.strip() or "(空白,自由发挥)",
@@ -190,7 +202,9 @@ async def _inspire_impl(req: InspireRequest) -> InspireResponse:
     story = _dna_of(req.dna)
     dna_block = dna_block_of(story)
     try:
-        ideas, comparison = await _generate_ideas(req, dna_block, req.count)
+        ideas, comparison = await _generate_ideas(
+            req, dna_block, req.count, avoid_concept=req.avoid
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"灵感生成失败: {exc}") from exc
 

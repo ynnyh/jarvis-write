@@ -10,7 +10,11 @@ import { toast } from "../ui/Toaster";
 import { useJobReconnect } from "../hooks/useJobReconnect";
 import { useDiscussChat } from "../hooks/useDiscussChat";
 
-interface Props { project: Project; arch: Architecture | null; onChanged: () => Promise<void>; hasContent?: boolean; }
+interface Props {
+  project: Project; arch: Architecture | null; onChanged: () => Promise<void>; hasContent?: boolean;
+  // 重生成架构的代价提示用:现有大纲/正文规模
+  outlinesCount?: number; writtenCount?: number;
+}
 
 const BLOCKS: { key: keyof Architecture; label: string; hint: string }[] = [
   { key: "core_seed", label: "核心种子", hint: "一句话故事本质:显性冲突 + 潜在危机" },
@@ -27,7 +31,7 @@ const PROFILE_FIELDS: { key: keyof StyleProfile; label: string; ph: string }[] =
   { key: "other", label: "其他创作主张", ph: "如:每章结尾留反转;对话推动剧情,少旁白" },
 ];
 
-export default function ArchPanel({ project, arch, onChanged, hasContent }: Props) {
+export default function ArchPanel({ project, arch, onChanged, hasContent, outlinesCount = 0, writtenCount = 0 }: Props) {
   const [form, setForm] = useState<Record<string, string>>({});
   const [dirty, setDirty] = useState(false);
   const [tendency, setTendency] = useState<Tendency>({});
@@ -119,10 +123,16 @@ export default function ArchPanel({ project, arch, onChanged, hasContent }: Prop
 
   async function regenerate(withDirective = "") {
     // 覆盖现有架构是重操作:已有架构时二次确认(未保存的手改也会被覆盖)
+    const hadArch = !!arch;
     if (arch) {
+      // 代价账:重生成架构会连带让现有大纲/正文落到旧架构上
+      const impact = [
+        outlinesCount ? `${outlinesCount} 章大纲` : "",
+        writtenCount ? `${writtenCount} 章正文本体` : "",
+      ].filter(Boolean).join("、") || "大纲";
       const ok = await confirmDialog({
         title: withDirective ? "按研讨要求重新生成架构?" : "重新生成整个架构?",
-        body: "现有四块内容(含未保存的手动修改)将被 AI 新生成的结果覆盖。已生成的大纲/正文不受影响,但可能与新架构失配。",
+        body: `现有四块内容(含未保存的手动修改)将被 AI 新结果覆盖。重写后,现有 ${impact}将标为「基于旧架构/失配」——可随后重铺蓝图,或清空正文与蓝图重来。`,
         confirmText: "重新生成",
         danger: true,
       });
@@ -140,9 +150,14 @@ export default function ArchPanel({ project, arch, onChanged, hasContent }: Prop
       });
       if (ctrl.signal.aborted) return;
       await onChanged();
-      setMsg(withDirective
-        ? "已按研讨要求重新生成架构。还不满意可以继续聊、再生成。"
-        : "架构已生成。下一步:去「大纲」生成章节蓝图。");
+      setMsg(
+        hadArch ? (withDirective
+          ? "已按研讨要求重新生成架构。若之前已铺过大纲/写过正文,它们在旧架构上——去「大纲」步骤选择重铺蓝图或清空重来。"
+          : "架构已重新生成。若之前已铺过大纲/写过正文,它们在旧架构上——去「大纲」步骤选择重铺蓝图或清空重来。")
+          : (withDirective
+            ? "已按研讨要求生成架构。下一步:去「大纲」生成章节蓝图。"
+            : "架构已生成。下一步:去「大纲」生成章节蓝图。"),
+      );
       if (withDirective) setDiscussOpen(false); // 采纳后收起研讨面板
     } catch (e) {
       if (!ctrl.signal.aborted) setErr(errMsg(e));
@@ -226,6 +241,7 @@ export default function ArchPanel({ project, arch, onChanged, hasContent }: Prop
         <div className="card-head">
           <h2 className="grow">
             顶层架构 {arch && <span className="badge">v{arch.version}</span>}
+            {arch?.concept_stale && <span className="badge warn" style={{ marginLeft: 8 }}>基于旧概念</span>}
           </h2>
           {arch && dirty && (
             <button className="primary" disabled={!!busy} onClick={save}>
@@ -233,6 +249,14 @@ export default function ArchPanel({ project, arch, onChanged, hasContent }: Prop
             </button>
           )}
         </div>
+        {arch?.concept_stale && (
+          <div className="card card-warn mt-2">
+            <b>⚠ 概念已更换,这份架构还挂在旧概念上</b>
+            <div className="card-desc mt-1">
+              你换了故事概念,但下面四块仍是按旧概念生成的。建议「重新生成整个架构」按新概念重写;否则后面的大纲/正文会继续沿用旧设定。
+            </div>
+          </div>
+        )}
         <div className="card-desc mt-2">
           {arch
             ? "四块内容都可以直接改——这是你的书,AI 只是初稿。改完记得保存。"

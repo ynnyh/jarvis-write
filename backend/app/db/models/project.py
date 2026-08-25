@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
@@ -77,10 +77,23 @@ class Project(Base, TimestampMixin):
     world_rules: Mapped[str | None] = mapped_column(Text, nullable=True)
     # draft / outlining / writing / done
     status: Mapped[str] = mapped_column(String(20), default="draft")
+    # 架构已重写、但大纲仍挂在旧架构上 → True:前端大纲页据此告知「保留或清空重来」。
+    # 与 Architecture.concept_stale 同一模式,但作用于大纲整组(架构一变影响全部章节蓝图)。
+    # 重新铺蓝图(save_blueprint)自动复位 False。存量行为零变化(默认 False)。
+    outline_stale: Mapped[bool] = mapped_column(Boolean, default=False)
 
     architecture: Mapped["Architecture | None"] = relationship(
         back_populates="project", uselist=False, cascade="all, delete-orphan"
     )
+
+    # 只读派生属性,供 ProjectOut 透出(前端据此做「已有架构?」「需重生成?」判断)
+    @property
+    def has_architecture(self) -> bool:
+        return self.architecture is not None
+
+    @property
+    def architecture_stale(self) -> bool:
+        return bool(self.architecture and self.architecture.concept_stale)
 
 
 class Architecture(Base):
@@ -97,5 +110,8 @@ class Architecture(Base):
     world_building: Mapped[str] = mapped_column(Text, default="")
     plot_architecture: Mapped[str] = mapped_column(Text, default="")
     version: Mapped[int] = mapped_column(Integer, default=1)
+    # 概念变更后,旧架构仍挂在旧概念上(True=「基于旧概念,建议重新生成架构」)。
+    # 重新生成架构(save_architecture)时自动复位 False。详见 app/engines/pipeline/architecture.py
+    concept_stale: Mapped[bool] = mapped_column(Boolean, default=False)
 
     project: Mapped[Project] = relationship(back_populates="architecture")

@@ -11,7 +11,7 @@ import { AppAction, dispatchAction, isAppAction, registerActionHandler } from ".
 import CommandPalette from "../ui/CommandPalette";
 import { setThemePref } from "../theme";
 import { isDesktop, onMenuAction, openReadWindow } from "../desktop";
-import { downloadFile } from "../api";
+import { api, downloadFile } from "../api";
 import { toast } from "../ui/Toaster";
 import { errMsg } from "../pollJob";
 import InspirePanel from "../panels/InspirePanel";
@@ -22,6 +22,7 @@ import BoardPanel, { BoardTab } from "../panels/BoardPanel";
 import AuditPanel from "../panels/AuditPanel";
 import RefreshPanel from "../panels/RefreshPanel";
 import SubmissionPanel from "../panels/SubmissionPanel";
+import ReworkDialog from "../panels/ReworkDialog";
 import DramaPanel from "../panels/drama/DramaPanel";
 // 「投流」页签的列表件也按需加载:静态 import 会把 ClipsPage 模块并进本页的大 chunk,
 // 直访 /clips 路由的分包(main.tsx 里 React.lazy)就跟着失效
@@ -61,6 +62,59 @@ const BOOK_TABS: { key: BookTab; label: string }[] = [
 const PROJECT_STATUS_CN: Record<string, string> = { draft: "草稿", writing: "连载中" };
 
 interface Guide { what: string; ai: string; done: string }
+interface BookStatusProps {
+  project: NonNullable<ReturnType<typeof useProject>["data"]>;
+  arch: ReturnType<typeof useArchitecture>["data"] | null;
+  outlines: NonNullable<ReturnType<typeof useOutlines>["data"]>;
+  doneCount: number; totalWords: number; staleCount: number;
+  active: string | null;
+  onGo: (key: string) => void;
+  onOpenRework: () => void;
+}
+
+// 本书四层状态:概念 → 架构 → 大纲 → 正文 一眼看完,哪层挂旧版本当场标红。
+// 回答用户的「现在整本书卡在哪、有几层是旧的、要从哪重来」——这个跨层视角
+// 原来散在各面板里(架构页/大纲页/写作页),这里收拢成常驻的一行。
+function BookStatus({ project, arch, outlines, doneCount, totalWords, staleCount, active, onGo, onOpenRework }: BookStatusProps) {
+  const target = project?.target_chapters ?? 30;
+  const layers = [
+    { key: "inspire", label: "概念", sub: project?.topic ? "已定" : "未定", down: !!project?.topic, hold: "", stale: false, staleText: "" },
+    { key: "arch", label: "架构", sub: arch ? `v${arch.version}` : "未生成", down: !!arch, hold: "基于旧概念", stale: !!(arch && arch.concept_stale), staleText: "重生成架构" },
+    { key: "outline", label: "大纲", sub: outlines.length ? `${outlines.length}/${target} 章` : "未生成", down: outlines.length > 0, hold: "基于旧架构", stale: !!project?.outline_stale, staleText: "重铺或清空" },
+    { key: "write", label: "正文", sub: doneCount ? `${doneCount} 章 · ${totalWords} 字` : "未开始", down: doneCount > 0, hold: `${staleCount} 章失配`, stale: staleCount > 0, staleText: "重写失配章" },
+  ];
+  const staleAny = layers.some((l) => l.stale);
+  return (
+    <div className="book-status">
+      <div className="book-status-chips">
+        {layers.map((l) => (
+          <button key={l.key} type="button"
+            className={"bs-chip" + (active === l.key ? " on" : "") + (l.stale ? " warn" : "")}
+            onClick={() => onGo(l.key)}
+            title={l.stale ? `${l.label}可能是旧版本:${l.staleText}` : undefined}>
+            <span className="bs-label">{l.label}</span>
+            <span className="bs-sub">{l.down ? <>✓&nbsp;</> : <></>}{l.sub}</span>
+            {l.stale ? <span className="bs-stale">⚠ {l.hold}</span> :
+              l.staleText ? <span className="bs-stale bs-stale-hold">· {l.staleText}</span> : null}
+          </button>
+        ))}
+      </div>
+      {(arch || doneCount > 0) && (
+        <button type="button" className="bs-rework-btn btn-sm" onClick={onOpenRework}>
+          重来向导 →
+        </button>
+      )}
+      {staleAny && (
+        <div className="book-status-rework">
+          <span className="bs-rw-note">⚠ 本书出现旧版本,建议按链从「第一个旧层」开始重来:</span>
+          {layers.filter((x) => x.stale).map((x) => (
+            <button key={x.key} className="btn-sm" onClick={() => onGo(x.key)}>{x.label} {x.staleText}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // 各区/子步引导:这一步干什么 / AI 会做什么 / 做完标准是什么
 const GUIDES = {
@@ -152,6 +206,8 @@ export default function ProjectPage() {
 
   // 全书阅读模式(有已生成章节时,标题行出现「阅读全书」入口)
   const [readingBook, setReadingBook] = useState(false);
+  // 重来向导:写差了想从头重来时的跨层决策对话框(状态在组件内,导航回调在渲染处内联接线)
+  const [reworkOpen, setReworkOpen] = useState(false);
 
   // 当前区来自 URL;非法值当作未指定(旧八步值在渲染期重定向,见下方 legacyTarget)
   const zone: Zone | null = VALID_ZONES.includes(stepParam as Zone)
@@ -421,6 +477,16 @@ export default function ProjectPage() {
               )}
             </div>
 
+            {project && (
+              <BookStatus
+                project={project} arch={arch ?? null} outlines={outlines}
+                doneCount={doneCount} totalWords={wordsTotal} staleCount={staleCount}
+                active={zone === "setup" ? setupStep : (zone === "write" ? "write" : null)}
+                onGo={(key) => { if (key === "write") gotoZone("write"); else setSetupStep(key as SetupStep); }}
+                onOpenRework={() => setReworkOpen(true)}
+              />
+            )}
+
             {suggestion && zone !== suggestion.zone && (
               <div className="next-bar">
                 <span>💡 {suggestion.text}</span>
@@ -439,8 +505,8 @@ export default function ProjectPage() {
 
             {zone === "setup" && (
               <>
-                {setupStep === "inspire" && <InspirePanel project={project} onChanged={reload} onGotoStep={setSetupStep} />}
-                {setupStep === "arch" && <ArchPanel project={project} arch={arch ?? null} onChanged={reload} hasContent={!!arch || doneCount > 0} />}
+                {setupStep === "inspire" && <InspirePanel project={project} onChanged={reload} onGotoStep={setSetupStep} outlinesCount={outlines.length} writtenCount={doneCount} />}
+                {setupStep === "arch" && <ArchPanel project={project} arch={arch ?? null} onChanged={reload} hasContent={!!arch || doneCount > 0} outlinesCount={outlines.length} writtenCount={doneCount} />}
                 {setupStep === "outline" && (
                   <OutlinePanel pid={pid} project={project} outlines={outlines} hasArch={!!arch} onChanged={reload}
                     onGotoStep={(s) => { if (s === "write") gotoZone("write"); else setSetupStep(s); }} />
@@ -480,6 +546,20 @@ export default function ProjectPage() {
             {zone === "settings" && <ProjectSettingsPanel pid={pid} project={project} />}
           </div>
         </div>
+      )}
+
+      {reworkOpen && (
+        <ReworkDialog
+          arch={arch ?? null}
+          outlinesCount={outlines.length} doneCount={doneCount} wordsTotal={wordsTotal}
+          onGo={(start) => { if (start === "write") gotoZone("write"); else setSetupStep(start); }}
+          onWipe={async () => {
+            await api.resetProjectContent(pid);
+            await reload();
+            nav(`/project/${pid}/setup?step=outline`, { replace: true });
+          }}
+          onClose={() => setReworkOpen(false)}
+        />
       )}
 
       {readingBook && chapters.length > 0 && (

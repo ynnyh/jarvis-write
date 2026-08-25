@@ -31,7 +31,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.deps import delete_project_cascade
+from app.api.deps import delete_project_cascade, reset_project_content
 from app.auth import current_user_id, get_current_user
 from app.db.models import Project
 from app.db.session import get_db
@@ -189,6 +189,19 @@ async def patch_project(
         updates["concept"] = concept.model_dump()
         if "topic" not in updates and concept.logline.strip():
             updates["topic"] = concept.logline.strip()
+        # 概念变了 → 标旧架构失效:重新生成架构时 save_architecture 自动复位。
+        # 只在实际有架构且概念确有变化时置位,避免"重复保存同一概念"误标。
+        if project.architecture is not None and concept.is_empty() is False:
+            old = project.concept or {}
+            changed = (
+                not isinstance(old, dict)
+                or any(
+                    str(old.get(k) or "").strip() != getattr(concept, k).strip()
+                    for k in ("logline", "hook", "twist", "protagonist", "conflict", "setting", "sell")
+                )
+            )
+            if changed:
+                project.architecture.concept_stale = True
     if updates.get("setup_state") == "":
         updates["setup_state"] = None  # "" = 起步完成
     if "chat_log" in updates and len(updates["chat_log"]) > 200:
@@ -206,6 +219,17 @@ async def delete_project(project_id: int, db: Session = Depends(get_db)) -> dict
     project = _get_project_or_404(db, project_id)
     deleted_chapters = delete_project_cascade(db, project)
     return {"ok": True, "deleted_chapters": deleted_chapters}
+
+
+@router.delete("/{project_id}/content")
+async def reset_project_content_api(project_id: int, db: Session = Depends(get_db)) -> dict:
+    """清空已写正文与大纲(保留架构/概念/DNA/简介),供架构重写后「从新架构重来」。
+
+    前端大纲页在「基于旧架构」横幅里给作者这个选择;是破坏性操作,前端自带二次确认。
+    """
+    project = _get_project_or_404(db, project_id)
+    deleted_chapters = reset_project_content(db, project)
+    return {"ok": True, "deleted_chapters": deleted_chapters, "content_reset": True}
 
 
 __all__ = ["router", "_get_project_or_404", "_parse_profile_json"]

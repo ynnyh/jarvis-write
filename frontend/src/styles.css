@@ -3350,3 +3350,54 @@ body:has(.write-zone.immersive) .pj-cols { grid-template-columns: minmax(0, 1fr)
 @media (max-width: 640px) { .clip-edit-grid { grid-template-columns: 1fr 1fr; } }
 /* 工作台里的生成参数折叠区(建后可调:时长/画风/导向) */
 .clip-params { margin-bottom: 12px; }
+
+/* ==========================================================================
+   本书四层状态条(ProjectPage)
+   概念 → 架构 → 大纲 → 正文 常驻一行:哪层挂旧版本当场标红,点某层直接跳转。
+   复用 --warn/--warn-line/--ok 语义色,暗色主题自动跟随。
+   ========================================================================== */
+.book-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 2px; }
+.book-status-chips {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.bs-rework-btn { margin-left: auto; flex-shrink: 0; color: var(--text-2); }
+.bs-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--bd);
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  color: inherit;
+}
+.bs-chip.on { border-color: var(--acc); }
+.bs-chip.warn {
+  border-color: var(--warn-line);
+  background: var(--warn-weak, transparent);
+}
+.bs-label { font-weight: 600; }
+.bs-sub { color: var(--text-2); }
+.bs-stale { color: var(--warn); font-weight: 600; }
+.bs-stale-hold { color: var(--text-2); font-weight: 400; }
+.book-status-rework {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin-top: 6px; flex-basis: 100%;
+}
+.bs-rw-note { font-size: var(--fs-sm); color: var(--warn); font-weight: 600; }
+
+/* ==========================================================================
+   重来向导对话框(ReworkDialog)
+   深度选择卡 + 现状/代价账,复用 dlg-* 外壳(与确认框同观感)。
+   ========================================================================== */
+.rework-dlg { width: 540px; }
+.rework-depths { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+.rework-depth {
+  text-align: left; padding: 10px 12px;
+  border: 1px solid var(--bd); border-radius: var(--r-md, 10px);
+  background: var(--surface); cursor: pointer; color: inherit;
+}
+.rework-depth.on { border-color: var(--acc); box-shadow: inset 0 0 0 1px var(--acc); }
+.rd-label { display: block; font-weight: 600; margin-bottom: 2px; }
+.rd-meta { display: block; font-size: var(--fs-xs); line-height: 1.5; }
+.rd-cost { font-size: var(--fs-sm); color: var(--text-2); }

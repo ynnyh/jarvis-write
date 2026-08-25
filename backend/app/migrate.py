@@ -724,6 +724,43 @@ def _add_mood_clip_mode_column() -> None:
             logger.info("迁移:mood_clips 补 mode 列")
 
 
+def _add_architecture_concept_stale_column() -> None:
+    """小说架构:architecture 补 concept_stale 列(概念变更→建议重生成,幂等)。
+
+    concept_stale=True 表示「架构还是按旧概念生成的,概念已换,建议重新生成架构」。
+    重新生成架构时 save_architecture 自动复位 False。存量行默认 False,行为零变化。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "architecture" not in insp.get_table_names():
+            return  # create_all 会按新模型建表,无需补列
+        if not _column_exists("architecture", "concept_stale"):
+            conn.execute(
+                text(
+                    "ALTER TABLE architecture "
+                    "ADD COLUMN concept_stale BOOLEAN DEFAULT 0"
+                )
+            )
+            logger.info("迁移:architecture 补 concept_stale 列")
+
+
+def _add_project_outline_stale_column() -> None:
+    """project 补 outline_stale 列(架构重写→建议重铺/清空,幂等)。
+
+    outline_stale=True 表示「架构已重写,但大纲仍挂在旧架构上」,前端大纲页据此
+    让作者选择保留或清空重来。重新铺蓝图时复位 False。存量行默认 False,零影响。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "projects" not in insp.get_table_names():
+            return  # create_all 会按新模型建表,无需补列
+        if not _column_exists("projects", "outline_stale"):
+            conn.execute(
+                text("ALTER TABLE projects ADD COLUMN outline_stale BOOLEAN DEFAULT 0")
+            )
+            logger.info("迁移:project 补 outline_stale 列")
+
+
 def run_migrations() -> None:
     """启动时调用。幂等。"""
     _add_user_id_columns()
@@ -754,6 +791,8 @@ def run_migrations() -> None:
     _add_provider_thinking_mode_column()
     _add_mood_clip_steering_columns()
     _add_mood_clip_mode_column()
+    _add_architecture_concept_stale_column()
+    _add_project_outline_stale_column()
     _disable_word_guard_default()
     _migrate_finalized_to_approved()
     # 先补加密老表存量明文 key,再拷到新表,保证 provider_configs 落库必为密文

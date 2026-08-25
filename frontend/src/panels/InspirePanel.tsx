@@ -12,7 +12,11 @@ import { confirmDialog } from "../ui/ConfirmDialog";
 import { errMsg } from "../pollJob";
 import type { SetupStep } from "../pages/ProjectPage";
 
-interface Props { project: Project; onChanged: () => Promise<void>; onGotoStep?: (step: SetupStep) => void; }
+interface Props {
+  project: Project; onChanged: () => Promise<void>; onGotoStep?: (step: SetupStep) => void;
+  // 换概念的代价提示用:现有大纲/正文规模
+  outlinesCount?: number; writtenCount?: number;
+}
 
 // 从项目已存概念/主题恢复当前草稿:有 concept 用 concept,否则把 topic 灌进 logline
 function conceptFromProject(p: Project): Concept {
@@ -20,9 +24,17 @@ function conceptFromProject(p: Project): Concept {
   return { ...EMPTY_CONCEPT, logline: p.topic ?? "" };
 }
 
-// 从项目已存 DNA 恢复坐标卡草稿(老项目无 dna → 空坐标)
+// 从项目已存的 DNA 恢复坐标卡草稿(老项目无 dna → 空坐标)
 function dnaFromProject(p: Project): StoryDNA {
   return p.dna ? { ...EMPTY_DNA, ...p.dna } : { ...EMPTY_DNA };
+}
+
+// 换概念的代价措辞:按现有大纲/正文规模拼一句
+function archStrand(outlines: number, written: number): string {
+  const parts: string[] = [];
+  if (outlines > 0) parts.push(`${outlines} 章大纲`);
+  if (written > 0) parts.push(`${written} 章正文`);
+  return parts.length ? `已有 ${parts.join("、")}` : "已生成架构";
 }
 
 // 只读概念卡:展示六字段(空字段淡出)
@@ -247,7 +259,7 @@ function MirrorView({ mirror, busy, onProceed, onClose }: {
   );
 }
 
-export default function InspirePanel({ project, onChanged, onGotoStep }: Props) {
+export default function InspirePanel({ project, onChanged, onGotoStep, outlinesCount = 0, writtenCount = 0 }: Props) {
   const { run: runJob } = useJob();
   // 当前正在打磨的概念草稿(三条路都往它上收敛)
   const [concept, setConcept] = useState<Concept>(() => conceptFromProject(project));
@@ -308,6 +320,20 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
     try {
       const r = await runJob<{ ideas: Concept[]; comparison?: string }>(
         () => api.inspireAsync(spark, tendency, 4, dnaIsEmpty(dna) ? null : dna),
+        { kind: "inspire", onStage: (s) => setBusy(`${s}…`) },
+      );
+      if (r) { setIdeas(r.ideas); setComparison(r.comparison ?? ""); }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
+  }
+
+  // 推倒重来:把当前已定概念当「本轮不要的方向」喂给模型,重出一批明显不同的概念。
+  // 治"重新生成还是老概念"——不带旧概念信号时,模型对相同输入天然趋同。
+  async function rerollConcepts() {
+    if (!hasConcept) return;
+    setBusy("AI 正在抛开当前设定重出一批(不含旧概念的方向)…"); setErr(""); setMsg("");
+    try {
+      const r = await runJob<{ ideas: Concept[]; comparison?: string }>(
+        () => api.inspireAsync(spark, tendency, 4, dnaIsEmpty(dna) ? null : dna, concept),
         { kind: "inspire", onStage: (s) => setBusy(`${s}…`) },
       );
       if (r) { setIdeas(r.ideas); setComparison(r.comparison ?? ""); }
@@ -392,6 +418,20 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
   // ---------- 定概念 / 保存 ----------
   async function commitConcept() {
     if (!hasConcept) { setErr("概念还是空的,先捏出点内容。"); return; }
+    // 已有架构时换概念 = 让现架构/大纲挂到旧概念上:提醒用户重生成架构(必要时重铺大纲),
+    // 避免"概念换了,架构还是老的"的静默错位。仅轻请求确认,不拦截——用户可能就是要重写。
+    if (project.has_architecture) {
+      const ok = await confirmDialog({
+        title: "更换概念会影响已有架构",
+        body: "\u2726 目前" +
+          `${archStrand(outlinesCount, writtenCount)}。换掉概念后,现架构/大纲会标「基于旧概念/旧架构」,` +
+          `${writtenCount ? `已有 ${writtenCount} 章正文本体会标为失配。` : ""}` +
+          "建议:定完新概念 → 重新生成架构 → 必要时候重铺蓝图。也可用「清空重来」从新概念整篇重写。",
+        confirmText: "仍要更换",
+        danger: true,
+      });
+      if (!ok) return;
+    }
     setBusy("写入本书概念…"); setErr(""); setMsg("");
     try {
       await api.patchProject(project.id, {
@@ -521,7 +561,14 @@ export default function InspirePanel({ project, onChanged, onGotoStep }: Props) 
                 <ConceptView c={idea} />
               </div>
             ))}
-            <button disabled={!!busy} onClick={brainstorm}>都不满意,换一批</button>
+            <div className="actions">
+              <button disabled={!!busy} onClick={brainstorm}>都不满意,换一批</button>
+              {hasConcept && (
+                <button disabled={!!busy} className="btn-danger" onClick={rerollConcepts}>
+                  推倒重出一批(抛开当前设定)
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>

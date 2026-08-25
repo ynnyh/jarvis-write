@@ -63,6 +63,11 @@ class ProjectOut(BaseModel):
     # 列表页进度(list 接口聚合填充;详情接口为 0)
     written_chapters: int = 0
     total_words: int = 0
+    # 架构状态(只读派生,见 Project 模型的 property):是否已有架构 / 架构是否仍挂在旧概念上
+    has_architecture: bool = False
+    architecture_stale: bool = False
+    # 架构已重写、但大纲仍挂在旧架构上(True=建议重铺蓝图或清空重来)
+    outline_stale: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -73,6 +78,8 @@ class ArchitectureOut(BaseModel):
     world_building: str
     plot_architecture: str
     version: int
+    # 概念变更后置 True(架构仍挂在旧概念上);重新生成架构后复位 False
+    concept_stale: bool = False
 
     model_config = {"from_attributes": True}
 

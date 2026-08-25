@@ -19,7 +19,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Outline, OutlineVersion, Project
+from app.db.models import Chapter, Outline, OutlineVersion, Project
 from app.engines.pipeline.blueprint_parser import parse_blueprint, validate_blueprint
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import render_style_block
@@ -250,6 +250,9 @@ def save_blueprint(
                 saved.append(outline)  # 内容没变,不升版本
                 continue
             version = outline.current_version + 1
+            # 蓝图(按新架构)重铺且本章内容变了 → 旧正文本体对不上,标失配,
+            # 与 per-chapter 级联引擎一致(differ 里也是这么标记的)。
+            _mark_chapter_stale(db, project.id, num)
 
         outline.title = ch.get("title", "")
         outline.chapter_role = ch.get("chapter_role", "")
@@ -279,5 +282,19 @@ def save_blueprint(
         saved.append(outline)
 
     project.status = "writing"
+    # 蓝图已按最新架构重铺 → 消退「架构换了、大纲还挂在旧架构上」的标记
+    project.outline_stale = False
     db.flush()
     return saved
+
+
+def _mark_chapter_stale(db: Session, project_id: int, chapter_number: int) -> None:
+    """该章原正文本体对不上了:标失配,写作页据此提示「是否重写」。"""
+    db.query(Chapter).filter(
+        Chapter.project_id == project_id,
+        Chapter.chapter_number == chapter_number,
+        Chapter.final_content != "",
+    ).update(
+        {Chapter.is_stale: True, Chapter.status: "stale"},
+        synchronize_session=False,
+    )
