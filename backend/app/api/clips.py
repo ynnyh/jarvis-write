@@ -10,18 +10,26 @@ POST   /api/clips/{id}/generate           批产三个本子(async)
 POST   /api/clips/{id}/pick               选定 {index}
 DELETE /api/clips/{id}                    删除
 GET    /api/clips/{id}/export             导出 ?format=md|srt|json
+GET    /api/clips/{id}/shoot               出片工作台(按选定手卡切段,首次访问自动建盘)
+PUT    /api/clips/{id}/shoot               整卡更新(勾完成/回填成品/写备注/同步外链参考图)
+POST   /api/clips/{id}/shoot/{i}/reference            段参考图上传(multipart)
+POST   /api/clips/{id}/shoot/{i}/reference/link       段参考图外链
+DELETE /api/clips/{id}/shoot/{i}/reference/{j}        删段参考图(上传连文件删)
+GET    /api/clips/{id}/shoot/{i}/reference/{j}        读段参考图(鉴权)
 """
 from __future__ import annotations
 
 import logging
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
+from app import storage
 from app.auth import assert_project_owner, get_current_user
-from app.db.models import MoodClip, Project
+from app.db.models import ClipShoot, MoodClip, Project
 from app.db.session import get_db
 from app.engines.clips import (
     ClipBatchError,
@@ -49,6 +57,7 @@ from app.engines.clips.common import (
     VALID_THEMES,
 )
 from app.engines.media.directions import VALID_DIRECTIONS
+from app.engines.media.text import clip
 from app.jobs import list_running, spawn_job
 
 logger = logging.getLogger("jarvis-write.clips")
@@ -101,12 +110,119 @@ class ClipCardIn(BaseModel):
     card: dict
 
 
+class ShootUpdateIn(BaseModel):
+    """出片工作台整卡更新:前端按段归并好后整卡回传(段数 ≤ 个位数,整卡写一次更安全)。"""
+    shoot: list[dict] = []
+
+
+class RefLinkIn(BaseModel):
+    """贴一张段参考图外链(生图站的图片地址,可能带时效签名)。"""
+    url: str = ""
+    note: str = ""
+
+
 def _get_clip(db: Session, clip_id: int) -> MoodClip:
     row = db.get(MoodClip, clip_id)
     if row is None:
         raise HTTPException(status_code=404, detail="短片不存在")
     assert_project_owner(row)
     return row
+
+
+# ---- 出片工作台 ---------------------------------------------
+# 状态存 ClipShoot.shoot(按段 index → {ref_images, done, result_link, note}),与手卡的
+# clip.chunks 是两份独立数据:手卡重算切段后前端按 index 归并,不再持有的段忽略、新段无状态。
+
+def _shoot_unit(chunk: dict) -> dict:
+    """从手卡的一个切段块派生「空段」出片单元:只带元信息,出片状态清零。"""
+    return {
+        "index": int(chunk.get("index", 0) or 0),
+        "start_s": int(chunk.get("start_s", 0) or 0),
+        "end_s": int(chunk.get("end_s", 0) or 0),
+        "duration_s": int(chunk.get("duration_s", 0) or 0),
+        "over_limit": bool(chunk.get("over_limit")),
+        "subtitle": str(chunk.get("subtitle") or ""),
+        "shot_seqs": list(chunk.get("shot_seqs") or []),
+        "scenes": list(chunk.get("scenes") or []),
+        "ref_images": [],
+        "done": False,
+        "result_link": "",
+        "note": "",
+    }
+
+
+def _get_shoot_row(db: Session, clip_id: int) -> ClipShoot:
+    """取该短片的出片工作台;没有就在第一次访问时按选定手卡的切段自动建盘。
+
+    懒建而不是建短片时就建:短片刻意到「选定本子、手卡就绪」才值得搭工作台,
+    此时 clip.chunks 才存在,建出来的段才有 index 可对齐。
+    """
+    row = db.query(ClipShoot).filter(ClipShoot.clip_id == clip_id).first()
+    if row is not None:
+        return row
+    clip_row = db.get(MoodClip, clip_id)
+    chunks = (clip_row.clip or {}).get("chunks") or []
+    row = ClipShoot(
+        user_id=clip_row.user_id,
+        clip_id=clip_id,
+        shoot=[_shoot_unit(c) for c in chunks],
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def _find_shoot_unit(shoot: list | None, index: int) -> dict:
+    """按段号找单元;找不到说明手卡已重排,让前端重新打开工作台归并。"""
+    for unit in shoot or []:
+        if isinstance(unit, dict) and int(unit.get("index", -1) or -1) == index:
+            return unit
+    raise HTTPException(
+        status_code=404,
+        detail="这个段没在工作台里,刷新一下让工作台跟新手卡对齐。",
+    )
+
+
+def _clean_refs(refs) -> list[dict]:
+    """整卡回传时收敛 ref_images:只留合法形态(kind∈upload/url,src 非空)。"""
+    out: list[dict] = []
+    for r in refs or []:
+        if not isinstance(r, dict):
+            continue
+        kind = r.get("kind")
+        src = str(r.get("src") or "")
+        if kind not in ("upload", "url") or not src:
+            continue
+        out.append({"kind": kind, "src": src, "note": clip(r.get("note"), 100)})
+    return out
+
+
+def _clean_shoot(units) -> list[dict]:
+    """整卡回传时归一化:收敛字段类型与长度,不信任客户端塞过来的任意结构。"""
+    cleaned: list[dict] = []
+    for u in units or []:
+        if not isinstance(u, dict):
+            continue
+        try:
+            index = int(u.get("index", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        cleaned.append({
+            "index": index,
+            "start_s": int(u.get("start_s", 0) or 0),
+            "end_s": int(u.get("end_s", 0) or 0),
+            "duration_s": int(u.get("duration_s", 0) or 0),
+            "over_limit": bool(u.get("over_limit")),
+            "subtitle": str(u.get("subtitle") or ""),
+            "shot_seqs": list(u.get("shot_seqs") or []),
+            "scenes": list(u.get("scenes") or []),
+            "ref_images": _clean_refs(u.get("ref_images")),
+            "done": bool(u.get("done")),
+            "result_link": clip(u.get("result_link"), 500),
+            "note": clip(u.get("note"), 500),
+        })
+    return cleaned
 
 
 def _validate_common(theme: str, custom_theme: str, duration_s: int, direction: str, mode: str = "mood") -> None:
@@ -350,8 +466,11 @@ async def delete_clip(clip_id: int, db: Session = Depends(get_db)):
                 status_code=409,
                 detail="这条短片正在生成/重拍中,等它跑完再删除(刷新页面可看进度)。",
             )
+    db.query(ClipShoot).filter(ClipShoot.clip_id == clip_id).delete()
     db.delete(row)
     db.commit()
+    # 出片参考图按 clip 号独占 clips/<id>/ 目录,行走了文件不能留在卷里吃配额
+    storage.delete_clip_dir(clip_id)
     return {"ok": True}
 
 
@@ -371,4 +490,118 @@ async def export_clip(clip_id: int, format: str = "md", db: Session = Depends(ge
         content=content,
         media_type=media,
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"},
+    )
+
+
+# ---- 出片工作台:按段出片(参考图/状态/成品),minimax 等图文生视频一键搬运 ----
+
+@router.get("/{clip_id}/shoot")
+async def get_shoot(clip_id: int, db: Session = Depends(get_db)):
+    """读出片工作台(首次访问自动按选定手卡切段建盘)。"""
+    _get_clip(db, clip_id)
+    return {"shoot": _get_shoot_row(db, clip_id).shoot or []}
+
+
+@router.put("/{clip_id}/shoot")
+async def update_shoot(clip_id: int, body: ShootUpdateIn, db: Session = Depends(get_db)):
+    """整卡更新:勾完成/回填成品链接/写备注/同步外链参考图,前端归并好后整卡回传。"""
+    _get_clip(db, clip_id)
+    row = _get_shoot_row(db, clip_id)
+    row.shoot = _clean_shoot(body.shoot)
+    db.commit()
+    return {"shoot": row.shoot}
+
+
+@router.post("/{clip_id}/shoot/{index}/reference")
+async def upload_shoot_reference(
+    clip_id: int, index: int, file: UploadFile = File(...), note: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    """给一段传一张参考图(人物定妆/关键帧实拍,minimax 生视频时丢给它当锚)。"""
+    _get_clip(db, clip_id)
+    row = _get_shoot_row(db, clip_id)
+    unit = _find_shoot_unit(row.shoot, index)
+    if len(unit["ref_images"]) >= storage.MAX_REFS_PER_SEGMENT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"每段最多 {storage.MAX_REFS_PER_SEGMENT} 张参考图,先删掉一张再传。",
+        )
+    data = await file.read(storage.MAX_IMAGE_BYTES + 1)
+    try:
+        rel = storage.save_clip_ref(clip_id, index, data, len(unit["ref_images"]))
+    except storage.UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    unit["ref_images"] = unit["ref_images"] + [
+        {"kind": "upload", "src": rel, "note": clip(note, 100)}
+    ]
+    # 原地改了 shoot 里的嵌套结构,SQLAlchemy 的 JSON 列不会自动标记 dirty,
+    # 不手动 flag_modified 的话 commit 不落盘(整卡 PUT 是整体赋值所以没事)。
+    flag_modified(row, "shoot")
+    db.commit()
+    return {"shoot": row.shoot}
+
+
+@router.post("/{clip_id}/shoot/{index}/reference/link")
+async def link_shoot_reference(
+    clip_id: int, index: int, body: RefLinkIn, db: Session = Depends(get_db)
+):
+    """给一段贴一张参考图外链(生图站地址;带时效签名会失效,前端要提示建议下载后上传)。"""
+    _get_clip(db, clip_id)
+    row = _get_shoot_row(db, clip_id)
+    unit = _find_shoot_unit(row.shoot, index)
+    if len(unit["ref_images"]) >= storage.MAX_REFS_PER_SEGMENT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"每段最多 {storage.MAX_REFS_PER_SEGMENT} 张参考图,先删掉一张再贴。",
+        )
+    url = clip(body.url, 500)
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="请填 http/https 开头的图片地址。")
+    unit["ref_images"] = unit["ref_images"] + [
+        {"kind": "url", "src": url, "note": clip(body.note, 100)}
+    ]
+    flag_modified(row, "shoot")
+    db.commit()
+    return {"shoot": row.shoot}
+
+
+@router.delete("/{clip_id}/shoot/{index}/reference/{img_index}")
+async def delete_shoot_reference(
+    clip_id: int, index: int, img_index: int, db: Session = Depends(get_db)
+):
+    """删一段的一张参考图(上传的连文件一起删)。"""
+    _get_clip(db, clip_id)
+    row = _get_shoot_row(db, clip_id)
+    unit = _find_shoot_unit(row.shoot, index)
+    refs = unit["ref_images"]
+    if not 0 <= img_index < len(refs):
+        raise HTTPException(status_code=404, detail="这张参考图不存在。")
+    gone = refs.pop(img_index)
+    if gone["kind"] == "upload":
+        storage.delete(gone["src"])
+    flag_modified(row, "shoot")
+    db.commit()
+    return {"shoot": row.shoot}
+
+
+@router.get("/{clip_id}/shoot/{index}/reference/{img_index}")
+async def read_shoot_reference(
+    clip_id: int, index: int, img_index: int, db: Session = Depends(get_db)
+):
+    """读一段上传的参考图(走鉴权;上传目录不挂静态服务,<img> 由前端转 blob 显示)。"""
+    _get_clip(db, clip_id)
+    row = _get_shoot_row(db, clip_id)
+    unit = _find_shoot_unit(row.shoot, index)
+    refs = unit["ref_images"]
+    if not 0 <= img_index < len(refs) or refs[img_index]["kind"] != "upload":
+        raise HTTPException(status_code=404, detail="这张参考图不存在。")
+    rel = refs[img_index]["src"]
+    try:
+        path = storage.resolve(rel)
+    except storage.UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="参考图文件已丢失。")
+    return Response(
+        content=path.read_bytes(), media_type=storage.content_type_of(rel)
     )

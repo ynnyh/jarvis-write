@@ -65,3 +65,30 @@ class MoodClip(Base, TimestampMixin):
     clip: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     # draft(建了)→ generated(候选已出)→ picked(已选定)
     status: Mapped[str] = mapped_column(String(20), default="draft")
+
+
+class ClipShoot(Base, TimestampMixin):
+    """一条短片选中本子的「出片工作台」:按段号记生成状态/参考图/成片在哪。
+
+    为什么单独成表而不是塞进 MoodClip.clip JSON:出片状态要频繁地按段写
+    (传参考图/勾完成/填成片链接),和手卡 JSON 混在一起每次得整卡读写、还容易在
+    重算切段时被覆盖。独立成行后按 clip_id 一次 UPDATE 就够,结构也更清晰。
+
+    shoot 字段是「按段 index → 出片状态」的数组,段号与 MoodClip.clip.chunks 的
+    index 对齐(手卡改完重算切段后,前端按 index 归并,消失的段忽略、新段无状态):
+    [{index, ref_images:[{kind:'upload'|'url', src, note}], done, result_link, note}]
+
+    成片刻意只记「贴回来的链接/备注」,不收成片文件——视频动不动几十 MB,一条
+    片就吃满上传配额(与漫剧分镜同一套取舍,见 app/storage.py 头注释)。
+    """
+
+    __tablename__ = "clip_shoots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    clip_id: Mapped[int] = mapped_column(
+        ForeignKey("mood_clips.id", ondelete="CASCADE"), index=True, unique=True
+    )
+    shoot: Mapped[list[Any]] = mapped_column(JSON, default=list)

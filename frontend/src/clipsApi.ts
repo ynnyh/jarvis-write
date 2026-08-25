@@ -97,6 +97,49 @@ export interface MoodClip {
   candidates?: ClipCard[];
 }
 
+// ---- 出片工作台(ClipShoot.shoot 单元素)----
+export interface ClipRefImage { kind: "upload" | "url"; src: string; note: string }
+export interface ClipShootUnit {
+  index: number;
+  start_s: number;
+  end_s: number;
+  duration_s: number;
+  over_limit: boolean;
+  subtitle: string;
+  shot_seqs: number[];
+  scenes: string[];
+  ref_images: ClipRefImage[];
+  done: boolean;
+  result_link: string;
+  note: string;
+}
+
+function authHeaders(): Record<string, string> {
+  const tk = token.get();
+  return tk ? { Authorization: `Bearer ${tk}` } : {};
+}
+
+/** 上传一张段参考图:multipart(不能手设 Content-Type,浏览器要自己带 boundary)。 */
+async function postImage<T>(path: string, file: File, note = ""): Promise<T> {
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("note", note);
+  const res = await fetch(path, { method: "POST", headers: authHeaders(), body: fd });
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try { const j = await res.json(); detail = j.detail ?? detail; } catch { /* ignore */ }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as T;
+}
+
+/** 读一张鉴权参考图 → 本地 blob URL(读取端点要 Authorization 头,<img src> 带不了)。 */
+async function imageBlobUrl(path: string): Promise<string> {
+  const res = await fetch(path, { headers: authHeaders() });
+  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+  return URL.createObjectURL(await res.blob());
+}
+
 export const clipsApi = {
   meta: () =>
     req<{
@@ -153,4 +196,17 @@ export const clipsApi = {
       URL.revokeObjectURL(url);
     });
   },
+  // ---- 出片工作台 ----
+  getShoot: (id: number) => req<{ shoot: ClipShootUnit[] }>("GET", `/api/clips/${id}/shoot`),
+  updateShoot: (id: number, shoot: ClipShootUnit[]) =>
+    req<{ shoot: ClipShootUnit[] }>("PUT", `/api/clips/${id}/shoot`, { shoot }),
+  uploadRef: (id: number, index: number, file: File, note = "") =>
+    postImage<{ shoot: ClipShootUnit[] }>(`/api/clips/${id}/shoot/${index}/reference`, file, note),
+  linkRef: (id: number, index: number, url: string, note = "") =>
+    req<{ shoot: ClipShootUnit[] }>("POST", `/api/clips/${id}/shoot/${index}/reference/link`, { url, note }),
+  deleteRef: (id: number, index: number, imgIndex: number) =>
+    req<{ shoot: ClipShootUnit[] }>("DELETE", `/api/clips/${id}/shoot/${index}/reference/${imgIndex}`),
+  refReadUrl: (id: number, index: number, imgIndex: number) => `/api/clips/${id}/shoot/${index}/reference/${imgIndex}`,
+  refBlobUrl: (id: number, index: number, imgIndex: number) =>
+    imageBlobUrl(`/api/clips/${id}/shoot/${index}/reference/${imgIndex}`),
 };

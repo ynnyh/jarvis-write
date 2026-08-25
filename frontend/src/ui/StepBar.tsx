@@ -6,6 +6,7 @@
 // 语义用 <nav> 而不是 role="tablist":这些按钮是「跳到那一段」的锚点导航,不是页签
 //(tablist 要求子项 role="tab" 且真的切换面板,读屏会读错)。
 import { ReactNode } from "react";
+import { toast } from "./Toaster";
 
 export type Step = {
   key: string;
@@ -23,10 +24,21 @@ export default function StepBar({ steps, anchorPrefix, allDone }: {
 }) {
   // 第一个未完成的就是「现在做这步」;全绿则为 null
   const current = steps.find((s) => !s.done) ?? null;
+  const currentIndex = steps.findIndex((s) => !s.done); // 全绿为 -1
 
   function jump(key: string) {
     document.getElementById(`${anchorPrefix}-${key}`)
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  // 卡点引导:当前步与已完成步照常跳到对应区;「还没排到的未来步」与其静默滚到空区,
+  // 不如明说缺哪一步、并把人直接带到当前该做的那步。漫剧/宣传片/clips 三线共用这套,
+  // 用户不会在「点了没反应的步骤条」上猜下一步。
+  function handleStep(s: Step, i: number) {
+    const idx = currentIndex;
+    if (i === idx || s.done || idx === -1) { jump(s.key); return; }
+    toast.info(`先做「${steps[idx].label}」`, `${s.label} 还没轮到——等它前面的步就绪再回来。已帮你跳到当前步。`);
+    jump(steps[idx].key);
   }
 
   return (
@@ -36,7 +48,7 @@ export default function StepBar({ steps, anchorPrefix, allDone }: {
           <button key={s.key} type="button"
             className={"chip" + (s.done ? " done" : "") + (current?.key === s.key ? " on" : "")}
             aria-current={current?.key === s.key}
-            onClick={() => jump(s.key)}>
+            onClick={() => handleStep(s, i)}>
             {s.done ? "✓ " : current?.key === s.key ? "▸ " : `${i + 1} `}{s.label}
           </button>
         ))}

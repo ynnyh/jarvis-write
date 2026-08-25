@@ -488,3 +488,120 @@ def test_save_clip_card_recalc_and_sync(client):
     assert len(saved["chunks"]) == 1 and saved["chunks"][0]["end_s"] == 4
     # 候选与手卡保持同步
     assert row["candidates"][0]["punchline"] == "改过的金句。"
+
+
+# ---------- 出片工作台(按段的参考图/状态/成品) ----------
+
+# 1×1 透明 PNG(只按文件头判定类型,sniff 不过度解码)
+_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00"
+    b"\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r"
+    b"\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+def _picked_clip(client, headers) -> int:
+    """建一条短片并走完批产 + 三选一,返回 id(手卡含切段,工作台才有盘可建)。"""
+    cid = _mk_clip(client, headers)
+    _PhaseAdapter.reset()
+    with patch("app.engines.clips.batch.get_adapter_for",
+               return_value=_PhaseAdapter(_HEAD, _EXPAND)):
+        r = client.post(f"/api/clips/{cid}/generate", headers=headers, json={})
+        assert _wait_job(client, headers, r.json()["job_id"])["status"] == "done"
+    assert client.post(f"/api/clips/{cid}/pick", headers=headers, json={"index": 0}).status_code == 200
+    return cid
+
+
+def test_shoot_roundtrip_and_image_ops(client):
+    """出片工作台:首次访问按选定手卡切段懒建盘 → 回填状态/成品 → 参考图上传/读/删/贴外链。"""
+    headers = _auth(client, "clips_shoot")
+    cid = _picked_clip(client, headers)
+
+    # 先读第一次:按手卡切段懒建盘(段号 1 基,与 SRT 同根轴)
+    r = client.get(f"/api/clips/{cid}/shoot", headers=headers)
+    assert r.status_code == 200, r.text
+    shoot = r.json()["shoot"]
+    assert len(shoot) == 1
+    assert shoot[0]["done"] is False and shoot[0]["result_link"] == ""
+
+    # 整卡回填:勾完成 + 成品链接(前端防抖后的终极落盘)
+    idx = shoot[0]["index"]
+    shoot[0]["done"] = True
+    shoot[0]["result_link"] = "https://example.com/video/done"
+    shoot[0]["note"] = "用定妆卡出的,脸部已调"
+    r = client.put(f"/api/clips/{cid}/shoot", headers=headers, json={"shoot": shoot})
+    assert r.status_code == 200, r.text
+    saved = r.json()["shoot"][0]
+    assert saved["done"] is True and saved["result_link"].startswith("https://example.com/video/")
+    assert saved["note"] == "用定妆卡出的,脸部已调"
+    # 索引元信息保持(整卡回传不该丢字幕/镜头号字段)
+    assert saved["index"] == idx and "subtitle" in saved and saved["shot_seqs"]
+
+    # 上传参考图 → 读回 → 删除(文件连删)
+    r = client.post(f"/api/clips/{cid}/shoot/{idx}/reference", headers=headers,
+                    files={"file": ("ref.png", _PNG, "image/png")},
+                    data={"note": "正面定妆"})
+    assert r.status_code == 200, r.text
+    shoot = r.json()["shoot"]
+    assert len(shoot[0]["ref_images"]) == 1
+    assert shoot[0]["ref_images"][0]["kind"] == "upload"
+    assert shoot[0]["ref_images"][0]["note"] == "正面定妆"
+
+    r = client.get(f"/api/clips/{cid}/shoot/{idx}/reference/0", headers=headers)
+    assert r.status_code == 200, f"READ FAILED: {r.text}"
+    assert r.content == _PNG
+    assert r.headers["content-type"].startswith("image/png")
+
+    # 贴一张外链参考图(生图站地址)
+    r = client.post(f"/api/clips/{cid}/shoot/{idx}/reference/link", headers=headers,
+                    json={"url": "https://img.example.com/pic.jpg", "note": "第二版"})
+    assert r.status_code == 200, r.text
+    refs = r.json()["shoot"][0]["ref_images"]
+    assert len(refs) == 2 and refs[1]["kind"] == "url"
+    # 微博/裸字符串会被拦
+    assert client.post(f"/api/clips/{cid}/shoot/{idx}/reference/link", headers=headers,
+                       json={"url": "不是链接"}).status_code == 400
+
+    # 删上传那张(连文件):之后读/删它都 404
+    r = client.delete(f"/api/clips/{cid}/shoot/{idx}/reference/0", headers=headers)
+    assert r.status_code == 200 and len(r.json()["shoot"][0]["ref_images"]) == 1
+    assert client.get(f"/api/clips/{cid}/shoot/{idx}/reference/0", headers=headers).status_code == 404
+
+    # 超限防护:3 张上限(已有一张外链,再贴两张到顶,第三张被拦)
+    for _ in range(2):
+        r = client.post(f"/api/clips/{cid}/shoot/{idx}/reference/link", headers=headers,
+                        json={"url": "https://img.example.com/" + str(_) + ".jpg"})
+        assert r.status_code == 200
+    r = client.post(f"/api/clips/{cid}/shoot/{idx}/reference/link", headers=headers,
+                    json={"url": "https://img.example.com/x.jpg"})
+    assert r.status_code == 400 and "最多 3 张" in r.json()["detail"]
+
+
+def test_shoot_permission_isolation_and_unknown_segment(client):
+    """出片工作台按用户隔离;段号对不上(手卡重排)要明确报错而不是静默。"""
+    headers = _auth(client, "clips_shoot_a")
+    other = _auth(client, "clips_shoot_b")
+    cid = _picked_clip(client, headers)
+    idx = client.get(f"/api/clips/{cid}/shoot", headers=headers).json()["shoot"][0]["index"]
+
+    # 别人既看不到也写不进
+    assert client.get(f"/api/clips/{cid}/shoot", headers=other).status_code == 404
+    r = client.post(f"/api/clips/{cid}/shoot/{idx}/reference", headers=other,
+                    files={"file": ("a.png", _PNG, "image/png")})
+    assert r.status_code == 404
+
+    # 当前用户:段 99 不在盘里(手卡重排后旧段消失)→ 404 提示对齐
+    assert client.post(f"/api/clips/{cid}/shoot/99/reference", headers=headers,
+                       files={"file": ("a.png", _PNG, "image/png")}).status_code == 404
+
+    # 删除短片:工作台行被级联带走,参考图目录也清掉(再访问自动重建空盘)
+    r = client.delete(f"/api/clips/{cid}", headers=headers)
+    assert r.status_code == 200
+    from app.db.models import ClipShoot
+    from app.db.session import SessionLocal
+    with SessionLocal() as s:
+        gone = s.query(ClipShoot).filter(ClipShoot.clip_id == cid).first()
+        assert gone is None
+    from app import storage
+    d = storage.upload_root() / "clips" / str(cid)
+    assert not d.exists() or not any(d.iterdir())

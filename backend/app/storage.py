@@ -14,8 +14,9 @@
 - 大小、每角色张数、每项目总量三道上限;
 - 读取走鉴权端点(不挂 StaticFiles),避免整个上传目录被公网直读。
 
-目录:<上传根>/drama/<project_id>/<card_id>-<n>.<ext>;上传根默认取 SQLite 库
-所在目录下的 uploads/(Docker 里就是数据卷 /srv/data/uploads,随卷一起备份)。
+目录:<上传根>/drama/<project_id>/<card_id>-<n>.<ext>(项目资产);
+    <上传根>/clips/<clip_id>/<段号>-<n>.<ext>(短片出片参考图);
+上传根默认取 SQLite 库所在目录下的 uploads/(Docker 里就是数据卷 /srv/data/uploads,随卷一起备份)。
 """
 from __future__ import annotations
 
@@ -29,8 +30,10 @@ logger = logging.getLogger("jarvis-write.storage")
 
 MAX_IMAGE_BYTES = 4 * 1024 * 1024      # 单张上限 4MB(定妆照够用,防塞大图)
 MAX_REFS_PER_CARD = 3                  # 每个角色最多 3 张(正面/侧面/表情)
+MAX_REFS_PER_SEGMENT = 3               # 短片出片工作台每段最多 3 张参考图(挑一版/多角度)
 MAX_ASSETS_PER_SHOT = 2                # 每格分镜最多挂 2 张静帧(出两版挑一版)
 MAX_PROJECT_UPLOAD_BYTES = 80 * 1024 * 1024  # 单项目上传总量上限 80MB
+MAX_CLIP_UPLOAD_BYTES = 20 * 1024 * 1024     # 短片参考图上限 20MB(短片未必挂项目,单独限量)
 
 # 文件头 → 扩展名(WebP 还要校验第 8-12 字节的 "WEBP")
 _SIGNATURES: tuple[tuple[bytes, str], ...] = (
@@ -41,7 +44,10 @@ _SIGNATURES: tuple[tuple[bytes, str], ...] = (
 _CONTENT_TYPES = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}
 # 两种资产共用一个项目目录,所以分镜静帧的文件名带 shot 前缀:
 # 角色卡 id 与分镜 id 来自不同表,同一个数字完全可能撞上(卡 7 与第 7 格)。
-_REL_RE = re.compile(r"^drama/\d+/(?:shot)?\d+-\d+\.(png|jpg|webp)$")
+# 短片出片工作台的参考图进 clips/<clip_id>/(短片不必挂项目,独占目录,按 clip 号隔离)。
+_REL_RE = re.compile(
+    r"^(?:drama/\d+/(?:shot)?\d+-\d+|clips/\d+/\d+-\d+)\.(png|jpg|webp)$"
+)
 
 
 class UploadError(ValueError):
@@ -76,12 +82,21 @@ def content_type_of(rel_path: str) -> str:
     return _CONTENT_TYPES.get(rel_path.rsplit(".", 1)[-1].lower(), "application/octet-stream")
 
 
-def project_usage_bytes(project_id: int) -> int:
-    """某项目已占用的上传空间(字节)。"""
-    d = upload_root() / "drama" / str(int(project_id))
+def _dir_usage(d: Path) -> int:
+    """某目录下已占用的上传空间(字节)。"""
     if not d.is_dir():
         return 0
     return sum(f.stat().st_size for f in d.iterdir() if f.is_file())
+
+
+def project_usage_bytes(project_id: int) -> int:
+    """某项目已占用的上传空间(字节)。"""
+    return _dir_usage(upload_root() / "drama" / str(int(project_id)))
+
+
+def clip_usage_bytes(clip_id: int) -> int:
+    """某短片已占用的参考图空间(字节)。"""
+    return _dir_usage(upload_root() / "clips" / str(int(clip_id)))
 
 
 def save_character_ref(project_id: int, card_id: int, data: bytes, taken: int) -> str:
@@ -89,7 +104,10 @@ def save_character_ref(project_id: int, card_id: int, data: bytes, taken: int) -
 
     taken 是该卡已有的张数,用来定序号;调用方负责张数上限的业务判断。
     """
-    return _save_image(project_id, str(int(card_id)), data, taken, "定妆照")
+    return _save_image(
+        "drama", project_id, str(int(card_id)), data, taken,
+        "定妆照", MAX_PROJECT_UPLOAD_BYTES, project_usage_bytes(project_id),
+    )
 
 
 def save_shot_asset(project_id: int, shot_id: int, data: bytes, taken: int) -> str:
@@ -97,13 +115,32 @@ def save_shot_asset(project_id: int, shot_id: int, data: bytes, taken: int) -> s
 
     文件名带 shot 前缀:与定妆照共用项目目录,而卡 id 和分镜 id 会撞号。
     """
-    return _save_image(project_id, f"shot{int(shot_id)}", data, taken, "分镜静帧")
+    return _save_image(
+        "drama", project_id, f"shot{int(shot_id)}", data, taken,
+        "分镜静帧", MAX_PROJECT_UPLOAD_BYTES, project_usage_bytes(project_id),
+    )
 
 
-def _save_image(project_id: int, stem: str, data: bytes, taken: int, what: str) -> str:
-    """落盘一张用户上传的图:校验(空/大小/文件头/项目配额)→ 服务端定名 → 写文件。
+def save_clip_ref(clip_id: int, segment_index: int, data: bytes, taken: int) -> str:
+    """保存短片出片工作台的一张段级参考图,返回相对路径(存进 ClipShoot 对应段的 ref_images)。
 
-    stem 是文件名前缀(定妆照用卡号,分镜静帧用 shot<格 id>),用户输入不参与路径。
+    stem 用段号(用户输入不参与路径);短片按 clip 号独占 clips/ 目录,不跟别的改名冲突。
+    """
+    return _save_image(
+        "clips", clip_id, str(int(segment_index)), data, taken,
+        "参考图", MAX_CLIP_UPLOAD_BYTES, clip_usage_bytes(clip_id),
+    )
+
+
+def _save_image(
+    area: str, owner_id: int, stem: str, data: bytes, taken: int,
+    what: str, limit: int, usage: int,
+) -> str:
+    """落盘一张用户上传的图:校验(空/大小/文件头/配额)→ 服务端定名 → 写文件。
+
+    area 是资产分区(drama=按项目隔离,clips=按短片隔离),owner_id 是该分区内的归属号;
+    stem 是文件名前缀(定妆照用卡号,分镜静帧用 shot<格 id>,出片参考图用段号),
+    用户输入一律不参与路径构造。
     """
     if not data:
         raise UploadError("图片是空的,请重新选择文件。")
@@ -113,12 +150,11 @@ def _save_image(project_id: int, stem: str, data: bytes, taken: int, what: str) 
             f"{len(data) / 1024 / 1024:.1f}MB,请压缩后再传。"
         )
     ext = sniff_image_ext(data)
-    if project_usage_bytes(project_id) + len(data) > MAX_PROJECT_UPLOAD_BYTES:
+    if usage + len(data) > limit:
         raise UploadError(
-            f"本项目上传总量已接近上限({MAX_PROJECT_UPLOAD_BYTES // 1024 // 1024}MB),"
-            "请先删掉不用的定妆照或分镜静帧。"
+            f"图片空间已接近上限({limit // 1024 // 1024}MB),请先删掉不用的图片。"
         )
-    d = upload_root() / "drama" / str(int(project_id))
+    d = upload_root() / area / str(int(owner_id))
     d.mkdir(parents=True, exist_ok=True)
     # 序号避让已存在的文件:删掉中间某张后再传,不覆盖别人
     n = max(taken, 0) + 1
@@ -126,7 +162,7 @@ def _save_image(project_id: int, stem: str, data: bytes, taken: int, what: str) 
         n += 1
     path = d / f"{stem}-{n}.{ext}"
     path.write_bytes(data)
-    rel = f"drama/{int(project_id)}/{path.name}"
+    rel = f"{area}/{int(owner_id)}/{path.name}"
     logger.info("%s落盘 %s(%.1fKB)", what, rel, len(data) / 1024)
     return rel
 
@@ -159,7 +195,16 @@ def delete_project_dir(project_id: int) -> int:
     按项目号生成、内容只可能是我们自己落的图,所以整目录删是安全的。
     失败不往上抛:数据已经删了,清不掉文件只该记日志,不该让删除接口报错。
     """
-    d = upload_root() / "drama" / str(int(project_id))
+    return _delete_owner_dir("drama", project_id)
+
+
+def delete_clip_dir(clip_id: int) -> int:
+    """删掉某短片的整个参考图目录,返回删掉的文件数(删短片时调用,理由同项目)。"""
+    return _delete_owner_dir("clips", clip_id)
+
+
+def _delete_owner_dir(area: str, owner_id: int) -> int:
+    d = upload_root() / area / str(int(owner_id))
     if not d.is_dir():
         return 0
     removed = 0
@@ -170,7 +215,7 @@ def delete_project_dir(project_id: int) -> int:
                 removed += 1
         d.rmdir()  # 只有空目录才删得掉;有意外的子目录就留着,不递归乱删
     except OSError as exc:
-        logger.warning("清理项目 %s 上传目录未完成: %s", project_id, exc)
+        logger.warning("清理 %s/%s 上传目录未完成: %s", area, owner_id, exc)
     if removed:
-        logger.info("清理项目 %s 上传目录:删除 %d 个文件", project_id, removed)
+        logger.info("清理 %s/%s 上传目录:删除 %d 个文件", area, owner_id, removed)
     return removed

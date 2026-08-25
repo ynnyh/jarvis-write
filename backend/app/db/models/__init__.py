@@ -37,7 +37,7 @@ from app.db.models.drama import (
     DramaTrailer,
 )
 from app.db.models.promo import PromoPlan, PromoShot
-from app.db.models.clips import MoodClip
+from app.db.models.clips import ClipShoot, MoodClip
 
 __all__ = [
     "User",
@@ -73,4 +73,5 @@ __all__ = [
     "PromoPlan",
     "PromoShot",
     "MoodClip",
+    "ClipShoot",
 ]
