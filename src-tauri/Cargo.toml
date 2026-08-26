@@ -20,6 +20,11 @@ tauri-plugin-updater = "2"
 tauri-plugin-dialog = "2"
 # 单实例:重复启动时聚焦已有窗口,不再拉起第二个后端子进程抢端口
 tauri-plugin-single-instance = "2"
+# 单实例启动守卫用的 Win32 API(CreateMutexW/FindWindowW/GetLastError),
+# 版本与插件所用 windows-sys 对齐,复用依赖树里已有的一份,不新增编译单元。
+# 注意:CreateMutexW 虽在 Threading 模块,签名引用了 SECURITY_ATTRIBUTES,
+# 实际门控在 Win32_Security feature 上,必须显式带上(不能指望插件的传递 feature)
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_Security", "Win32_UI_WindowsAndMessaging"] }
 # 窗口状态记忆:重启后恢复窗口位置/尺寸/最大化状态
 tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }

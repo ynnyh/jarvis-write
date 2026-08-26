@@ -18,24 +18,34 @@ import socket
 import sys
 from pathlib import Path
 
+PREFERRED_PORT = 8756
 
-def _port_free(host: str, port: int) -> bool:
-    """探测端口在 host 上是否可绑定(空闲)。"""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+
+def _bind_server_socket(host: str, env_port: int) -> socket.socket:
+    """绑定服务 socket 并返回(端口自此锁定到进程退出,不存在探测窗口)。
+
+    显式 JARVIS_PORT:绑定失败直接抛 OSError(调用方给出清晰报错后退出),
+    而不是打印 URL 后让壳导航到死地址白屏。
+    默认:优先 PREFERRED_PORT,被占则绑定端口 0 由 OS **原子**分配空闲口。
+
+    旧实现是「探测(bind+close)→ 重导入 app → uvicorn 再 bind」,探测与真正
+    绑定之间隔着数秒的重导入窗口:多个实例(用户连点「打开」)或他进程可以
+    在窗口里抢走 8756,uvicorn 绑定失败即退出。现在 socket 在导入完成后一次
+    绑定、原样交给 uvicorn(``serve(sockets=...)``),从根上消灭竞态。
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        if env_port:
+            sock.bind((host, env_port))
+            return sock
         try:
-            s.bind((host, port))
-            return True
+            sock.bind((host, PREFERRED_PORT))
         except OSError:
-            return False
-
-
-def _pick_port(host: str, preferred: int = 8756) -> int:
-    """优先用 preferred 端口;被占用则让 OS 分配一个空闲端口。"""
-    if _port_free(host, preferred):
-        return preferred
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind((host, 0))
-        return s.getsockname()[1]
+            sock.bind((host, 0))  # OS 原子分配,必然成功
+        return sock
+    except OSError:
+        sock.close()
+        raise
 
 
 def _load_app_version() -> None:
@@ -177,11 +187,20 @@ def main() -> None:
     if secret_created:
         _reencrypt_legacy_keys(secret)
 
+    # ---- 端口:先重导入再绑定 ----
+    # 重导入 app 可能要数秒(PyInstaller 解包 + 杀毒扫描 + FastAPI 全家桶),
+    # 必须放在绑定**之前**:绑定到 uvicorn 开始监听之间的间隙越短越好,
+    # 桌面壳「打印 URL 后轮询端口就绪」的等待才不会平白多出一截。
+    import uvicorn
+
+    from app.main import app  # 触发建表/迁移在 lifespan 里跑
+
     env_port = int(os.environ.get("JARVIS_PORT", "0")) or 0
-    if env_port:
-        # 显式指定的端口被占用:清晰报错退出(桌面壳会把启动失败弹给用户),
-        # 而不是打印 URL 后让壳导航到死地址白屏。
-        if not _port_free(host, env_port):
+    try:
+        sock = _bind_server_socket(host, env_port)
+    except OSError:
+        if env_port:
+            # 显式指定的端口被占用:清晰报错退出(桌面壳会把启动失败弹给用户)。
             print(
                 f"端口 {env_port} 已被占用(JARVIS_PORT 指定),无法启动。"
                 "请关闭占用进程或取消 JARVIS_PORT 让系统自动选择端口。",
@@ -189,19 +208,16 @@ def main() -> None:
                 flush=True,
             )
             sys.exit(1)
-        port = env_port
-    else:
-        port = _pick_port(host)
+        raise  # 理论不可达:非显式端口的兜底是绑定 0 号端口,由 OS 保证成功
+    port = sock.getsockname()[1]
 
-    # 桌面壳约定:读这一行拿到实际地址;壳侧会轮询端口就绪后再开窗口,
-    # 因此此处打印早于 uvicorn bind 完成没有害处。
+    # 桌面壳约定:读这一行拿到实际地址。socket 已绑定,uvicorn 拿到的就是它
+    # (sockets= 参数),不存在「打印的端口和真正监听的端口不一致」的可能。
     print(f"JARVIS_SERVER_URL=http://{host}:{port}", flush=True)
 
-    import uvicorn
-
-    from app.main import app  # 触发建表/迁移在 lifespan 里跑
-
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="info")).run(
+        sockets=[sock]
+    )
 
 
 if __name__ == "__main__":

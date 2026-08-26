@@ -1,5 +1,6 @@
-// jarvis-write 桌面壳:启动时拉起打包进来的后端(PyInstaller onedir),
-// 读其 stdout 的 JARVIS_SERVER_URL 拿到本机地址,再把窗口导航过去。
+// jarvis-write 桌面壳:启动即开窗显示本地 splash(给「打开」一个即时反馈),
+// 后台线程拉起打包进来的后端(PyInstaller onedir),读其 stdout 的
+// JARVIS_SERVER_URL 拿到本机地址,就绪后把主窗导航过去。
 // 关窗时杀掉后端子进程,避免残留。
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
@@ -117,6 +118,40 @@ fn fatal_setup_error(handle: &tauri::AppHandle, msg: &str) -> ! {
         ))
         .title("jarvis-write 启动失败")
         .blocking_show();
+    std::process::exit(1);
+}
+
+// 启动链路失败兜底(后台线程调用):splash 窗口还在(用户在等启动)→ 弹原生
+// 错误框引导重试;窗口已不在(用户已关窗/退出,kill_backend 已把后端杀掉)
+// → 静默退出,不弹「启动失败」吓人——后端是被正常终止的,不是故障。
+// 弹框经 run_on_main_thread:插件对话框在主线程之外直接 blocking_show
+// 行为不保证,排队回主线程用非阻塞 show + 信道等用户点掉再退出。
+fn fatal_startup_failure(handle: &tauri::AppHandle, msg: &str) -> ! {
+    ulog(handle, &format!("启动失败(后台线程):{msg}"));
+    if handle.get_webview_window("main").is_none() {
+        std::process::exit(1);
+    }
+    use tauri_plugin_dialog::DialogExt;
+    let log_hint = handle
+        .path()
+        .app_log_dir()
+        .map(|d| d.display().to_string())
+        .unwrap_or_else(|_| "应用日志目录".to_string());
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    let h = handle.clone();
+    let text = format!(
+        "后端启动失败,应用无法继续。\n\n{msg}\n\n日志目录:{log_hint}\n若反复出现,请重启电脑后重试或联系支持。"
+    );
+    let _ = handle.run_on_main_thread(move || {
+        h.dialog()
+            .message(text)
+            .title("jarvis-write 启动失败")
+            .show(move |_| {
+                let _ = tx.send(());
+            });
+    });
+    // 等用户点掉错误框再退出;等不到(极端)也在 120s 后退出,绝不悬挂
+    let _ = rx.recv_timeout(Duration::from_secs(120));
     std::process::exit(1);
 }
 
@@ -643,13 +678,16 @@ fn spawn_backend(exe: std::path::PathBuf) -> Result<(Child, String), String> {
     });
 
     // 后端启动早期会打印一行 JARVIS_SERVER_URL=http://127.0.0.1:<port>
-    let deadline = Instant::now() + Duration::from_secs(30);
+    // 超时给到 60s(旧 30s):首启/更新后首启要过杀毒全量扫描(PyInstaller
+    // 解包 + 数百个依赖文件),慢机器上 30s 不够——splash 有即时反馈,等得起。
+    let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         let now = Instant::now();
         if now >= deadline {
             let _ = child.kill();
             return Err(
-                "后端启动超时(30 秒未汇报服务地址),可能端口被占用或数据目录被锁".to_string()
+                "后端启动超时(60 秒未就绪)。最常见原因是杀毒软件首次启动时全量扫描程序目录,请稍后重试或将安装目录加入杀毒白名单"
+                    .to_string(),
             );
         }
         match rx.recv_timeout(deadline - now) {
@@ -661,12 +699,16 @@ fn spawn_backend(exe: std::path::PathBuf) -> Result<(Child, String), String> {
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 let _ = child.kill();
                 return Err(
-                    "后端启动超时(30 秒未汇报服务地址),可能端口被占用或数据目录被锁".to_string(),
+                    "后端启动超时(60 秒未就绪)。最常见原因是杀毒软件首次启动时全量扫描程序目录,请稍后重试或将安装目录加入杀毒白名单"
+                        .to_string(),
                 );
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 let _ = child.kill();
-                return Err("后端未汇报服务地址就退出了".to_string());
+                return Err(
+                    "后端未汇报服务地址就退出了(可能被杀毒软件拦截,或数据目录被其他进程锁住)"
+                        .to_string(),
+                );
             }
         }
     }
@@ -692,8 +734,111 @@ fn wait_backend_ready(url: &str) {
     }
 }
 
+// ===== 单实例启动守卫 =====
+// tauri-plugin-single-instance(2.4.x)在 Windows 上判活的链路是:
+// 「命名互斥体存在 → FindWindowW 找到首实例的隐藏窗口 → 通知其唤起后退出」。
+// 它有个竞态洞:互斥体存在但**窗口还没建好**(首实例尚在初始化)或没找到时,
+// 第二个实例什么也不做、直接放行——用户连点「打开」时第二个进程照常跑到
+// setup,拉起第二份后端抢端口/锁数据库,弹「后端启动失败」。
+// 这里在 Tauri Builder 之前先做一道**不依赖任何窗口**的内核级互斥体判定,
+// 把洞堵上;插件保持原位,继续负责「唤起已有窗口」的正路。
+#[cfg(windows)]
+mod single_instance_boot_guard {
+    use std::time::Duration;
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::Foundation::GetLastError;
+    use windows_sys::Win32::Foundation::ERROR_ALREADY_EXISTS;
+    use windows_sys::Win32::System::Threading::CreateMutexW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::FindWindowW;
+
+    // 与 tauri.conf.json 的 identifier 保持一致;插件正是拿它派生自己的
+    // 互斥体名/隐藏窗口名。改 identifier 时这里必须同步。
+    const IDENTIFIER: &str = "com.jarviswrite.desktop";
+
+    fn encode_wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    // 尝试成为唯一实例。true = 守卫互斥体由本进程新建(此前无人持),可继续运行。
+    // ⚠ 两类句柄的生死必须分清(实测踩过):「拿到守卫」的句柄刻意不关闭、
+    // 不释放——命名互斥体只要还有句柄就存在,进程退出时内核自动回收,「存在」
+    // 本身就是要维持到进程死的状态;而「观测到已存在」的那次调用返回的句柄
+    // **必须立刻 CloseHandle**——否则本进程自己就把互斥体钉住了,宽限重试
+    // 永远看到自己那份句柄,前任退出后也接不了管(更新重启会被误杀)。
+    fn try_acquire() -> bool {
+        let name = encode_wide(&format!("{IDENTIFIER}-boot-guard"));
+        // SAFETY: 入参合法;句柄处置见上。
+        let handle = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
+        if handle.is_null() {
+            // CreateMutexW 本身失败(极端情况):按无守卫放行,行为退回插件层,
+            // 与修前一致,不因守卫把应用弄到打不开。
+            return true;
+        }
+        // SAFETY: 紧跟 CreateMutexW 调用读取,中间无其他 Win32 调用,不会串值。
+        let already_exists = unsafe { GetLastError() } == ERROR_ALREADY_EXISTS;
+        if already_exists {
+            // SAFETY: 观测句柄,用完即弃(见函数注释)。
+            unsafe { CloseHandle(handle) };
+            false
+        } else {
+            true // 守卫句柄有意持有到进程退出
+        }
+    }
+
+    // 首实例的插件隐藏窗口是否已就绪(类名/窗口名是 tauri-plugin-single-instance
+    // 2.4.x 的内部约定;上游若改名,最坏退化为「第二实例静默退出、不唤起已有窗口」,
+    // 依然安全——绝不会因此放行第二个实例)。
+    fn plugin_window_ready() -> bool {
+        let class = encode_wide(&format!("{IDENTIFIER}-sic"));
+        let window = encode_wide(&format!("{IDENTIFIER}-siw"));
+        // SAFETY: 纯窗口查询,无副作用。
+        let hwnd = unsafe { FindWindowW(class.as_ptr(), window.as_ptr()) };
+        !hwnd.is_null()
+    }
+
+    // 轮询判定逻辑,抽出来供单元测试注入假实现(不真等 2 秒)。
+    // true = 本进程继续运行;false = 应退出。
+    pub(crate) fn decide(
+        mut acquire: impl FnMut() -> bool,
+        mut window_ready: impl FnMut() -> bool,
+        mut wait: impl FnMut(),
+        max_polls: usize,
+    ) -> bool {
+        if acquire() {
+            return true; // 首实例(或前任已退出,守卫刚刚易主)
+        }
+        for _ in 0..max_polls {
+            wait();
+            if acquire() {
+                return true; // 前任(更新重启中退出的旧实例)已释放,本进程顶上
+            }
+            if window_ready() {
+                return true; // 健康首实例的插件窗口已就绪:放行去走插件的正路
+                             // (插件会在自己初始化时唤起已有窗口并令本进程退出)
+            }
+        }
+        false // 守卫一直被持且插件窗口始终没出现:首实例初始化停滞/插件异常,
+              // 绝不拉第二份后端,静默退出
+    }
+
+    pub fn ensure() {
+        let proceed = decide(
+            try_acquire,
+            plugin_window_ready,
+            || std::thread::sleep(Duration::from_millis(150)),
+            13, // 150ms × 13 ≈ 2s 宽限
+        );
+        if !proceed {
+            std::process::exit(0);
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 单实例守卫:必须在任何 Tauri/插件初始化、后端拉起之前执行(见模块注释)。
+    #[cfg(windows)]
+    single_instance_boot_guard::ensure();
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // 重复启动:把已有窗口唤到前台(可能正藏在托盘),不再起第二份后端
@@ -739,29 +884,17 @@ pub fn run() {
             approved: AtomicBool::new(false),
         })
         .setup(|app| {
-            // 定位打包进 resources 的后端 onedir。
-            let exe = match app.path().resource_dir() {
-                Ok(dir) => dir.join(BACKEND_EXE),
-                Err(e) => fatal_setup_error(&app.handle(), &format!("找不到资源目录: {e}")),
-            };
-
-            let (child, url) = match spawn_backend(exe) {
-                Ok(v) => v,
-                Err(e) => fatal_setup_error(&app.handle(), &e),
-            };
-            app.state::<Backend>().0.lock().unwrap().replace(child);
-
-            wait_backend_ready(&url);
-
-            let parsed = match url.parse() {
-                Ok(p) => p,
-                Err(e) => fatal_setup_error(&app.handle(), &format!("后端地址非法({url}): {e}")),
-            };
-            if let Err(e) = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(parsed))
-                .title("jarvis · write")
-                .inner_size(1200.0, 820.0)
-                .min_inner_size(880.0, 600.0)
-                .build()
+            // 先开窗、后起服务:窗口立刻出现并显示本地 splash(「正在启动」提示),
+            // 后端在后台线程拉起、就绪后把主窗导航到本地服务地址。
+            // 旧顺序是「拉起后端→等就绪→才建窗」:首启/更新后首启要过杀毒
+            // 全量扫描,几十秒桌面毫无动静,用户以为没打开而连点「打开」,
+            // 引出多实例抢端口/锁数据库的连锁反应。
+            if let Err(e) =
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::App("splash.html".into()))
+                    .title("jarvis · write")
+                    .inner_size(1200.0, 820.0)
+                    .min_inner_size(880.0, 600.0)
+                    .build()
             {
                 fatal_setup_error(&app.handle(), &format!("创建窗口失败: {e}"));
             }
@@ -783,6 +916,38 @@ pub fn run() {
 
             // 窗口已创建,后台检查软件更新(仅发行版真正检查)
             spawn_update_check(app.handle().clone());
+
+            // 后台拉起后端。子进程句柄拿到手就立刻入 state:启动期间用户
+            // 关掉 splash 窗,Destroyed → kill_backend 也能把它杀掉,不留
+            // 「壳没了、后端还占着端口/数据库」的孤儿。
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let exe = match handle.path().resource_dir() {
+                    Ok(dir) => dir.join(BACKEND_EXE),
+                    Err(e) => fatal_startup_failure(&handle, &format!("找不到资源目录: {e}")),
+                };
+
+                let (child, url) = match spawn_backend(exe) {
+                    Ok(v) => v,
+                    Err(e) => fatal_startup_failure(&handle, &e),
+                };
+                handle.state::<Backend>().0.lock().unwrap().replace(child);
+
+                wait_backend_ready(&url);
+
+                let parsed = match url.parse() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        fatal_startup_failure(&handle, &format!("后端地址非法({url}): {e}"))
+                    }
+                };
+                let nav_handle = handle.clone();
+                let _ = handle.run_on_main_thread(move || {
+                    if let Some(w) = nav_handle.get_webview_window("main") {
+                        let _ = w.navigate(parsed);
+                    }
+                });
+            });
 
             Ok(())
         })
@@ -939,7 +1104,6 @@ async fn check_for_update(handle: tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::validate_update_proxy;
-
     // 代理地址校验:空=清除;http/socks5 + host:port 合法;其余一律拒绝。
     #[test]
     fn validate_update_proxy_rules() {
@@ -958,5 +1122,55 @@ mod tests {
         assert!(validate_update_proxy("https://127.0.0.1:7890").is_err());
         assert!(validate_update_proxy("127.0.0.1:7890").is_err());
         assert!(validate_update_proxy("不是地址").is_err());
+    }
+}
+
+// 单实例守卫的判定逻辑:四种场景各钉一条,回归时测试直接红。
+// 只测纯逻辑(注入假 acquire/window_ready/wait),不碰真 Win32 调用。
+#[cfg(all(test, windows))]
+mod single_instance_boot_guard_tests {
+    use super::single_instance_boot_guard::decide;
+
+    // 首实例:第一把就拿到守卫,零等待直接运行
+    #[test]
+    fn first_instance_runs_immediately() {
+        let mut waits = 0;
+        assert!(decide(|| true, || panic!("不应查窗口"), || waits += 1, 13));
+        assert_eq!(waits, 0);
+    }
+
+    // 更新重启:旧实例在宽限期内退出(第 3 次尝试时守卫可拿)→ 本进程顶上
+    #[test]
+    fn acquires_after_owner_exits() {
+        let mut attempts = 0;
+        let mut waits = 0;
+        assert!(decide(
+            || {
+                attempts += 1;
+                attempts >= 3
+            },
+            || false,
+            || waits += 1,
+            13
+        ));
+        assert_eq!(waits, 2);
+    }
+
+    // 健康首实例:守卫拿不到,但它的插件窗口已就绪 → 放行走插件的正路
+    // (唤起已有窗口 + 退出第二实例由插件完成)
+    #[test]
+    fn healthy_owner_delegates_to_plugin() {
+        let mut window_checks = 0;
+        assert!(decide(|| false, || { window_checks += 1; true }, || {}, 13));
+        assert_eq!(window_checks, 1);
+    }
+
+    // 竞态洞(本次修的 bug):守卫一直被持、插件窗口始终没出现
+    // → 轮满宽限期后退出,绝不放行第二份后端
+    #[test]
+    fn stalled_owner_causes_exit() {
+        let mut waits = 0;
+        assert!(!decide(|| false, || false, || waits += 1, 13));
+        assert_eq!(waits, 13);
     }
 }
