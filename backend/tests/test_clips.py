@@ -234,6 +234,30 @@ def test_clips_novel_derived_grounding(client):
     assert [c["id"] for c in r.json()["clips"]] == [cid]
 
 
+def test_standalone_list_excludes_novel_derived(client):
+    """独立工坊列表只看自建条目:小说衍生的投流企划不得混入。
+
+    回归背景:独立列表曾不过滤 source_project_id,小说企划混进工坊列表且
+    界面零区分,用户点进工作台、返回又按数据归属跳回小说书页,以为工坊
+    内容丢失(实测复现)。小说「投流」页签的过滤不受影响。
+    """
+    headers = _auth(client, "clips_mix")
+    r = client.post("/api/projects", headers=headers, json={"title": "混入排查书"})
+    pid = r.json()["id"]
+    novel_cid = client.post("/api/clips", headers=headers, json={
+        "theme": "regret", "duration_s": 15, "source_project_id": pid,
+    }).json()["clip_row"]["id"]
+    own_cid = client.post("/api/clips", headers=headers,
+                          json={"theme": "love", "duration_s": 15}).json()["clip_row"]["id"]
+
+    # 独立工坊列表(不传 project_id):只有自建那条,小说衍生被排除
+    r = client.get("/api/clips?mode=mood", headers=headers)
+    assert [c["id"] for c in r.json()["clips"]] == [own_cid]
+    # 小说「投流」页签照旧:只看该书衍生的
+    r = client.get(f"/api/clips?project_id={pid}", headers=headers)
+    assert [c["id"] for c in r.json()["clips"]] == [novel_cid]
+
+
 def test_one_take_failure_still_delivers_the_rest(client):
     """②三发并行:一发展开失败,另外两个本子照样交付(旧实现是一截断全批白跑)。"""
     headers = _auth(client, "clips_partial")

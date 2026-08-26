@@ -47,6 +47,15 @@ export function ClipsList({ projectId, mode = "mood" }: { projectId: number | nu
   }, [projectId, mode]);
   useEffect(() => { void reload(); }, [reload]);
 
+  const novelMode = projectId !== null;
+
+  // 进工作台时带上「返回到哪」:工坊列表进来回工坊列表,小说投流页签进来回
+  // 小说页签——返回跟进入路径走,而不是按数据归属跳(否则独立工坊点进一条
+  // 小说衍生的企划,返回会被甩进小说书页,工坊上下文凭空消失)。
+  const backTo = novelMode
+    ? `/project/${projectId}/book?tab=clips`
+    : `/${base}`;
+
   async function create() {
     const kind = isPlay ? "玩法" : "情绪主题";
     if (!theme && !custom.trim()) { toast.err("先选命题", `选一个${kind},或填自定义`); return; }
@@ -61,11 +70,10 @@ export function ClipsList({ projectId, mode = "mood" }: { projectId: number | nu
       });
       toast.ok("已建,马上开产三个本子", "进工作台看进度;不合适可带意见换一批");
       // autostart:工作台 mount 时自动触发生成,补上"建完还要再点一次生成"的断档
-      nav(`/${base}/${r.clip_row.id}`, { state: { autostart: true } });
+      nav(`/${base}/${r.clip_row.id}`, { state: { autostart: true, backTo } });
     } catch (e) { toast.err("创建失败", errMsg(e)); } finally { setBusy(false); }
   }
 
-  const novelMode = projectId !== null;
   const dirInfo = (meta?.directions ?? []).find((d) => d.key === direction);
 
   return (
@@ -184,7 +192,7 @@ export function ClipsList({ projectId, mode = "mood" }: { projectId: number | nu
         <EmptyState>{novelMode ? "这本书还没有投流短视频——上面建一个。" : isPlay ? "还没有灵感片。选个玩法试试,三十秒出三个本子。" : "还没有短片。选个主题试试,三十秒出三个本子。"}</EmptyState>
       ) : rows.map((r) => (
         <div key={r.id} className="sub-summary ep-row"
-          onClick={() => nav(`/${base}/${r.id}`)}>
+          onClick={() => nav(`/${base}/${r.id}`, { state: { backTo } })}>
           <div className="card-head mb-2">
             <b>{(r.clip as ClipCard).take ? `《${(r.clip as ClipCard).take}》` : ""}{r.theme_display}{r.custom_theme && !r.theme ? `·${r.custom_theme}` : ""}</b>
             <span className="badge mute">{r.duration_s}s</span>

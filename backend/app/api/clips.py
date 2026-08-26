@@ -289,7 +289,14 @@ async def list_clips(project_id: int | None = None, mode: str | None = None, db:
     if mode is not None:
         q = q.filter(MoodClip.mode == mode)
     if project_id is not None:
+        # 小说「投流」页签:只看该书衍生的企划
         q = q.filter(MoodClip.source_project_id == project_id)
+    else:
+        # 独立工坊(情绪短片/灵感工坊):只看工坊自建的条目,小说衍生的投流
+        # 企划留在小说页签里。曾因缺这道过滤,小说企划混进工坊列表且界面
+        # 零区分,用户点进工作台、返回又按数据归属跳回小说书页,以为工坊
+        # 内容丢失(实测复现)。
+        q = q.filter(MoodClip.source_project_id.is_(None))
     rows = q.order_by(MoodClip.updated_at.desc()).limit(100).all()
     return {"clips": [clip_dict(r, with_candidates=False) for r in rows]}
 

@@ -18,7 +18,7 @@ import { clipStatusTone } from "./shared";
 
 export default function ClipWorkspace({ cid, mode = "mood" }: { cid: number; mode?: string }) {
   const nav = useNavigate();
-  const location = useLocation() as { state?: { autostart?: boolean } };
+  const location = useLocation() as { state?: { autostart?: boolean; backTo?: string } };
   const { run } = useJob();
   const [row, setRow] = useState<MoodClip | null>(null);
   const [busy, setBusy] = useState(false);
@@ -141,7 +141,16 @@ export default function ClipWorkspace({ cid, mode = "mood" }: { cid: number; mod
           <span className="badge mute">{row.direction_label}</span>
           <span className={`badge ${clipStatusTone(row.status)}`.trim()}>{row.status_cn}</span>
         </h1>
-        <button className="btn" onClick={() => nav(row.source_project_id ? `/project/${row.source_project_id}/book?tab=clips` : `/${mode === "play" ? "inspire" : "clips"}`)}>← 返回</button>
+        {/* 返回跟进入路径走(列表/小说页签进来时带了 backTo):从哪个列表点进来
+            就回哪个列表。刷新/直链丢状态时才按数据归属兜底——小说衍生企划回
+            小说投流页签,工坊自建回工坊列表。旧实现无条件按数据归属跳,独立
+            工坊点进小说衍生企划后返回被甩进小说书页,工坊上下文凭空消失。 */}
+        <button className="btn" onClick={() => nav(
+          location.state?.backTo
+          ?? (row.source_project_id
+            ? `/project/${row.source_project_id}/book?tab=clips`
+            : `/${mode === "play" ? "inspire" : "clips"}`),
+        )}>← 返回</button>
       </div>
 
       <StepBar steps={steps} anchorPrefix="clips-step" allDone={<>
