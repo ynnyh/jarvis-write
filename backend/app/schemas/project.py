@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.canon import StoryCanon
 from app.schemas.concept import Concept
@@ -111,6 +111,13 @@ class OutlineOut(BaseModel):
     current_version: int
 
     model_config = {"from_attributes": True}
+
+    @field_validator("characters_involved", "key_items", "beats", mode="before")
+    @classmethod
+    def _null_list_to_empty(cls, v: Any) -> Any:
+        # 场景节拍上线前的老行这些 JSON 列是 NULL;from_attributes 下字段存在值为
+        # None 时字段默认值不生效,beats 走默认 [] 的兜底是假的,序列化直接 500
+        return [] if v is None else v
 
 
 class GenerateBlueprintRequest(BaseModel):
