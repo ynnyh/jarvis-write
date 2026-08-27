@@ -38,6 +38,11 @@ export default function BirthdayHandcard({ card, honoreeName, memories, onExport
   const allPromptsText = (card.chunks ?? []).map((c) =>
     `【段 ${c.index} · ${c.start_s}-${c.end_s}s】\n${chunkPromptText(card.shots, c.shot_seqs ?? [])}`
   ).join("\n\n");
+  // 按镜头一键复制中文提示词(与漫剧/情绪短片同款):几秒一格小片,一格一格点太磨人。
+  const allShotsCnText = (card.shots ?? [])
+    .filter((s) => (s.prompt_cn || "").trim())
+    .map((s) => `镜头 ${s.seq}：${(s.prompt_cn || "").trim()}`)
+    .join("\n\n");
   const upd = (patch: Partial<WishCard>) => setDraft({ ...(draft as WishCard), ...patch });
   const updShot = (seq: number, patch: Partial<WishShot>) => setDraft({
     ...(draft as WishCard),
@@ -161,6 +166,8 @@ export default function BirthdayHandcard({ card, honoreeName, memories, onExport
           <div className="card-head mb-2">
             <b>分镜({card.shots.length} 格 · {card.shots.reduce((s, x) => s + x.duration_s, 0)}s)</b>
             <span className="muted">画风锚已注入每格提示词</span>
+            <span className="grow" />
+            {allShotsCnText && <CopyBtn text={allShotsCnText} label="复制全部镜头中文" />}
           </div>
           <div className="tbl-wrap">
             <table className="tbl">

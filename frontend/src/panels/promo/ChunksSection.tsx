@@ -17,6 +17,16 @@ export default function ChunksSection({ plan, shotCount, jobs, onBuild }: {
   const items = plan.chunks?.items ?? [];
   const hasShots = shotCount > 0;
 
+  // 一键复制全部段提示词:5/10/15 秒的段一段一段复制太磨人,整片按段号顺序拼好一口气搬走。
+  // 只带中文视频提示词(motion_prompt_cn),英文/音频说明不带,保持生成主链路干净。
+  const allCnText = items
+    .map((c) =>
+      (c.motion_prompt_cn ?? "").trim()
+        ? `【段 ${c.index} · ${c.start_s}-${c.end_s}s】\n${String(c.motion_prompt_cn).trim()}`
+        : "")
+    .filter(Boolean)
+    .join("\n\n");
+
   return (
     <section className="card">
       <div className="card-head">
@@ -54,6 +64,8 @@ export default function ChunksSection({ plan, shotCount, jobs, onBuild }: {
           <div className="card-head mb-2">
             <b>{items.length} 段 · 每段 ≤{plan.chunks.chunk_s}s</b>
             <span className="muted">按段号顺序首尾相接</span>
+            <span className="grow" />
+            {allCnText && <CopyBtn text={allCnText} label="复制全部段提示词" />}
           </div>
           {/* 每条提示词末尾都带着音频那句(后端 media.audio 统一追加),这里说清它不是「静音」 */}
           <p className="hint">

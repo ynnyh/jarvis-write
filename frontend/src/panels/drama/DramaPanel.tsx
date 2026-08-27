@@ -1073,6 +1073,14 @@ function EpisodeDetail({ pid, eid, hasStyle, onEpisodesChanged, onDeselect }: {
       + `:${s.dialogue ? 1 : 0}:${s.motion_cn || ""}:${s.done_still ? 1 : 0}${s.assets?.length ?? 0}`)
     .join("|");
 
+  // 「复制全部中文」:把这一集每格的中文提示词一口气拼起来(镜头号开头,格与格空行隔开)。
+  // 用户分工:中文提示词去即梦/可灵出图,几十格一格格复制太磨人;这份整集清单粘到
+  // 文档/交给模型/批量出图都能用。其余轨道(英/负/运动)刻意不带,保持出图主链路干净。
+  const allCnText = shots
+    .filter((s) => (s.prompt_cn || "").trim())
+    .map((s) => `镜头 ${s.seq}：${(s.prompt_cn || "").trim()}`)
+    .join("\n\n");
+
   return (
     <div className="card">
       <div className="card-head">
@@ -1179,6 +1187,12 @@ function EpisodeDetail({ pid, eid, hasStyle, onEpisodesChanged, onDeselect }: {
             {/* 逐格施工单的进度条:一集几十格,出到第几格得一眼看见 */}
             <span className="badge">静帧 {stillsDone}/{shots.length}</span>
             <span className="badge">视频 {videosDone}/{shots.length}</span>
+            <span className="grow" />
+            <CopyBtn
+              text={allCnText}
+              label="复制全部中文"
+              title="把这集所有镜头的中文提示词按镜头号一口气复制,去即梦/可灵批量出图"
+            />
             <span className="muted">
               画风锚/角色锚已注入。复制中文提示词去即梦/可灵出图;出好的静帧挂回那一格,
               做完打个勾——导出的施工单会带上这份进度

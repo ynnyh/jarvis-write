@@ -37,6 +37,12 @@ export default function ClipHandcard({ card, onExport, onSave }: {
   const allPromptsText = (card.chunks ?? []).map((c) =>
     `【段 ${c.index} · ${c.start_s}-${c.end_s}s】\n${chunkPromptText(card.shots, c.shot_seqs ?? [])}`
   ).join("\n\n");
+  // 按镜头一键复制中文提示词(与漫剧同款):几秒一格小片,一格一格点太磨人;
+  // 咕到文档/交给模型/批量出图都用这份「镜头号+中文提示词」清单。
+  const allShotsCnText = (card.shots ?? [])
+    .filter((s) => (s.prompt_cn || "").trim())
+    .map((s) => `镜头 ${s.seq}：${(s.prompt_cn || "").trim()}`)
+    .join("\n\n");
   const upd = (patch: Partial<ClipCard>) => setDraft({ ...(draft as ClipCard), ...patch });
   const updShot = (seq: number, patch: Partial<ClipShot>) => setDraft({
     ...(draft as ClipCard),
@@ -148,6 +154,8 @@ export default function ClipHandcard({ card, onExport, onSave }: {
           <div className="card-head mb-2">
             <b>分镜({card.shots.length} 格 · {card.shots.reduce((s, x) => s + x.duration_s, 0)}s)</b>
             <span className="muted">画风锚已注入每格提示词</span>
+            <span className="grow" />
+            {allShotsCnText && <CopyBtn text={allShotsCnText} label="复制全部镜头中文" />}
           </div>
           <div className="tbl-wrap">
             <table className="tbl">
