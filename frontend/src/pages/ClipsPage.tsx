@@ -15,9 +15,9 @@ export default function ClipsPage() {
   const { id } = useParams();
   const [params] = useSearchParams();
   const projectId = params.get("project");
-  // 灵感工坊(/inspire)与情绪短片(/clips)共用这一个页面,按路径区分命题目录与文案
-  const isInspire = useLocation().pathname.startsWith("/inspire");
-  const mode = isInspire ? "play" : "mood";
+  // 情绪短片(/clips)/灵感工坊(/inspire)/故事工坊(/free)共用这一个页面,按路径区分命题目录与文案
+  const pathname = useLocation().pathname;
+  const mode = pathname.startsWith("/inspire") ? "play" : pathname.startsWith("/free") ? "free" : "mood";
   return id
     ? <ClipWorkspace cid={Number(id)} mode={mode} />
     : <ClipsList projectId={projectId ? Number(projectId) : null} mode={mode} />;
@@ -28,9 +28,11 @@ export function ClipsList({ projectId, mode = "mood" }: { projectId: number | nu
   const nav = useNavigate();
   const meta = useClipsMeta();
   const isPlay = mode === "play";
+  // 故事工坊(mode=free):「我的点子」驱动——用户自带完整故事,不走命题目录
+  const isFree = mode === "free";
   // 不带前导斜杠:下方路径全按 `/${base}/…` 拼前缀,base 再带斜杠会拼出
   // 「//inspire/42」这类双斜杠路径,路由匹配不到、被兜底重定向回首页。
-  const base = isPlay ? "inspire" : "clips";
+  const base = isPlay ? "inspire" : isFree ? "free" : "clips";
   const [rows, setRows] = useState<MoodClip[] | null>(null);
   const [theme, setTheme] = useState("");
   const [custom, setCustom] = useState("");
@@ -59,8 +61,13 @@ export function ClipsList({ projectId, mode = "mood" }: { projectId: number | nu
     : `/${base}`;
 
   async function create() {
-    const kind = isPlay ? "玩法" : "情绪主题";
-    if (!theme && !custom.trim()) { toast.err("先选命题", `选一个${kind},或填自定义`); return; }
+    if (isFree) {
+      // 故事工坊:点子必填(它就是这条的"命题"),标题只是可选备注
+      if (!inspiration.trim()) { toast.err("先写点子", "把你想到的场景/对话随手写下来,一句话到一段话都行"); return; }
+    } else {
+      const kind = isPlay ? "玩法" : "情绪主题";
+      if (!theme && !custom.trim()) { toast.err("先选命题", `选一个${kind},或填自定义`); return; }
+    }
     setBusy(true);
     try {
       const r = await clipsApi.create({
@@ -82,26 +89,48 @@ export function ClipsList({ projectId, mode = "mood" }: { projectId: number | nu
     <>
       {!novelMode && (
         <div className="page-head">
-          <h1>{isPlay ? "灵感工坊" : "情绪短片"}</h1>
+          <h1>{isPlay ? "灵感工坊" : isFree ? "故事工坊" : "情绪短片"}</h1>
           <button className="btn" onClick={() => nav("/")}>← 我的小说</button>
         </div>
       )}
       <section className="card">
         <div className="card-head">
           <h3 className="grow">
-            {novelMode ? "为这本书出投流短视频" : isPlay ? "新建灵感片" : "新建情绪短片"}
+            {novelMode ? "为这本书出投流短视频" : isPlay ? "新建灵感片" : isFree ? "新建我的故事片" : "新建情绪短片"}
             <span className="muted">{novelMode ? "从书里抽金句名场面,金句可溯源" : "15/30 秒,一次三本子三选一"}</span>
           </h3>
         </div>
         <p className="card-desc">
           {novelMode
             ? "AI 读你的定稿章节,挑最戳人的金句与名场面,一次产 3 个不同切入的投流本子——核心金句必须出自正文,引擎会逐句溯源校验。"
-            : isPlay
-              ? "选个好玩/猎奇的灵感玩法(治愈手绘·黏土定格·赛博雨夜…),AI 一次给 3 个不同切入的本子,画风气质一眼可辨,允许荒诞与反差;每格带三轨提示词与切段,拿去即梦/剪映/minimax 直接出片。"
-              : "选个情绪命题(遗憾/争吵/爱情/童趣…),AI 一次给 3 个不同切入的本子:钩子开场 → 情绪蓄势 → 金句收尾,每格带三轨提示词与切段,拿去即梦/剪映直接出片。"}
+            : isFree
+              ? "把你想到的故事一口气写下来:一个场景、一段对话都行。AI 以你的点子为本子主轴(第 1 条原样还原,另两条同场景换变体),画风任选动画系,每格带三轨提示词与切段,拿去即梦/剪映直接出片。"
+              : isPlay
+                ? "选个好玩/猎奇的灵感玩法(治愈手绘·黏土定格·赛博雨夜…),AI 一次给 3 个不同切入的本子,画风气质一眼可辨,允许荒诞与反差;每格带三轨提示词与切段,拿去即梦/剪映/minimax 直接出片。"
+                : "选个情绪命题(遗憾/争吵/爱情/童趣…),AI 一次给 3 个不同切入的本子:钩子开场 → 情绪蓄势 → 金句收尾,每格带三轨提示词与切段,拿去即梦/剪映直接出片。"}
         </p>
         <div className="form-grid">
-          {!novelMode && (
+          {isFree && (
+            <div className="field field-full">
+              <label className="fl" htmlFor="clip-idea">
+                我的点子<span className="hint">必填——场景、人物、想突出的一笑,随手写</span>
+              </label>
+              <textarea id="clip-idea" value={inspiration} maxLength={500} rows={3}
+                placeholder={"如「小朋友和妈妈坐出租车,孩子一路问司机叔叔奇怪的问题,最后一句把俩人全问愣了」"}
+                onChange={(e) => setInspiration(e.target.value)} />
+            </div>
+          )}
+          {isFree && (
+            <div className="field">
+              <label className="fl" htmlFor="clip-free-title">
+                故事标题<span className="hint">可选,列表里好认</span>
+              </label>
+              <input id="clip-free-title" value={custom} maxLength={40}
+                placeholder="如「出租车十万个为什么」"
+                onChange={(e) => setCustom(e.target.value)} />
+            </div>
+          )}
+          {!novelMode && !isFree && (
             <div className="field field-full">
               <span className="fl">{isPlay ? "灵感玩法" : "情绪命题"}<span className="hint">选一个,或用自定义</span></span>
               <div className="chips">
@@ -119,7 +148,7 @@ export function ClipsList({ projectId, mode = "mood" }: { projectId: number | nu
               </div>
             </div>
           )}
-          {!theme && !novelMode && (
+          {!theme && !novelMode && !isFree && (
             <div className="field field-full">
               <label className="fl" htmlFor="clip-custom">{isPlay ? "自定义玩法" : "自定义主题"}</label>
               <input id="clip-custom" value={custom} maxLength={40}
@@ -171,16 +200,18 @@ export function ClipsList({ projectId, mode = "mood" }: { projectId: number | nu
               onChange={(e) => setStyleHints(e.target.value)}
               placeholder="不填则 AI 按命题自定氛围" />
           </div>
-          <div className="field field-full">
-            <label className="fl" htmlFor="clip-inspire">
-              一句话灵感<span className="hint">可选,故事种子</span>
-            </label>
-            <input id="clip-inspire" value={inspiration} maxLength={60}
-              onChange={(e) => setInspiration(e.target.value)}
-              placeholder={novelMode
-                ? "如「主打男女主第一次对峙」(不填则 AI 自动挑)"
-                : isPlay ? "如「一个会说话的包子」(不填则 AI 自由发挥)" : "如「异地恋的最后一通电话」(不填则 AI 自由发挥)"} />
-          </div>
+          {!isFree && (
+            <div className="field field-full">
+              <label className="fl" htmlFor="clip-inspire">
+                一句话灵感<span className="hint">可选,故事种子</span>
+              </label>
+              <input id="clip-inspire" value={inspiration} maxLength={60}
+                onChange={(e) => setInspiration(e.target.value)}
+                placeholder={novelMode
+                  ? "如「主打男女主第一次对峙」(不填则 AI 自动挑)"
+                  : isPlay ? "如「一个会说话的包子」(不填则 AI 自由发挥)" : "如「异地恋的最后一通电话」(不填则 AI 自由发挥)"} />
+            </div>
+          )}
         </div>
         <div className="form-actions">
           <button className="primary" disabled={busy} onClick={create}>
@@ -191,12 +222,12 @@ export function ClipsList({ projectId, mode = "mood" }: { projectId: number | nu
       </section>
 
       {rows === null ? <p className="muted">加载中…</p> : rows.length === 0 ? (
-        <EmptyState>{novelMode ? "这本书还没有投流短视频——上面建一个。" : isPlay ? "还没有灵感片。选个玩法试试,三十秒出三个本子。" : "还没有短片。选个主题试试,三十秒出三个本子。"}</EmptyState>
+        <EmptyState>{novelMode ? "这本书还没有投流短视频——上面建一个。" : isPlay ? "还没有灵感片。选个玩法试试,三十秒出三个本子。" : isFree ? "还没有故事片。把你的点子粘进上面的大框,三十秒出三个本子。" : "还没有短片。选个主题试试,三十秒出三个本子。"}</EmptyState>
       ) : rows.map((r) => (
         <div key={r.id} className="sub-summary ep-row"
           onClick={() => nav(`/${base}/${r.id}`, { state: { backTo } })}>
           <div className="card-head mb-2">
-            <b>{(r.clip as ClipCard).take ? `《${(r.clip as ClipCard).take}》` : ""}{r.theme_display}{r.custom_theme && !r.theme ? `·${r.custom_theme}` : ""}</b>
+            <b>{(r.clip as ClipCard).take ? `《${(r.clip as ClipCard).take}》` : ""}{r.theme_display}{r.custom_theme && !r.theme && r.mode !== "free" ? `·${r.custom_theme}` : ""}</b>
             <span className="badge mute">{r.duration_s}s</span>
             <span className="badge mute">{r.direction_label}</span>
             <span className={`badge ${clipStatusTone(r.status)}`.trim()}>{r.status_cn}</span>

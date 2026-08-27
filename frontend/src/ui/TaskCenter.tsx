@@ -54,6 +54,9 @@ export function jobLabel(kind: string): string {
   if (m) return `第 ${m[1]} 章校对`;
   if (kind.startsWith("inspire-refine")) return "概念改写";
   if (kind.startsWith("inspire")) return "灵感方案";
+  // 短片三线(mood/play/free)共用 clips-* 任务 kind:生成三本子 / 单条重拍分镜
+  if (kind.startsWith("clips-gen-")) return "短片·产出本子";
+  if (kind.startsWith("clips-reexp-")) return "短片·重拍分镜";
   return kind;
 }
 

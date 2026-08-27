@@ -14,6 +14,7 @@ const ENTRIES = [
   { to: "/", ico: "📚", label: "我的小说" },
   { to: "/clips", ico: "⚡", label: "情绪短片" },
   { to: "/inspire", ico: "💡", label: "灵感工坊" },
+  { to: "/free", ico: "✨", label: "故事工坊" },
   { to: "/promo", ico: "🎬", label: "宣传片工坊" },
   { to: "/birthday", ico: "🎂", label: "生日祝福" },
   { to: "/help", ico: "📖", label: "使用指南" },

@@ -29,6 +29,7 @@ from app.llm.router import Task, get_adapter_for
 from app.prompts.clips import (
     CLIPS_CLICHE_BLACKLIST,
     CLIPS_EXPAND_PROMPT,
+    CLIPS_FREE_CONTEXT,
     CLIPS_GENERIC_CONTEXT,
     CLIPS_GROUNDING_RULE,
     CLIPS_NOVEL_CONTEXT,
@@ -38,6 +39,7 @@ from app.prompts.clips import (
     CLIPS_TAKES_PROMPT,
     expand_feedback_block,
     takes_feedback_block,
+    takes_rule,
 )
 
 logger = logging.getLogger(__name__)
@@ -313,9 +315,23 @@ def _build_context(db: Session, clip: MoodClip) -> tuple[str, str, str]:
         )
         return context, excerpts, CLIPS_GROUNDING_RULE
 
+    mode = getattr(clip, "mode", "mood") or "mood"
+    if mode == "free":
+        # 故事工坊:点子(inspiration)是本子的主轴,必填;标题(custom_theme)可选
+        if not clip.inspiration.strip():
+            raise ClipBatchError("先把你的点子写下来(一句话到一段话都行)。")
+        context = CLIPS_FREE_CONTEXT.format(
+            theme_label=theme_label(clip),
+            duration_s=clip.duration_s,
+            direction_directive=directive,
+            steering_block=steering,
+            inspiration_block=inspiration_block,
+        )
+        return context, "", ""
+
     if not (clip.theme or clip.custom_theme.strip()):
         raise ClipBatchError("先选一个主题(或填自定义主题)。")
-    context_tpl = CLIPS_PLAY_CONTEXT if (getattr(clip, "mode", "mood") or "mood") == "play" else CLIPS_GENERIC_CONTEXT
+    context_tpl = CLIPS_PLAY_CONTEXT if mode == "play" else CLIPS_GENERIC_CONTEXT
     context = context_tpl.format(
         theme_label=theme_label(clip),
         duration_s=clip.duration_s,
@@ -394,6 +410,7 @@ async def generate_batch(
                 structure_rules=CLIPS_STRUCTURE_RULES,
                 cliche_blacklist=CLIPS_CLICHE_BLACKLIST,
                 feedback_block=takes_feedback_block(clip.candidates or [], feedback),
+                takes_rule=takes_rule(getattr(clip, "mode", "mood") or "mood"),
                 quote_hint=(
                     "本子核心金句在正文里的原句(逐字摘自节选;轻度改写时原句也照抄在此)"
                     if excerpts

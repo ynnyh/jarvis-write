@@ -136,7 +136,7 @@ export default function ClipWorkspace({ cid, mode = "mood" }: { cid: number; mod
     <>
       <div className="page-head">
         <h1>
-          {row.theme_display}{row.custom_theme && !row.theme ? `·${row.custom_theme}` : ""}
+          {row.theme_display}{row.custom_theme && !row.theme && row.mode !== "free" ? `·${row.custom_theme}` : ""}
           <span className="badge mute">{row.duration_s}s</span>
           <span className="badge mute">{row.direction_label}</span>
           <span className={`badge ${clipStatusTone(row.status)}`.trim()}>{row.status_cn}</span>
@@ -149,7 +149,7 @@ export default function ClipWorkspace({ cid, mode = "mood" }: { cid: number; mod
           location.state?.backTo
           ?? (row.source_project_id
             ? `/project/${row.source_project_id}/book?tab=clips`
-            : `/${mode === "play" ? "inspire" : "clips"}`),
+            : `/${mode === "play" ? "inspire" : mode === "free" ? "free" : "clips"}`),
         )}>← 返回</button>
       </div>
 

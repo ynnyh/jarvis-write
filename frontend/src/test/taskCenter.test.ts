@@ -45,6 +45,13 @@ describe("jobLabel", () => {
     expect(jobLabel("inspire-2")).toBe("灵感方案");
   });
 
+  it("短片任务:clips-gen / clips-reexp 带条号也能出人话标签", () => {
+    expect(jobLabel("clips-gen-3")).toBe("短片·产出本子");
+    expect(jobLabel("clips-reexp-3")).toBe("短片·重拍分镜");
+    // inspire 前缀规则在前,但不能把 clips-* 吞进去(两个前缀不相交,守一手)
+    expect(jobLabel("clips-gen-12")).toBe("短片·产出本子");
+  });
+
   it("未识别的 kind 原样返回(兜底,不抛错)", () => {
     expect(jobLabel("gate-release-3-5")).toBe("gate-release-3-5");
     expect(jobLabel("diag-3")).toBe("diag-3");

@@ -47,7 +47,8 @@ CLIPS_PLAYS: list[dict] = [
 ]
 _PLAY_MAP = {t["key"]: t for t in CLIPS_PLAYS}
 VALID_PLAYS = tuple(_PLAY_MAP)
-VALID_MODES = ("mood", "play")
+# free=故事工坊(自由创作):用户自带完整点子,引擎照点子拍;mood/play 是「命题驱动」
+VALID_MODES = ("mood", "play", "free")
 
 VALID_DURATIONS = (15, 30)
 
@@ -77,7 +78,7 @@ VALID_INTENSITIES = tuple(t["key"] for t in INTENSITIES)
 
 
 def _clip_mode(clip: MoodClip) -> str:
-    """工坊类型:mood=情绪短片,play=灵感玩法;存量行(None)按 mood 兜底。"""
+    """工坊类型:mood=情绪短片,play=灵感玩法,free=故事工坊;存量行(None)按 mood 兜底。"""
     return getattr(clip, "mode", "mood") or "mood"
 
 
@@ -85,7 +86,11 @@ def theme_label(clip: MoodClip) -> str:
     """主题显示:目录 key → 标签+导演提示;自定义 → 原文 + 兜底导演提示
     (自定义主题没有目录 directive 可靠,不补一句"落地成具体场景"就常拍成抽象意象)。
 
-    按工坊类型分流:灵感工坊(mode=play)查玩法目录,玩法 directive 含强画风锁定。"""
+    按工坊类型分流:故事工坊(mode=free)以用户点子为主轴;灵感工坊(mode=play)
+    查玩法目录,玩法 directive 含强画风锁定。"""
+    if _clip_mode(clip) == "free":
+        # 点子本身的"忠实还原"约束由 CLIPS_FREE_CONTEXT 模板负责,这里只给短标签
+        return f"{clip.custom_theme.strip()}(自由创作)"
     if _clip_mode(clip) == "play":
         if clip.theme in _PLAY_MAP:
             p = _PLAY_MAP[clip.theme]
@@ -126,6 +131,8 @@ def steering_block(clip: MoodClip) -> str:
 
 def theme_display(clip: MoodClip) -> str:
     """列表用短标签。"""
+    if _clip_mode(clip) == "free":
+        return clip.custom_theme.strip() or "自由创作"
     if _clip_mode(clip) == "play":
         if clip.theme in _PLAY_MAP:
             return _PLAY_MAP[clip.theme]["label"]

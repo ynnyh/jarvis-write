@@ -8,6 +8,7 @@
 - 归一化:镜头上限/时长收敛/切段分组、画风锚兜底、三个本子共用同一套画风
 - 容错:一条切入展开失败仍交付其余本子(带重试);少于 2 个则按失败上报
 - 三选一:pick 后 clip 落定、status=picked;无效序号 400
+- 故事工坊(free):点子必填、点子逐字进两段提示词、mood/play 的"切入真正不同"要求不串味
 - 小说衍生:无定稿章节 → 引导错误;金句 quote_source 不在正文节选 → cautions 标注(溯源红线)
 - 导出:md 手卡含金句/切段;srt 时间轴与分镜同轴
 """
@@ -450,6 +451,58 @@ def test_generate_feedback_reaches_takes_prompt(client):
     assert "用户意见" in second_takes and "金句太鸡汤" in second_takes
     assert "上一批" in second_takes and "未说出口的道歉" in second_takes
     assert "用户意见" not in _CaptureAdapter.prompts[0]  # 首跑无反馈块
+
+
+# ---------- 故事工坊(mode=free:用户自带点子) ----------
+
+def test_free_mode_idea_required_and_grounded(client):
+    """故事工坊:缺点子创建 400(mood 旧校验不变);点子原文与「忠实还原」多样性规则
+    进①②两段提示词;引擎照常两段式交付三个本子、列表按 mode=free 可见。"""
+    headers = _auth(client, "clips_free")
+
+    # 点子就是 free 的"命题":缺点子 → 400;mood 的主题校验不受影响
+    r = client.post("/api/clips", headers=headers, json={
+        "mode": "free", "duration_s": 15})
+    assert r.status_code == 400 and "点子" in r.json()["detail"]
+    assert client.post("/api/clips", headers=headers,
+                       json={"mode": "mood", "duration_s": 15}).status_code == 400
+
+    idea = "小朋友和妈妈坐出租车,孩子一路问司机叔叔奇怪的问题,最后一句把俩人全问愣了"
+    r = client.post("/api/clips", headers=headers, json={
+        "mode": "free", "duration_s": 15, "direction": "anime_jp",
+        "custom_theme": "出租车十万个为什么", "inspiration": idea})
+    assert r.status_code == 200, r.text
+    row = r.json()["clip_row"]
+    cid = row["id"]
+    assert row["mode"] == "free" and row["inspiration"] == idea
+    # 列表短标签就是标题本身(free 不再拼自定义标题尾巴)
+    assert row["theme_display"] == "出租车十万个为什么"
+
+    _CaptureAdapter.reset()
+    with patch("app.engines.clips.batch.get_adapter_for",
+               return_value=_CaptureAdapter(_HEAD, _EXPAND)):
+        r = client.post(f"/api/clips/{cid}/generate", headers=headers)
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    assert len(job["result"]["candidates"]) == 3
+    assert _CaptureAdapter.calls == {"takes": 1, "expand": 3}
+
+    takes_prompt = _CaptureAdapter.prompts[0]
+    # 点子逐字进①提示词 + free 版切入规则(不许"另起炉灶编新故事")
+    assert idea in takes_prompt and "自由创作" in takes_prompt
+    assert "围着用户的故事拍" in takes_prompt
+    # mood/play 的"切入真正不同"要求不得漏进 free 提示词
+    assert "真正不同" not in takes_prompt
+    # 同一份 context 流进②展开:每条切入展开时都带着用户的故事
+    expands = _CaptureAdapter.prompts[1:]
+    assert len(expands) == 3 and all(idea in p for p in expands)
+
+    # 工坊列表按 mode 过滤可见;不混进 mood 列表
+    free_ids = [c["id"] for c in
+                client.get("/api/clips?mode=free", headers=headers).json()["clips"]]
+    mood_ids = [c["id"] for c in
+                client.get("/api/clips?mode=mood", headers=headers).json()["clips"]]
+    assert cid in free_ids and cid not in mood_ids
 
 
 def test_reexpand_replaces_target_only(client):
