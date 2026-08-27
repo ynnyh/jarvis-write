@@ -1,0 +1,146 @@
+# PR 级持续集成:每次 push / PR 自动跑后端测试 + 前端 lint/build/test。
+#
+# 目的:
+# - 合并前确保全量测试通过,不把 bug 带进主分支
+# - 前端 TypeScript 类型检查 + ESLint + 构建,挡住类型错误和构建失败
+# - 后端 pytest 全量,包含 mock LLM 全链路测试
+#
+# 不做的事:
+# - 不跑桌面版打包(那是 desktop-release.yml 的事,只在打 tag 时跑)
+# - 不部署文档站(那是 docs-pages.yml 的事)
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ============ 后端测试 ============
+  backend-test:
+    name: Backend · pytest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: 运行 pytest(带覆盖率)
+        run: |
+          python -m pytest --cov=app --cov-report=xml --cov-report=term-missing -q
+
+      - name: 上传覆盖率到 Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: backend/coverage.xml
+          flags: backend
+          name: backend-coverage
+        continue-on-error: true  # Codecov token 未配置时不阻断 CI
+
+  # ============ 前端 lint + 类型检查 + 构建 ============
+  frontend-lint-build:
+    name: Frontend · lint + typecheck + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: TypeScript 类型检查
+        run: npx tsc --noEmit
+
+      - name: ESLint
+        run: npx eslint .
+
+      - name: 构建
+        run: npm run build
+
+  # ============ 前端单元测试 ============
+  frontend-test:
+    name: Frontend · vitest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 运行 vitest
+        run: npx vitest run --coverage
+        continue-on-error: false  # 覆盖率配置可能不全,但测试本身必须通过
+
+  # ============ 工程约定门禁 ============
+  convention-check:
+    name: Conventions · engine layering + UI conventions
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: 后端引擎分层门禁(不许 media/ 反向 import,三条出片线不许互相 import)
+        run: python -m pytest tests/test_engine_conventions.py -v
+
+      - name: 前端版面公约门禁(扫全量源码,挡四类复发)
+        run: |
+          cd ../frontend
+          npm ci
+          npx vitest run src/test/uiConventions.test.ts

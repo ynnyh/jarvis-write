@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 💬 QQ 交流群
+    url: https://github.com/ynnyh/jarvis-write#community
+    about: 日常提问、试用邀请码、功能讨论，欢迎进 QQ 群（1006352530）
+  - name: 📖 在线文档
+    url: https://ynnyh.github.io/jarvis-write/
+    about: 使用指南、功能导览、设计文档

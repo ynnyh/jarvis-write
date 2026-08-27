@@ -1,0 +1,63 @@
+name: Bug 报告
+description: 报告一个 bug 或异常行为
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢花时间报告 bug！请尽量填写完整，帮助我们快速定位和修复。
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 清晰描述遇到的问题，以及预期行为是什么
+      placeholder: 例如：点击「生成风格卡」后按钮一直转圈，没有返回 job_id；预期应该立即返回 job_id 并开始轮询
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 一步步描述如何复现这个问题
+      placeholder: |
+        1. 打开任意小说项目
+        2. 进入「漫剧工坊」
+        3. 点击「生成风格卡」
+        4. 看到错误
+    validations:
+      required: true
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: 运行环境
+      options:
+        - Windows 桌面版
+        - Docker 自部署
+        - 本地开发（backend + frontend dev server）
+        - 其他（请在描述中说明）
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本号
+      description: 桌面版在「设置 → 关于」查看；自部署看 git commit 或 release tag
+      placeholder: 例如 v0.15.0 或 commit 2f6df6c
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志 / 截图
+      description: 后端控制台日志、浏览器开发者工具的 Network/Console 报错、截图等
+      render: shell
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: 补充信息
+      description: 任何其他可能有用的信息（LLM 提供商、模型名称、项目大小等）
