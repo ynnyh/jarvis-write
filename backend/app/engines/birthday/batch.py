@@ -32,7 +32,7 @@ from app.engines.birthday.common import (
 )
 from app.engines.media.anchors import ensure_style_anchors, merge_negative
 from app.engines.media.directions import direction_directive
-from app.engines.media.text import coerce_int
+from app.engines.media.text import coerce_int, split_character_desc
 from app.llm.router import Task, get_adapter_for
 from app.prompts.birthday import (
     BIRTHDAY_CLICHE_BLACKLIST,
@@ -63,11 +63,13 @@ class BirthdayBatchError(ValueError):
 
 # =============== 归一化(口径与 clips 同源,各自维护:两线的上限与字段随产品分叉) ===============
 
-def _norm_character_cards(shots: list[dict]) -> list[dict]:
-    """从分镜聚合角色定妆卡:按角色名分组,合并该角色出现的所有镜头的外貌描段。
+def _norm_character_cards(shots: list[dict], style_note: str = "") -> list[dict]:
+    """从分镜聚合角色定妆卡:按角色名切分外貌描段、跨镜头合并,并入统一画风。
 
     从 shots 聚合而不是信展开的顶层字段:编辑保存(PUT /wish)只回传
     {"lines","shots"} 再走 `_build_candidate`,顶层字段会在那里丢。
+    角色切分走 media.text.split_character_desc(与 clips 同源):模型常把多角色
+    混写进一段,按镜头笼统塞给每个角色,卡就互相串了。
     """
     merged: dict[str, list[str]] = {}
     order: list[str] = []
@@ -76,15 +78,25 @@ def _norm_character_cards(shots: list[dict]) -> list[dict]:
         desc = str(s.get("character_desc") or "").strip()
         if not desc:
             continue
+        spans = split_character_desc(desc, names)
         for name in names:
             if name in ("", "旁白"):
+                continue
+            span = (spans.get(name) or "").strip()
+            if not span:
                 continue
             if name not in merged:
                 merged[name] = []
                 order.append(name)
-            if desc not in merged[name]:
-                merged[name].append(desc)
-    return [{"name": name[:40], "desc": "\n".join(merged[name])[:1200]} for name in order]
+            if span not in merged[name]:
+                merged[name].append(span)
+    cards = []
+    for name in order:
+        desc = "\n".join(merged[name])[:1200]
+        if style_note:
+            desc = f"{desc}\n{style_note}" if desc else style_note
+        cards.append({"name": name[:40], "desc": desc})
+    return cards
 
 
 def _norm_shots(raw, style: dict, max_seq_cap: int) -> list[dict]:
@@ -249,13 +261,19 @@ def _build_candidate(
     if abs(total - duration_s) > max(8, duration_s // 3):
         cautions.append(f"分镜总时长 {total}s 与目标 {duration_s}s 偏差较大,拼接时注意")
 
+    # 定妆卡并入画风锚:定妆照与正片同受一条风格卡约束(与 clips 同款),
+    # 文生图时一并贴上,出来的参考图才和正片一个气质
+    sn = (style.get("style_name") or "").strip()
+    sc = (style.get("style_cn") or "").strip()
+    style_note = f"【定妆照画风】{sn}:{sc}" if (sn or sc) else ""
+
     return {
         "take": take["take"],
         "logline": take["logline"],
         "emotion_curve": take.get("emotion_curve", ""),
         "lines": lines,
         "shots": shots,
-        "character_cards": _norm_character_cards(shots),
+        "character_cards": _norm_character_cards(shots, style_note=style_note),
         "punchline": take.get("punchline", ""),
         "chunks": group_chunks(shots, 15),
         "hook_text": take.get("hook_text", ""),

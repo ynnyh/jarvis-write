@@ -682,3 +682,39 @@ def test_shoot_permission_isolation_and_unknown_segment(client):
     from app import storage
     d = storage.upload_root() / "clips" / str(cid)
     assert not d.exists() or not any(d.iterdir())
+
+
+# ---------- 角色定妆卡:多角色切分不串卡 + 并入画风 ----------
+
+def test_norm_character_cards_split_and_style():
+    """多角色混写(含实测的「第一个角色冒号被吞」形态)必须切成各角色的独立卡片,
+    并入统一定妆照画风——串卡会让每张定妆图里同时长出两个人。"""
+    from app.engines.clips.batch import _norm_character_cards
+
+    desc = ("小朋友女/5岁/矮小圆润/黑短发齐刘海/圆脸大眼小嘴/穿黄色短袖T恤+蓝色背带裤。"
+            "妈妈:女/30岁/中等身材/黑色长发扎低马尾/鹅蛋脸/穿白色衬衫+深蓝色长裙")
+    shots = [
+        {"characters": ["小朋友", "妈妈"], "character_desc": desc},
+        {"characters": ["小朋友"],
+         "character_desc": "小朋友蹲在出租车后排,黄色短袖T恤,齐刘海"},
+    ]
+    cards = _norm_character_cards(shots, style_note="【定妆照画风】治愈手绘:手绘水彩绘本风")
+    assert [c["name"] for c in cards] == ["小朋友", "妈妈"]
+    kid, mom = cards[0], cards[1]
+    # 各自只含自己的描段:妈妈的卡不许出现孩子的黄T恤,孩子的卡不许出现妈妈的低马尾
+    assert "黄色短袖T恤" in kid["desc"] and "低马尾" not in kid["desc"]
+    assert "低马尾" in mom["desc"] and "黄色短袖" not in mom["desc"].split("【定妆照画风】")[0]
+    # 跨镜头合并(同一角色的第二段追加)+ 画风行落在每张卡上
+    assert "蹲在出租车后排" in kid["desc"]
+    assert mom["desc"].endswith("【定妆照画风】治愈手绘:手绘水彩绘本风")
+
+
+def test_norm_character_cards_single_char_takes_whole_desc():
+    """单角色镜头整段归它;style_note 为空时不追加画风行(存量行为不变)。"""
+    from app.engines.clips.batch import _norm_character_cards
+
+    cards = _norm_character_cards(
+        [{"characters": ["沈砚"], "character_desc": "沈砚,黑短发,玄色劲装"}],
+        style_note="",
+    )
+    assert cards == [{"name": "沈砚", "desc": "沈砚,黑短发,玄色劲装"}]

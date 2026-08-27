@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 
 
 def clip(s: object, width: int) -> str:
@@ -36,3 +37,56 @@ def csv_text(header: list[str], rows: list[list]) -> str:
     writer.writerow(header)
     writer.writerows(rows)
     return "\ufeff" + buf.getvalue()
+
+
+def split_character_desc(desc: str, characters: list[str]) -> dict[str, str]:
+    """把一格里混写的多角色外貌按「角色名」切给各角色,返回 {角色名: 描段}。
+
+    模型契约是多角色用「角色名:…」分段(见各线展开提示词),但实测两种走样都出过:
+    - 第一个角色的冒号被吞:「小朋友女/5岁…。妈妈:女/30岁…」;
+    - 正常分段里夹了对别的角色的提(mid-sentence 提到"妈妈的包")。
+    切法:按 characters 顺序找每个角色的名字锚——优先「名字+冒号」,退而求其次
+    找裸名字;相邻锚之间的文字归前一个锚的角色;第一个锚之前的引子,只在它以
+    某个角色名开头时归那个角色(正是冒号被吞的形态),否则丢弃;单角色镜头整段
+    直接归它。找不到的名字不发明内容(缺就缺着)。
+    """
+    text = (desc or "").strip()
+    names = [str(n).strip() for n in (characters or []) if str(n or "").strip() and n != "旁白"]
+    if not text:
+        return {n: "" for n in names}
+    if len(names) == 1:
+        return {names[0]: text}
+
+    # 找每个角色的锚:先找「名字+冒号」,没有再退化找裸名字;各自从上一个锚之后找,
+    # 避免后文对前文角色的再次提及把锚拉回去
+    anchors: list[tuple[int, int, str]] = []  # (名字起始位, 名字长度, 名字)
+    search_from = 0
+    for name in names:
+        hit = re.search(re.escape(name) + r"\s*[:：]", text[search_from:])
+        if hit is None:
+            hit = re.search(re.escape(name), text[search_from:])
+        if hit is None:
+            continue
+        start = search_from + hit.start()
+        anchors.append((start, len(name), name))
+        search_from = start + len(name)
+
+    if not anchors:
+        return {n: "" for n in names}
+
+    def _clean(chunk: str) -> str:
+        return chunk.strip(" \t\r\n。.、;;::： ")
+
+    out: dict[str, str] = {}
+    # 引子:第一个锚之前的文字,只有以某个角色名开头才归那个角色(冒号被吞的形态)
+    first_pos = anchors[0][0]
+    lead = _clean(text[:first_pos])
+    if lead and text.lstrip().startswith(anchors[0][2]):
+        out[anchors[0][2]] = lead
+    for i, (start, ln, name) in enumerate(anchors):
+        end = anchors[i + 1][0] if i + 1 < len(anchors) else len(text)
+        span = _clean(text[start:end])
+        if span:
+            prev = out.get(name)
+            out[name] = f"{prev};{span}" if prev else span
+    return out
