@@ -468,9 +468,9 @@ def test_storyboard_cap_scales_with_duration(client):
     """镜头数上限按目标时长动态算;超上限如实报数,不静默截断。"""
     from app.engines.drama.storyboard import shot_cap
 
-    assert shot_cap(30) == 15  # 30s / 每格最短 2s
-    assert shot_cap(180) == 80  # 夹在上限内
-    assert shot_cap(10) == 8  # 短集也有下限
+    assert shot_cap(30) == 30  # 30s / 每格最短 1s
+    assert shot_cap(180) == 120  # 夹在上限内
+    assert shot_cap(10) == 10  # 短集也按 1s/格走,下限只在 <8s 时才兜底
 
     headers = _auth(client, "drama_cap")
     p = _create_project(client, headers, "上限漫剧书")
@@ -492,18 +492,18 @@ def test_storyboard_cap_scales_with_duration(client):
     over = _JsonAdapter({"shots": [
         {"seq": i, "scene_name": "荒山雪道", "characters": ["沈砚"],
          "action_desc": f"第{i}格画面", "shot_type": "近景", "camera": "固定",
-         "dialogue": "", "duration_s": 2}
-        for i in range(1, 19)  # 18 格,超 15 格上限
+         "dialogue": "", "duration_s": 1}
+        for i in range(1, 37)  # 36 格,超 30 格上限(30s / 每格 1s)
     ]})
     with patch("app.engines.drama.storyboard.get_adapter_for", return_value=over):
         r = client.post(f"/api/projects/{pid}/drama/episodes/{ep_id}/storyboard", headers=headers)
         job = _wait_job(client, headers, r.json()["job_id"])
     assert job["status"] == "done", job
-    assert "镜头数上限 15 格" in over.prompts[0]  # 上限进了提示词
-    assert len(job["result"]["shots"]) == 15
+    assert "镜头数上限 30 格" in over.prompts[0]  # 上限进了提示词
+    assert len(job["result"]["shots"]) == 30
     assert job["result"]["truncated"] is True
-    assert "多给了 3 格" in job["result"]["notice"]
-    assert "短于目标" not in job["result"]["notice"]  # 15×2=30s 已达目标
+    assert "多给了 6 格" in job["result"]["notice"]
+    assert "短于目标" not in job["result"]["notice"]  # 30×1=30s 已达目标
 
 
 # ---- 阶段 2:声线选型 + 成片包 ----

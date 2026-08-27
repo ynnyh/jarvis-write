@@ -5,9 +5,9 @@
 覆盖式重生成:重拆会删旧镜头。生成前 progress 报预估镜头数(成本透明,
 借鉴 Toonflow)。景别/运镜收敛到白名单口径(宽容同义词截短保留)。
 
-镜头数上限按本集目标时长算(每格最短 2 秒),不写死——写死 24 格时
-180 秒的长集会被砍成 ~96 秒的成片,且用户看不到任何提示。真被截断/
-总时长明显短于目标时,返回 notice 让前端如实显示。
+镜头数上限按本集目标时长算(每格最短 1 秒,目标片通常已按 1 秒/格拆细),
+不写死——写死 24 格时 180 秒的长集会被砍成 ~96 秒的成片,且用户看不到
+任何提示。真被截断/总时长明显短于目标时,返回 notice 让前端如实显示。
 """
 from __future__ import annotations
 
@@ -27,11 +27,13 @@ from app.engines.drama.common import coerce_int, episode_dict, shots_payload
 from app.llm.router import Task, get_adapter_for
 from app.prompts.drama import STORYBOARD_PROMPT
 
-# 镜头数上限:按「每格最短 2 秒」算够不够铺满目标时长,再夹在 [8, 80] 内
-# (下限保证短集也有基本镜头量,上限纯防 LLM 抽风吐几百格)
-_SEC_PER_SHOT_MIN = 2
+# 镜头数上限:按「每格最短 1 秒」算够不够铺满目标时长,再夹在 [8, 120] 内
+# (下限保证短集也有基本镜头量,上限防 LLM 抽风吐几百格把一个调用打崩)。
+# 为什么拆这么细:视频模型单格渲染质量差,finer 的镜头让每格只承载一个
+# 可看清的小动作,成片拼接起来反而更稳;改粗的口径曾让 3 秒一格糊成一片。
+_SEC_PER_SHOT_MIN = 1
 _CAP_FLOOR = 8
-_CAP_CEIL = 80
+_CAP_CEIL = 120
 # 分镜总时长低于目标的这个比例,就提示「短了」(留一点正常的取舍余量)
 _SHORT_RATIO = 0.8
 
@@ -83,8 +85,8 @@ async def build_storyboard(
         for i, l in enumerate(lines, start=1)
         if isinstance(l, dict)
     )
-    estimate = max(6, round(episode.duration_target_s / 4))
     cap = shot_cap(episode.duration_target_s)
+    estimate = min(cap, max(6, episode.duration_target_s))
     progress(f"AI 正在拆分镜(预计 {estimate} 格左右,上限 {cap} 格,覆盖旧分镜)…")
 
     adapter = get_adapter_for(Task.DRAMA_STORYBOARD, timeout=300)
@@ -122,7 +124,7 @@ async def build_storyboard(
                 "shot_type": _norm_shot_type(item.get("shot_type")),
                 "camera": _norm_camera(item.get("camera")),
                 "dialogue": str(item.get("dialogue") or "").strip()[:400],
-                "duration_s": coerce_int(item.get("duration_s"), 4, lo=1, hi=10),
+                "duration_s": coerce_int(item.get("duration_s"), 1, lo=1, hi=10),
             }
         )
     if not shots_out:
