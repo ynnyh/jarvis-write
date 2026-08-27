@@ -28,7 +28,9 @@ export function ClipsList({ projectId, mode = "mood" }: { projectId: number | nu
   const nav = useNavigate();
   const meta = useClipsMeta();
   const isPlay = mode === "play";
-  const base = isPlay ? "/inspire" : "/clips";
+  // 不带前导斜杠:下方路径全按 `/${base}/…` 拼前缀,base 再带斜杠会拼出
+  // 「//inspire/42」这类双斜杠路径,路由匹配不到、被兜底重定向回首页。
+  const base = isPlay ? "inspire" : "clips";
   const [rows, setRows] = useState<MoodClip[] | null>(null);
   const [theme, setTheme] = useState("");
   const [custom, setCustom] = useState("");
