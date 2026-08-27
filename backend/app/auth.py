@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db.models import User
 from app.db.session import get_db
+from app.logging_config import set_user_id
 
 # 当前请求/任务的用户 id;后台任务继承创建时的上下文
 current_user_id: contextvars.ContextVar[int | None] = contextvars.ContextVar(
@@ -93,6 +94,9 @@ async def get_current_user(
     if get_settings().is_local:
         user = _local_user(db)
         current_user_id.set(user.id)
+        # 日志上下文:本请求后续所有日志行带 user=<id>。每个请求是独立 task、
+        # 上下文各持副本,不会串到别的请求,无需 reset。
+        set_user_id(user.id)
         return user
 
     token = _bearer_token(request)
@@ -107,6 +111,7 @@ async def get_current_user(
     if not user.is_active:
         raise HTTPException(status_code=401, detail="账号已被禁用,请联系管理员")
     current_user_id.set(user.id)
+    set_user_id(user.id)  # 日志上下文(同 local 分支:请求级 task 上下文,无需 reset)
     return user
 
 

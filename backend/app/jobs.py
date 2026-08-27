@@ -18,6 +18,7 @@ from typing import Any
 import httpx
 
 from app import live
+from app.logging_config import set_job_id
 
 logger = logging.getLogger("jarvis-write.jobs")
 
@@ -102,6 +103,8 @@ def create_job(kind: str) -> str:
     # 复制创建时的上下文,所以随后 fire_and_track/spawn_job 起的后台任务及其嵌套
     # 的每一次 LLM 调用都自动认领这个 job_id,不必逐个接口改(共 20+ 处建任务点)。
     live.current_job_id.set(job_id)
+    # 日志上下文:任务期间的所有日志行带 job=<id>,排查"哪次生成在刷屏"直接按号过滤
+    set_job_id(job_id)
     _persist_create(job_id, kind, owner)
     return job_id
 
