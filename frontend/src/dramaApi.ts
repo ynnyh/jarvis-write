@@ -88,7 +88,7 @@ export interface PasteVariant {
   negative: string;  // 有负面框的站粘这里;单框站为空(已并入 main)
   hint: string;      // 一句人话操作提示
 }
-// key = oneframe / dualbox / mj;顺序即后端给的展示顺序
+// key = oneframe / dualbox / mj(生图);视频侧 i2v / i2v_en / t2v / r2v;顺序即后端给的展示顺序
 export type PasteSet = Record<string, PasteVariant>;
 
 // 定妆照资产:上传的存相对路径(读取走鉴权端点),外链存 http(s) 地址

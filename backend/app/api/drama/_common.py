@@ -62,6 +62,7 @@ from app.engines.drama.common import (
     scene_card_dict,
     shot_asset_list,
     shot_progress,
+    shot_refs_by_seq,
     shots_payload,
     style_card,
     style_card_dict,

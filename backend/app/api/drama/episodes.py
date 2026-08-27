@@ -19,6 +19,7 @@ from app.api.drama._common import (
     build_storyboard,
     clips_payload,
     CLIP_LIMIT_DEFAULT,
+    DramaCharacterCard,
     DramaEpisode,
     DramaProductionPack,
     DramaShot,
@@ -31,6 +32,7 @@ from app.api.drama._common import (
     Project,
     render_shot_prompts,
     shot_progress,
+    shot_refs_by_seq,
     shots_payload,
     spawn_job,
     VALID_MODES,
@@ -126,7 +128,13 @@ async def get_episode_clips(
         .filter(DramaStyleCard.project_id == project_id)
         .first()
     )
-    return {"plan": clips_payload(shots, style, limit_s)}
+    # r2v 主体绑定要按格知道"谁已有定妆照":没有参考图的格,这一版的提示是引导先出定妆照
+    cards = (
+        db.query(DramaCharacterCard)
+        .filter(DramaCharacterCard.project_id == project_id)
+        .all()
+    )
+    return {"plan": clips_payload(shots, style, limit_s, refs_by_seq=shot_refs_by_seq(shots, cards))}
 
 
 @router.delete("/episodes/{episode_id}")

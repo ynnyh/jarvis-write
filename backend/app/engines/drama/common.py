@@ -223,6 +223,20 @@ def has_ref_image(card: DramaCharacterCard | None) -> bool:
     return bool(card is not None and ref_image_list(card))
 
 
+def shot_refs_by_seq(shots: list, cards: list[DramaCharacterCard]) -> dict[int, list[str]]:
+    """格号 → 该格**已有定妆照**的出场角色名(按出场顺序)。
+
+    两处共用:导出手册的参考图指令行、视频段计划 r2v 变体的主体绑定
+    (段级主体 = 段内各格的并集,video.clips_payload 负责并)。没有定妆照的
+    角色不出现——免得提示用户去传不存在的图。
+    """
+    with_ref = {c.name for c in cards if has_ref_image(c)}
+    return {
+        s.seq: [n for n in (s.characters or []) if n in with_ref]
+        for s in shots
+    }
+
+
 def scene_card_dict(card: DramaSceneCard) -> dict:
     return {
         "id": card.id,
@@ -311,7 +325,11 @@ def shots_payload(db: Session, project_id: int, shots: list[DramaShot]) -> list[
             if has_ref_image(card) and card.name not in refs:
                 refs.append(card.name)
         out.append(
-            shot_dict(s, paste=shot_paste(s, style, refs), video=shot_video_paste(s, style))
+            shot_dict(
+                s,
+                paste=shot_paste(s, style, refs),
+                video=shot_video_paste(s, style, ref_names=refs),
+            )
         )
     return out
 

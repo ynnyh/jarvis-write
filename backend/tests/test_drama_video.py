@@ -446,3 +446,72 @@ def test_export_carries_video_plan_in_md_and_csv(client):
     assert "【怎么动】" in csv_text and "出好的静帧当首帧图" in csv_text
     assert "超过单次上限" in csv_text                  # 12 秒那格如实标出来
     assert csv_text.startswith("﻿")              # Excel 打开不乱码
+
+
+# =============== 参考生视频 r2v:多图主体绑定 ===============
+
+def test_r2v_binds_subjects_in_upload_order():
+    """r2v 的核心:参考图编号与上传顺序一一对应,身份锚从「文字」换到「图」。"""
+    v = video_paste(
+        motion_cn="她抬手抹去刀锋上的雪",
+        motion_en="she wipes snow off the blade",
+        prompt_cn="沈砚,黑短发,玄色劲装,雪夜拔刀,国风厚涂",
+        ref_names=("沈砚", "陆雪"),
+    )
+    r2v = v["r2v"]
+    assert "参考图1 = 「沈砚」" in r2v["main"]
+    assert "参考图2 = 「陆雪」" in r2v["main"]
+    assert "严格照这张定妆照" in r2v["main"]
+    # 上传顺序要能照着做:hint 里写明第几张是谁
+    assert "第 1 张 = 「沈砚」" in r2v["hint"] and "第 2 张 = 「陆雪」" in r2v["hint"]
+    assert "以参考图为最高优先" in r2v["hint"]      # 文字与图冲突时照图
+    assert "【画面】" in r2v["main"] and "【怎么动】" in r2v["main"]
+    assert "【音频】" in r2v["main"]                # 音频分轨口径同样生效
+
+
+def test_r2v_without_refs_guides_back_to_ref_sheets():
+    """没有定妆照时 r2v 没有意义:不给主体块,hint 明确指路,别让人拿去空跑。"""
+    v = video_paste(motion_cn="雪片斜落", motion_en="snow drifts", ref_names=[])
+    r2v = v["r2v"]
+    assert "主体绑定" not in r2v["main"]
+    assert "先回角色卡" in r2v["hint"] and "i2v / t2v" in r2v["hint"]
+
+
+def test_r2v_is_last_platform_and_default_untouched():
+    """新平台追加到末尾,老用户的默认偏好(i2v)不受影响。"""
+    keys = [k for k, _ in VIDEO_PLATFORMS]
+    assert keys == ["i2v", "i2v_en", "t2v", "r2v"]
+
+
+def test_shot_video_paste_carries_refs():
+    v = shot_video_paste(
+        _Shot(seq=3, characters=("沈砚",)),
+        _Style(),
+        ref_names=("沈砚",),
+    )
+    assert "参考图1 = 「沈砚」" in v["r2v"]["main"]
+
+
+def test_clips_payload_segment_refs_are_union_in_order():
+    """段级 r2v 主体 = 段内各格参考角色的并集(按首次出现顺序去重、编号连续)。"""
+    # 两格同角色才会并成一段(并段规则:不引入新角色)——这正是要并的场景
+    shots = [
+        _Shot(seq=1, characters=("沈砚", "陆雪")),
+        _Shot(seq=2, characters=("沈砚", "陆雪")),
+    ]
+    plan = clips_payload(
+        shots, _Style(), 10,
+        refs_by_seq={1: ["沈砚"], 2: ["沈砚", "陆雪"]},
+    )
+    assert len(plan["segments"]) == 1
+    main = plan["segments"][0]["paste"]["r2v"]["main"]
+    assert "参考图1 = 「沈砚」" in main
+    assert "参考图2 = 「陆雪」" in main
+    assert main.count("参考图1") == 1               # 重复角色不重复编号
+
+
+def test_clips_payload_without_refs_still_renders_r2v():
+    """refs_by_seq 不传(旧调用方):r2v 退化成纯画面版,不许报错。"""
+    plan = clips_payload([_Shot(seq=1)], _Style(), 10)
+    r2v = plan["segments"][0]["paste"]["r2v"]
+    assert "主体绑定" not in r2v["main"] and r2v["main"]

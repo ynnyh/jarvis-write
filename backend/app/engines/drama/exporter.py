@@ -22,6 +22,7 @@ from app.engines.drama.common import (
     ref_image_list,
     shot_asset_list,
     shot_progress,
+    shot_refs_by_seq,
     source_chapter_label,
 )
 from app.engines.drama.paste import ref_sheet_paste, shot_paste
@@ -57,6 +58,11 @@ def _ref_names(shot: DramaShot, cards: list[DramaCharacterCard]) -> list[str]:
     """
     with_ref = {c.name for c in cards if has_ref_image(c)}
     return [n for n in (shot.characters or []) if n in with_ref]
+
+
+def _refs_by_seq(shots: list[DramaShot], cards: list[DramaCharacterCard]) -> dict[int, list[str]]:
+    """格号 → 已有定妆照的出场角色名(视频段计划的 r2v 主体绑定按这个并集取)。"""
+    return shot_refs_by_seq(shots, cards)
 
 
 def export_markdown(
@@ -193,18 +199,21 @@ def export_markdown(
             L.append(paste["mj"]["main"] or "(没有英文轨,先出提示词)")
             L.append("")
 
-        L.extend(_video_section(shots, style))
+        L.extend(_video_section(shots, style, _refs_by_seq(shots, cards)))
 
     return "\n".join(L)
 
 
-def _video_section(shots: list[DramaShot], style: DramaStyleCard | None) -> list[str]:
+def _video_section(
+    shots: list[DramaShot], style: DramaStyleCard | None,
+    refs_by_seq: dict[int, list[str]] | None = None,
+) -> list[str]:
     """让静帧动起来那一步:视频段计划(按单次时长上限并段)+ 每段的视频提示词。
 
     单列一节而不是混进出图那节:生图与生视频吃的提示词根本不是一回事(i2v 不许
     带外貌词,见 engines/drama/video.py),而且视频站有单次时长上限,得先并段。
     """
-    plan = clips_payload(shots, style, CLIP_LIMIT_DEFAULT)
+    plan = clips_payload(shots, style, CLIP_LIMIT_DEFAULT, refs_by_seq=refs_by_seq)
     L = ["## 让它动起来:视频段计划(按单次上限 %d 秒并段)" % plan["limit_s"], ""]
     L.append(
         "> 视频站单次只能出 5-15 秒,而分镜格是 2-8 秒——所以**一段生成一次,再在画布/"
@@ -248,6 +257,12 @@ def _video_section(shots: list[DramaShot], style: DramaStyleCard | None) -> list
         L.append("")
         L.append(f"> {paste['t2v']['hint']}")
         L.append("")
+        L.append("**④ 参考生视频·多图主体绑定(Vidu / PixStag / 可灵多图):按序传定妆照**")
+        L.append("")
+        L.append(paste["r2v"]["main"])
+        L.append("")
+        L.append(f"> {paste['r2v']['hint']}")
+        L.append("")
         if seg["dialogue"]:
             L.append(f"> 这一段的字幕/配音:{seg['dialogue']}")
             L.append("")
@@ -263,7 +278,8 @@ def export_csv(
     """分镜表 CSV(带 BOM,Excel 打开中文不乱码)。
 
     最后几列是「让它动起来」那一步的:clip 说明这一格属于第几个视频段(段内共用一次
-    生成),paste_i2v 是那一段的图生视频提示词;still_asset 是你挂回来的静帧、
+    生成),paste_i2v 是那一段的图生视频提示词,paste_r2v 是参考生视频的主体绑定版
+    (角色定妆照按序当参考);still_asset 是你挂回来的静帧、
     clip_ref 是成片在哪,done_* 是两个打勾栏(站内勾过的这里就是 ✓,没勾的留空给你手打)。
     paste_oneframe 是「单框站直接粘贴版」(负面词已并入正文):
     批量出图的人普遍拿 Excel 一行行复制,没这列就得自己拼负面词。
@@ -274,11 +290,12 @@ def export_csv(
         "seq", "scene_name", "characters", "shot_type", "camera", "duration_s",
         "action_desc", "dialogue", "prompt_cn", "prompt_en", "negative",
         "paste_oneframe", "motion_cn", "motion_en", "clip", "clip_seqs",
-        "clip_duration_s", "clip_runs", "paste_i2v", "still_asset", "clip_ref",
+        "clip_duration_s", "clip_runs", "paste_i2v", "paste_r2v",
+        "still_asset", "clip_ref",
         "done_still", "done_video",
     ]
     # 段号按格反查:表是逐格的,而视频段是「几格并一段」,不给映射用户对不上号
-    plan = clips_payload(shots, style, CLIP_LIMIT_DEFAULT)
+    plan = clips_payload(shots, style, CLIP_LIMIT_DEFAULT, refs_by_seq=_refs_by_seq(shots, cards or []))
     seg_of: dict[int, dict] = {}
     for seg in plan["segments"]:
         for q in seg["seqs"]:
@@ -297,6 +314,7 @@ def export_csv(
              seg.get("index", ""), "、".join(str(q) for q in seg.get("seqs", [])),
              seg.get("duration_s", ""), seg.get("runs", ""),
              (seg.get("paste") or {}).get("i2v", {}).get("main", ""),
+             (seg.get("paste") or {}).get("r2v", {}).get("main", ""),
              "、".join(a["src"] for a in assets),
              getattr(s, "clip_ref", "") or "",
              "✓" if getattr(s, "done_still", False) else "",

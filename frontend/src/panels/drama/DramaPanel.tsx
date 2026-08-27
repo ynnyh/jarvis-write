@@ -36,7 +36,7 @@ interface Props { pid: number }
 
 // 记住用户上次选的生图站:换一格/刷新页面不用重选(全项目共用一个偏好)
 const PASTE_PLATFORM_KEY = "jarvis_drama_paste_platform";
-// 视频站的偏好单独存:生图与生视频的 key 空间不同(oneframe/dualbox/mj vs i2v/i2v_en/t2v),
+// 视频站的偏好单独存:生图与生视频的 key 空间不同(oneframe/dualbox/mj vs i2v/i2v_en/t2v/r2v),
 // 共用一个键会互相把对方的选择顶掉。
 const VIDEO_PLATFORM_KEY = "jarvis_drama_video_platform";
 // 单次生成时长上限:各视频站不一样(5/10/15 秒),记住用户那家站的档位

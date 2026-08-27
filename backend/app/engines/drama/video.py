@@ -54,6 +54,9 @@ VIDEO_PLATFORMS: tuple[tuple[str, str], ...] = (
     ("i2v", "图生视频·中文站(即梦 / 可灵 / 海螺:传首帧图 + 粘这段)"),
     ("i2v_en", "图生视频·英文站(Runway / Luma / Pika)"),
     ("t2v", "文生视频(Sora / Veo / 可灵文生:没有首帧,慎用)"),
+    # 参考生视频:Vidu / PixStag / 可灵多图参考一类——按序上传角色定妆照当主体,
+    # 人物身份由参考图锁定、场景让模型自由发挥。跳过「逐格出静帧」那一步。
+    ("r2v", "参考生视频·多图主体绑定(Vidu / PixStag / 可灵多图:按序传定妆照)"),
 )
 DEFAULT_VIDEO_PLATFORM = "i2v"
 
@@ -123,14 +126,26 @@ def video_paste(
     ratio: str = "9:16",
     limit_s: int = CLIP_LIMIT_DEFAULT,
     has_character: bool = True,
+    ref_names: tuple[str, ...] | list[str] = (),
 ) -> dict[str, dict[str, str]]:
     """一格(或一段)的视频粘贴版,结构与生图粘贴版一致 {label,main,negative,hint}。
 
-    三份对应三种拿法:i2v 中文站 / i2v 英文站 / t2v 文生视频。
+    四份对应四种拿法:i2v 中文站 / i2v 英文站 / t2v 文生视频 /
+    r2v 参考生视频(多图主体绑定:角色定妆照按序上传,身份由参考图锁定)。
+    ref_names = 本格/本段**已有定妆照**的出场角色名(顺序即上传顺序,前端原样展示)。
     """
     neg = video_negative(style_negative)
     dur = _duration_line(duration_s, limit_s)
     frame = f"用{seq_label}出好的静帧当首帧图" if seq_label else "用这一格出好的静帧当首帧图"
+
+    refs = [str(n).strip() for n in (ref_names or []) if str(n or "").strip()]
+    subjects = "\n".join(
+        f"参考图{i} = 「{n}」:长相、发型、服饰严格照这张定妆照,不得改动"
+        for i, n in enumerate(refs, 1)
+    )
+    upload_order = (
+        "在站点按顺序上传:" + "、".join(f"第 {i} 张 = 「{n}」的定妆照" for i, n in enumerate(refs, 1)) + "。"
+    ) if refs else ""
 
     i2v_main = _join(
         f"【首帧】{frame}:人物长相、发型、服饰、画风**全部照首帧**,不许重画、不许换脸。",
@@ -158,6 +173,22 @@ def video_paste(
         if has_character
         else "这一格没有人物,文生视频直接出也不会有换脸问题,可以省掉出静帧那一步。"
     )
+    r2v_main = _join(
+        (f"【主体绑定】{upload_order}\n{subjects}" if refs else ""),
+        f"【画面】{(prompt_cn or '').strip()}",
+        f"【怎么动】{motion_cn}",
+        f"【镜头】{(camera or '固定').strip()},竖屏 {ratio}",
+        f"【时长】{dur}",
+        VIDEO_AUDIO_RULE_CN,
+        f"【不要出现】{neg}",
+    )
+    r2v_hint = (
+        f"{upload_order}人物长相**以参考图为最高优先**(文字描述与参考图冲突时照图);"
+        "这版不用先逐格出静帧,定妆照直接当参考,场景交给模型发挥。"
+        if refs
+        else "本格出场角色还没有定妆照——先回角色卡「出定妆照」并把出好的图传上去,"
+             "这版才有意义;在那之前请用 i2v / t2v。"
+    )
     return {
         "i2v": {
             "label": dict(VIDEO_PLATFORMS)["i2v"],
@@ -178,10 +209,19 @@ def video_paste(
             "negative": "",
             "hint": t2v_hint,
         },
+        "r2v": {
+            "label": dict(VIDEO_PLATFORMS)["r2v"],
+            "main": r2v_main,
+            "negative": "",
+            "hint": r2v_hint,
+        },
     }
 
 
-def shot_video_paste(shot, style, limit_s: int = CLIP_LIMIT_DEFAULT) -> dict[str, dict[str, str]]:
+def shot_video_paste(
+    shot, style, limit_s: int = CLIP_LIMIT_DEFAULT,
+    ref_names: tuple[str, ...] | list[str] = (),
+) -> dict[str, dict[str, str]]:
     """分镜格的视频粘贴版(便利封装:从 DramaShot + 风格卡取料)。"""
     motion_cn, motion_en = motion_tracks(shot)
     return video_paste(
@@ -195,6 +235,7 @@ def shot_video_paste(shot, style, limit_s: int = CLIP_LIMIT_DEFAULT) -> dict[str
         ratio=(getattr(style, "ratio", "") or "9:16") if style is not None else "9:16",
         limit_s=limit_s,
         has_character=bool(shot.characters),
+        ref_names=ref_names,
     )
 
 
@@ -314,16 +355,29 @@ def _segment(index: int, group: list, limit_s: int) -> dict:
     }
 
 
-def clips_payload(shots: list, style, limit_s: int = CLIP_LIMIT_DEFAULT) -> dict:
-    """视频段计划 + 每段的粘贴版(前端与导出手册同一套料)。"""
+def clips_payload(
+    shots: list, style, limit_s: int = CLIP_LIMIT_DEFAULT,
+    refs_by_seq: dict[int, list[str]] | None = None,
+) -> dict:
+    """视频段计划 + 每段的粘贴版(前端与导出手册同一套料)。
+
+    refs_by_seq:格号 → 该格**已有定妆照**的角色名(exporter/api 用 _ref_names 算好
+    传进来)。段级的 r2v 主体 = 段内各格参考角色的并集(按首次出现顺序去重)。
+    """
     plan = clip_plan(shots, limit_s)
     by_seq = {s.seq: s for s in shots}
     limit = plan["limit_s"]
+    refs_by_seq = refs_by_seq or {}
     for seg in plan["segments"]:
         first = by_seq.get(seg["seqs"][0])
         motion_en = " then ".join(
             motion_tracks(by_seq[q])[1] for q in seg["seqs"] if q in by_seq
         )
+        seg_refs: list[str] = []
+        for q in seg["seqs"]:
+            for name in refs_by_seq.get(q, []):
+                if name not in seg_refs:
+                    seg_refs.append(name)
         seg["paste"] = video_paste(
             motion_cn=seg["motion"],
             motion_en=motion_en,
@@ -335,5 +389,6 @@ def clips_payload(shots: list, style, limit_s: int = CLIP_LIMIT_DEFAULT) -> dict
             ratio=(getattr(style, "ratio", "") or "9:16") if style is not None else "9:16",
             limit_s=limit,
             has_character=bool(seg["characters"]),
+            ref_names=seg_refs,
         )
     return plan
