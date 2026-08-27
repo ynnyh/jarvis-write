@@ -23,6 +23,8 @@ import os
 import sys
 from pathlib import Path
 
+from app.paths import resource_path
+
 from sqlalchemy import inspect, text
 
 from app.db.session import engine
@@ -36,12 +38,27 @@ BASELINE_REVISION = "fe553853d66d"
 _SIGNATURE_TABLE = "projects"
 
 
+def _alembic_dir() -> Path:
+    """迁移脚本目录(冻结/源码两态一致),供程序化注入 script_location。
+
+    不依赖 alembic.ini 里写的 %(here)s 插值——那条只有在 ini 恰好被完整
+    打包且解析成功时才成立,一旦 ini 缺键/损坏/被打漏,Config 解析到
+    script_location 为空就会抛「No 'script_location' key found in configuration」,
+    迁移整个静默跳过。这里用 resource_path 统一定位：
+    - 源码        → backend/alembic
+    - 冻结(有打包)→ _MEIPASS/alembic
+    - 冻结(漏打包)→ _MEIPASS/alembic(维护在 _alembic_ini_path 里的显式告警)
+    """
+    return resource_path("alembic")
+
+
 def _alembic_ini_path() -> str:
     """解析 alembic.ini 的绝对路径。
 
     源码环境:backend/alembic.ini
     冻结环境(PyInstaller):_MEIPASS/alembic.ini
     """
+    logger = logging.getLogger("jarvis-write.migration")
     # 优先用环境变量(测试或特殊部署可覆盖)
     env_path = os.environ.get("ALEMBIC_CONFIG")
     if env_path and Path(env_path).exists():
@@ -53,6 +70,21 @@ def _alembic_ini_path() -> str:
         candidate = Path(meipass) / "alembic.ini"
         if candidate.exists():
             return str(candidate)
+        # 缺包子产:不再静默回退到"当前目录/根下碰运气",显式告警。
+        # 历史教训:桌面安装包漏打 alembic.ini+alembic(旧 onedir 构建),
+        # 迁移这边每次启动都静默失败、回退 create_all —— 升级老库时
+        # 只有 Alembic 迁移负责的新列永远建不出来,API 查询 500,界面表现为
+        # 「进不到首页」。把问题亮出来,避免下次又无声无息。
+        if (Path(meipass) / "alembic").exists():
+            logger.warning("迁移:打包找不到 alembic.ini,将程序化注入默认 script_location")
+            return str(Path(meipass) / "alembic.ini")
+        logger.error(
+            "迁移:打包产物缺失 alembic.ini 与 alembic/ 迁移脚本"
+            "(旧构建或 spec 漏打数据文件)。Alembic 迁移不会生效,"
+            "仅靠 create_all+legacy migrate 兜底;升级老库时 Alembic 专属的新列可能缺失。"
+            "请重新按 scripts/build-desktop.sh 构建安装包。"
+        )
+        return ""
 
     # 源码环境:相对 backend/ 目录
     # app/db/migration.py → backend/app/db/migration.py → backend/
@@ -91,7 +123,12 @@ def _stamp_to_baseline() -> None:
     logger.info("首次集成 Alembic:现有数据库 stamp 到基线版本 %s", BASELINE_REVISION)
     logger.info("alembic.ini 路径: %s", ini_path)
 
-    cfg = Config(ini_path)
+    cfg = Config(ini_path) if ini_path else Config()
+    # 程序化注入 script_location:不再依赖 ini 的 %(here)s 插值/键值。
+    # 脚本目录经 resource_path 解析(冻结=_MEIPASS/alembic,源码=backend/alembic),
+    # 与 desktop.spec 的 datas 落点一致;ini 缺键/损坏/被打漏也不会再报
+    # 「No 'script_location' key found in configuration」。
+    cfg.set_main_option("script_location", str(_alembic_dir()))
     # 程序化调用必须关掉 alembic 的日志接管:ini 里的 [loggers] 段会触发
     # fileConfig(disable_existing_loggers=True),把应用已建好的全部 logger
     # 一键禁用,之后所有业务日志静默消失。[loggers] 段保留给开发者 CLI 用。
@@ -110,7 +147,9 @@ def _upgrade_head() -> None:
     logger.info("运行 Alembic 迁移: upgrade head")
     logger.info("alembic.ini 路径: %s", ini_path)
 
-    cfg = Config(ini_path)
+    cfg = Config(ini_path) if ini_path else Config()
+    # 同 _stamp_to_baseline:程序化注入 script_location,摆脱对 ini 的依赖
+    cfg.set_main_option("script_location", str(_alembic_dir()))
     # 同上:不许 alembic 接管应用日志(见 _stamp_to_baseline 内注释)
     cfg.attributes["configure_logger"] = False
     command.upgrade(cfg, "head")
