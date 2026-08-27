@@ -21,9 +21,9 @@ from pathlib import Path
 
 APP = Path(__file__).resolve().parents[1] / "app"
 
-# 出片线各自的目录 + 接口层
+# 出片线各自的目录 + 接口层(drama 接口层已拆成包,递归扫)
 LINES = {
-    "drama": [APP / "engines" / "drama", APP / "api" / "drama.py"],
+    "drama": [APP / "engines" / "drama", APP / "api" / "drama"],
     "promo": [APP / "engines" / "promo", APP / "api" / "promo.py"],
     "clips": [APP / "engines" / "clips", APP / "api" / "clips.py"],
     "birthday": [APP / "engines" / "birthday", APP / "api" / "birthday.py"],
