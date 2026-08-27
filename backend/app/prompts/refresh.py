@@ -4,24 +4,10 @@
 
 已有书的 outline 多半没有 beats(老数据),重度翻新要靠 beats 才有结构。
 这里用「本章简述 + 已成文正文(若有)」反推 3-5 个场景节拍。
+
+模板已外置到 app/prompts/templates/refresh/ 目录。
 """
+from app.prompts.loader import load_prompt
 
 # 回填节拍:优先依据已成文正文(最真实),无正文时依据蓝图简述反推
-BEATS_BACKFILL_PROMPT = """\
-你是小说编辑,要为一章补出"场景节拍表"——把本章拆成 3-5 个依次推进的场景,
-每个场景一句话(谁、在哪、做了什么/推进了什么),供后续重写时按节拍铺场景。
-
-【本章标题】{title}
-【本章简述】{summary}
-【本章定位】{chapter_role}
-【涉及人物】{characters}
-
-【本章已成文正文(若有,以它为准反推真实发生的场景;为空则依据简述合理设计)】
-{chapter_text}
-
-要求:
-1. 3-5 个节拍,按时间/因果顺序,每个一句话(不超过 30 字)
-2. 若有正文,节拍必须忠实于正文实际发生的事,不得杜撰
-3. 只输出节拍,每个一行,行首不加编号或符号,节拍之间不要空行
-4. 不要输出标题、解释、总结
-"""
+BEATS_BACKFILL_PROMPT = load_prompt("refresh/beats_backfill.txt")
