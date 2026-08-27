@@ -9,13 +9,7 @@ The hard problem of AI-assisted novel writing isn't producing text — it's keep
 <p align="center">
   <img src="docs/assets/screenshots/01-workbench.png" alt="Writing workbench" width="820">
 </p>
-<p align="center"><i>The writing workbench: six-step pipeline navigation and a chapter map (review status, word counts) on the left; chapter-by-chapter generation / reading / rewriting on the right</i></p>
-
-**🎬 The cascading outline update, end to end in 30 seconds:**
-
-<p align="center">
-  <img src="docs/assets/screenshots/demo-cascade.gif" alt="Cascading outline update demo" width="820">
-</p>
+<p align="center"><i>The writing workbench: a global workshop sidebar on the left; inside a book you move through three zones — Set up / Write / Whole book. The write zone puts the chapter text front and center, with a submission slip and chapter blueprint at the top, an always-on AI sidebar on the right (ask anything / rework this chapter), and every AI edit accepted piece by piece through a diff review</i></p>
 
 <details>
 <summary>📸 More screenshots (desktop / mobile)</summary>
@@ -23,6 +17,12 @@ The hard problem of AI-assisted novel writing isn't producing text — it's keep
 | Home · My novels | App lock |
 |---|---|
 | <img src="docs/assets/screenshots/02-home.png" width="400"> | <img src="docs/assets/screenshots/03-applock.png" width="400"> |
+
+**✨ Story Workshop** — for when an idea of your own shows up: describe the scene in a paragraph and get a vertical short film built around it:
+
+<p align="center">
+  <img src="docs/assets/screenshots/04-story-workshop.png" alt="Story workshop" width="400">
+</p>
 
 The mobile UI is fully adapted — just open it in a phone browser:
 

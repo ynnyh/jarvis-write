@@ -32,6 +32,9 @@ features:
   - icon: ⚡
     title: 情绪短片工坊 · 15/30s 三本子三选一
     details: 遗憾/争吵/爱情/童趣等十大情绪命题，一次产 3 个不同切入的本子（钩子→蓄势→金句字幕卡）；小说项目内另有「投流」页签——从你的定稿章节抽金句名场面出种草片，金句逐句溯源校验，编造引用当场标红。
+  - icon: ✨
+    title: 故事工坊 · 我有个点子，直接拍
+    details: 自己冒出一个具体场景时进这条：一段话把点子写下来（如「小朋友和妈妈坐出租车，车上的搞笑对话」），AI 以你的点子为本子主轴——第 1 个本子忠实还原你的故事，另两条同场景换镜头变体，不另起炉灶；画风任选 Q版沙雕漫画 / 日系二次元 / 3D 动画等，手卡自带角色定妆卡，先锁脸再逐段出片。
   - icon: 🎚️
     title: 标签化倾向系统
     details: 风格/节奏/基调不再写死在 Prompt 里：chips + 自定义输入 + 预设模板，贯穿大纲、正文、润色三个节点，全程你说了算。
@@ -65,14 +68,9 @@ features:
 <p align="center">
   <img src="./assets/screenshots/01-workbench.png" alt="写作工作台" width="860">
 </p>
-<p align="center"><i>写作区（截图为早期三栏版本；现已升级为「正文即界面」单栏交互——正文为主场、段落气泡改写、AI 窄栏常驻、章首交稿单，截图待更新）</i></p>
+<p align="center"><i>写作区即「正文即界面」：本章正文为主场，章首交稿单与本章蓝图一键展开，右栏 AI 窄栏常驻，改动一律 diff 逐条验收</i></p>
 
-改大纲不再是大工程。改任意一章，系统自动分级改动、分析下游影响、勾选后级联重生成：
-
-<p align="center">
-  <img src="./assets/screenshots/demo-cascade.gif" alt="大纲级联更新演示" width="860">
-</p>
-<p align="center"><i>大纲级联更新全流程演示（30 秒）</i></p>
+改大纲不再是大工程。改任意一章，系统自动分级改动（小改零成本短路）、分析下游影响、勾选后级联重生成，已有正文自动标记失配，大纲全程版本化可回退。
 
 ## 漫剧工坊：写完的小说，一键变成漫剧
 
@@ -97,13 +95,15 @@ features:
 
 详见[功能导览 · 漫剧工坊](/features#漫剧工坊-小说一键改编漫剧)。
 
-## 宣传片工坊 & 情绪短片工坊：不写小说，也能用这台制片台
+## 宣传片工坊 & 情绪短片工坊 & 灵感/故事工坊 & 生日祝福：不写小说，也能用这台制片台
 
-漫剧之外，同一套制片管线（锚段一致性 / 三轨提示词 / 切段 / SRT）又开了两个工坊：
+漫剧之外，同一套制片管线（锚段一致性 / 三轨提示词 / 切段 / SRT）又开了五个工坊：
 
 **📣 宣传片工坊（城市 / 景区 / 品牌）——先聊后做。** 与 AI 策划总监多轮研讨（真流式打字机）：你说「想从吃的入手」，他反问关键问题、给具体方案、每轮复述共识；聊透了一键**收敛成创作简报**（定位/受众/段落结构/slogan/⚠需人工核实清单），简报是后续生成的契约，可锁定可重收敛。**素材点事实红线**：史实/数据/slogan 只可引用你给的素材点——宣传片把年代写错就是事故。全链路：风格+地标卡 → 解说词 → 分镜 → 三轨提示词 → **生成切段**（镜头边界并段 ≤5/10/15s，每段整段视频提示词+首帧指引，贴画布拼接工作流）→ 成片包 → 四格式导出。
 
 **⚡ 情绪短片工坊（15/30 秒）——一次三本子，三选一。** 遗憾/争吵/爱情/童趣等十大情绪命题（每个带导演提示），一次产 3 个不同切入的本子：钩子开场 → 情绪蓄势 → **金句字幕卡**收尾，每本自带三轨提示词/切段/SRT——短视频是试号逻辑，不磨单版。小说项目内另有**「投流」页签**：从你的定稿章节抽金句名场面出种草片，**金句溯源校验**（引用必须给出正文原句并逐句比对，编造的当场标红）——它读的是你的书，引用的是你写的话，这是和通用 AI 聊天拉开差距的地方。
+
+**💡 灵感工坊 & ✨ 故事工坊——「选玩法让 AI 编」与「我的点子直接拍」两条心智。** 灵感工坊（`/inspire`）内置治愈手绘 / 黏土定格 / 赛博雨夜 / 动物拟人 / 荒诞脑洞等十二种玩法，玩法自带强画风锚，一次三本子三选一；故事工坊（`/free`）则是你自己冒出一个具体场景时进的那条：一段话把点子写下来，AI 以**你的点子为本子主轴**（第 1 个本子忠实还原，另两条同场景换变体），画风任选 Q版沙雕漫画 / 日系二次元等，手卡自带角色定妆卡——先出定妆照锁脸，再逐段出片。
 
 详见[功能导览](/features)。
 
@@ -118,11 +118,8 @@ features:
   <img src="./assets/screenshots/mobile-04.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
   <img src="./assets/screenshots/mobile-05.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
   <img src="./assets/screenshots/mobile-06.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
-  <img src="./assets/screenshots/mobile-07.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
-  <img src="./assets/screenshots/mobile-08.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
-  <img src="./assets/screenshots/mobile-09.jpg" style="width:100%;margin:0;border-radius:12px;border:1px solid var(--vp-c-divider);box-shadow:0 2px 10px rgba(0,0,0,.08);">
 </div>
-<p><i>移动端截图（早期版本；现已改为全屏正文 + 顶栏目录 / 任务中心 + 全屏 sheet，截图待更新）</i></p>
+<p><i>移动端：首页 / 全局导航抽屉 / 正文即界面 / 全书阅读器 / 故事工坊 / 全书概览</i></p>
 
 ## 三种使用方式
 
