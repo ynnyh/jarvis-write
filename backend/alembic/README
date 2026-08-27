@@ -1,0 +1,46 @@
+# Alembic 迁移目录
+
+本目录包含 jarvis-write 的数据库迁移脚本。
+
+## 常用命令
+
+```bash
+cd backend
+
+# 应用所有待执行的迁移
+alembic upgrade head
+
+# 回退到上一个迁移
+alembic downgrade -1
+
+# 查看当前迁移版本
+alembic current
+
+# 查看迁移历史
+alembic history
+
+# 根据模型变更自动生成新迁移(需先修改 app/db/models/ 下的模型)
+alembic revision --autogenerate -m "描述本次变更"
+
+# 生成空迁移脚本(手动编写)
+alembic revision -m "描述本次变更"
+```
+
+## 与现有 migrate.py 的关系
+
+- **Alembic** 管理 schema 变更(建表、加列、改列、建索引等)
+- **app/migrate.py** 保留为 legacy 数据迁移(创建 admin 账号、归属 orphan 数据、
+  LLM key 加密、provider_settings→configs 表数据迁移等),在 Alembic upgrade 之后运行
+- 未来的 schema 变更全部走 Alembic,不再往 migrate.py 里加 `_add_xxx_column()`
+
+## SQLite 兼容性
+
+- `env.py` 已开启 `render_as_batch=True`,自动用 batch 模式处理 SQLite 不支持的
+  ALTER TABLE 操作(如 DROP COLUMN、ALTER COLUMN、改约束等)
+- 生成的迁移脚本会自动使用 `with op.batch_alter_table("table_name") as batch_op:` 语法
+
+## 桌面版(PyInstaller)
+
+- 迁移脚本通过 `desktop.spec` 的 datas 打入冻结包
+- 运行时从 `_MEIPASS/alembic` 解析迁移脚本路径
+- 桌面版启动时自动执行 `alembic upgrade head`

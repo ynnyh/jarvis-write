@@ -38,6 +38,7 @@ from app.api.editorial import router as editorial_router
 from app.api.inspire import router as inspire_router
 from app.api.media import router as media_router
 from app.api.misc import router as misc_router
+from app.api.project_io import router as project_io_router
 from app.api.outline import router as outline_router
 from app.api.overview import router as overview_router
 from app.api.polish import router as polish_router
@@ -49,7 +50,6 @@ from app.api.drama import router as drama_router
 from app.api.system import router as system_router
 from app.api.tendency import router as tendency_router
 from app.api.writing_cards import router as writing_cards_router
-from app.api.drama import router as drama_router
 from app.api.promo import router as promo_router
 from app.api.clips import router as clips_router
 from app.api.birthday import router as birthday_router
@@ -59,12 +59,9 @@ from app.db.session import engine
 
 # 导入 models 触发表注册(SQLAlchemy 需要模型被 import 才会建表)
 import app.db.models  # noqa: F401
+from app.logging_config import RequestIdMiddleware, setup_logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+setup_logging()
 logger = logging.getLogger("jarvis-write")
 
 
@@ -126,13 +123,21 @@ def _assert_secure_config() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """启动时建表 + 幂等迁移。
+    """启动时建表 + 迁移。
 
-    不用 Alembic:create_all 建缺失的表,migrate.py 负责给旧表补列、
-    建初始 admin、把存量无主数据归到 admin(全部幂等,每次启动都跑)。
+    迁移流程(渐进式引入 Alembic):
+    1. Alembic upgrade head —— 管理 schema 变更(建表/加列/改约束)
+       - 现有用户(pre-Alembic)自动 stamp 到基线,不重复建表
+       - Alembic 失败时不阻断,回退到 create_all 兜底
+    2. Base.metadata.create_all —— 安全兜底,确保缺失的表被建出
+    3. app.migrate.run_migrations —— legacy 数据迁移(建 admin/归属 orphan/
+       加密 key/provider_settings→configs 等数据逻辑),全部幂等
     """
     _assert_secure_config()  # 生产弱密钥即拒启动(见函数注释)
     _assert_local_safe()  # local 模式只许走桌面入口,否则拒启动(见函数注释)
+    logger.info("运行 Alembic 数据库迁移...")
+    from app.db.migration import run_alembic_migrations
+    run_alembic_migrations()
     logger.info("建表中(SQLite)...")
     Base.metadata.create_all(bind=engine)
     logger.info("建表完成,运行多用户迁移...")
@@ -174,6 +179,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # 请求 ID 中间件:为每个请求生成唯一 ID,注入日志上下文,
+    # 响应头带 X-Request-ID 便于客户端排查。必须在业务中间件之前。
+    app.add_middleware(RequestIdMiddleware)
 
     # local 模式防 DNS rebinding:免鉴权只靠绑 127.0.0.1,但恶意网页可以把
     # 域名重绑定到 127.0.0.1 后发"同源"请求(Host 头是攻击者域名),CORS 白名单
@@ -218,6 +227,7 @@ def create_app() -> FastAPI:
     app.include_router(promo_router)
     app.include_router(clips_router)
     app.include_router(birthday_router)
+    app.include_router(project_io_router)
     app.include_router(misc_router)
 
     # 资源定位统一走 resource_path:源码环境相对 backend/,冻结(桌面版)相对

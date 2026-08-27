@@ -19,6 +19,8 @@ for pkg in (
     "fastapi",
     "pydantic",
     "pydantic_settings",
+    "alembic",
+    "mako",
     "app",
 ):
     hidden += collect_submodules(pkg)
@@ -30,6 +32,12 @@ datas = [
     # 冻结后经 resource_path("config/...") 从 _MEIPASS/config 读取,漏打会导致
     # 建书"选题材"墙与编辑部优化动作全空(catalog/editorial 加载即 500)。
     ("config", "config"),
+    # Alembic 迁移脚本与配置:桌面版启动时自动执行 upgrade head,
+    # 漏打会导致迁移模块找不到 alembic.ini,回退到 create_all 兜底(新表建不出来)。
+    ("alembic.ini", "alembic.ini"),
+    ("alembic", "alembic"),
+    # Prompt 模板文件:外置到 app/prompts/templates/,漏打会导致模板加载失败。
+    ("app/prompts/templates", "app/prompts/templates"),
 ]
 # pydantic 等可能带数据文件
 datas += collect_data_files("pydantic")
