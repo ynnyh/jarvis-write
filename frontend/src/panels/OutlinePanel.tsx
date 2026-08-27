@@ -469,7 +469,8 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
           onDirectiveChip={(directive) => {
             setShowDirective(true);
             setDirectiveText(directive);
-            window.scrollTo({ top: 0, behavior: "smooth" });
+            // 应用壳改为「右栏自滚」后,页面滚动发生在 .app-main 里(见 styles.css)
+            document.querySelector(".app-main")?.scrollTo({ top: 0, behavior: "smooth" });
           }}
           discussOpen={discussFor === o.chapter_number}
           onToggleDiscuss={() => setDiscussFor(discussFor === o.chapter_number ? null : o.chapter_number)}

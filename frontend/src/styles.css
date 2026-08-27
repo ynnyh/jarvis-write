@@ -558,10 +558,13 @@ select { cursor: pointer; }
 /* ---------- 工作台外壳:左侧全局导航 + 右侧内容(2026-08 重构,旧顶栏退役) ----------
    侧栏是纵向空间:一级入口一行一个带 active 态,底部常驻任务中心与用量——
    顶栏横排放不下这些,三个工坊的入口此前只能埋在首页按钮堆里。 */
-.app-shell { display: flex; min-height: 100vh; align-items: stretch; }
+/* 应用壳:左右两栏,**滚动只发生在右栏**——侧栏随视口钉死,内容再长也不跟着跑。
+   早先侧栏用 position: sticky(整页滚动 + 侧栏粘住),实测部分环境会失效;
+   改为「外壳锁死视口高度、.app-main 自身滚动」的应用壳标准做法,不再依赖 sticky。 */
+.app-shell { display: flex; height: 100vh; align-items: stretch; }
 .app-side {
   width: 224px; flex-shrink: 0;
-  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  overflow-y: auto; /* 菜单本身超出一屏时(小竖窗)侧栏内部自己滚,底部固定件始终可达 */
   display: flex; flex-direction: column; gap: var(--sp-4);
   background: var(--surface); border-right: 1px solid var(--line);
   padding: var(--sp-5) 12px;
@@ -607,7 +610,7 @@ select { cursor: pointer; }
   color: var(--text-3); font-size: var(--fs-xs);
 }
 .side-mini:hover { color: var(--text); text-decoration: underline; }
-.app-main { flex: 1; min-width: 0; }
+.app-main { flex: 1; min-width: 0; height: 100vh; overflow-y: auto; }
 /* 移动端精简顶条:☰ 唤出抽屉导航;桌面壳是横排,移动壳靠 767px 断点转竖排 */
 .m-shellbar {
   position: sticky; top: 0; z-index: var(--z-topbar);
@@ -3032,8 +3035,10 @@ html, body { max-width: 100%; overflow-x: hidden; }
 @keyframes m-rise { from { transform: translateY(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
 
 @media (max-width: 767px) {
-  /* 外壳转竖排:m-shellbar 在上,内容在下(桌面横排的侧栏此时不渲染) */
-  .app-shell { flex-direction: column; }
+  /* 外壳转竖排:m-shellbar 在上,内容在下(桌面横排的侧栏此时不渲染)。
+     桌面壳「右栏自滚」的两条规则在移动端退回自然页面滚动,别造出双层滚动 */
+  .app-shell { flex-direction: column; height: auto; }
+  .app-main { height: auto; overflow-y: visible; }
 
   /* write 区:单列正文;章级动作由章首状态卡 + 目录抽屉 + 章尾卡承接 */
   /* 底部给 AI 输入条(.m-ai-bar)让位,不遮章尾卡 */
