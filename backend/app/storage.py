@@ -38,6 +38,7 @@ MAX_CLIP_UPLOAD_BYTES = 20 * 1024 * 1024     # 短片参考图上限 20MB(短片
 MAX_WISH_UPLOAD_BYTES = 20 * 1024 * 1024     # 祝福片参考图上限 20MB(同理按 wish 号单独限量)
 MAX_RENDER_BYTES = 120 * 1024 * 1024        # 单个渲染草片上限 120MB(15s 768p 通常几 MB,放宽防意外)
 MAX_AUDIO_BYTES = 8 * 1024 * 1024           # 音色参考音频上限 8MB(5-10 秒 mp3/wav 远用不满)
+MAX_BGM_BYTES = 15 * 1024 * 1024            # 每集 BGM 上限 15MB(一首主题曲 mp3 通常 3-8MB)
 
 # 文件头 → 扩展名(WebP 还要校验第 8-12 字节的 "WEBP")
 _SIGNATURES: tuple[tuple[bytes, str], ...] = (
@@ -58,11 +59,13 @@ _CONTENT_TYPES = {
 _REL_RE = re.compile(
     r"^(?:drama/\d+/(?:shot)?\d+-\d+\.(?:png|jpg|webp)"
     r"|drama/\d+/voice\d+\.(?:mp3|wav)"
+    r"|drama/\d+/bgm\d+\.(?:mp3|wav)"
     r"|clips/\d+/\d+-\d+\.(?:png|jpg|webp)"
     r"|birthday/\d+/\d+-\d+\.(?:png|jpg|webp)"
     r"|render/r\d+\.mp4"
     r"|render/tts/[0-9a-f]{16}\.wav"
-    r"|render/lf/r\d+\.png)$"
+    r"|render/lf/r\d+\.png"
+    r"|render/synth/e\d+-t\d+\.mp4)$"
 )
 
 
@@ -246,6 +249,25 @@ def save_character_voice(project_id: int, card_id: int, data: bytes) -> str:
     (d / name).write_bytes(data)
     rel = f"drama/{int(project_id)}/{name}"
     logger.info("音色参考落盘 %s(%.1fKB)", rel, len(data) / 1024)
+    return rel
+
+
+def save_episode_bgm(project_id: int, episode_id: int, data: bytes) -> str:
+    """保存一集的 BGM(主题曲/垫乐),返回相对路径(集级,固定名重传即换)。"""
+    if not data:
+        raise UploadError("音频是空的,请重新选择文件。")
+    if len(data) > MAX_BGM_BYTES:
+        raise UploadError(
+            f"BGM 最大 {MAX_BGM_BYTES // 1024 // 1024}MB,当前 "
+            f"{len(data) / 1024 / 1024:.1f}MB,请压缩后再传。"
+        )
+    ext = sniff_audio_ext(data)
+    d = upload_root() / "drama" / str(int(project_id))
+    d.mkdir(parents=True, exist_ok=True)
+    name = f"bgm{int(episode_id)}.{ext}"
+    (d / name).write_bytes(data)
+    rel = f"drama/{int(project_id)}/{name}"
+    logger.info("BGM 落盘 %s(%.1fKB)", rel, len(data) / 1024)
     return rel
 
 

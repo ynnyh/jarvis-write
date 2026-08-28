@@ -140,9 +140,9 @@ export default function ProjectSettingsPanel({ pid, project }: Props) {
         </div>
         {project.render_mode === "full" && (
           <p className="hint mt-1">
-            完整档<b>对白配音链已上线</b>:有台词的格点「本站直接出片」= indextts2 按角色音色配音
-            + 对口型(先到角色卡传 5-10 秒音色参考,配音情绪在分镜格上选)。首尾帧自动接力与
-            一键合成分期上线中;已出的草片与进度两种模式通用。
+            完整档已上线:<b>对白配音链</b>(角色音色配音 + 对口型)与<b>一键合成整集</b>
+            (拼接 + BGM 垫底 + 字幕烧录,需部署里有 ffmpeg);首尾帧自动接力同步可用。
+            已出的草片与进度两种模式通用。
           </p>
         )}
       </div>

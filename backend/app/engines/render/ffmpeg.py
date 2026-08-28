@@ -46,6 +46,53 @@ def available() -> bool:
     return ffmpeg_bin() is not None
 
 
+def ffprobe_bin() -> str | None:
+    """定位 ffprobe:优先与 ffmpeg 同目录(apt 与 gyan.dev 包都成对),再 PATH。"""
+    bin_path = ffmpeg_bin()
+    if bin_path:
+        sibling = Path(bin_path).with_name("ffprobe.exe" if os.name == "nt" else "ffprobe")
+        if sibling.is_file():
+            return str(sibling)
+    return shutil.which("ffprobe") or shutil.which("ffprobe.exe")
+
+
+def probe_clip(path: Path) -> dict | None:
+    """探测一个媒体文件:{duration_s, has_audio, width, height}。
+
+    任何失败(没装 ffprobe/文件坏/解析不出)返回 None,调用方回落到
+    分镜表里的保守估计——探测是优化,不是门槛。
+    """
+    bin_path = ffprobe_bin()
+    if bin_path is None or not Path(path).is_file():
+        return None
+    cmd = [
+        bin_path, "-v", "error",
+        "-show_entries", "format=duration",
+        "-show_entries", "stream=codec_type,width,height",
+        "-of", "json", str(path),
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=30)  # noqa: S603
+        if proc.returncode != 0:
+            return None
+        import json
+
+        info = json.loads(proc.stdout)
+        duration = float((info.get("format") or {}).get("duration") or 0)
+        has_audio = any(
+            s.get("codec_type") == "a" for s in info.get("streams") or []
+        )
+        video = next((s for s in info.get("streams") or [] if s.get("codec_type") == "v"), {})
+        return {
+            "duration_s": duration,
+            "has_audio": has_audio,
+            "width": int(video.get("width") or 0),
+            "height": int(video.get("height") or 0),
+        }
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        return None
+
+
 def extract_last_frame(mp4_path: Path, out_png: Path) -> bool:
     """从 mp4 抽最后一帧存成 png。成功返回 True;任何失败返回 False(不抛)。"""
     bin_path = ffmpeg_bin()

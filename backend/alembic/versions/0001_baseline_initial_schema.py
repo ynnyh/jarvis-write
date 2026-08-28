@@ -730,6 +730,7 @@ def upgrade() -> None:
     sa.Column('user_id', sa.Integer(), nullable=False),
     sa.Column('line', sa.String(length=10), nullable=False),
     sa.Column('project_id', sa.Integer(), nullable=True),
+    sa.Column('episode_id', sa.Integer(), nullable=True),
     sa.Column('shot_id', sa.Integer(), nullable=True),
     sa.Column('clip_id', sa.Integer(), nullable=True),
     sa.Column('chunk_index', sa.Integer(), nullable=False),
@@ -750,6 +751,7 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_render_tasks_user_id'), ['user_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_render_tasks_line'), ['line'], unique=False)
         batch_op.create_index(batch_op.f('ix_render_tasks_project_id'), ['project_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_render_tasks_episode_id'), ['episode_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_render_tasks_shot_id'), ['shot_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_render_tasks_clip_id'), ['clip_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_render_tasks_status'), ['status'], unique=False)

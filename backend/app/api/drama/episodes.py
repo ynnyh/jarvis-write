@@ -6,8 +6,10 @@
 """
 from __future__ import annotations
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, File, HTTPException, Response, UploadFile
 from sqlalchemy.orm import Session
+
+from app import storage
 
 from app.api.drama._common import (
     PlanIn,
@@ -241,3 +243,70 @@ async def get_pack(project_id: int, episode_id: int, db: Session = Depends(get_d
         .first()
     )
     return {"pack": row.pack if row else None}
+
+
+# =============== 集级 BGM(整集合成的垫乐;每集一段,重传即换) ===============
+
+
+@router.post("/episodes/{episode_id}/bgm")
+async def upload_episode_bgm(
+    project_id: int,
+    episode_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """上传这一集的 BGM(MP3/WAV ≤15MB;固定名重传即换)。合成时低音量垫底。"""
+    get_project_or_404(db, project_id)
+    _get_episode(db, project_id, episode_id)
+    data = await file.read(storage.MAX_BGM_BYTES + 1)
+    try:
+        rel = storage.save_episode_bgm(project_id, episode_id, data)
+    except storage.UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"bgm": rel}
+
+
+@router.get("/episodes/{episode_id}/bgm")
+async def read_episode_bgm(
+    project_id: int, episode_id: int, db: Session = Depends(get_db)
+):
+    """试听这一集的 BGM(走鉴权,上传目录不挂静态服务)。"""
+    get_project_or_404(db, project_id)
+    _get_episode(db, project_id, episode_id)  # 归属校验
+    # 路径规则在 storage(bgm<集号>.<ext>),按约定直接探测两种扩展名
+    prefix = f"drama/{project_id}/bgm{episode_id}."
+    for ext in ("mp3", "wav"):
+        rel = prefix + ext
+        try:
+            path = storage.resolve(rel)
+        except storage.UploadError:
+            continue
+        if path.is_file():
+            return Response(
+                content=path.read_bytes(),
+                media_type=storage.content_type_of(rel),
+                headers={"Cache-Control": "private, max-age=86400"},
+            )
+    raise HTTPException(status_code=404, detail="这一集还没有 BGM,先上传一首。")
+
+
+@router.delete("/episodes/{episode_id}/bgm")
+async def delete_episode_bgm(
+    project_id: int, episode_id: int, db: Session = Depends(get_db)
+):
+    """删掉这一集的 BGM(连文件一起删;合成时就不垫音乐了)。"""
+    get_project_or_404(db, project_id)
+    _get_episode(db, project_id, episode_id)
+    removed = False
+    for ext in ("mp3", "wav"):
+        rel = f"drama/{project_id}/bgm{episode_id}.{ext}"
+        try:
+            path = storage.resolve(rel)
+        except storage.UploadError:
+            continue
+        if path.is_file():
+            path.unlink()
+            removed = True
+    if not removed:
+        raise HTTPException(status_code=404, detail="这一集还没有 BGM。")
+    return {"ok": True}

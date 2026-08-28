@@ -184,7 +184,7 @@ def _dedup_running(kind: str) -> str | None:
 def _create_task(
     db: Session, user_id: int, *, line: str, kind: str, workflow_id: str,
     params: dict, project_id: int | None, shot_id: int | None = None,
-    clip_id: int | None = None, chunk_index: int = -1,
+    clip_id: int | None = None, chunk_index: int = -1, episode_id: int | None = None,
 ) -> RenderTask:
     task = RenderTask(
         user_id=user_id,
@@ -193,6 +193,7 @@ def _create_task(
         workflow_id=workflow_id,
         params=params,
         project_id=project_id,
+        episode_id=episode_id,
         shot_id=shot_id,
         clip_id=clip_id,
         chunk_index=chunk_index,
@@ -407,6 +408,10 @@ async def adopt_render_task(
     各线指针:漫剧 drama_shots.clip_ref;情绪 ClipShoot.shoot[i].result_link。
     """
     task = _get_own_task(db, task_id, user.id)
+    if task.kind == "synth":
+        raise HTTPException(
+            status_code=400, detail="整集成片不需要设为成片——直接在线预览或下载即可。"
+        )
     if task.status != "success" or not task.result_path:
         raise HTTPException(status_code=400, detail="只有出片成功的版本才能设为成片。")
     if task.line == "drama":
@@ -582,3 +587,102 @@ async def adopt_prev_frame(
     from app.engines.drama.common import shots_payload
 
     return {"shot": shots_payload(db, project_id, [shot])[0], "from_seq": prev.seq}
+
+
+# =============== 整集一键合成(完整档第三步)===============
+
+
+class SynthIn(BaseModel):
+    burn_subtitles: bool = True
+
+
+@router.post("/api/projects/{project_id}/drama/episodes/{episode_id}/synth")
+async def submit_episode_synth(
+    project_id: int, episode_id: int, body: SynthIn,
+    db: Session = Depends(get_db), user=Depends(get_current_user)
+):
+    """整集一键合成:逐镜草片拼接(+静帧占位)+ BGM 垫底 + 字幕烧录。
+
+    完整档专属;ffmpeg 本地跑,不需要平台 token——所以这里不做 token 校验,
+    只校验 ffmpeg 存在与项目档位。
+    """
+    from app.engines.render.ffmpeg import available as ffmpeg_available
+    from app.engines.render.synthesis import collect_plan
+
+    project = db.get(Project, project_id)
+    get_project_or_404(db, project_id)
+    if project is None or project.render_mode != "full":
+        raise HTTPException(
+            status_code=400,
+            detail="一键合成是完整档功能:请先到「项目设置 → 出片模式」切到完整档。",
+        )
+    if not ffmpeg_available():
+        raise HTTPException(
+            status_code=400,
+            detail="部署里没有 ffmpeg,无法合成:桌面安装包自带;源码环境装 ffmpeg "
+                   "或设环境变量 JARVIS_FFMPEG 指到可执行文件。",
+        )
+    kind = f"render:synth:e{episode_id}"
+    if (jid := _dedup_running(kind)):
+        return {"job_id": jid, "task_id": None, "deduped": True}
+
+    from app.db.models import DramaEpisode, DramaShot
+
+    ep = (
+        db.query(DramaEpisode)
+        .filter(DramaEpisode.id == episode_id, DramaEpisode.project_id == project_id)
+        .first()
+    )
+    if ep is None:
+        raise HTTPException(status_code=404, detail="这一集不存在。")
+    shots = (
+        db.query(DramaShot)
+        .filter(DramaShot.episode_id == episode_id)
+        .order_by(DramaShot.seq)
+        .all()
+    )
+    plan = collect_plan(db, shots)
+    if not plan.items:
+        raise HTTPException(
+            status_code=400,
+            detail="这一集还没有可合成的片段:先给分镜格出片,或至少挂一张静帧当占位。",
+        )
+    params = {
+        "burn_subtitles": body.burn_subtitles,
+        "clips": plan.clip_count,
+        "stills": plan.still_count,
+        "skipped_seqs": plan.skipped_seqs,
+    }
+    task = _create_task(
+        db, user.id, line="drama", kind="synth", workflow_id="ffmpeg",
+        params=params, project_id=project_id, episode_id=episode_id,
+    )
+    spec = {
+        "task_id": task.id, "user_id": user.id, "line": "drama",
+        "project_id": project_id, "episode_id": episode_id,
+        "kind": "synth", "workflow_id": "ffmpeg", "params": params,
+    }
+
+    async def work(progress):
+        return await start_render(progress, spec)
+
+    return {"job_id": spawn_job(kind, work), "task_id": task.id, "deduped": False}
+
+
+@router.get("/api/projects/{project_id}/drama/episodes/{episode_id}/synth")
+async def get_episode_synth(
+    project_id: int, episode_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)
+):
+    """最新一次整集合成的状态(刷新页面接续进度用)。"""
+    get_project_or_404(db, project_id)
+    row = (
+        db.query(RenderTask)
+        .filter(
+            RenderTask.user_id == user.id,
+            RenderTask.episode_id == episode_id,
+            RenderTask.kind == "synth",
+        )
+        .order_by(RenderTask.id.desc())
+        .first()
+    )
+    return {"synth": _task_out(row) if row else None}

@@ -66,7 +66,13 @@ export interface RenderTaskOut {
   workflow_id: string;
   provider_task_id: string;
   status: "queued" | "running" | "success" | "failed" | string;
-  params: { prompt?: string; duration_s?: number; resolution?: string };
+  params: {
+    prompt?: string; duration_s?: number; resolution?: string;
+    // 对白链(talk)
+    text?: string; emotion?: string; tts_cached?: boolean; note?: string;
+    // 整集合成(synth)
+    burn_subtitles?: boolean; clips?: number; stills?: number; skipped_seqs?: number[];
+  };
   result_path: string;
   error: string;
   created_at: string;
@@ -126,7 +132,38 @@ export const renderApi = {
     if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
     return URL.createObjectURL(await res.blob());
   },
+
+  // ---- 整集一键合成(完整档)----
+  uploadEpisodeBgm: (pid: number, eid: number, file: File) =>
+    postImage<{ bgm: string }>(
+      `/api/projects/${pid}/drama/episodes/${eid}/bgm`, file),
+  async episodeBgmBlobUrl(pid: number, eid: number): Promise<string> {
+    const res = await fetch(`/api/projects/${pid}/drama/episodes/${eid}/bgm`, { headers: authHeaders() });
+    if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+    return URL.createObjectURL(await res.blob());
+  },
+  deleteEpisodeBgm: (pid: number, eid: number) =>
+    req<{ ok: boolean }>("DELETE", `/api/projects/${pid}/drama/episodes/${eid}/bgm`),
+  submitEpisodeSynth: (pid: number, eid: number, burnSubtitles: boolean) =>
+    req<SubmitRenderResult>(
+      "POST", `/api/projects/${pid}/drama/episodes/${eid}/synth`, { burn_subtitles: burnSubtitles }),
+  episodeSynthStatus: (pid: number, eid: number) =>
+    req<{ synth: RenderTaskOut | null }>("GET", `/api/projects/${pid}/drama/episodes/${eid}/synth`),
 };
+
+/** multipart 上传(FormData 不能手设 Content-Type,浏览器要自己带 boundary)。 */
+async function postImage<T>(path: string, file: File, note = ""): Promise<T> {
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("note", note);
+  const res = await fetch(path, { method: "POST", headers: authHeaders(), body: fd });
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try { const j = await res.json(); detail = j.detail ?? detail; } catch { /* ignore */ }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as T;
+}
 
 /** 出片状态的中文展示(版本列表/徽标用)。 */
 export const RENDER_STATUS_CN: Record<string, string> = {

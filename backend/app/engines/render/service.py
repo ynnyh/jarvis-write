@@ -91,8 +91,10 @@ def apply_pointer(line: str, shot_id: int | None, clip_id: int | None, chunk_ind
 async def start_render(progress, spec: dict) -> dict:
     """跑一次出片(异步 worker)。spec 字段见 api/render.py 的提交端点。"""
     task_id = int(spec["task_id"])
-    line = spec["line"]
     kind = spec["kind"]
+    if kind == "synth":
+        return await _run_synth_job(progress, spec, task_id)
+    line = spec["line"]
     workflow_id = spec["workflow_id"]
 
     # 配置现场读:提交到真正执行之间用户可能改了 token,以执行那一刻为准
@@ -315,6 +317,80 @@ def _extract_last_frame(task_id: int, mp4_path) -> None:
             logger.info("末帧已存 %s", out.name)
     except Exception:  # noqa: BLE001 — 接力失败不影响出片
         logger.debug("末帧抽取出错 task=%s", task_id, exc_info=True)
+
+
+async def _run_synth_job(progress, spec: dict, task_id: int) -> dict:
+    """整集一键合成(完整档):本地 ffmpeg,不需要平台 token。
+
+    与单镜出片的分工:plan 在任务里现查现建(草片/静帧的状态可能刚变),
+    ffmpeg 重活放线程池(asyncio.to_thread)不阻塞事件循环。
+    """
+    import asyncio
+
+    from app.engines.render import synthesis
+    from app.engines.render.synthesis import SynthError
+
+    episode_id = int(spec["episode_id"])
+
+    def _collect():
+        from app.db.models import DramaShot
+
+        with _db_session() as db:
+            shots = (
+                db.query(DramaShot)
+                .filter(DramaShot.episode_id == episode_id)
+                .order_by(DramaShot.seq)
+                .all()
+            )
+            return synthesis.collect_plan(db, shots)
+
+    progress("收集片段…")
+    plan = await asyncio.to_thread(_collect)
+    if not plan.items:
+        _mark_failed(task_id, "没有可合成的片段")
+        raise SynthError("这一集还没有可合成的片段:先出几格草片,或给分镜格挂静帧当占位。")
+
+    project_id = int(spec["project_id"])
+    out_rel = f"render/synth/e{episode_id}-t{task_id}.mp4"
+    out_abs = storage.upload_root() / "render" / "synth" / f"e{episode_id}-t{task_id}.mp4"
+    bgm = synthesis.find_bgm(project_id, episode_id)
+    burn = bool((spec.get("params") or {}).get("burn_subtitles", True))
+
+    def _run() -> Path:
+        return synthesis.run_synthesis(
+            progress, plan, burn_subtitles=burn, bgm_path=bgm, out_path=out_abs,
+        )
+
+    note_bits = [f"可拼 {plan.clip_count} 格", f"静帧占位 {plan.still_count} 格"]
+    if plan.skipped_seqs:
+        note_bits.append(f"跳过 {len(plan.skipped_seqs)} 格(第 {'、'.join(map(str, plan.skipped_seqs))} 格无草片无静帧)")
+    if bgm is None:
+        note_bits.append("未传 BGM")
+    progress(" / ".join(note_bits))
+
+    try:
+        await asyncio.to_thread(_run)
+    except SynthError as exc:
+        _mark_failed(task_id, str(exc))
+        raise RenderError(str(exc)) from exc
+
+    removed = synthesis.cleanup_old_synth(episode_id, out_abs)
+    with _db_session() as db:
+        row = db.get(RenderTask, task_id)
+        if row is not None:
+            row.status = "success"
+            row.result_path = out_rel
+            row.params = {
+                **(row.params or {}),
+                "total_s": round(plan.total_s, 1),
+                "clips": plan.clip_count,
+                "stills": plan.still_count,
+                "skipped_seqs": plan.skipped_seqs,
+                **({"cleaned_old": removed} if removed else {}),
+            }
+            db.commit()
+    logger.info("整集合成完成 task=%s ep=%s → %s", task_id, episode_id, out_rel)
+    return {"task_id": task_id, "status": "success", "result_path": out_rel}
 
 
 def _mark_failed(task_id: int, error: str) -> None:

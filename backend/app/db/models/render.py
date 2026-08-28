@@ -70,6 +70,8 @@ class RenderTask(Base, TimestampMixin):
     project_id: Mapped[int | None] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True
     )
+    # 集级任务(整集一键合成 kind="synth")专用:shot_id/clip_id 皆为空时看这里
+    episode_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     shot_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     clip_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     chunk_index: Mapped[int] = mapped_column(Integer, default=-1)

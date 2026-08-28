@@ -862,3 +862,167 @@ def test_purge_removes_last_frame(client: TestClient):
         db.commit()
     assert client.delete(f"/api/projects/{pid}", headers=headers).status_code == 200
     assert not (storage.upload_root() / "render" / "lf" / f"r{lf_id}.png").exists()
+
+
+# =============== 整集一键合成 ===============
+
+
+def _make_plan_db(client: TestClient, username: str, *, full: bool = True):
+    """种一集三格:①有本站草片+配音(talk) ②只有静帧 ③什么都没有。"""
+    from app.db.models import DramaEpisode, DramaShot
+    from app.db.session import SessionLocal
+
+    headers = _auth(client, username)
+    pid = client.post("/api/projects", headers=headers, json={"title": "合成书"}).json()["id"]
+    if full:
+        client.patch(f"/api/projects/{pid}", headers=headers, json={"render_mode": "full"})
+    _config_token(client, headers)  # 出片前置:引擎令牌
+    with SessionLocal() as db:
+        ep = DramaEpisode(project_id=pid, ep_index=1, title="第一集")
+        db.add(ep)
+        db.flush()
+        s1 = DramaShot(episode_id=ep.id, seq=1, camera="固定", duration_s=3, dialogue="第一句")
+        s2 = DramaShot(episode_id=ep.id, seq=2, camera="推", duration_s=4, dialogue="第二句")
+        s3 = DramaShot(episode_id=ep.id, seq=3, camera="拉", duration_s=3)
+        db.add_all([s1, s2, s3])
+        db.commit()
+        return headers, pid, ep.id, s1.id, s2.id, s3.id
+
+
+def test_collect_plan_branches(client: TestClient):
+    from app.engines.render.synthesis import collect_plan
+
+    headers, pid, eid, sid1, sid2, sid3 = _make_plan_db(client, "synth_collect")
+    # 第 1 格出片(引擎回写 clip_ref)+ 最新任务标记为 talk(有配音音轨)
+    fake = _FakeRender()
+    with patch("app.api.render.start_render", fake):
+        r = client.post(f"/api/projects/{pid}/drama/shots/{sid1}/render", headers=headers)
+        assert _wait_job(client, headers, r.json()["job_id"])["status"] == "done"
+    from app.db.models import DramaShot, RenderTask
+    from app.db.session import SessionLocal
+
+    with SessionLocal() as db:
+        t = db.query(RenderTask).filter(RenderTask.shot_id == sid1).first()
+        t.kind = "talk"  # 假引擎不知道情感链,这里手工标记「有配音」
+        db.commit()
+        shot1 = db.get(DramaShot, sid1)
+        # 给第 2 格挂一张静帧
+        d = storage.upload_root() / "drama" / str(pid)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"shot{sid2}-1.png").write_bytes(bytes.fromhex("89504e470d0a1a0a") + bytes(16))
+        shot2 = db.get(DramaShot, sid2)
+        shot2.assets = [{"kind": "upload", "src": f"drama/{pid}/shot{sid2}-1.png", "note": ""}]
+        db.commit()
+
+        shots = db.query(DramaShot).filter(DramaShot.episode_id == eid).order_by(DramaShot.seq).all()
+        with patch("app.engines.render.synthesis.probe_clip",
+                   lambda p: {"duration_s": 3.0, "has_audio": False, "width": 720, "height": 1280}):
+            plan = collect_plan(db, shots)
+    assert plan.clip_count == 1 and plan.still_count == 1
+    assert plan.skipped_seqs == [3]
+    assert plan.items[0].has_audio is True and plan.items[0].text == "第一句"
+    assert plan.items[1].kind == "still" and plan.items[1].has_audio is False
+    assert (plan.width, plan.height) == (720, 1280)
+
+
+def test_build_srt_and_command():
+    from pathlib import Path
+
+    from app.engines.render.synthesis import SynthItem, SynthPlan, build_command, build_srt
+
+    plan = SynthPlan(items=[
+        SynthItem("clip", Path("a.mp4"), 3.0, "第一句", True),
+        SynthItem("still", Path("b.png"), 4.0, "第二句", False),
+        SynthItem("clip", Path("c.mp4"), 2.5, "", False),
+    ], skipped_seqs=[9], width=720, height=1280)
+    srt = build_srt(plan)
+    assert "00:00:00,000 --> 00:00:03,000" in srt and "第一句" in srt
+    assert "00:00:03,000 --> 00:00:07,000" in srt and "第二句" in srt
+    # 第三格无台词:时长计入但不出现字幕条
+    assert srt.count("-->") == 2
+
+    cmd = build_command(plan, burn_subtitles=True, bgm_path=Path("bg.mp3"),
+                        out_path=Path("out/e1-t1.mp4"))
+    joined = " ".join(cmd)
+    assert "concat=n=3:v=1:a=1" in joined
+    assert "anullsrc" in joined and "subtitles=sub.srt" in joined
+    assert "volume=0.12" in joined and "-stream_loop" in joined
+    # still 输入要 -loop 定时长;clip 普通 -i
+    assert cmd.count("-loop") == 1
+
+
+def test_synth_api_flow(client: TestClient):
+    """API 链路:lite 拒 / 无片段拒 / 正常合成(fake ffmpeg)+ 旧片清理 + adopt 400。"""
+    headers, pid, eid, sid1, sid2, sid3 = _make_plan_db(client, "synth_api")
+
+    # 轻量档 → 400
+    client.patch(f"/api/projects/{pid}", headers=headers, json={"render_mode": "lite"})
+    r = client.post(f"/api/projects/{pid}/drama/episodes/{eid}/synth",
+                    headers=headers, json={"burn_subtitles": True})
+    assert r.status_code == 400 and "完整档" in r.json()["detail"]
+    client.patch(f"/api/projects/{pid}", headers=headers, json={"render_mode": "full"})
+
+    # 三格都没有草片/静帧 → 400
+    r = client.post(f"/api/projects/{pid}/drama/episodes/{eid}/synth",
+                    headers=headers, json={"burn_subtitles": True})
+    assert r.status_code == 400
+
+    # 给第 1 格出片(fake 引擎)+ 落一个旧成片文件(验证清理)
+    fake = _FakeRender()
+    with patch("app.api.render.start_render", fake):
+        r = client.post(f"/api/projects/{pid}/drama/shots/{sid1}/render", headers=headers)
+        assert _wait_job(client, headers, r.json()["job_id"])["status"] == "done"
+    old = storage.upload_root() / "render" / "synth" / f"e{eid}-t0.mp4"
+    old.parent.mkdir(parents=True, exist_ok=True)
+    old.write_bytes(_MINI_MP4)
+
+    def fake_run_synthesis(progress, plan, *, burn_subtitles, bgm_path, out_path):
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(_MINI_MP4)
+        assert burn_subtitles is True
+        return out_path
+
+    with patch("app.engines.render.synthesis.run_synthesis", fake_run_synthesis):
+        r = client.post(f"/api/projects/{pid}/drama/episodes/{eid}/synth",
+                        headers=headers, json={"burn_subtitles": True})
+        assert r.status_code == 200, r.text
+        job = _wait_job(client, headers, r.json()["job_id"])
+        assert job["status"] == "done", job
+        task_id = r.json()["task_id"]
+
+    # 状态端点 + 旧成片已清 + 文件端点可读
+    synth = client.get(f"/api/projects/{pid}/drama/episodes/{eid}/synth", headers=headers).json()["synth"]
+    assert synth and synth["status"] == "success"
+    assert not old.exists()
+    r = client.get(f"/api/render/tasks/{task_id}/file", headers=headers)
+    assert r.status_code == 200 and r.headers["content-type"] == "video/mp4"
+    # 整集成片不参与「设为成片」
+    r = client.post(f"/api/render/tasks/{task_id}/adopt", headers=headers)
+    assert r.status_code == 400 and "不需要设为成片" in r.json()["detail"]
+
+
+def test_bgm_roundtrip(client: TestClient):
+    from app.db.models import DramaEpisode
+    from app.db.session import SessionLocal
+
+    headers = _auth(client, "bgm_a")
+    pid = client.post("/api/projects", headers=headers, json={"title": "BGM 书"}).json()["id"]
+    with SessionLocal() as db:
+        ep = DramaEpisode(project_id=pid, ep_index=1, title="第一集")
+        db.add(ep)
+        db.commit()
+        eid = ep.id
+
+    r = client.post(f"/api/projects/{pid}/drama/episodes/{eid}/bgm",
+                    headers=headers, files={"file": ("bg.mp3", b"<html>no</html>", "audio/mpeg")})
+    assert r.status_code == 400
+    mp3 = b"ID3\x04\x00" + b"\x00" * 512
+    r = client.post(f"/api/projects/{pid}/drama/episodes/{eid}/bgm",
+                    headers=headers, files={"file": ("bg.mp3", mp3, "audio/mpeg")})
+    assert r.status_code == 200 and r.json()["bgm"].endswith(".mp3")
+    r = client.get(f"/api/projects/{pid}/drama/episodes/{eid}/bgm", headers=headers)
+    assert r.status_code == 200 and r.headers["content-type"] == "audio/mpeg"
+    r = client.delete(f"/api/projects/{pid}/drama/episodes/{eid}/bgm", headers=headers)
+    assert r.status_code == 200
+    r = client.get(f"/api/projects/{pid}/drama/episodes/{eid}/bgm", headers=headers)
+    assert r.status_code == 404
