@@ -47,6 +47,7 @@ from app.engines.promo import (
     PromoStoryboardError,
     build_chunks,
     build_pack,
+    build_promo_film_prompt,
     build_storyboard,
     distill_brief,
     export_csv,
@@ -112,6 +113,11 @@ class ChatIn(BaseModel):
 
 class ChunksIn(BaseModel):
     chunk_s: int = Field(default=15)
+
+
+class FilmPromptIn(BaseModel):
+    """整片提示词手动保存:整段替换(粘贴自己写的版本也走这里)。"""
+    film_prompt: str = ""
 
 
 class ShotIn(BaseModel):
@@ -409,6 +415,33 @@ async def promo_chunks(plan_id: int, body: ChunksIn | None = None, db: Session =
     if chunk_s not in (5, 10, 15):
         raise HTTPException(status_code=400, detail="切段时长只支持 5/10/15 秒。")
     return _plan_job(plan_id, "chunks", _ChunksAction(chunk_s))
+
+
+# ---- 整片提示词(端到端音频原生视频模型) ----
+
+
+@router.post("/{plan_id}/film-prompt")
+async def promo_film_prompt(plan_id: int, db: Session = Depends(get_db)):
+    """把分镜+解说词+地标卡组装成一条「一次出一整片」的成片提示词(覆盖旧稿)。"""
+    _get_plan(db, plan_id)
+    return _plan_job(plan_id, "film-prompt", build_promo_film_prompt)
+
+
+@router.get("/{plan_id}/film-prompt")
+async def get_promo_film_prompt(plan_id: int, db: Session = Depends(get_db)):
+    plan = _get_plan(db, plan_id)
+    return {"film_prompt": plan.film_prompt or ""}
+
+
+@router.put("/{plan_id}/film-prompt")
+async def save_promo_film_prompt(
+    plan_id: int, body: FilmPromptIn, db: Session = Depends(get_db)
+):
+    """整段替换保存:手改后的稿子、或用户自己写的版本都存这一列。"""
+    plan = _get_plan(db, plan_id)
+    plan.film_prompt = (body.film_prompt or "").strip()
+    db.commit()
+    return {"film_prompt": plan.film_prompt}
 
 
 # =============== 分镜手动编辑 ===============

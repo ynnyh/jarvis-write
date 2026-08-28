@@ -858,6 +858,24 @@ def _add_episode_film_prompt_column() -> None:
             logger.info("迁移:drama_episodes 补 film_prompt 列")
 
 
+def _add_clips_promo_film_prompt_columns() -> None:
+    """mood_clips / promo_plans 补 film_prompt 列(整片提示词,幂等)。
+
+    同 drama_episodes 的 film_prompt:mood_clips 覆盖情绪短片/灵感工坊/故事工坊
+    三种 mode,promo_plans 是宣传片;语义同为「生成即覆盖,保存即替换」。
+    """
+    for table in ("mood_clips", "promo_plans"):
+        with engine.begin() as conn:
+            insp = inspect(conn)
+            if table not in insp.get_table_names():
+                continue  # create_all 会按新模型建表,无需补列
+            if not _column_exists(table, "film_prompt"):
+                conn.execute(
+                    text(f"ALTER TABLE {table} ADD COLUMN film_prompt TEXT DEFAULT ''")
+                )
+                logger.info("迁移:%s 补 film_prompt 列", table)
+
+
 def run_migrations() -> None:
     """启动时调用。幂等。"""
     _add_user_id_columns()
@@ -895,6 +913,7 @@ def run_migrations() -> None:
     _add_drama_dialogue_chain_columns()
     _add_render_episode_id_column()
     _add_episode_film_prompt_column()
+    _add_clips_promo_film_prompt_columns()
     _disable_word_guard_default()
     _migrate_finalized_to_approved()
     # 先补加密老表存量明文 key,再拷到新表,保证 provider_configs 落库必为密文

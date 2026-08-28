@@ -90,3 +90,28 @@ def split_character_desc(desc: str, characters: list[str]) -> dict[str, str]:
             prev = out.get(name)
             out[name] = f"{prev};{span}" if prev else span
     return out
+
+
+def speaker_of(dialogue: str, lines: list) -> str:
+    """台词原文 → 说话人(按文本精确对齐剧本/本子 lines;对不上就空着不猜)。
+
+    整片提示词的镜头表要写「谁说了这句」,但各线分镜里台词都不带说话人,
+    只能回查剧本 lines 做文本精确匹配——匹配不上宁可空着,猜错更糟。
+    """
+    key = str(dialogue or "").strip()
+    if not key:
+        return ""
+    for line in lines or []:
+        if isinstance(line, dict) and str(line.get("text") or "").strip() == key:
+            return str(line.get("speaker") or "").strip()
+    return ""
+
+
+def strip_fences(text: str) -> str:
+    """剥掉模型偶尔裹上来的 markdown 围栏——上屏的就是纯文本,不带这些赘余。"""
+    t = str(text or "").strip()
+    if t.startswith("```"):
+        t = t.split("\n", 1)[-1] if "\n" in t else ""
+        if t.rstrip().endswith("```"):
+            t = t.rstrip()[:-3]
+    return t.strip()

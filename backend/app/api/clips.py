@@ -33,6 +33,7 @@ from app.db.models import ClipShoot, MoodClip, Project, RenderTask
 from app.db.session import get_db
 from app.engines.clips import (
     ClipBatchError,
+    build_clip_film_prompt,
     clip_dict,
     export_json,
     export_markdown,
@@ -108,6 +109,11 @@ class PickIn(BaseModel):
 class ClipCardIn(BaseModel):
     """手卡编辑保存:选定本子的完整卡(台词/分镜/三轨提示词/金句),服务端归一化重算切段。"""
     card: dict
+
+
+class FilmPromptIn(BaseModel):
+    """整片提示词手动保存:整段替换(粘贴自己写的版本也走这里)。"""
+    film_prompt: str = ""
 
 
 class ShootUpdateIn(BaseModel):
@@ -412,6 +418,47 @@ async def reexpand_clip(clip_id: int, body: ReexpandIn, db: Session = Depends(ge
             )
 
     return {"job_id": spawn_job(kind, work)}
+
+
+# ---- 整片提示词(端到端音频原生视频模型) ----
+
+
+@router.post("/{clip_id}/film-prompt")
+async def build_film_prompt(clip_id: int, db: Session = Depends(get_db)):
+    """把选中本子的分镜+台词+风格组装成一条「一次出一整片」的成片提示词(覆盖旧稿)。"""
+    _get_clip(db, clip_id)
+    kind = f"clips-film-prompt-{clip_id}"
+    for jid, job in list_running("clips-"):
+        if job["kind"] == kind:
+            return {"job_id": jid}
+
+    async def work(progress):
+        from app.db.session import SessionLocal
+
+        with SessionLocal() as session:
+            row = session.get(MoodClip, clip_id)
+            if row is None:
+                raise ValueError("短片已被删除,任务取消。")
+            return await build_clip_film_prompt(session, row, progress)
+
+    return {"job_id": spawn_job(kind, work)}
+
+
+@router.get("/{clip_id}/film-prompt")
+async def get_film_prompt(clip_id: int, db: Session = Depends(get_db)):
+    row = _get_clip(db, clip_id)
+    return {"film_prompt": row.film_prompt or ""}
+
+
+@router.put("/{clip_id}/film-prompt")
+async def save_film_prompt(
+    clip_id: int, body: FilmPromptIn, db: Session = Depends(get_db)
+):
+    """整段替换保存:手改后的稿子、或用户自己写的版本都存这一列。"""
+    row = _get_clip(db, clip_id)
+    row.film_prompt = (body.film_prompt or "").strip()
+    db.commit()
+    return {"film_prompt": row.film_prompt}
 
 
 @router.put("/{clip_id}/clip")

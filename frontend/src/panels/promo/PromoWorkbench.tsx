@@ -9,6 +9,7 @@ import {
 } from "../../promoApi";
 import { errMsg } from "../../pollJob";
 import StepBar, { Step } from "../../ui/StepBar";
+import { FilmPromptCard } from "../../ui/FilmPromptCard";
 import { usePromoJobs } from "./usePromoJobs";
 import PlanForm from "./PlanForm";
 import VisualSection from "./VisualSection";
@@ -124,6 +125,15 @@ export default function PromoWorkbench({ pid, meta }: {
             <ChunksSection plan={plan} shotCount={shots.length} jobs={jobs}
               onBuild={(cs) => void jobs.act("chunks", () => promoApi.chunks(pid, cs),
                 `切段已生成(每段 ≤${cs}s)`)} />
+            {/* 整片提示词(端到端音频原生视频模型):一条出一整片,与逐段生成互补 */}
+            <FilmPromptCard
+              load={() => promoApi.getFilmPrompt(pid).then((r) => r.film_prompt)}
+              save={(t) => promoApi.saveFilmPrompt(pid, t).then((r) => r.film_prompt)}
+              generate={() => promoApi.buildFilmPrompt(pid)}
+              jobKind={`promo-film-prompt-${pid}`}
+              ready={shots.length > 0}
+              readyHint="先生成分镜,才有原料组装整片提示词"
+            />
             <PackSection pid={pid} plan={plan} shotCount={shots.length} jobs={jobs}
               onBuild={() => void jobs.act("pack", () => promoApi.pack(pid), "成片包已生成")} />
           </div>

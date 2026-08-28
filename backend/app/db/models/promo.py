@@ -62,6 +62,9 @@ class PromoPlan(Base, TimestampMixin):
     # 镜头边界贪心聚段,每段 ≤ chunk_s 秒——一段一次文生视频/图生视频,画布上按段拼接
     chunks: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     status: Mapped[str] = mapped_column(String(20), default="draft")
+    # 整片提示词:端到端音频原生视频模型(Sora/Veo/可灵)用的一次性成片提示词,
+    # 由分镜+解说词+地标卡+风格卡组装生成;可手改、可整段粘贴保存。
+    film_prompt: Mapped[str] = mapped_column(Text, default="")
 
 
 class PromoShot(Base, TimestampMixin):

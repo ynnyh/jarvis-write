@@ -65,6 +65,9 @@ class MoodClip(Base, TimestampMixin):
     clip: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     # draft(建了)→ generated(候选已出)→ picked(已选定)
     status: Mapped[str] = mapped_column(String(20), default="draft")
+    # 整片提示词:端到端音频原生视频模型(Sora/Veo/可灵)用的一次性成片提示词,
+    # 由选中本子(shots/lines)+ 风格卡组装生成;可手改、可整段粘贴保存。
+    film_prompt: Mapped[str] = mapped_column(Text, default="")
 
 
 class ClipShoot(Base, TimestampMixin):

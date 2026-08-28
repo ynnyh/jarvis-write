@@ -8,6 +8,7 @@ import { ClipCard, ClipRefImage, ClipShootUnit, clipsApi } from "../../clipsApi"
 import { toast } from "../../ui/Toaster";
 import { errMsg } from "../../pollJob";
 import { CopyBtn } from "../../ui/copy";
+import { FilmPromptCard } from "../../ui/FilmPromptCard";
 import { confirmDialog } from "../../ui/ConfirmDialog";
 import EmptyState from "../../ui/EmptyState";
 import { useJob } from "../../ui/useJob";
@@ -276,6 +277,16 @@ export default function ShootWorkbench({ clipId, card, onProgress }: {
         也可以照老办法把「角色定妆图 + 本段提示词」搬进图文生视频工具(如 minimax H3),
         成片地址贴回「成品链接」存档。段号与手卡切段一致,手卡改过会按新切段自动归并。
       </p>
+
+      {/* 整片提示词(端到端音频原生视频模型):一条出一整片,不想逐段出片就用它 */}
+      <FilmPromptCard
+        load={() => clipsApi.getFilmPrompt(clipId).then((r) => r.film_prompt)}
+        save={(t) => clipsApi.saveFilmPrompt(clipId, t).then((r) => r.film_prompt)}
+        generate={() => clipsApi.buildFilmPrompt(clipId)}
+        jobKind={`clips-film-prompt-${clipId}`}
+        ready={(card.shots ?? []).length > 0}
+        readyHint="先「三选一」选定本子并生成分镜,才有原料组装整片提示词"
+      />
 
       {units === null ? (
         <p className="muted">加载出片盘…</p>

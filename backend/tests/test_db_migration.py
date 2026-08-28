@@ -102,9 +102,13 @@ def test_legacy_db_stamps_without_touching_data(isolated_db):
     conn = sqlite3.connect(db_path)
     conn.execute("CREATE TABLE projects (id INTEGER PRIMARY KEY, title TEXT)")
     conn.execute("INSERT INTO projects (title) VALUES ('用户的真实作品')")
-    # drama_episodes 按老库形态建(没有 film_prompt 列),0002 要给它补列
+    # 基线之后每个迁移要改的表,都得按真实老库形态(缺新列)在这里建出来:
+    # 存量库升级 = stamp + 逐个应用迁移,迁移不许假设表不存在——新迁移动了
+    # 新表,就回来补一张最小同构表,让这条纪律一直被钉住。
     conn.execute("CREATE TABLE drama_episodes (id INTEGER PRIMARY KEY, title TEXT)")
     conn.execute("INSERT INTO drama_episodes (title) VALUES ('第一集')")
+    conn.execute("CREATE TABLE mood_clips (id INTEGER PRIMARY KEY)")
+    conn.execute("CREATE TABLE promo_plans (id INTEGER PRIMARY KEY)")
     conn.commit()
     conn.close()
 
@@ -117,9 +121,10 @@ def test_legacy_db_stamps_without_touching_data(isolated_db):
     # stamp+upgrade 不许重建表、不许丢数据
     assert conn.execute("SELECT title FROM projects").fetchall() == [("用户的真实作品",)]
     assert conn.execute("SELECT title FROM drama_episodes").fetchall() == [("第一集",)]
-    # 新迁移把缺的列补上了(NOT NULL 带 server_default,老行落默认值)
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(drama_episodes)").fetchall()}
-    assert "film_prompt" in cols
+    # 各迁移把缺的列补上了(NOT NULL 带 server_default,老行落默认值)
+    for table in ("drama_episodes", "mood_clips", "promo_plans"):
+        cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        assert "film_prompt" in cols, table
     assert conn.execute(
         "SELECT film_prompt FROM drama_episodes"
     ).fetchall() == [("",)]

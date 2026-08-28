@@ -9,6 +9,7 @@ from .brief import PromoBriefError, distill_brief
 from .chat import PromoChatError, chat_stream
 from .chunks import PromoChunkError, build_chunks
 from .exporter import export_csv, export_json, export_markdown, export_srt
+from .film_prompt import PromoFilmPromptError, build_promo_film_prompt
 from .pack import PromoPackError, build_pack
 from .prompt_render import PromoPromptError, render_shot_prompts
 from .script import PromoScriptError, write_script
@@ -19,6 +20,7 @@ __all__ = [
     "PromoBriefError",
     "PromoChatError",
     "PromoChunkError",
+    "PromoFilmPromptError",
     "PromoPackError",
     "PromoPromptError",
     "PromoScriptError",
@@ -32,6 +34,7 @@ __all__ = [
     "render_shot_prompts",
     "build_pack",
     "build_chunks",
+    "build_promo_film_prompt",
     "export_markdown",
     "export_csv",
     "export_json",

@@ -18,23 +18,13 @@ from app.db.models import (
     DramaStyleCard,
     Project,
 )
+from app.engines.media.text import speaker_of, strip_fences
 from app.llm.router import Task, get_adapter_for
 from app.prompts.drama import FILM_PROMPT_PROMPT
 
 
 class FilmPromptError(ValueError):
     """整片提示词生成的业务性错误(信息直接上屏)。"""
-
-
-def _speaker_of(dialogue: str, lines: list) -> str:
-    """台词原文 → 说话人(按文本精确对齐剧本 lines;对不上就空着不猜)。"""
-    key = (dialogue or "").strip()
-    if not key:
-        return ""
-    for line in lines or []:
-        if isinstance(line, dict) and str(line.get("text") or "").strip() == key:
-            return str(line.get("speaker") or "").strip()
-    return ""
 
 
 def _characters_block(db: Session, project_id: int, shots: list[DramaShot]) -> str:
@@ -74,7 +64,7 @@ def _shots_block(episode: DramaEpisode, shots: list[DramaShot]) -> str:
     rows = []
     for s in shots:
         dialogue = (s.dialogue or "").strip()
-        speaker = _speaker_of(dialogue, lines)
+        speaker = speaker_of(dialogue, lines)
         row = (
             f"- 镜头{s.seq}|场景:{s.scene_name or '未标'}|{s.shot_type or '中景'}"
             f"|运镜:{s.camera or '固定'}|{s.duration_s}秒"
@@ -131,7 +121,7 @@ async def build_episode_film_prompt(
         shots_block=_shots_block(episode, shots),
     )
     raw = await adapter.ask(prompt)
-    text = _strip_fences(raw)
+    text = strip_fences(raw)
     if not text:
         raise FilmPromptError("模型返回了空内容,请重试一次。")
     episode.film_prompt = text

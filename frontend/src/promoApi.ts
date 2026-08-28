@@ -185,6 +185,14 @@ export const promoApi = {
     req<{ plan: PromoPlan }>("PATCH", `/api/promos/${id}`, body),
   remove: (id: number) => req<{ ok: boolean }>("DELETE", `/api/promos/${id}`),
 
+  // 整片提示词(端到端音频原生视频模型用):生成 / 读取 / 整段保存(手改或粘贴自己的版本)
+  buildFilmPrompt: (id: number) =>
+    req<{ job_id: string }>("POST", `/api/promos/${id}/film-prompt`, undefined, LLM_TIMEOUT),
+  getFilmPrompt: (id: number) =>
+    req<{ film_prompt: string }>("GET", `/api/promos/${id}/film-prompt`),
+  saveFilmPrompt: (id: number, film_prompt: string) =>
+    req<{ film_prompt: string }>("PUT", `/api/promos/${id}/film-prompt`, { film_prompt }),
+
   chat: (id: number, messages: ChatTurn[], onToken: (t: string) => void) =>
     chatStream(`/api/promos/${id}/chat`, { messages }, onToken),
 

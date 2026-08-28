@@ -9,10 +9,13 @@ from .common import (
     clip_dict,
 )
 from .exporter import export_json, export_markdown, export_srt
+from .film_prompt import ClipFilmPromptError, build_clip_film_prompt
 
 __all__ = [
     "ClipBatchError",
+    "ClipFilmPromptError",
     "generate_batch",
+    "build_clip_film_prompt",
     "reexpand_batch",
     "pick_clip",
     "CLIP_THEMES",

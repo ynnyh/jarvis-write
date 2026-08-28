@@ -32,6 +32,7 @@ import EmptyState from "../../ui/EmptyState";
 import Banner from "../../ui/Banner";
 import StepBar, { Step } from "../../ui/StepBar";
 import { CopyBtn, selectAll } from "../../ui/copy";
+import { FilmPromptCard } from "../../ui/FilmPromptCard";
 import { confirmDialog } from "../../ui/ConfirmDialog";
 import {
   checkImageAspect,
@@ -1432,79 +1433,18 @@ function EpisodeDetail({ pid, eid, hasStyle, ratio, renderMode, onEpisodesChange
 /** 整片提示词(端到端音频原生视频模型用):Sora/Veo/可灵这类「一条提示词出一整片」。
  *
  *  与三轨提示词的分工:那份逐格出图逐格出片,人再拼;这份把分镜+角色卡+画风组装成
- *  一整段带时间码镜头表的成片提示词,贴进端到端模型一次出整集。文本框可手改、
- *  可整段粘贴自己写的版本(保存即替换),生成则整体覆盖。
+ *  一整段带时间码镜头表的成片提示词,贴进端到端模型一次出整集。UI 与生成/保存/复制
+ *  逻辑在各工坊完全一致,收敛在共享的 FilmPromptCard,这里只接本工坊的数据源。
  */
 function FilmPromptSection({ pid, eid }: { pid: number; eid: number }) {
-  const { run } = useJob();
-  const [text, setText] = useState("");
-  const [dirty, setDirty] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-
-  useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    dramaApi.getFilmPrompt(pid, eid)
-      .then((r) => { if (alive) { setText(r.film_prompt); setDirty(false); } })
-      .catch(() => { /* 读取失败按空稿处理,不影响页面 */ })
-      .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
-  }, [pid, eid]);
-
-  async function generate() {
-    setBusy(true); setErr("");
-    try {
-      await run(() => dramaApi.buildFilmPrompt(pid, eid), { kind: `drama-film-prompt-${eid}` });
-      const r = await dramaApi.getFilmPrompt(pid, eid);
-      setText(r.film_prompt);
-      setDirty(false);
-      toast.ok("整片提示词已生成", "文本框可直接改;一键复制贴去 Sora/Veo/可灵一次出一整片");
-    } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
-  }
-
-  async function save() {
-    try {
-      const r = await dramaApi.saveFilmPrompt(pid, eid, text);
-      setText(r.film_prompt);
-      setDirty(false);
-      toast.ok("整片提示词已保存");
-    } catch (e) { toast.err("保存失败", errMsg(e)); }
-  }
-
   return (
-    <div className="card">
-      <div className="card-head mb-2">
-        <b>整片提示词(端到端模型)</b>
-        <span className="badge">Sora / Veo / 可灵</span>
-        <span className="grow" />
-        {text && !loading && (
-          <CopyBtn text={text} label="一键复制" title="整段复制,贴进端到端视频模型直接生成" />
-        )}
-        <button className="btn-sm" disabled={!dirty || busy} onClick={() => void save()}>
-          {dirty ? "保存修改" : "已保存"}
-        </button>
-        <button className="primary" disabled={busy || loading}
-          title={text ? "按这集最新的分镜/角色卡/画风重新组装(覆盖现有内容)" : "按这集分镜+角色卡+画风组装"}
-          onClick={() => void generate()}>
-          {busy ? "生成中…" : text ? "重新生成" : "AI 生成整片提示词"}
-        </button>
-      </div>
-      <p className="hint">
-        把每个镜头怎么拍、人物长什么样、环境什么氛围综合成一条完整提示词,贴出去一次生成整集;
-        也可以把自己写好的版本整段粘贴进来保存。改了剧本/分镜后点「重新生成」即可同步。
-      </p>
-      {err && <div className="msg-err">{err}</div>}
-      <textarea
-        rows={Math.min(16, Math.max(6, text.split("\n").length + 1))}
-        value={text}
-        placeholder={loading ? "加载中…"
-          : "还没有整片提示词:点「AI 生成」按这集分镜组装,或把自己写的整段粘贴进来。"}
-        disabled={loading}
-        onChange={(e) => { setText(e.target.value); setDirty(true); }}
-      />
-    </div>
+    <FilmPromptCard
+      load={() => dramaApi.getFilmPrompt(pid, eid).then((r) => r.film_prompt)}
+      save={(t) => dramaApi.saveFilmPrompt(pid, eid, t).then((r) => r.film_prompt)}
+      generate={() => dramaApi.buildFilmPrompt(pid, eid)}
+      jobKind={`drama-film-prompt-${eid}`}
+      readyHint="先拆分镜,才有原料组装整片提示词"
+    />
   );
 }
 
