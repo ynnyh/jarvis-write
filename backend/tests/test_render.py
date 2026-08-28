@@ -997,7 +997,11 @@ def test_build_srt_and_command():
 
 
 def test_synth_api_flow(client: TestClient):
-    """API 链路:lite 拒 / 无片段拒 / 正常合成(fake ffmpeg)+ 旧片清理 + adopt 400。"""
+    """API 链路:lite 拒 / 无 ffmpeg 拒 / 无片段拒 / 正常合成(fake ffmpeg)+ 旧片清理 + adopt 400。
+
+    ffmpeg 门槛全程打桩:本机装没装、CI runner 有没有都不影响结果,
+    「有/没有」两条分支各自显式断言,谁的环境都不许漂。
+    """
     headers, pid, eid, sid1, sid2, sid3 = _make_plan_db(client, "synth_api")
 
     # 轻量档 → 400
@@ -1007,10 +1011,17 @@ def test_synth_api_flow(client: TestClient):
     assert r.status_code == 400 and "完整档" in r.json()["detail"]
     client.patch(f"/api/projects/{pid}", headers=headers, json={"render_mode": "full"})
 
-    # 三格都没有草片/静帧 → 400
-    r = client.post(f"/api/projects/{pid}/drama/episodes/{eid}/synth",
-                    headers=headers, json={"burn_subtitles": True})
-    assert r.status_code == 400
+    # 没有 ffmpeg → 400(与档位是两道独立的闸)
+    with patch("app.engines.render.ffmpeg.available", return_value=False):
+        r = client.post(f"/api/projects/{pid}/drama/episodes/{eid}/synth",
+                        headers=headers, json={"burn_subtitles": True})
+        assert r.status_code == 400 and "ffmpeg" in r.json()["detail"]
+
+    # ffmpeg 有了,但三格都没有草片/静帧 → 400
+    with patch("app.engines.render.ffmpeg.available", return_value=True):
+        r = client.post(f"/api/projects/{pid}/drama/episodes/{eid}/synth",
+                        headers=headers, json={"burn_subtitles": True})
+        assert r.status_code == 400
 
     # 给第 1 格出片(fake 引擎)+ 落一个旧成片文件(验证清理)
     fake = _FakeRender()
@@ -1027,7 +1038,8 @@ def test_synth_api_flow(client: TestClient):
         assert burn_subtitles is True
         return out_path
 
-    with patch("app.engines.render.synthesis.run_synthesis", fake_run_synthesis):
+    with patch("app.engines.render.synthesis.run_synthesis", fake_run_synthesis), \
+         patch("app.engines.render.ffmpeg.available", return_value=True):
         r = client.post(f"/api/projects/{pid}/drama/episodes/{eid}/synth",
                         headers=headers, json={"burn_subtitles": True})
         assert r.status_code == 200, r.text
