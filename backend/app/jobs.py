@@ -168,6 +168,11 @@ def normalize_job_error(exc: Exception) -> str:
     429 限流),其余原样返回(后端业务错误本身已是中文)。
     """
     msg = str(exc)
+    # 出片链路的错误文案是面向用户的最终版(含「出片平台…(HTTP 401/402)」形态),
+    # 若掉进下面的 HTTP 状态分支会被翻译成「模型 API Key 无效」,指错地方——原样放行。
+    from app.engines.render.client import RenderError
+    if isinstance(exc, RenderError):
+        return msg
     if "HTTP 401" in msg:
         return "模型 API Key 无效或已欠费(HTTP 401),请到「设置」检查 key 与账户余额"
     if "HTTP 402" in msg:

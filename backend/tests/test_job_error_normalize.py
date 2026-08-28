@@ -20,3 +20,14 @@ def test_unknown_error_passthrough():
     # 已是中文的业务错误/未知异常:原样返回,不瞎猜
     assert normalize_job_error(ValueError("第 3 章没有大纲")) == "第 3 章没有大纲"
     assert normalize_job_error(RuntimeError("some weird error")) == "some weird error"
+
+
+def test_render_error_not_hijacked():
+    """出片链路的错误不许被翻译成『模型 API Key』——文案里同样含 HTTP 401/402,
+    但说的是出片平台的令牌与余额,劫持后用户会去改错地方的 key。"""
+    from app.engines.render.client import RenderError
+
+    msg = "出片平台拒绝了查询请求(HTTP 402):令牌无效或余额不足,请到「设置 → 出片引擎」检查令牌与账户余额。"
+    assert normalize_job_error(RenderError(msg)) == msg
+    msg2 = "提交出片任务失败(HTTP 401):token invalid"
+    assert normalize_job_error(RenderError(msg2)) == msg2
