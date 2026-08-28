@@ -442,3 +442,287 @@ def test_clips_payload_builder():
     assert payload["duration_s"] == 15  # 38s 夹到 15
     assert "她站在天台" in payload["prompt"] and "风吹头发" in payload["prompt"]
     assert "噪点" in payload["prompt"] and payload["resolution"] == "768p竖"
+
+
+# =============== 对白链:情绪映射 / wav 解析 / 音色上传 ===============
+
+
+def test_emotion_weights():
+    from app.engines.render.emotion import emotion_weights, normalize_emotion
+
+    # 空与脏值 → 平静兜底
+    calm = emotion_weights("")
+    assert calm["emo_calm"] == 0.6 and calm["emo_random"] is False
+    assert emotion_weights("不存在的情绪")["emo_calm"] == 0.6
+    # 主情绪 0.8,平静垫底
+    happy = emotion_weights("happy")
+    assert happy["emo_happy"] == 0.8 and happy["emo_calm"] == 0.2
+    assert happy["emo_control_method"]
+    assert normalize_emotion("HAPPY") == "happy"
+
+
+def test_wav_duration_parse():
+    import struct
+
+    from app.engines.render.service import wav_duration_s
+
+    def wav(rate: int, seconds: float) -> bytes:
+        # 单声道 8bit:byte_rate = 采样率 × 1 × 8/8 = 采样率,时长 = data 大小 / 采样率
+        data = b"\x00" * int(rate * seconds)
+        fmt = struct.pack("<HHIIHH", 1, 1, rate, rate, 1, 8)
+        return (b"RIFF" + struct.pack("<I", 4 + 8 + len(fmt) + 8 + len(data)) + b"WAVE"
+                + b"fmt " + struct.pack("<I", len(fmt)) + fmt
+                + b"data" + struct.pack("<I", len(data)) + data)
+
+    assert wav_duration_s(wav(8000, 3)) == 3.0
+    assert abs(wav_duration_s(wav(44100, 2.5)) - 2.5) < 0.01
+    assert wav_duration_s(b"<html>not wav</html>") == 0.0
+    assert wav_duration_s(b"") == 0.0
+
+
+def test_audio_sniff_and_voice_upload(client: TestClient):
+    import pytest as _pytest
+
+    headers = _auth(client, "render_voice_a")
+    pid = client.post("/api/projects", headers=headers, json={"title": "音色书"}).json()["id"]
+    from app.db.models import DramaCharacterCard
+    from app.db.session import SessionLocal
+
+    with SessionLocal() as db:
+        card = DramaCharacterCard(project_id=pid, name="林小满")
+        db.add(card)
+        db.flush()
+        cid = card.id
+        db.commit()
+
+    # 非音频内容必须拒
+    r = client.post(f"/api/projects/{pid}/drama/characters/{cid}/voice",
+                    headers=headers, files={"file": ("a.mp3", b"<html>no</html>", "audio/mpeg")})
+    assert r.status_code == 400
+    # ID3 头的 mp3 → 上传成功,卡上带 voice_ref
+    mp3 = b"ID3\x04\x00" + b"\x00" * 256
+    r = client.post(f"/api/projects/{pid}/drama/characters/{cid}/voice",
+                    headers=headers, files={"file": ("a.mp3", mp3, "audio/mpeg")})
+    assert r.status_code == 200, r.text
+    assert r.json()["card"]["voice_ref"].startswith("drama/")
+    rel = r.json()["card"]["voice_ref"]
+    # 试听走鉴权端点;再传 wav 覆盖(固定名重传即换)
+    r = client.get(f"/api/projects/{pid}/drama/characters/{cid}/voice", headers=headers)
+    assert r.status_code == 200 and r.headers["content-type"] == "audio/mpeg"
+    wav = b"RIFF" + b"\x00" * 4 + b"WAVE" + b"fmt " + b"\x00" * 20
+    r = client.post(f"/api/projects/{pid}/drama/characters/{cid}/voice",
+                    headers=headers, files={"file": ("b.wav", wav, "audio/wav")})
+    assert r.json()["card"]["voice_ref"].endswith(".wav")
+    # 删除:文件与字段一起清
+    r = client.delete(f"/api/projects/{pid}/drama/characters/{cid}/voice", headers=headers)
+    assert r.status_code == 200 and r.json()["card"]["voice_ref"] == ""
+    assert not storage.resolve(rel).exists()  # 文件连字段一起清了
+    # B 看不到 A 的音色端点(归属隔离)
+    hb = _auth(client, "render_voice_b")
+    assert client.get(f"/api/projects/{pid}/drama/characters/{cid}/voice", headers=hb).status_code == 404
+
+
+# =============== 对白链:路由分支与全流程 ===============
+
+
+def _seed_talk_scene(client: TestClient, username: str, *, with_voice: bool, with_still: bool = True):
+    """种一套对白出片的料:书(完整档)+ 集带剧本 lines + 有台词的分镜格(+角色音色)。
+
+    返回 (headers, pid, shot_id, card_id)。
+    """
+    from app.db.models import DramaCharacterCard, DramaEpisode, DramaShot
+    from app.db.session import SessionLocal
+
+    headers = _auth(client, username)
+    pid = client.post("/api/projects", headers=headers, json={"title": "对白书"}).json()["id"]
+    r = client.patch(f"/api/projects/{pid}", headers=headers, json={"render_mode": "full"})
+    assert r.status_code == 200, r.text
+    with SessionLocal() as db:
+        card = DramaCharacterCard(project_id=pid, name="林小满")
+        db.add(card)
+        db.flush()
+        cid = card.id
+        db.commit()
+        ep = DramaEpisode(
+            project_id=pid, ep_index=1, title="第一集",
+            script={"lines": [{"speaker": "林小满", "text": "你到底想说什么"}]},
+        )
+        db.add(ep)
+        db.flush()
+        shot = DramaShot(
+            episode_id=ep.id, seq=1, camera="推", duration_s=3,
+            dialogue="你到底想说什么", emotion="happy",
+        )
+        db.add(shot)
+        db.flush()
+        if with_still:
+            # 挂静帧记录 + 真实文件(resolve 白名单校验与 is_file 都要过)
+            from app import storage as _storage
+
+            rel = f"drama/{pid}/shot{shot.id}-1.png"
+            d = _storage.upload_root() / "drama" / str(pid)
+            d.mkdir(parents=True, exist_ok=True)
+            (d / f"shot{shot.id}-1.png").write_bytes(bytes.fromhex("89504e470d0a1a0a") + bytes(32))
+            shot.assets = [{"kind": "upload", "src": rel, "note": ""}]
+        db.commit()
+    if with_voice:
+        mp3 = b"ID3\x04\x00" + b"\x00" * 128
+        r = client.post(f"/api/projects/{pid}/drama/characters/{cid}/voice",
+                        headers=headers, files={"file": ("v.mp3", mp3, "audio/mpeg")})
+        assert r.status_code == 200, r.text
+    _config_token(client, headers)
+    shot_id = _shot_id_of(client, headers, pid)
+    return headers, pid, shot_id, cid
+
+
+def _shot_id_of(client: TestClient, headers: dict, pid: int) -> int:
+    eps = client.get(f"/api/projects/{pid}/drama/episodes", headers=headers).json()["episodes"]
+    detail = client.get(f"/api/projects/{pid}/drama/episodes/{eps[0]['id']}", headers=headers).json()
+    return detail["shots"][0]["id"]
+
+
+def test_talk_routing_branches(client: TestClient):
+    """三分支:全料→talk;缺音色→i2v+note;缺静帧→t2v+note;轻量档→普通出片。"""
+    # ① 全料(音色+静帧+完整档)→ talk
+    headers, pid, sid, _ = _seed_talk_scene(client, "talk_full", with_voice=True)
+    fake = _FakeRender()
+    with patch("app.api.render.start_render", fake):
+        r = client.post(f"/api/projects/{pid}/drama/shots/{sid}/render", headers=headers)
+        assert r.status_code == 200, r.text
+        assert _wait_job(client, headers, r.json()["job_id"])["status"] == "done"
+    assert fake.specs[0]["kind"] == "talk"
+    assert fake.specs[0]["talk"]["text"] == "你到底想说什么"
+    assert fake.specs[0]["talk"]["emotion"] == "happy"
+    # talk 走对口型工作流(配置里没填时回落默认)
+    assert fake.specs[0]["workflow_id"] == "minimax_h3_image_audio_to_video"
+
+    # ② 缺音色 → 回退 i2v,params.note 说明原因
+    headers2, pid2, sid2, _ = _seed_talk_scene(client, "talk_novoice", with_voice=False)
+    fake2 = _FakeRender()
+    with patch("app.api.render.start_render", fake2):
+        r = client.post(f"/api/projects/{pid2}/drama/shots/{sid2}/render", headers=headers2)
+        assert _wait_job(client, headers2, r.json()["job_id"])["status"] == "done"
+    assert fake2.specs[0]["kind"] == "i2v"
+    assert "音色" in fake2.specs[0]["params"].get("note", "")
+
+    # ③ 缺静帧 → 对白链开不了工,回退 t2v + note
+    headers3, pid3, sid3, _ = _seed_talk_scene(client, "talk_nostill", with_voice=True, with_still=False)
+    fake3 = _FakeRender()
+    with patch("app.api.render.start_render", fake3):
+        r = client.post(f"/api/projects/{pid3}/drama/shots/{sid3}/render", headers=headers3)
+        assert _wait_job(client, headers3, r.json()["job_id"])["status"] == "done"
+    assert fake3.specs[0]["kind"] == "t2v"
+    assert "静帧" in fake3.specs[0]["params"].get("note", "")
+
+    # ④ 轻量档:有台词有音色也走普通 i2v,无 note
+    headers4, pid4, sid4, _ = _seed_talk_scene(client, "talk_lite", with_voice=True)
+    client.patch(f"/api/projects/{pid4}", headers=headers4, json={"render_mode": "lite"})
+    fake4 = _FakeRender()
+    with patch("app.api.render.start_render", fake4):
+        r = client.post(f"/api/projects/{pid4}/drama/shots/{sid4}/render", headers=headers4)
+        assert _wait_job(client, headers4, r.json()["job_id"])["status"] == "done"
+    assert fake4.specs[0]["kind"] == "i2v"
+    assert "note" not in fake4.specs[0]["params"]
+
+
+def test_talk_full_pipeline_with_tts_cache(client: TestClient):
+    """真 service 链路(打桩平台 client):TTS 未命中→合成入库;重 roll 命中缓存不再付费。
+
+    submit 按工作流分账:indextts2 一次 + 对口型一次;第二轮只有对口型一次。
+    """
+    from app.db.models import RenderTask, TtsTrack
+    from app.db.session import SessionLocal
+
+    headers, pid, sid, _ = _seed_talk_scene(client, "talk_pipeline", with_voice=True)
+    _wav_bytes = _make_wav(rate=8000, seconds=3)
+
+    calls: list[str] = []
+    state = {"kind": "wav"}  # fetch_bytes 按它返回对应假文件
+
+    async def fake_submit(base_url, token, workflow_id, params):
+        calls.append(workflow_id)
+        state["kind"] = "wav" if "indextts2" in workflow_id else "mp4"
+        # TTS 参数断言:台词/音色/情感权重都在;对口型参数断言:首帧/音频/时长
+        if "indextts2" in workflow_id:
+            assert params["prompt_text"] == "你到底想说什么"
+            assert params["prompt_simple"].startswith("data:audio/")
+            assert params["emo_happy"] == 0.8
+        else:
+            assert params["ref_image_0"].startswith("data:image/")
+            assert params["ref_audio_0"].startswith("data:audio/")
+        return f"pt-{len(calls)}"
+
+    async def fake_poll(base_url, token, task_id):
+        return "success", ["https://fake/result"]
+
+    async def fake_fetch(url, timeout_s=120):
+        return _make_wav(8000, 3) if state["kind"] == "wav" else _MINI_MP4
+
+    with patch("app.engines.render.service.submit", fake_submit), \
+         patch("app.engines.render.service.poll", fake_poll), \
+         patch("app.engines.render.service.fetch_bytes", fake_fetch):
+        r = client.post(f"/api/projects/{pid}/drama/shots/{sid}/render", headers=headers)
+        assert _wait_job(client, headers, r.json()["job_id"])["status"] == "done", r.text
+        task_id_1 = r.json()["task_id"]
+        # 重 roll:TTS 走缓存,只调对口型一次
+        r2 = client.post(f"/api/projects/{pid}/drama/shots/{sid}/render", headers=headers)
+        job2 = _wait_job(client, headers, r2.json()["job_id"])
+        assert job2["status"] == "done", job2
+
+    # 调用账本:第一轮 TTS+对口型 2 次,第二轮缓存命中只对口型 1 次
+    assert calls == ["indextts2-v1", "minimax_h3_image_audio_to_video",
+                     "minimax_h3_image_audio_to_video"]
+    with SessionLocal() as db:
+        t1 = db.get(RenderTask, task_id_1)
+        assert t1.kind == "talk" and t1.status == "success"
+        assert t1.params["duration_s"] == 3 and t1.params["tts_cached"] is False
+        rows = db.query(TtsTrack).all()
+        assert len(rows) == 1 and rows[0].duration_s == 3.0
+        # 两版草片都回写成功,指针指向最新一版
+        from app.db.models import DramaShot
+
+        assert db.get(DramaShot, sid).clip_ref
+
+
+def _make_wav(rate: int, seconds: float) -> bytes:
+    import struct
+
+    data = b"\x00" * int(rate * seconds)
+    fmt = struct.pack("<HHIIHH", 1, 1, rate, rate, 1, 8)
+    return (b"RIFF" + struct.pack("<I", 4 + 8 + len(fmt) + 8 + len(data)) + b"WAVE"
+            + b"fmt " + struct.pack("<I", len(fmt)) + fmt
+            + b"data" + struct.pack("<I", len(data)) + data)
+
+
+def test_talk_long_audio_truncated_note(client: TestClient):
+    """配音超过 15s:不失败,照常出片,但 task.params.note 如实标注已截断。"""
+    from app.db.session import SessionLocal
+
+    headers, pid, sid, _ = _seed_talk_scene(client, "talk_long", with_voice=True)
+
+    async def fake_submit(base_url, token, workflow_id, params):
+        return f"pt-{workflow_id}"
+
+    async def fake_poll(base_url, token, task_id):
+        return "success", ["https://fake/result"]
+
+    state = {"kind": "wav"}
+
+    async def fake_fetch(url, timeout_s=120):
+        w = _make_wav(8000, 20) if state["kind"] == "wav" else _MINI_MP4
+        state["kind"] = "mp4"
+        return w
+
+    with patch("app.engines.render.service.submit", fake_submit), \
+         patch("app.engines.render.service.poll", fake_poll), \
+         patch("app.engines.render.service.fetch_bytes", fake_fetch):
+        r = client.post(f"/api/projects/{pid}/drama/shots/{sid}/render", headers=headers)
+        job = _wait_job(client, headers, r.json()["job_id"])
+        assert job["status"] == "done", job
+
+    with SessionLocal() as db:
+        from app.db.models import RenderTask as RT
+
+        row = db.query(RT).filter(RT.shot_id == sid).first()
+        assert row.params["duration_s"] == 15  # 20s 夹到上限
+        assert "截断" in row.params.get("note", "")

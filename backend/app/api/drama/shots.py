@@ -50,6 +50,10 @@ async def patch_shot(project_id: int, shot_id: int, body: ShotIn, db: Session = 
         shot.camera = clip(body.camera, 20)
     if body.dialogue is not None:
         shot.dialogue = body.dialogue
+    if body.emotion is not None:
+        from app.engines.render.emotion import normalize_emotion
+
+        shot.emotion = normalize_emotion(body.emotion)  # 脏值回落平静,不 400
     if body.duration_s is not None:
         shot.duration_s = body.duration_s
     for field in ("prompt_cn", "prompt_en", "negative", "motion_cn", "motion_en"):

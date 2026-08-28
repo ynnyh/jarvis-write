@@ -25,6 +25,9 @@ DEFAULT_RENDER_BASE_URL = "https://www.autodl.art"
 # 轻量档两个预置工作流:有静帧走首尾帧,无静帧走纯文生
 DEFAULT_WORKFLOW_I2V = "minimax_h3_lightx2v"
 DEFAULT_WORKFLOW_T2V = "minimax_h3_lightx2v_no_pic"
+# 完整档对白链:先 indextts2 配音,再对口型出"开口说话"的视频
+DEFAULT_WORKFLOW_TTS = "indextts2-v1"
+DEFAULT_WORKFLOW_TALK = "minimax_h3_image_audio_to_video"
 
 
 class RenderConfig(Base, TimestampMixin):
@@ -44,6 +47,9 @@ class RenderConfig(Base, TimestampMixin):
     resolution: Mapped[str] = mapped_column(String(10), default="768p")
     workflow_i2v: Mapped[str] = mapped_column(String(120), default=DEFAULT_WORKFLOW_I2V)
     workflow_t2v: Mapped[str] = mapped_column(String(120), default=DEFAULT_WORKFLOW_T2V)
+    # 完整档对白链:先配音(workflow_tts)再对口型(workflow_talk)
+    workflow_tts: Mapped[str] = mapped_column(String(120), default=DEFAULT_WORKFLOW_TTS)
+    workflow_talk: Mapped[str] = mapped_column(String(120), default=DEFAULT_WORKFLOW_TALK)
 
 
 class RenderTask(Base, TimestampMixin):
@@ -75,3 +81,29 @@ class RenderTask(Base, TimestampMixin):
     # uploads/render/ 下的相对文件名(渲染产物;URL 短效,成功即下载落盘)
     result_path: Mapped[str] = mapped_column(String(300), default="")
     error: Mapped[str] = mapped_column(Text, default="")
+
+
+class TtsTrack(Base, TimestampMixin):
+    """一段已合成的配音(indextts2 结果缓存),cache_key 命中即免费复用。
+
+    为什么缓存:重 roll 视频不该重付配音钱(¥0.02/次是小钱,但更要紧的是
+    同一台词同一音色每次合成时长会差零点几秒,画面节奏就跟着漂)。key =
+    sha256(workflow|voice_src|emotion|text) 前 16 位;文件落
+    uploads/render/tts/<key>.wav。删项目不删这里——音色与台词是用户级资产,
+    换个项目念同一句照样命中。
+    """
+
+    __tablename__ = "tts_tracks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    cache_key: Mapped[str] = mapped_column(String(16), unique=True)
+    voice_src: Mapped[str] = mapped_column(String(300), default="")
+    text: Mapped[str] = mapped_column(Text, default="")
+    emotion: Mapped[str] = mapped_column(String(20), default="")
+    workflow_id: Mapped[str] = mapped_column(String(120), default="")
+    # 真实音频秒数(wav 头解析;对白格的 audio_duration 以它为准,TTS-first)
+    duration_s: Mapped[float] = mapped_column(default=0.0)
+    path: Mapped[str] = mapped_column(String(300), default="")

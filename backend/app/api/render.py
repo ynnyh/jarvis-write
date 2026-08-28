@@ -32,14 +32,21 @@ from app.api.settings import _mask
 from app.auth import get_current_user
 from app.crypto import decrypt, encrypt
 from app.db.models import (
+    DramaEpisode,
     DramaShot,
     DramaStyleCard,
+    Project,
     RenderConfig,
     RenderTask,
 )
 from app.db.session import get_db
 from app.engines.clips.render_input import chunk_render_payload
-from app.engines.drama.common import shot_asset_list
+from app.engines.drama.common import (
+    character_anchor_maps,
+    match_character,
+    shot_asset_list,
+)
+from app.engines.drama.production import match_speaker
 from app.engines.drama.video import api_render_payload
 from app.engines.render.service import apply_pointer, start_render
 from app.jobs import list_running, spawn_job
@@ -69,6 +76,8 @@ def _config_out(row: RenderConfig | None) -> dict:
         "resolution": row.resolution if row else "768p",
         "workflow_i2v": row.workflow_i2v if row else "",
         "workflow_t2v": row.workflow_t2v if row else "",
+        "workflow_tts": row.workflow_tts if row else "",
+        "workflow_talk": row.workflow_talk if row else "",
         # 前端空态引导用:没填 token 就把出片按钮换成「先去设置」
         "configured": bool(token),
     }
@@ -81,6 +90,8 @@ class RenderConfigIn(BaseModel):
     resolution: str = "768p"
     workflow_i2v: str = ""
     workflow_t2v: str = ""
+    workflow_tts: str = ""
+    workflow_talk: str = ""
 
 
 @router.get("/api/render/config")
@@ -122,6 +133,8 @@ async def save_render_config(
     row.resolution = req.resolution
     row.workflow_i2v = req.workflow_i2v.strip() or row.workflow_i2v
     row.workflow_t2v = req.workflow_t2v.strip() or row.workflow_t2v
+    row.workflow_tts = req.workflow_tts.strip() or row.workflow_tts
+    row.workflow_talk = req.workflow_talk.strip() or row.workflow_talk
     db.commit()
     return _config_out(row)
 
@@ -186,11 +199,37 @@ def _create_task(
     return task
 
 
+def _find_speaker_voice(db: Session, project_id: int, shot: DramaShot) -> tuple[str, str]:
+    """对白格 → (说话人, 音色参考路径)。反推口径与成片包配音稿同一套。
+
+    剧本 lines 反推 speaker(精确→模糊),再按名/别名匹配角色卡取 voice_ref;
+    任何一环断了(无剧本/匹配不到/角色没传音色)都返回空,由调用方回退普通出片。
+    """
+    text = (shot.dialogue or "").strip()
+    if not text:
+        return "", ""
+    ep = db.get(DramaEpisode, shot.episode_id)
+    lines = ((ep.script or {}).get("lines") or []) if ep else []
+    speaker = match_speaker(text, [l for l in lines if isinstance(l, dict)])
+    if not speaker:
+        return "", ""
+    by_name, by_alias = character_anchor_maps(db, project_id)
+    card = match_character(speaker, by_name, by_alias)
+    if card is None:
+        return speaker, ""
+    return speaker, (getattr(card, "voice_ref", "") or "")
+
+
 @router.post("/api/projects/{project_id}/drama/shots/{shot_id}/render")
 async def submit_drama_render(
     project_id: int, shot_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)
 ):
-    """提交一格分镜出片:有静帧走首尾帧(i2v),没静帧走文生视频(t2v)。"""
+    """提交一格分镜出片。路由优先级:
+
+    完整档 + 有台词 + 匹配到说话人音色 + 有静帧 → **talk**(配音对口型);
+    否则有静帧走首尾帧(i2v)、没静帧走文生视频(t2v)。回退原因写进
+    task.params.note,不静默——用户得知道这格为什么没开口说话。
+    """
     shot = _get_shot(db, project_id, shot_id)
     cfg = _require_config(db, user.id)
     kind = "render:drama:shot:" + str(shot_id)
@@ -201,10 +240,49 @@ async def submit_drama_render(
     style = (
         db.query(DramaStyleCard).filter(DramaStyleCard.project_id == project_id).first()
     )
-    has_frame = bool(assets)
-    kind_flow = "i2v" if has_frame else "t2v"
-    payload = api_render_payload(shot, style, quality=cfg.resolution)
-    workflow_id = cfg.workflow_i2v if kind_flow == "i2v" else cfg.workflow_t2v
+    project = db.get(Project, project_id)
+    quality = cfg.resolution
+
+    # ---- 对白链判定(完整档)----
+    talk = None
+    note = ""
+    if (
+        (shot.dialogue or "").strip()
+        and project is not None
+        and project.render_mode == "full"
+    ):
+        speaker, voice_src = _find_speaker_voice(db, project_id, shot)
+        if not assets:
+            note = "完整档:本格还没挂静帧,对白配音对口型缺首帧图——先出图挂静帧再出片。"
+        elif not voice_src:
+            who = f"「{speaker}」" if speaker else "说话角色"
+            note = (
+                f"完整档:{who}还没传音色参考,本格走了普通出片"
+                "(到角色卡传 5-10 秒人声即可配音对口型)。"
+            )
+        else:
+            talk = {
+                "user_id": user.id,
+                "text": shot.dialogue.strip(),
+                "voice_src": voice_src,
+                "emotion": shot.emotion or "",
+                "workflow_tts": cfg.workflow_tts,
+            }
+
+    if talk:
+        kind_flow = "talk"
+        workflow_id = cfg.workflow_talk
+        payload = {
+            "resolution": api_render_payload(shot, style, quality=quality)["resolution"],
+            "text": shot.dialogue.strip()[:400],
+            "emotion": shot.emotion or "",
+        }
+    else:
+        kind_flow = "i2v" if assets else "t2v"
+        workflow_id = cfg.workflow_i2v if kind_flow == "i2v" else cfg.workflow_t2v
+        payload = api_render_payload(shot, style, quality=quality)
+        if note:
+            payload["note"] = note
     task = _create_task(
         db, user.id, line="drama", kind=kind_flow, workflow_id=workflow_id,
         params=payload, project_id=project_id, shot_id=shot_id,
@@ -213,8 +291,10 @@ async def submit_drama_render(
         "task_id": task.id, "user_id": user.id, "line": "drama",
         "shot_id": shot_id, "clip_id": None, "chunk_index": -1,
         "kind": kind_flow, "workflow_id": workflow_id, "params": payload,
+        "talk": talk,
         "first_frame": (
-            {"src": assets[0]["src"], "kind": assets[0]["kind"]} if has_frame else None
+            {"src": assets[0]["src"], "kind": assets[0]["kind"]}
+            if assets else None
         ),
     }
 

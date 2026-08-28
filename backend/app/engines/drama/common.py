@@ -191,6 +191,8 @@ def character_card_dict(card: DramaCharacterCard, style=None) -> dict:
         "ref_prompt_cn": card.ref_prompt_cn or "",
         "ref_prompt_en": card.ref_prompt_en or "",
         "ref_images": ref_image_list(card),
+        # 音色参考音频(完整档对白链:indextts2 克隆原料;空=未传,对白格回退普通出片)
+        "voice_ref": getattr(card, "voice_ref", "") or "",
         "ref_paste": ref_sheet_paste(card, style) if (card.ref_prompt_cn or "") else None,
     }
 
@@ -276,6 +278,8 @@ def shot_dict(shot: DramaShot, paste: dict | None = None, video: dict | None = N
         "shot_type": shot.shot_type,
         "camera": shot.camera,
         "dialogue": shot.dialogue,
+        # 配音情绪(完整档对白链;空=平静,见 engines/render/emotion.py)
+        "emotion": getattr(shot, "emotion", "") or "",
         "duration_s": shot.duration_s,
         "prompt_cn": shot.prompt_cn,
         "prompt_en": shot.prompt_en,

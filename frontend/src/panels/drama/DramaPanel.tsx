@@ -24,6 +24,7 @@ import {
   dramaApi,
 } from "../../dramaApi";
 import { useJob } from "../../ui/useJob";
+import { useProject } from "../../hooks/queries";
 import { toast } from "../../ui/Toaster";
 import { errMsg } from "../../pollJob";
 import EmptyState from "../../ui/EmptyState";
@@ -41,6 +42,18 @@ import {
 import { DramaGuide, DramaProductionGuide } from "./DramaGuide";
 
 interface Props { pid: number }
+
+// 对白出片的配音情绪选项(与后端 engines/render/emotion.py 同一份清单,别各改各的)
+const EMOTION_OPTIONS: { key: string; label: string }[] = [
+  { key: "", label: "平静" },
+  { key: "happy", label: "开心" },
+  { key: "angry", label: "愤怒" },
+  { key: "sad", label: "悲伤" },
+  { key: "afraid", label: "惊恐" },
+  { key: "disgusted", label: "厌恶" },
+  { key: "surprised", label: "惊讶" },
+  { key: "melancholic", label: "忧郁" },
+];
 
 // 记住用户上次选的生图站:换一格/刷新页面不用重选(全项目共用一个偏好)
 const PASTE_PLATFORM_KEY = "jarvis_drama_paste_platform";
@@ -797,6 +810,32 @@ function CharCardRow({ pid, card, onSaved }: {
     } catch (e) { toast.err("删除失败", errMsg(e)); }
   }
 
+  // ===== 音色参考(完整档对白出片)=====
+  const [voiceBusy, setVoiceBusy] = useState(false);
+
+  async function pickVoice(file: File | undefined) {
+    if (!file) return;
+    setVoiceBusy(true);
+    try {
+      const r = await dramaApi.uploadVoice(pid, card.id, file);
+      onSaved(r.card);
+      toast.ok(`${card.name} 的音色参考已上传`, "对白格点「本站直接出片」就会按这个声音配音对口型");
+    } catch (e) { toast.err("音色上传失败", errMsg(e)); } finally { setVoiceBusy(false); }
+  }
+
+  async function removeVoice() {
+    if (!await confirmDialog({
+      title: "删掉这段音色参考?",
+      body: "删后这个角色的对白格出片回退普通出片(不配音)。",
+      confirmText: "删除", danger: true,
+    })) return;
+    setVoiceBusy(true);
+    try {
+      const r = await dramaApi.deleteVoice(pid, card.id);
+      onSaved(r.card);
+    } catch (e) { toast.err("删除失败", errMsg(e)); } finally { setVoiceBusy(false); }
+  }
+
   return (
     <div className="sub-summary">
       <div className="card-head mb-2">
@@ -851,6 +890,26 @@ function CharCardRow({ pid, card, onSaved }: {
         <input value={draft.voice_desc}
           onChange={(e) => { setDraft({ ...draft, voice_desc: e.target.value }); setDirty(true); }} />
       </div>
+      {/* 音色参考(完整档对白出片):indextts2 克隆这段人声,让该角色在分镜里开口说话 */}
+      <div className="media-field">
+        <div className="card-head mb-2">
+          <span className="muted">音色参考(完整档对白出片:按这个声音开口说话)</span>
+          <span className="grow" />
+          <label className="btn-sm" style={{ cursor: "pointer" }}>
+            {draft.voice_ref ? "换一段" : "上传音色"}
+            <input type="file" accept="audio/mpeg,audio/wav,.mp3,.wav" hidden disabled={voiceBusy}
+              onChange={(e) => { void pickVoice(e.target.files?.[0]); e.target.value = ""; }} />
+          </label>
+          {!!draft.voice_ref && (
+            <button className="btn-sm" disabled={voiceBusy} onClick={() => void removeVoice()}>删除</button>
+          )}
+        </div>
+        <VoicePreview pid={pid} cid={card.id} src={draft.voice_ref} />
+        <p className="hint">
+          5-10 秒<b>干净人声</b>(别带背景音乐),MP3/WAV ≤8MB,重传即换。
+          对白格点「本站直接出片」时按它克隆嗓音再对口型;没传的对白格回退普通出片(不说话)。
+        </p>
+      </div>
       <div className="media-field">
         <div className="card-head mb-2">
           <span className="muted">定妆照(锁脸的关键一步)</span>
@@ -898,6 +957,22 @@ function CharCardRow({ pid, card, onSaved }: {
       )}
     </div>
   );
+}
+
+/** 音色参考试听:<audio src> 带不了 Authorization 头,取 blob 转本地 URL(同图片缩略图)。 */
+function VoicePreview({ pid, cid, src }: { pid: number; cid: number; src?: string }) {
+  const [url, setUrl] = useState("");
+  useEffect(() => {
+    if (!src) { setUrl(""); return; }
+    let revoke = "";
+    let alive = true;
+    dramaApi.voiceBlobUrl(pid, cid)
+      .then((u) => { if (alive) { revoke = u; setUrl(u); } else URL.revokeObjectURL(u); })
+      .catch(() => { if (alive) setUrl(""); });
+    return () => { alive = false; if (revoke) URL.revokeObjectURL(revoke); };
+  }, [pid, cid, src]);
+  if (!src || !url) return null;
+  return <audio controls src={url} preload="none" style={{ width: "100%", maxWidth: 320 }} />;
 }
 
 // ================= 集规划 + 集列表 =================
@@ -1522,6 +1597,9 @@ function PromptRow({ pid, shot, ratio, onSaved, onRegenerated }: {
   // 正在预览的版本 id;null = 跟随「当前成片指针」自动选
   const [previewId, setPreviewId] = useState<number | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
+  // 出片模式(项目级;react-query 缓存,几十格共享一份请求)
+  const { data: proj } = useProject(pid);
+  const renderMode = proj?.render_mode === "full" ? "full" : "lite";
 
   useEffect(() => {
     let alive = true;
@@ -1688,10 +1766,26 @@ function PromptRow({ pid, shot, ratio, onSaved, onRegenerated }: {
         <div className="media-field">
           <div className="card-head mb-2">
             <b>本站直接出片</b>
-            <span className="badge">
-              {(draft.assets?.length ?? 0) > 0 ? "首尾帧 · 静帧当首帧" : "文生视频 · 未挂静帧"}
-            </span>
+            {draft.dialogue?.trim() ? (
+              <span className="badge">
+                {renderMode === "full" ? "对白出片 · 配音对口型" : "普通出片 · 完整档可配音"}
+              </span>
+            ) : (
+              <span className="badge">
+                {(draft.assets?.length ?? 0) > 0 ? "首尾帧 · 静帧当首帧" : "文生视频 · 未挂静帧"}
+              </span>
+            )}
             <span className="grow" />
+            {!!draft.dialogue?.trim() && (
+              <label className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                配音情绪
+                <select value={draft.emotion || ""} disabled={assetBusy}
+                  title="对白出片时喂给配音的情感;点一下就存"
+                  onChange={(e) => void tick({ emotion: e.target.value })}>
+                  {EMOTION_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                </select>
+              </label>
+            )}
             <button className="btn-sm primary" disabled={renderBusy}
               onClick={() => void renderNow()}>
               {renderBusy ? "出片中…(约 1-3 分钟)" : renderTasks.some((t) => t.status === "success") ? "重出一版" : "出片"}
@@ -1716,7 +1810,7 @@ function PromptRow({ pid, shot, ratio, onSaved, onRegenerated }: {
                     {renderTasks.map((t) => (
                       <option key={t.id} value={t.id}>
                         #{t.id} · {RENDER_STATUS_CN[t.status] ?? t.status}
-                        {t.status === "success" ? ` · ${t.params.duration_s ?? "?"}s` : ""}
+                        {t.status === "success" ? ` · ${t.kind === "talk" ? "配音对口型" : ""}${t.params.duration_s ?? "?"}s` : ""}
                         {t.result_path && t.result_path === (draft.clip_ref || "") ? " · 当前成片" : ""}
                       </option>
                     ))}
@@ -1729,9 +1823,9 @@ function PromptRow({ pid, shot, ratio, onSaved, onRegenerated }: {
                 </div>
               )}
               <p className="hint">
-                有静帧的格走<b>首尾帧</b>工作流(静帧当首帧,长相稳);没静帧的走<b>文生视频</b>,
-                同一格每版可能换脸——先出图挂静帧再出片更稳。重 roll 免计费压力,不满意就连点几版挑最好的;
-                「视频出好了」的勾照旧由你打。
+                有台词的格在<b>完整档</b>下自动「配音+对口型」(先给说话角色传音色参考,见角色卡);
+                没音色/轻量档走普通出片。有静帧走首尾帧(长相稳),没静帧走文生视频。
+                重 roll 几分钱一次,不满意就连出几版挑;「视频出好了」的勾照旧由你打。
               </p>
             </>
           )}

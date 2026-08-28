@@ -798,6 +798,33 @@ def _add_project_render_mode_column() -> None:
             logger.info("迁移:projects 补 render_mode 列")
 
 
+def _add_drama_dialogue_chain_columns() -> None:
+    """完整档对白链两列(幂等):角色卡音色参考 + 分镜配音情绪。
+
+    voice_ref = indextts2 克隆用的参考音频(每角色一段,重传即换);
+    emotion = 对白格配音情绪(空=平静,手选不进拆分镜 prompt)。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "drama_character_cards" in insp.get_table_names():
+            if not _column_exists("drama_character_cards", "voice_ref"):
+                conn.execute(
+                    text(
+                        "ALTER TABLE drama_character_cards "
+                        "ADD COLUMN voice_ref VARCHAR(300) DEFAULT ''"
+                    )
+                )
+                logger.info("迁移:drama_character_cards 补 voice_ref 列")
+        if "drama_shots" in insp.get_table_names():
+            if not _column_exists("drama_shots", "emotion"):
+                conn.execute(
+                    text(
+                        "ALTER TABLE drama_shots ADD COLUMN emotion VARCHAR(20) DEFAULT ''"
+                    )
+                )
+                logger.info("迁移:drama_shots 补 emotion 列")
+
+
 def run_migrations() -> None:
     """启动时调用。幂等。"""
     _add_user_id_columns()
@@ -832,6 +859,7 @@ def run_migrations() -> None:
     _add_architecture_concept_stale_column()
     _add_project_outline_stale_column()
     _add_project_render_mode_column()
+    _add_drama_dialogue_chain_columns()
     _disable_word_guard_default()
     _migrate_finalized_to_approved()
     # 先补加密老表存量明文 key,再拷到新表,保证 provider_configs 落库必为密文

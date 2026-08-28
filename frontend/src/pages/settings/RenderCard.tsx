@@ -15,6 +15,8 @@ export function RenderCard() {
   const [resolution, setResolution] = useState("768p");
   const [wfI2v, setWfI2v] = useState("");
   const [wfT2v, setWfT2v] = useState("");
+  const [wfTts, setWfTts] = useState("");
+  const [wfTalk, setWfTalk] = useState("");
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
@@ -27,6 +29,8 @@ export function RenderCard() {
         setResolution(c.resolution);
         setWfI2v(c.workflow_i2v);
         setWfT2v(c.workflow_t2v);
+        setWfTts(c.workflow_tts);
+        setWfTalk(c.workflow_talk);
       } catch { /* 未登录/网络差的静默失败:表单留空即可 */ }
       finally { setLoaded(true); }
     })();
@@ -41,6 +45,8 @@ export function RenderCard() {
         resolution,
         workflow_i2v: wfI2v,
         workflow_t2v: wfT2v,
+        workflow_tts: wfTts,
+        workflow_talk: wfTalk,
       });
       setCfg(c);
       setToken("");
@@ -94,9 +100,21 @@ export function RenderCard() {
                 onChange={(e) => setWfT2v(e.target.value)} />
             </label>
           </div>
+          <div className="form-grid mt-2">
+            <label className="field">
+              <span className="fl">配音工作流 ID(完整档对白出片第一步)</span>
+              <input value={wfTts} placeholder="indextts2-v1"
+                onChange={(e) => setWfTts(e.target.value)} />
+            </label>
+            <label className="field">
+              <span className="fl">对口型工作流 ID(完整档对白出片第二步)</span>
+              <input value={wfTalk} placeholder="minimax_h3_image_audio_to_video"
+                onChange={(e) => setWfTalk(e.target.value)} />
+            </label>
+          </div>
           <p className="hint">
-            工作流 ID 在 autodl.art「ComfyUI 工作流」页每个卡片上能看到;留空则用默认的
-            MiniMax H3 首尾帧 / 文生视频。两档之外的工作流(对口型/多图参考)后续版本接入。
+            工作流 ID 在 autodl.art「ComfyUI 工作流」页每个卡片上能看到;留空用默认。
+            对白链两步只在项目「完整档」下生效(项目设置里切换)。
           </p>
           <div className="form-actions mt-2">
             <button className="primary" disabled={saving} onClick={save}>

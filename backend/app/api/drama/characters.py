@@ -254,6 +254,69 @@ async def read_character_reference(
     )
 
 
+# =============== 音色参考音频(完整档对白链:indextts2 克隆原料) ===============
+
+
+@router.post("/characters/{card_id}/voice")
+async def upload_character_voice(
+    project_id: int,
+    card_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """上传该角色的音色参考(5-10 秒干净人声,MP3/WAV,≤8MB;重传即换)。"""
+    get_project_or_404(db, project_id)
+    card = _get_character(db, project_id, card_id)
+    data = await file.read(storage.MAX_AUDIO_BYTES + 1)
+    try:
+        rel = storage.save_character_voice(project_id, card_id, data)
+    except storage.UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    # 换扩展名重传(mp3→wav)时旧文件名不同,先清掉,不然卷里留幽灵音频
+    if card.voice_ref and card.voice_ref != rel:
+        storage.delete(card.voice_ref)
+    card.voice_ref = rel
+    db.commit()
+    return {"card": character_card_dict(card, style_card(db, project_id))}
+
+
+@router.get("/characters/{card_id}/voice")
+async def read_character_voice(
+    project_id: int, card_id: int, db: Session = Depends(get_db)
+):
+    """试听该角色的音色参考(走鉴权,同定妆照的读取思路)。"""
+    get_project_or_404(db, project_id)
+    card = _get_character(db, project_id, card_id)
+    if not card.voice_ref:
+        raise HTTPException(status_code=404, detail="这个角色还没有音色参考。")
+    try:
+        path = storage.resolve(card.voice_ref)
+    except storage.UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="音频文件已丢失,请重新上传。")
+    return Response(
+        content=path.read_bytes(),
+        media_type=storage.content_type_of(card.voice_ref),
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
+
+
+@router.delete("/characters/{card_id}/voice")
+async def delete_character_voice(
+    project_id: int, card_id: int, db: Session = Depends(get_db)
+):
+    """删掉该角色的音色参考(连文件一起删;对白格随即回退普通出片)。"""
+    get_project_or_404(db, project_id)
+    card = _get_character(db, project_id, card_id)
+    if not card.voice_ref:
+        raise HTTPException(status_code=404, detail="这个角色还没有音色参考。")
+    storage.delete(card.voice_ref)
+    card.voice_ref = ""
+    db.commit()
+    return {"card": character_card_dict(card, style_card(db, project_id))}
+
+
 # =============== 声线选型卡(阶段 2) ===============
 
 

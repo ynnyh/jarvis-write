@@ -62,12 +62,15 @@ describe("RenderCard(设置 → 出片引擎)", () => {
       resolution: "768p",
       workflow_i2v: "minimax_h3_lightx2v",
       workflow_t2v: "minimax_h3_lightx2v_no_pic",
+      workflow_tts: "indextts2-v1",
+      workflow_talk: "minimax_h3_image_audio_to_video",
       configured: true,
     });
     vi.doMock("../renderApi", () => ({
       renderApi: { getConfig: vi.fn().mockResolvedValue({
         base_url: "https://www.autodl.art", token_masked: "", has_token: false,
         resolution: "768p", workflow_i2v: "wf-i2v", workflow_t2v: "wf-t2v",
+        workflow_tts: "wf-tts", workflow_talk: "wf-talk",
         configured: false,
       }), saveConfig },
       RENDER_STATUS_CN,
@@ -89,6 +92,8 @@ describe("RenderCard(设置 → 出片引擎)", () => {
       token: "ak-real-token",
       resolution: "768p",
       workflow_i2v: "wf-i2v",
+      workflow_tts: "wf-tts",
+      workflow_talk: "wf-talk",
     });
     // 保存成功后状态徽标变「已配置」,输入框清空、占位变「留空保持不变」
     await waitFor(() => expect(screen.getByText("已配置")).toBeTruthy());

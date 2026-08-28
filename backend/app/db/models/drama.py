@@ -89,6 +89,10 @@ class DramaCharacterCard(Base, TimestampMixin):
     # upload 的 src 存相对路径(相对上传根目录),换卷/搬迁不破;url 是用户贴的外链
     # (平台链接可能失效,所以上传优先)。
     ref_images: Mapped[Any] = mapped_column(JSON, default=list)
+    # 音色参考音频(5-10 秒干净人声,相对路径):完整档对白链的克隆原料——
+    # 对白格出片时 indextts2 按它克隆该角色嗓音再对口型。每角色一段,重传即换;
+    # 空串=未传,对白格回退普通出片(见 api/render.py 的路由)。
+    voice_ref: Mapped[str] = mapped_column(String(300), default="")
     locked: Mapped[bool] = mapped_column(Boolean, default=False)
 
     __table_args__ = (UniqueConstraint("project_id", "name", name="uq_drama_char_name"),)
@@ -173,6 +177,9 @@ class DramaShot(Base, TimestampMixin):
     camera: Mapped[str] = mapped_column(String(20), default="")
     # 该镜头承载的台词或旁白(与剧本 lines 对齐,可空)
     dialogue: Mapped[str] = mapped_column(Text, default="")
+    # 配音情绪(完整档对白链喂 indextts2 的情感权重,engines/render/emotion.py):
+    # 空串=平静。手选不进拆分镜 prompt——情绪是演奏指示,人拍板比模型猜准。
+    emotion: Mapped[str] = mapped_column(String(20), default="")
     duration_s: Mapped[int] = mapped_column(Integer, default=4)
     # ===== 三轨提示词(拿去即梦/可灵/MJ)=====
     prompt_cn: Mapped[str] = mapped_column(Text, default="")

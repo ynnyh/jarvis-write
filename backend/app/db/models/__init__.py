@@ -39,7 +39,7 @@ from app.db.models.drama import (
 from app.db.models.promo import PromoPlan, PromoShot
 from app.db.models.clips import ClipShoot, MoodClip
 from app.db.models.birthday import BirthdayShoot, BirthdayWish
-from app.db.models.render import RenderConfig, RenderTask
+from app.db.models.render import RenderConfig, RenderTask, TtsTrack
 
 __all__ = [
     "User",
@@ -80,4 +80,5 @@ __all__ = [
     "BirthdayShoot",
     "RenderConfig",
     "RenderTask",
+    "TtsTrack",
 ]

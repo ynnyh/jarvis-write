@@ -53,6 +53,10 @@ def _match_speaker(dialogue: str, lines: list[dict]) -> str:
     return ""
 
 
+# 公共别名:对白链(api/render.py)出片前要反推说话人以取角色音色,同一套匹配口径
+match_speaker = _match_speaker
+
+
 def _shots_block(shots: list[DramaShot]) -> str:
     rows = []
     for s in shots:

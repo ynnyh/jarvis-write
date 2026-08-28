@@ -112,6 +112,8 @@ export interface DramaCharacterCard {
   ref_prompt_cn: string;
   ref_prompt_en: string;
   ref_images: DramaRefImage[];
+  // 音色参考音频(完整档对白出片:indextts2 克隆原料;空=未传,对白格回退普通出片)
+  voice_ref?: string;
   ref_paste: PasteSet | null;
   locked: boolean;
 }
@@ -150,6 +152,8 @@ export interface DramaShot {
   shot_type: string;
   camera: string;
   dialogue: string;
+  // 配音情绪(完整档对白出片喂 indextts2;空=平静,选项见后端 engines/render/emotion.py)
+  emotion?: string;
   duration_s: number;
   prompt_cn: string;
   prompt_en: string;
@@ -372,6 +376,15 @@ export const dramaApi = {
       "DELETE", `/api/projects/${pid}/drama/shots/${sid}/asset/${index}`),
   shotAssetBlobUrl: (pid: number, sid: number, index: number) =>
     imageBlobUrl(`/api/projects/${pid}/drama/shots/${sid}/asset/${index}`),
+  // 音色参考(完整档对白出片:克隆角色嗓音的原料;重传即换)
+  uploadVoice: (pid: number, cid: number, file: File) =>
+    postImage<{ card: DramaCharacterCard }>(
+      `/api/projects/${pid}/drama/characters/${cid}/voice`, file),
+  deleteVoice: (pid: number, cid: number) =>
+    req<{ card: DramaCharacterCard }>(
+      "DELETE", `/api/projects/${pid}/drama/characters/${cid}/voice`),
+  voiceBlobUrl: (pid: number, cid: number) =>
+    imageBlobUrl(`/api/projects/${pid}/drama/characters/${cid}/voice`),
   // 成片包(阶段 2):配音稿 + 剪辑清单
   buildPack: (pid: number, eid: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/episodes/${eid}/pack`, undefined, LLM_TIMEOUT),

@@ -153,6 +153,8 @@ class ShotIn(BaseModel):
     shot_type: str | None = None
     camera: str | None = None
     dialogue: str | None = None
+    # 配音情绪(完整档对白链;空=平静,白名单校验在 patch_shot 里做)
+    emotion: str | None = None
     duration_s: int | None = Field(default=None, ge=1, le=10)
     prompt_cn: str | None = None
     prompt_en: str | None = None

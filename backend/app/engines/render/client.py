@@ -49,15 +49,16 @@ def normalize_status(raw: str) -> str:
     return "running"
 
 
-def image_data_uri(data: bytes, ext: str) -> str:
-    """图片字节 → base64 文件参数。
+def file_data_uri(data: bytes, ext: str) -> str:
+    """文件字节 → base64 文件参数(图片与音频通用)。
 
-    用标准 data URI(带 data:image/...;base64 前缀)而不是裸 base64:
+    用标准 data URI(带 data:<mime>;base64 前缀)而不是裸 base64:
     这是 ComfyUI 系上传节点最普遍的接受形态。若平台只认裸 base64,改这一处即可。
     """
-    mime = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}.get(
-        (ext or "").lower(), "image/png"
-    )
+    mime = {
+        "png": "image/png", "jpg": "image/jpeg", "webp": "image/webp",
+        "wav": "audio/wav", "mp3": "audio/mpeg",
+    }.get((ext or "").lower(), "application/octet-stream")
     return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
 
 

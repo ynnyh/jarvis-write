@@ -41,6 +41,8 @@ export interface RenderConfigOut {
   resolution: string;      // 480p | 768p(竖横由各线画幅折算)
   workflow_i2v: string;    // 首尾帧工作流 ID(有静帧走它)
   workflow_t2v: string;    // 文生视频工作流 ID(无静帧走它)
+  workflow_tts: string;    // 配音工作流 ID(完整档对白链第一步)
+  workflow_talk: string;   // 对口型工作流 ID(完整档对白链第二步)
   configured: boolean;     // false = 前端把出片按钮换成「先去设置」空态
 }
 export interface RenderConfigIn {
@@ -49,6 +51,8 @@ export interface RenderConfigIn {
   resolution?: string;
   workflow_i2v?: string;
   workflow_t2v?: string;
+  workflow_tts?: string;
+  workflow_talk?: string;
 }
 
 /** 一次出片尝试(重 roll 攒版本,新版在前)。params.prompt 截到 400 字,只够辨认。 */

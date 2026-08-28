@@ -37,6 +37,7 @@ MAX_PROJECT_UPLOAD_BYTES = 80 * 1024 * 1024  # 单项目上传总量上限 80MB
 MAX_CLIP_UPLOAD_BYTES = 20 * 1024 * 1024     # 短片参考图上限 20MB(短片未必挂项目,单独限量)
 MAX_WISH_UPLOAD_BYTES = 20 * 1024 * 1024     # 祝福片参考图上限 20MB(同理按 wish 号单独限量)
 MAX_RENDER_BYTES = 120 * 1024 * 1024        # 单个渲染草片上限 120MB(15s 768p 通常几 MB,放宽防意外)
+MAX_AUDIO_BYTES = 8 * 1024 * 1024           # 音色参考音频上限 8MB(5-10 秒 mp3/wav 远用不满)
 
 # 文件头 → 扩展名(WebP 还要校验第 8-12 字节的 "WEBP")
 _SIGNATURES: tuple[tuple[bytes, str], ...] = (
@@ -44,19 +45,44 @@ _SIGNATURES: tuple[tuple[bytes, str], ...] = (
     (b"\xff\xd8\xff", "jpg"),
     (b"RIFF", "webp"),
 )
-_CONTENT_TYPES = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp", "mp4": "video/mp4"}
+_CONTENT_TYPES = {
+    "png": "image/png", "jpg": "image/jpeg", "webp": "image/webp",
+    "mp4": "video/mp4", "mp3": "audio/mpeg", "wav": "audio/wav",
+}
 # 两种资产共用一个项目目录,所以分镜静帧的文件名带 shot 前缀:
 # 角色卡 id 与分镜 id 来自不同表,同一个数字完全可能撞上(卡 7 与第 7 格)。
 # 短片出片工作台的参考图进 clips/<clip_id>/(短片不必挂项目,独占目录,按 clip 号隔离);
 # 祝福片同理进 birthday/<wish_id>/(回忆杀段的寿星真实照片是人物一致性锚点,同一定位)。
-# render/r<任务号>.mp4 是出片引擎的渲染产物(引擎自己落的,不走用户上传白名单)。
+# render/r<任务号>.mp4 是出片引擎的渲染产物(引擎自己落的,不走用户上传白名单);
+# render/tts/<哈希>.wav 是配音缓存(同上);drama 下的 voice<卡号> 是角色音色参考音频(固定名,重传即换)。
 _REL_RE = re.compile(
-    r"^(?:drama/\d+/(?:shot)?\d+-\d+|clips/\d+/\d+-\d+|birthday/\d+/\d+-\d+|render/r\d+)\.(png|jpg|webp|mp4)$"
+    r"^(?:drama/\d+/(?:shot)?\d+-\d+\.(?:png|jpg|webp)"
+    r"|drama/\d+/voice\d+\.(?:mp3|wav)"
+    r"|clips/\d+/\d+-\d+\.(?:png|jpg|webp)"
+    r"|birthday/\d+/\d+-\d+\.(?:png|jpg|webp)"
+    r"|render/r\d+\.mp4"
+    r"|render/tts/[0-9a-f]{16}\.wav)$"
 )
 
 
 class UploadError(ValueError):
     """上传相关的业务性错误(信息直接上屏)。"""
+
+
+def sniff_audio_ext(data: bytes) -> str:
+    """按文件头判定音频类型,返回扩展名;不是支持的音频就抛。
+
+    mp3 两种合法开头:ID3 标签(b"ID3")或裸 MPEG 帧同步字(0xFF Ex/Fx);
+    wav 是 RIFF 容器且第 8-12 字节为 "WAVE"(与渲染草片的 ftyp 校验同理,
+    防上游回错误页存成音频)。
+    """
+    if data.startswith(b"ID3"):
+        return "mp3"
+    if len(data) > 2 and data[0] == 0xFF and (data[1] & 0xE0) == 0xE0:
+        return "mp3"
+    if data.startswith(b"RIFF") and data[8:12] == b"WAVE":
+        return "wav"
+    raise UploadError("音色参考只支持 MP3 / WAV 音频(按文件内容判定,改扩展名无效)。")
 
 
 def upload_root() -> Path:
@@ -175,12 +201,51 @@ def save_render_result(task_id: int, data: bytes) -> str:
     return rel
 
 
+def save_tts_cache(key: str, data: bytes) -> str:
+    """落盘一段配音缓存(indextts2 结果),返回相对路径(存 TtsTrack.path)。"""
+    if not data:
+        raise UploadError("配音结果是空的。")
+    if len(data) > MAX_RENDER_BYTES:
+        raise UploadError("配音音频超过大小上限,已丢弃。")
+    if not data.startswith(b"RIFF") or data[8:12] != b"WAVE":
+        raise UploadError("配音结果不是有效的 WAV 文件(平台可能返回了错误信息)。")
+    d = upload_root() / "render" / "tts"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{key}.wav").write_bytes(data)
+    rel = f"render/tts/{key}.wav"
+    logger.info("配音缓存落盘 %s(%.1fKB)", rel, len(data) / 1024)
+    return rel
+
+
 def delete_render_file(rel_path: str) -> None:
     """删一个渲染草片文件(任务/项目级联清理用;路径不合法只记日志不抛)。"""
     try:
         resolve(rel_path).unlink(missing_ok=True)
     except UploadError:
         logger.warning("跳过非法渲染产物路径的删除: %r", rel_path)
+
+
+def save_character_voice(project_id: int, card_id: int, data: bytes) -> str:
+    """保存一段角色音色参考音频,返回相对路径(存 DramaCharacterCard.voice_ref)。
+
+    与定妆照的「最多 3 张挑着用」不同:音色每角色**就一段**,固定文件名
+    voice<卡号>.<ext>,重传直接覆盖(换音色 = 传新的,旧的自然作废)。
+    """
+    if not data:
+        raise UploadError("音频是空的,请重新选择文件。")
+    if len(data) > MAX_AUDIO_BYTES:
+        raise UploadError(
+            f"音频最大 {MAX_AUDIO_BYTES // 1024 // 1024}MB,当前 "
+            f"{len(data) / 1024 / 1024:.1f}MB——5-10 秒干净人声就够,请截一段再传。"
+        )
+    ext = sniff_audio_ext(data)
+    d = upload_root() / "drama" / str(int(project_id))
+    d.mkdir(parents=True, exist_ok=True)
+    name = f"voice{int(card_id)}.{ext}"
+    (d / name).write_bytes(data)
+    rel = f"drama/{int(project_id)}/{name}"
+    logger.info("音色参考落盘 %s(%.1fKB)", rel, len(data) / 1024)
+    return rel
 
 
 def _save_image(
