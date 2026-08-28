@@ -163,6 +163,8 @@ class ProjectPatch(BaseModel):
     style_memo: str | None = Field(default=None, max_length=20000)
     # 世界观硬规则(钉板):整段覆盖(传 "" 清空);逐行一条规则
     world_rules: str | None = Field(default=None, max_length=20000)
+    # 出片模式:lite=轻量档(文+图出片)/ full=完整档;非法值在下方归一为 lite
+    render_mode: str | None = Field(default=None, max_length=10)
 
 
 @router.patch("/{project_id}", response_model=ProjectOut)
@@ -206,6 +208,8 @@ async def patch_project(
         updates["setup_state"] = None  # "" = 起步完成
     if "chat_log" in updates and len(updates["chat_log"]) > 200:
         updates["chat_log"] = updates["chat_log"][-200:]  # 防膨胀:只留最近 200 条
+    if "render_mode" in updates and updates["render_mode"] not in ("lite", "full"):
+        updates["render_mode"] = "lite"  # 脏值收敛,不 400(开关打错不该炸整个保存)
     for field, value in updates.items():
         setattr(project, field, value)
     db.commit()

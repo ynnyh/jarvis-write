@@ -15,6 +15,7 @@ import { AccountCard } from "./settings/AccountCard";
 import { AppLockCard } from "./settings/AppLockCard";
 import { ProvidersCard } from "./settings/ProvidersCard";
 import { PreferencesCard } from "./settings/PreferencesCard";
+import { RenderCard } from "./settings/RenderCard";
 
 export default function SettingsPage() {
   return (
@@ -27,6 +28,7 @@ export default function SettingsPage() {
       <AccountCard />
       <AppLockCard />
       <ProvidersCard />
+      <RenderCard />
       <PreferencesCard />
       <div className="settings-foot">
         <a

@@ -3,12 +3,21 @@
 // 段号与手卡 clip.chunks 对齐:手卡改完重算切段后,前端按 index 归并
 // (消失的段忽略、新段无状态),后端只认整卡回传,不猜 merge 策略。
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { ClipCard, ClipRefImage, ClipShootUnit, clipsApi } from "../../clipsApi";
 import { toast } from "../../ui/Toaster";
 import { errMsg } from "../../pollJob";
 import { CopyBtn } from "../../ui/copy";
 import { confirmDialog } from "../../ui/ConfirmDialog";
 import EmptyState from "../../ui/EmptyState";
+import { useJob } from "../../ui/useJob";
+import {
+  checkImageAspect,
+  RENDER_STATUS_CN,
+  RenderConfigOut,
+  renderApi,
+  RenderTaskOut,
+} from "../../renderApi";
 import { chunkPromptText } from "./shared";
 
 /** 一张段参考图缩略图:上传的走鉴权端点转 blob,外链直接用 src。 */
@@ -40,6 +49,116 @@ function RefThumb({ clipId, index, imgIndex, image, canEdit, onDelete }: {
   );
 }
 
+/** 一个段的「本站出片」块:提交引擎出片、预览草片、版本切换与采用。
+ *
+ *  出片单位是段:首帧用该段挂的第一张参考图(没有就文生视频,情绪短片多为
+ *  无角色的氛围画面,换脸风险低)。 adopted 的版本回写 result_link,
+ *  「出好了」的勾仍由人工打——草片合不合格引擎说了不算。
+ */
+function SegmentRender({ clipId, unit, configured, onAdopted }: {
+  clipId: number; unit: ClipShootUnit; configured: boolean | null;
+  /** 采用某版后把 result_link 同步回外层盘(外层负责持久化) */
+  onAdopted: (index: number, link: string) => void;
+}) {
+  const { run } = useJob();
+  const [tasks, setTasks] = useState<RenderTaskOut[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [previewId, setPreviewId] = useState<number | null>(null);
+  const [previewUrl, setPreviewUrl] = useState("");
+
+  const reload = useCallback(async () => {
+    try { setTasks((await renderApi.clipChunkTasks(clipId, unit.index)).tasks); }
+    catch { setTasks([]); }
+  }, [clipId, unit.index]);
+  useEffect(() => { void reload(); setPreviewId(null); }, [reload]);
+
+  const shown =
+    tasks.find((t) => t.id === previewId)
+    ?? tasks.find((t) => t.status === "success" && t.result_path === unit.result_link)
+    ?? tasks.find((t) => t.status === "success")
+    ?? null;
+  useEffect(() => {
+    let revoke = "";
+    let alive = true;
+    if (!shown) { setPreviewUrl(""); return; }
+    void renderApi.taskBlobUrl(shown.id)
+      .then((u) => { if (alive) { revoke = u; setPreviewUrl(u); } else URL.revokeObjectURL(u); })
+      .catch(() => { if (alive) setPreviewUrl(""); });
+    return () => { alive = false; if (revoke) URL.revokeObjectURL(revoke); };
+  }, [shown]);
+
+  async function renderNow() {
+    setBusy(true);
+    try {
+      const r = await renderApi.submitClipChunk(clipId, unit.index);
+      await run(() => Promise.resolve({ job_id: r.job_id }),
+        { kind: `render:clips:${clipId}:${unit.index}` });
+      await reload();
+      setPreviewId(null);
+      toast.ok(`段 ${unit.index} 的草片已出`, "不满意点「重出一版」再挑;出好了记得勾「出好了」");
+    } catch (e) { toast.err("出片失败", errMsg(e)); } finally { setBusy(false); }
+  }
+
+  async function adopt(taskId: number) {
+    try {
+      const r = await renderApi.adoptTask(taskId);
+      setPreviewId(taskId);
+      onAdopted(unit.index, r.result_link || "");
+      toast.ok("已设为这一段的成片");
+    } catch (e) { toast.err("设为成片失败", errMsg(e)); }
+  }
+
+  return (
+    <div className="media-field">
+      <div className="card-head mb-2">
+        <b>本站直接出片</b>
+        <span className="badge">
+          {unit.ref_images.length > 0 ? "首尾帧 · 参考图当首帧" : "文生视频 · 未挂参考图"}
+        </span>
+        <span className="grow" />
+        <button className="btn-sm primary" disabled={busy}
+          onClick={() => void renderNow()}>
+          {busy ? "出片中…(约 1-3 分钟)" : tasks.some((t) => t.status === "success") ? "重出一版" : "出片"}
+        </button>
+      </div>
+      {configured === false ? (
+        <EmptyState>
+          还没配置出片引擎:先到 <Link to="/settings">设置 → 出片引擎</Link> 填 autodl.art
+          的令牌(费用约 ¥0.02/秒),回来这里点「出片」就行。
+        </EmptyState>
+      ) : (
+        <>
+          {previewUrl
+            ? <video className="render-preview" src={previewUrl} controls preload="metadata" />
+            : <p className="hint">还没出过片:点上面的「出片」,出好的草片会显示在这里。</p>}
+          {tasks.length > 0 && (
+            <div className="card-head mb-2">
+              <span className="muted">版本({tasks.length})</span>
+              <select value={String(shown?.id ?? "")}
+                onChange={(e) => setPreviewId(Number(e.target.value))}>
+                {tasks.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    #{t.id} · {RENDER_STATUS_CN[t.status] ?? t.status}
+                    {t.status === "success" ? ` · ${t.params.duration_s ?? "?"}s` : ""}
+                    {t.result_path && t.result_path === unit.result_link ? " · 当前成片" : ""}
+                  </option>
+                ))}
+              </select>
+              {shown?.status === "success" && shown.result_path !== unit.result_link && (
+                <button className="btn-sm" onClick={() => void adopt(shown.id)}>设为成片</button>
+              )}
+            </div>
+          )}
+          <p className="hint">
+            有参考图走<b>首尾帧</b>(第一张参考图当首帧),没有走<b>文生视频</b>。
+            想重 roll 就再点一次,版本都留在列表里挑最好的一版。
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function ShootWorkbench({ clipId, card, onProgress }: {
   clipId: number; card: ClipCard;
   /** 把「已出片段数/总段数」回传给顶层工作台,供步骤条的③出片步判断 done */
@@ -52,6 +171,11 @@ export default function ShootWorkbench({ clipId, card, onProgress }: {
   const [linkVal, setLinkVal] = useState("");
   const fileRefs = useRef<Record<number, HTMLInputElement | null>>({});
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 出片引擎配置(整盘共用一份;configured=null = 还没读到,先不显示空态)
+  const [renderCfg, setRenderCfg] = useState<RenderConfigOut | null>(null);
+  useEffect(() => {
+    void renderApi.getConfig().then(setRenderCfg).catch(() => {});
+  }, []);
   // 防抖持久化要从「最新一次 render 的 units」读,闭包直接捕获会拿到首帧的空盘;
   // 用 ref 顶住最新的 persist,setTimeout 里调它,改完 500ms 后再落盘。
   const persistRef = useRef<() => Promise<void>>(async () => {});
@@ -112,7 +236,10 @@ export default function ShootWorkbench({ clipId, card, onProgress }: {
     catch (e) { toast.err("操作失败", errMsg(e)); }
   }
 
-  function onRefUpload(index: number, file: File) {
+  async function onRefUpload(index: number, file: File) {
+    // 画幅软校验:情绪短片固定竖屏 9:16,横图出视频会被裁得没法看,先提醒(不拦)
+    const warn = await checkImageAspect(file, "9:16");
+    if (warn) toast.info("画幅可能不匹配", warn);
     void afterMutate(clipsApi.uploadRef(clipId, index, file));
   }
 
@@ -144,8 +271,10 @@ export default function ShootWorkbench({ clipId, card, onProgress }: {
         {saving && <span className="muted">保存中…</span>}
       </div>
       <p className="card-desc">
-        按生成切段一段一段出片:把「角色定妆图 + 本段提示词」搬进图文生视频工具(如 minimax H3),
-        生成的成片贴回「成品链接」存个档。段号与手卡切段一致,手卡改过会按新切段自动归并。
+        按生成切段一段一段出片:每段点「<b>本站直接出片</b>」由引擎直接出视频草片
+        (需在「设置 → 出片引擎」配好令牌;第一张参考图当首帧),出完点「设为成片」、勾「出好了」。
+        也可以照老办法把「角色定妆图 + 本段提示词」搬进图文生视频工具(如 minimax H3),
+        成片地址贴回「成品链接」存档。段号与手卡切段一致,手卡改过会按新切段自动归并。
       </p>
 
       {units === null ? (
@@ -224,6 +353,9 @@ export default function ShootWorkbench({ clipId, card, onProgress }: {
                   </div>
                   <p className="hint">外链(生图站地址)可能带时效签名会失效;要长期留存建议下载后点「上传参考图」。</p>
                 </div>
+
+                <SegmentRender clipId={clipId} unit={u} configured={renderCfg?.configured ?? null}
+                  onAdopted={(idx, link) => { patch(idx, { result_link: link }); schedulePersist(); }} />
 
                 <div className="media-field">
                   <div className="card-head mb-2"><span className="muted">成品与备注</span></div>

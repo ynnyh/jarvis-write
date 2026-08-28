@@ -30,6 +30,7 @@ from app.db.models import (
     OutlineVersion,
     Project,
     Relationship,
+    RenderTask,
     WritingCard,
 )
 
@@ -73,6 +74,15 @@ def delete_project_cascade(db: Session, project: Project) -> int:
             db.query(model).filter(model.episode_id.in_(episode_ids)).delete(
                 synchronize_session=False
             )
+    # 出片任务与渲染草片跟着项目走:先收文件名,行删掉后再清文件(与上传图同序)
+    from app.api.render import purge_render_tasks
+
+    render_files = [
+        t.result_path
+        for t in db.query(RenderTask).filter(RenderTask.project_id == project_id)
+        if t.result_path
+    ]
+    purge_render_tasks(db, project_id=project_id)
     deleted_chapters = (
         db.query(Chapter)
         .filter(Chapter.project_id == project_id)
@@ -101,6 +111,8 @@ def delete_project_cascade(db: Session, project: Project) -> int:
     db.commit()
 
     storage.delete_project_dir(project_id)
+    for rel in render_files:
+        storage.delete_render_file(rel)
 
     return deleted_chapters
 

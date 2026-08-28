@@ -59,6 +59,8 @@ class ProjectOut(BaseModel):
     # 世界观硬规则(钉板):不可违背的设定/常识,逐行一条;注入生成各环节,
     # 并可发起「规则扫描」逐章体检正文
     world_rules: str | None = None
+    # 出片模式(docs/adr/0003):lite=轻量档(文+图出片)/ full=完整档(对白链/接力/合成)
+    render_mode: str = "lite"
     status: str
     # 列表页进度(list 接口聚合填充;详情接口为 0)
     written_chapters: int = 0

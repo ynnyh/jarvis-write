@@ -30,6 +30,17 @@ export default function ProjectSettingsPanel({ pid, project }: Props) {
   const [dlAnchor, setDlAnchor] = useState(canon0.deadline ? String(canon0.deadline.anchor_chapter) : "1");
   const [canonSaving, setCanonSaving] = useState(false);
 
+  // 出片模式切换(lite/full):即点即存;完整档未点亮时后端行为不变
+  async function saveRenderMode(mode: "lite" | "full") {
+    if (project.render_mode === mode) return;
+    try {
+      await api.patchProject(pid, { render_mode: mode });
+      await invalidateProject();
+      toast.ok(mode === "full" ? "已切到完整档" : "已切回轻量档",
+        mode === "full" ? "完整档模块分期点亮中,当前行为与轻量档一致" : "逐镜手动出片与筛选");
+    } catch (e) { toast.err("出片模式保存失败", errMsg(e)); }
+  }
+
   // 保存每章目标字数:后端 ProjectPatch 已支持 target_words_per_chapter,纯前端接线
   async function saveTargetWords() {
     const n = Number(targetWords);
@@ -111,6 +122,29 @@ export default function ProjectSettingsPanel({ pid, project }: Props) {
 
   return (
     <>
+      {/* 出片模式(docs/adr/0003):轻量=文+图出片、逐镜人工筛;完整=对白配音链/
+          首尾帧自动接力/一键合成。完整档模块分期点亮,未点亮时行为与轻量档一致,
+          切换不丢数据——两档共用同一份镜头、草片与任务记录。 */}
+      <div className="card card-compact">
+        <label className="fl">出片模式</label>
+        <div className="hint mb-1">轻量档在漫剧分镜格 / 情绪短片工作台点「出片」即出视频草片(需在顶部「设置 → 出片引擎」配令牌)。</div>
+        <div className="chips">
+          <button type="button" className={"chip" + (project.render_mode !== "full" ? " on" : "")}
+            onClick={() => void saveRenderMode("lite")}>
+            轻量档 · 文+图出片
+          </button>
+          <button type="button" className={"chip" + (project.render_mode === "full" ? " on" : "")}
+            onClick={() => void saveRenderMode("full")}>
+            完整档 · 全自动闭环 <span className="badge">未启用</span>
+          </button>
+        </div>
+        {project.render_mode === "full" && (
+          <p className="hint mt-1">
+            完整档的对白配音链、首尾帧自动接力、一键合成正在分期上线;当前版本切到完整档,
+            行为与轻量档一致(已出的草片与进度两种模式下通用)。
+          </p>
+        )}
+      </div>
       {/* 每章目标字数(死路 #3:此前只能在创建向导设,成书后无处可改) */}
       <div className="card card-compact">
         <label className="fl">每章目标字数</label>

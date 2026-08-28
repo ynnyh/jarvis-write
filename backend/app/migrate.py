@@ -778,6 +778,26 @@ def _add_project_outline_stale_column() -> None:
             logger.info("迁移:project 补 outline_stale 列")
 
 
+def _add_project_render_mode_column() -> None:
+    """projects 补 render_mode 列(出片模式,幂等)。
+
+    lite=轻量档(文+图出片,逐镜手动筛选),full=完整档(对白链/接力/合成)。
+    完整档分期点亮(docs/adr/0003),存量项目默认 lite,行为零变化。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "projects" not in insp.get_table_names():
+            return  # create_all 会按新模型建表,无需补列
+        if not _column_exists("projects", "render_mode"):
+            conn.execute(
+                text(
+                    "ALTER TABLE projects ADD COLUMN render_mode "
+                    "VARCHAR(10) NOT NULL DEFAULT 'lite'"
+                )
+            )
+            logger.info("迁移:projects 补 render_mode 列")
+
+
 def run_migrations() -> None:
     """启动时调用。幂等。"""
     _add_user_id_columns()
@@ -811,6 +831,7 @@ def run_migrations() -> None:
     _add_birthday_pack_column()
     _add_architecture_concept_stale_column()
     _add_project_outline_stale_column()
+    _add_project_render_mode_column()
     _disable_word_guard_default()
     _migrate_finalized_to_approved()
     # 先补加密老表存量明文 key,再拷到新表,保证 provider_configs 落库必为密文

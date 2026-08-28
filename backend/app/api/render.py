@@ -1,0 +1,386 @@
+# app/api/render.py
+# -*- coding: utf-8 -*-
+"""出片引擎接口(轻量档):配置 + 漫剧/情绪两条线的提交、版本历史、采用、读取。
+
+架构见 docs/adr/0003:工坊是控制面,生成本身外包给 autodl.art 的 ComfyUI 工作流。
+提交即建 RenderTask(queued)并起后台任务;版本历史支撑「重 roll 攒版本、挑一版」;
+「采用」只回写各线自己的指针字段(drama_shots.clip_ref / ClipShoot.shoot[].result_link),
+打勾(done_video/done)永远留给人工——草片好不好,引擎说了不算。
+
+GET  /api/render/config                                        出片配置(token 打码)
+PUT  /api/render/config                                        保存(token 留空不改)
+POST /api/projects/{pid}/drama/shots/{sid}/render              提交一格出片(异步)
+GET  /api/projects/{pid}/drama/shots/{sid}/render/tasks        该格版本历史
+POST /api/clips/{cid}/shoot/{i}/render                         提交一段出片(异步)
+GET  /api/clips/{cid}/shoot/{i}/render/tasks                   该段版本历史
+POST /api/render/tasks/{tid}/adopt                             改用某版当成片
+GET  /api/render/tasks/{tid}/file                              读草片文件(鉴权)
+"""
+from __future__ import annotations
+
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Response
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
+
+from app import storage
+from app.api.clips import _get_clip
+from app.api.drama._common import _get_shot
+from app.api.settings import _mask
+from app.auth import get_current_user
+from app.crypto import decrypt, encrypt
+from app.db.models import (
+    DramaShot,
+    DramaStyleCard,
+    RenderConfig,
+    RenderTask,
+)
+from app.db.session import get_db
+from app.engines.clips.render_input import chunk_render_payload
+from app.engines.drama.common import shot_asset_list
+from app.engines.drama.video import api_render_payload
+from app.engines.render.service import apply_pointer, start_render
+from app.jobs import list_running, spawn_job
+from app.net_guard import assert_public_base_url
+
+logger = logging.getLogger("jarvis-write.render")
+
+router = APIRouter(tags=["render"], dependencies=[Depends(get_current_user)])
+
+_VALID_RESOLUTIONS = ("480p", "768p")
+_TASK_LIST_LIMIT = 20
+
+
+# =============== 出片配置(每用户一份)===============
+
+
+def _get_config_row(db: Session, user_id: int) -> RenderConfig | None:
+    return db.query(RenderConfig).filter(RenderConfig.user_id == user_id).first()
+
+
+def _config_out(row: RenderConfig | None) -> dict:
+    token = decrypt(row.token) if row else ""
+    return {
+        "base_url": row.base_url if row else "",
+        "token_masked": _mask(token),
+        "has_token": bool(token),
+        "resolution": row.resolution if row else "768p",
+        "workflow_i2v": row.workflow_i2v if row else "",
+        "workflow_t2v": row.workflow_t2v if row else "",
+        # 前端空态引导用:没填 token 就把出片按钮换成「先去设置」
+        "configured": bool(token),
+    }
+
+
+class RenderConfigIn(BaseModel):
+    base_url: str = ""
+    # 留空/不传 = 不改动已存 token(与 LLM key 同一交互约定)
+    token: str | None = Field(default=None, description="留空 = 不改动已存 token")
+    resolution: str = "768p"
+    workflow_i2v: str = ""
+    workflow_t2v: str = ""
+
+
+@router.get("/api/render/config")
+async def get_render_config(
+    db: Session = Depends(get_db), user=Depends(get_current_user)
+):
+    return _config_out(_get_config_row(db, user.id))
+
+
+@router.put("/api/render/config")
+async def save_render_config(
+    req: RenderConfigIn, db: Session = Depends(get_db), user=Depends(get_current_user)
+):
+    if req.base_url.strip():
+        assert_public_base_url(req.base_url.strip())  # SSRF 防线,照 LLM 配置同款
+    if req.resolution not in _VALID_RESOLUTIONS:
+        raise HTTPException(
+            status_code=400, detail=f"分辨率只支持 {'/'.join(_VALID_RESOLUTIONS)}。"
+        )
+    row = _get_config_row(db, user.id)
+    if row is None:
+        from app.db.models.render import (
+            DEFAULT_RENDER_BASE_URL,
+            DEFAULT_WORKFLOW_I2V,
+            DEFAULT_WORKFLOW_T2V,
+        )
+
+        row = RenderConfig(
+            user_id=user.id,
+            base_url=DEFAULT_RENDER_BASE_URL,
+            workflow_i2v=DEFAULT_WORKFLOW_I2V,
+            workflow_t2v=DEFAULT_WORKFLOW_T2V,
+        )
+        db.add(row)
+    if req.base_url.strip():
+        row.base_url = req.base_url.strip()
+    if req.token:  # 空串/不传 = 不改动已存 token
+        row.token = encrypt(req.token.strip())
+    row.resolution = req.resolution
+    row.workflow_i2v = req.workflow_i2v.strip() or row.workflow_i2v
+    row.workflow_t2v = req.workflow_t2v.strip() or row.workflow_t2v
+    db.commit()
+    return _config_out(row)
+
+
+def _require_config(db: Session, user_id: int) -> RenderConfig:
+    """出片前置:必须已配 token,没配就给「去设置」的引导语(前端空态同款文案)。"""
+    row = _get_config_row(db, user_id)
+    if row is None or not decrypt(row.token):
+        raise HTTPException(
+            status_code=400,
+            detail="还没有配置出片引擎:请先到「设置 → 出片引擎」填写 autodl.art 的令牌(token)。",
+        )
+    return row
+
+
+# =============== 提交出片(漫剧 = 格 / 情绪 = 段)===============
+
+
+def _task_out(t: RenderTask) -> dict:
+    params = dict(t.params or {})
+    if params.get("prompt"):
+        params["prompt"] = str(params["prompt"])[:400]
+    return {
+        "id": t.id,
+        "line": t.line,
+        "kind": t.kind,
+        "workflow_id": t.workflow_id,
+        "provider_task_id": t.provider_task_id,
+        "status": t.status,
+        "params": params,
+        "result_path": t.result_path,
+        "error": t.error,
+        "created_at": t.created_at.isoformat() if t.created_at else "",
+    }
+
+
+def _dedup_running(kind: str) -> str | None:
+    """同单元已有出片任务在跑就别再起一个(断线重连直接复用旧任务)。"""
+    running = list_running(kind)
+    return running[0][0] if running else None
+
+
+def _create_task(
+    db: Session, user_id: int, *, line: str, kind: str, workflow_id: str,
+    params: dict, project_id: int | None, shot_id: int | None = None,
+    clip_id: int | None = None, chunk_index: int = -1,
+) -> RenderTask:
+    task = RenderTask(
+        user_id=user_id,
+        line=line,
+        kind=kind,
+        workflow_id=workflow_id,
+        params=params,
+        project_id=project_id,
+        shot_id=shot_id,
+        clip_id=clip_id,
+        chunk_index=chunk_index,
+        status="queued",
+    )
+    db.add(task)
+    db.commit()
+    return task
+
+
+@router.post("/api/projects/{project_id}/drama/shots/{shot_id}/render")
+async def submit_drama_render(
+    project_id: int, shot_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)
+):
+    """提交一格分镜出片:有静帧走首尾帧(i2v),没静帧走文生视频(t2v)。"""
+    shot = _get_shot(db, project_id, shot_id)
+    cfg = _require_config(db, user.id)
+    kind = "render:drama:shot:" + str(shot_id)
+    if (jid := _dedup_running(kind)) :
+        return {"job_id": jid, "task_id": None, "deduped": True}
+
+    assets = shot_asset_list(shot)
+    style = (
+        db.query(DramaStyleCard).filter(DramaStyleCard.project_id == project_id).first()
+    )
+    has_frame = bool(assets)
+    kind_flow = "i2v" if has_frame else "t2v"
+    payload = api_render_payload(shot, style, quality=cfg.resolution)
+    workflow_id = cfg.workflow_i2v if kind_flow == "i2v" else cfg.workflow_t2v
+    task = _create_task(
+        db, user.id, line="drama", kind=kind_flow, workflow_id=workflow_id,
+        params=payload, project_id=project_id, shot_id=shot_id,
+    )
+    spec = {
+        "task_id": task.id, "user_id": user.id, "line": "drama",
+        "shot_id": shot_id, "clip_id": None, "chunk_index": -1,
+        "kind": kind_flow, "workflow_id": workflow_id, "params": payload,
+        "first_frame": (
+            {"src": assets[0]["src"], "kind": assets[0]["kind"]} if has_frame else None
+        ),
+    }
+
+    async def work(progress):
+        return await start_render(progress, spec)
+
+    return {"job_id": spawn_job(kind, work), "task_id": task.id, "deduped": False}
+
+
+@router.get("/api/projects/{project_id}/drama/shots/{shot_id}/render/tasks")
+async def list_drama_render_tasks(
+    project_id: int, shot_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)
+):
+    _get_shot(db, project_id, shot_id)  # 归属校验
+    rows = (
+        db.query(RenderTask)
+        .filter(RenderTask.user_id == user.id, RenderTask.shot_id == shot_id)
+        .order_by(RenderTask.id.desc())
+        .limit(_TASK_LIST_LIMIT)
+        .all()
+    )
+    return {"tasks": [_task_out(t) for t in rows]}
+
+
+@router.post("/api/clips/{clip_id}/shoot/{chunk_index}/render")
+async def submit_clips_render(
+    clip_id: int, chunk_index: int, db: Session = Depends(get_db), user=Depends(get_current_user)
+):
+    """提交一个切段出片:首帧用该段挂的第一张参考图,没有就文生视频。"""
+    mood = _get_clip(db, clip_id)
+    cfg = _require_config(db, user.id)
+    kind = f"render:clips:{clip_id}:{chunk_index}"
+    if (jid := _dedup_running(kind)):
+        return {"job_id": jid, "task_id": None, "deduped": True}
+
+    chunks = (mood.clip or {}).get("chunks") or []
+    if not 0 <= chunk_index < len(chunks):
+        raise HTTPException(status_code=404, detail="这个段不存在(手卡可能重新切过段)。")
+    chunk = chunks[chunk_index]
+
+    from app.db.models import ClipShoot
+
+    shoot_row = db.query(ClipShoot).filter(ClipShoot.clip_id == clip_id).first()
+    refs = []
+    if shoot_row is not None and 0 <= chunk_index < len(shoot_row.shoot or []):
+        refs = shoot_row.shoot[chunk_index].get("ref_images") or []
+    has_frame = bool(refs)
+    kind_flow = "i2v" if has_frame else "t2v"
+    payload = chunk_render_payload(mood, chunk, quality=cfg.resolution)
+    workflow_id = cfg.workflow_i2v if kind_flow == "i2v" else cfg.workflow_t2v
+    task = _create_task(
+        db, user.id, line="clips", kind=kind_flow, workflow_id=workflow_id,
+        params=payload, project_id=None, clip_id=clip_id, chunk_index=chunk_index,
+    )
+    spec = {
+        "task_id": task.id, "user_id": user.id, "line": "clips",
+        "shot_id": None, "clip_id": clip_id, "chunk_index": chunk_index,
+        "kind": kind_flow, "workflow_id": workflow_id, "params": payload,
+        "first_frame": (
+            {"src": refs[0]["src"], "kind": refs[0]["kind"]} if has_frame else None
+        ),
+    }
+
+    async def work(progress):
+        return await start_render(progress, spec)
+
+    return {"job_id": spawn_job(kind, work), "task_id": task.id, "deduped": False}
+
+
+@router.get("/api/clips/{clip_id}/shoot/{chunk_index}/render/tasks")
+async def list_clips_render_tasks(
+    clip_id: int, chunk_index: int, db: Session = Depends(get_db), user=Depends(get_current_user)
+):
+    _get_clip(db, clip_id)  # 归属校验
+    rows = (
+        db.query(RenderTask)
+        .filter(
+            RenderTask.user_id == user.id,
+            RenderTask.clip_id == clip_id,
+            RenderTask.chunk_index == chunk_index,
+        )
+        .order_by(RenderTask.id.desc())
+        .limit(_TASK_LIST_LIMIT)
+        .all()
+    )
+    return {"tasks": [_task_out(t) for t in rows]}
+
+
+# =============== 版本采用 / 草片读取 ===============
+
+
+def _get_own_task(db: Session, task_id: int, user_id: int) -> RenderTask:
+    task = db.get(RenderTask, task_id)
+    # 不泄露存在性:别人的任务与不存在的任务同样 404
+    if task is None or task.user_id != user_id:
+        raise HTTPException(status_code=404, detail="出片任务不存在。")
+    return task
+
+
+@router.post("/api/render/tasks/{task_id}/adopt")
+async def adopt_render_task(
+    task_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)
+):
+    """改用某一版草片当成片(只回写指针;打勾仍由人工)。
+
+    各线指针:漫剧 drama_shots.clip_ref;情绪 ClipShoot.shoot[i].result_link。
+    """
+    task = _get_own_task(db, task_id, user.id)
+    if task.status != "success" or not task.result_path:
+        raise HTTPException(status_code=400, detail="只有出片成功的版本才能设为成片。")
+    if task.line == "drama":
+        shot = db.get(DramaShot, task.shot_id) if task.shot_id else None
+        if shot is None:
+            raise HTTPException(status_code=404, detail="这一格已不存在(可能重拆过分镜)。")
+        shot.clip_ref = task.result_path
+        db.commit()
+        return {"adopted": True, "clip_ref": task.result_path}
+    if task.line == "clips":
+        from app.db.models import ClipShoot
+
+        row = db.query(ClipShoot).filter(ClipShoot.clip_id == task.clip_id).first()
+        if row is None or not 0 <= task.chunk_index < len(row.shoot or []):
+            raise HTTPException(status_code=404, detail="这个段已不存在(手卡可能重新切过段)。")
+        row.shoot[task.chunk_index]["result_link"] = task.result_path
+        flag_modified(row, "shoot")
+        db.commit()
+        return {"adopted": True, "result_link": task.result_path}
+    raise HTTPException(status_code=400, detail="未知的出片线。")
+
+
+@router.get("/api/render/tasks/{task_id}/file")
+async def read_render_task_file(
+    task_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)
+):
+    """读渲染草片(走鉴权,渲染目录不挂静态服务)。"""
+    task = _get_own_task(db, task_id, user.id)
+    if not task.result_path:
+        raise HTTPException(status_code=404, detail="这一版还没有成片文件。")
+    try:
+        path = storage.resolve(task.result_path)
+    except storage.UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="成片文件已丢失。")
+    return Response(
+        content=path.read_bytes(),
+        media_type="video/mp4",
+        # 私有资产:允许浏览器本地缓存,但不许中间层/CDN 缓存
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
+
+
+# 供级联清理复用(删项目/删短片时把任务行与草片文件一起带走)
+def purge_render_tasks(db: Session, *, project_id: int | None = None, clip_id: int | None = None) -> int:
+    """删掉归属的渲染任务行与草片文件,返回删除行数(调用方负责在事务里调)。"""
+    q = db.query(RenderTask)
+    if project_id is not None:
+        q = q.filter(RenderTask.project_id == project_id)
+    elif clip_id is not None:
+        q = q.filter(RenderTask.clip_id == clip_id)
+    else:
+        return 0
+    rows = q.all()
+    for t in rows:
+        if t.result_path:
+            storage.delete_render_file(t.result_path)
+    for t in rows:
+        db.delete(t)
+    return len(rows)

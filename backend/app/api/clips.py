@@ -29,7 +29,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app import storage
 from app.auth import assert_project_owner, get_current_user
-from app.db.models import ClipShoot, MoodClip, Project
+from app.db.models import ClipShoot, MoodClip, Project, RenderTask
 from app.db.session import get_db
 from app.engines.clips import (
     ClipBatchError,
@@ -486,10 +486,21 @@ async def delete_clip(clip_id: int, db: Session = Depends(get_db)):
                 detail="这条短片正在生成/重拍中,等它跑完再删除(刷新页面可看进度)。",
             )
     db.query(ClipShoot).filter(ClipShoot.clip_id == clip_id).delete()
+    # 出片任务与渲染草片跟着短片走:行删掉后再清文件(与参考图目录同序)
+    from app.api.render import purge_render_tasks
+
+    render_files = [
+        t.result_path
+        for t in db.query(RenderTask).filter(RenderTask.clip_id == clip_id)
+        if t.result_path
+    ]
+    purge_render_tasks(db, clip_id=clip_id)
     db.delete(row)
     db.commit()
     # 出片参考图按 clip 号独占 clips/<id>/ 目录,行走了文件不能留在卷里吃配额
     storage.delete_clip_dir(clip_id)
+    for rel in render_files:
+        storage.delete_render_file(rel)
     return {"ok": True}
 
 

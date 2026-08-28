@@ -77,6 +77,10 @@ class Project(Base, TimestampMixin):
     world_rules: Mapped[str | None] = mapped_column(Text, nullable=True)
     # draft / outlining / writing / done
     status: Mapped[str] = mapped_column(String(20), default="draft")
+    # 出片模式(docs/adr/0003):lite=轻量档(文+图出片,逐镜手动筛选),
+    # full=完整档(对白配音链/自动接力/一键合成)。存量项目默认 lite;
+    # 完整档模块分期点亮,未点亮时前端按「未启用」占位展示。
+    render_mode: Mapped[str] = mapped_column(String(10), default="lite", server_default="lite")
     # 架构已重写、但大纲仍挂在旧架构上 → True:前端大纲页据此告知「保留或清空重来」。
     # 与 Architecture.concept_stale 同一模式,但作用于大纲整组(架构一变影响全部章节蓝图)。
     # 重新铺蓝图(save_blueprint)自动复位 False。存量行为零变化(默认 False)。

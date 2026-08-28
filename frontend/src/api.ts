@@ -299,6 +299,8 @@ export interface Project {
   style_memo?: string | null;
   // 世界观硬规则钉板:每行一条不可违背的设定/常识,注入后续所有生成;规则扫描以此体检正文
   world_rules?: string | null;
+  // 出片模式:lite=轻量档(文+图出片,逐镜筛选)/ full=完整档(对白链/自动接力/一键合成,分期点亮)
+  render_mode?: "lite" | "full" | string;
   // 故事宪法(结构化):书级恒真声明——刻意留白 / 常驻装置+复现节奏 / 倒计时;
   // 与 world_rules 在后端合并成一张「宪法块」,全程注入生成端 + 全程门禁比对(治长程一致性 #1/#2)
   canon?: StoryCanon | null;

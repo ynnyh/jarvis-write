@@ -36,6 +36,7 @@ MAX_ASSETS_PER_SHOT = 2                # 每格分镜最多挂 2 张静帧(出�
 MAX_PROJECT_UPLOAD_BYTES = 80 * 1024 * 1024  # 单项目上传总量上限 80MB
 MAX_CLIP_UPLOAD_BYTES = 20 * 1024 * 1024     # 短片参考图上限 20MB(短片未必挂项目,单独限量)
 MAX_WISH_UPLOAD_BYTES = 20 * 1024 * 1024     # 祝福片参考图上限 20MB(同理按 wish 号单独限量)
+MAX_RENDER_BYTES = 120 * 1024 * 1024        # 单个渲染草片上限 120MB(15s 768p 通常几 MB,放宽防意外)
 
 # 文件头 → 扩展名(WebP 还要校验第 8-12 字节的 "WEBP")
 _SIGNATURES: tuple[tuple[bytes, str], ...] = (
@@ -43,13 +44,14 @@ _SIGNATURES: tuple[tuple[bytes, str], ...] = (
     (b"\xff\xd8\xff", "jpg"),
     (b"RIFF", "webp"),
 )
-_CONTENT_TYPES = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}
+_CONTENT_TYPES = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp", "mp4": "video/mp4"}
 # 两种资产共用一个项目目录,所以分镜静帧的文件名带 shot 前缀:
 # 角色卡 id 与分镜 id 来自不同表,同一个数字完全可能撞上(卡 7 与第 7 格)。
 # 短片出片工作台的参考图进 clips/<clip_id>/(短片不必挂项目,独占目录,按 clip 号隔离);
 # 祝福片同理进 birthday/<wish_id>/(回忆杀段的寿星真实照片是人物一致性锚点,同一定位)。
+# render/r<任务号>.mp4 是出片引擎的渲染产物(引擎自己落的,不走用户上传白名单)。
 _REL_RE = re.compile(
-    r"^(?:drama/\d+/(?:shot)?\d+-\d+|clips/\d+/\d+-\d+|birthday/\d+/\d+-\d+)\.(png|jpg|webp)$"
+    r"^(?:drama/\d+/(?:shot)?\d+-\d+|clips/\d+/\d+-\d+|birthday/\d+/\d+-\d+|render/r\d+)\.(png|jpg|webp|mp4)$"
 )
 
 
@@ -149,6 +151,36 @@ def save_wish_ref(wish_id: int, segment_index: int, data: bytes, taken: int) -> 
         "birthday", wish_id, str(int(segment_index)), data, taken,
         "参考图", MAX_WISH_UPLOAD_BYTES, wish_usage_bytes(wish_id),
     )
+
+
+def save_render_result(task_id: int, data: bytes) -> str:
+    """落盘一个渲染草片(出片引擎的产物),返回相对路径(存 RenderTask.result_path)。
+
+    为什么引擎产物要落盘而用户成片不收:渲染平台的结果 URL 有效期很短,不当场
+    下载,出的片就永远丢了。这是引擎自己写的文件,不走用户上传的白名单/配额,
+    但同样按文件头验一下 mp4(防上游回了个错误页 HTML 存成视频)。
+    """
+    if not data:
+        raise UploadError("渲染结果是空的。")
+    if len(data) > MAX_RENDER_BYTES:
+        raise UploadError(f"渲染视频超过 {MAX_RENDER_BYTES // 1024 // 1024}MB 上限,已丢弃。")
+    if len(data) < 12 or data[4:8] != b"ftyp":
+        raise UploadError("渲染结果不是有效的 MP4 文件(平台可能返回了错误信息)。")
+    d = upload_root() / "render"
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / f"r{int(task_id)}.mp4"
+    path.write_bytes(data)
+    rel = f"render/{path.name}"
+    logger.info("渲染草片落盘 %s(%.1fMB)", rel, len(data) / 1024 / 1024)
+    return rel
+
+
+def delete_render_file(rel_path: str) -> None:
+    """删一个渲染草片文件(任务/项目级联清理用;路径不合法只记日志不抛)。"""
+    try:
+        resolve(rel_path).unlink(missing_ok=True)
+    except UploadError:
+        logger.warning("跳过非法渲染产物路径的删除: %r", rel_path)
 
 
 def _save_image(

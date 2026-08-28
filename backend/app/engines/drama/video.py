@@ -23,32 +23,18 @@ from __future__ import annotations
 from app.engines.drama.common import clip
 from app.engines.media.audio import VIDEO_AUDIO_RULE_CN, VIDEO_AUDIO_RULE_EN
 from app.engines.media.segments import group_by_limit
+from app.engines.media.video import (  # noqa: F401  共用件下沉 media,这里沿用旧名(外部有引用)
+    VIDEO_NEGATIVE_CN,
+    VIDEO_NEGATIVE_EN,
+    camera_en,
+    clamp_duration_s,
+    resolution_value,
+    video_negative,
+)
 
 # 单次生成时长上限:各站常见档位(即梦/可灵多为 5-10 秒,Sora/Veo/Runway 到 15 秒)
 CLIP_LIMITS: tuple[int, ...] = (5, 10, 15)
 CLIP_LIMIT_DEFAULT = 10
-
-# 视频特有负面词:生图那套(多手指/水印)之外,是「动起来」才会有的坏毛病
-VIDEO_NEGATIVE_CN = (
-    "人脸变形、五官漂移、中途换脸,肢体穿模、手指增减,画面闪烁抖动,"
-    "物体突然出现或消失,镜头剧烈晃动,速度忽快忽慢,画风中途改变,"
-    "出现文字、字幕、水印、logo"
-)
-VIDEO_NEGATIVE_EN = (
-    "face morphing, identity change, distorted face, extra limbs, "
-    "flickering, jitter, sudden cut, warping objects, violent camera shake, "
-    "speed ramping, style change, text, subtitles, watermark, logo"
-)
-
-# 运镜 → 视频站的镜头词(生图那套构图词在视频站不吃)
-_CAMERA_EN: dict[str, str] = {
-    "固定": "static camera, locked off",
-    "推": "slow push in, dolly in",
-    "拉": "slow pull back, dolly out",
-    "摇": "slow pan",
-    "跟随": "tracking shot following the subject",
-    "环绕": "slow orbit around the subject",
-}
 
 VIDEO_PLATFORMS: tuple[tuple[str, str], ...] = (
     ("i2v", "图生视频·中文站(即梦 / 可灵 / 海螺:传首帧图 + 粘这段)"),
@@ -59,11 +45,6 @@ VIDEO_PLATFORMS: tuple[tuple[str, str], ...] = (
     ("r2v", "参考生视频·多图主体绑定(Vidu / PixStag / 可灵多图:按序传定妆照)"),
 )
 DEFAULT_VIDEO_PLATFORM = "i2v"
-
-
-def camera_en(camera: str) -> str:
-    """运镜中文 → 英文镜头词(白名单外的值给个中性兜底,不硬翻)。"""
-    return _CAMERA_EN.get((camera or "").strip(), "steady camera")
 
 
 def motion_fallback(shot) -> tuple[str, str]:
@@ -104,14 +85,6 @@ def _duration_line(duration_s: int, limit_s: int) -> str:
 
 def _join(*blocks: str) -> str:
     return "\n\n".join(b.strip() for b in blocks if b and b.strip())
-
-
-def video_negative(style_negative: str = "") -> str:
-    """视频负面词 = 视频特有项 + 画风卡的负面词基座(去重靠包含判断)。"""
-    base = (style_negative or "").strip()
-    if not base:
-        return VIDEO_NEGATIVE_CN
-    return f"{VIDEO_NEGATIVE_CN},{base}"
 
 
 def video_paste(
@@ -392,3 +365,33 @@ def clips_payload(
             ref_names=seg_refs,
         )
     return plan
+
+
+# =============== 出片引擎提交参数(轻量档:autodl.art ComfyUI 工作流)===============
+
+def api_render_payload(shot, style, quality: str = "768p") -> dict:
+    """一格分镜 → 出片引擎的提交参数(线内构造,供 api/render.py 调用)。
+
+    与 video_paste 同源不同形:video_paste 是**给人贴**的,要带「用第几格静帧
+    当首帧图」这类操作指引;这里给 **API** 用,那些指引全是噪音,只留模型真正
+    吃的四样——怎么动、镜头、时长、不要出现。首帧图不由这里管(引擎按
+    assets 里的本地静帧取文件转 base64),t2v/i2v 走哪路由调用方按有无静帧定。
+
+    resolution 的竖/横按画风卡 ratio 折算,画质档(480p/768p)来自出片配置。
+    """
+    motion_cn, _ = motion_tracks(shot)
+    cam = (shot.camera or "").strip() or "固定"
+    duration = clamp_duration_s(shot.duration_s, upper=15, default=4)
+    neg = video_negative((getattr(style, "negative", "") or "") if style is not None else "")
+    prompt = _join(
+        f"【怎么动】{motion_cn}",
+        f"【镜头】{cam},人物长相、发型、服饰与画风严格保持首帧不变,不重画、不换脸",
+        f"【时长】{duration} 秒",
+        f"【不要出现】{neg}",
+    )
+    ratio = (getattr(style, "ratio", "") or "9:16") if style is not None else "9:16"
+    return {
+        "prompt": prompt,
+        "duration_s": duration,
+        "resolution": resolution_value(quality, ratio),
+    }

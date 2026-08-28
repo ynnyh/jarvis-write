@@ -3305,6 +3305,13 @@ body:has(.write-zone.immersive) .pj-cols { grid-template-columns: minmax(0, 1fr)
 }
 .ref-thumb-foot .btn-sm { padding: 2px 6px; font-size: var(--fs-xs); }
 
+/* 出片引擎的草片预览:竖屏视频限高居中,别让 9:16 的一条占满整个面板 */
+.render-preview {
+  display: block; max-width: min(100%, 280px); max-height: 380px;
+  margin: 6px 0; border: 1px solid var(--line); border-radius: var(--r-md, 8px);
+  background: var(--surface-2);
+}
+
 /* 逐格施工单的两个打勾栏:横排靠拢,别让「静帧/视频出好了」读成两条独立设置 */
 .shot-ticks {
   display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px;

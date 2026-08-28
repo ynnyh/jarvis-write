@@ -4,6 +4,7 @@
 // 一致性靠锚段注入:画风锚(风格卡)+ 人物锚(角色卡)+ 场景锚(场景卡)逐字嵌入每格分镜。
 // 阶段 2 补齐出片最后一块:声线选型 + 成片包(配音稿/剪辑清单/SRT 字幕)。
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   ClipPlan,
   DRAMA_STATUS_CN,
@@ -30,6 +31,13 @@ import Banner from "../../ui/Banner";
 import StepBar, { Step } from "../../ui/StepBar";
 import { CopyBtn, selectAll } from "../../ui/copy";
 import { confirmDialog } from "../../ui/ConfirmDialog";
+import {
+  checkImageAspect,
+  RENDER_STATUS_CN,
+  RenderConfigOut,
+  renderApi,
+  RenderTaskOut,
+} from "../../renderApi";
 import { DramaGuide, DramaProductionGuide } from "./DramaGuide";
 
 interface Props { pid: number }
@@ -142,6 +150,8 @@ export default function DramaPanel({ pid }: Props) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [trailer, setTrailer] = useState<DramaTrailer | null>(null);
   const [loadErr, setLoadErr] = useState("");
+  // 逐格出片进度(展开的集上报:视频出好了 N/M):步骤条「逐格出片」步的数据源
+  const [shootProg, setShootProg] = useState({ done: 0, total: 0 });
 
   const reloadBase = useCallback(async () => {
     try {
@@ -196,6 +206,10 @@ export default function DramaPanel({ pid }: Props) {
         : selected === null
           ? "在下面的集列表里点任意一集展开,再走 ④-1 → ④-4。"
           : nextEpisodeTodo(selected) },
+    { key: "shoot", label: "逐格出片", done: shootProg.total > 0 && shootProg.done >= shootProg.total,
+      todo: shootProg.total === 0
+        ? "点开一集,在每格分镜的「本站直接出片」出视频草片(先挂静帧再出片,长相更稳)。"
+        : `已出 ${shootProg.done}/${shootProg.total} 格:分镜格里点「本站直接出片」,不满意的点「重出一版」再挑。` },
     { key: "trailer", label: "预告片", done: !!trailer,
       todo: "可选:从各集高能素材混剪一条宣传片。" },
   ];
@@ -234,7 +248,9 @@ export default function DramaPanel({ pid }: Props) {
             {selectedId !== null ? (
               <EpisodeDetail pid={pid} eid={selectedId}
                 hasStyle={!!style?.style_cn}
+                ratio={style?.ratio || "9:16"}
                 onEpisodesChanged={setEpisodes}
+                onShootProgress={setShootProg}
                 onDeselect={() => setSelectedId(null)} />
             ) : episodes.length > 0 && (
               <div className="card drama-pick-hint">
@@ -1009,9 +1025,11 @@ function PlanSection({ pid, approved, episodes, onChanged, selectedId, onSelect 
 }
 
 // ================= 单集详情:剧本 → 分镜 → 提示词 → 导出 =================
-function EpisodeDetail({ pid, eid, hasStyle, onEpisodesChanged, onDeselect }: {
-  pid: number; eid: number; hasStyle: boolean;
+function EpisodeDetail({ pid, eid, hasStyle, ratio, onEpisodesChanged, onShootProgress, onDeselect }: {
+  pid: number; eid: number; hasStyle: boolean; ratio: string;
   onEpisodesChanged: (eps: DramaEpisode[]) => void;
+  /** 把「视频出好了 N/M」上报给顶部步骤条(逐格出片那一步的状态) */
+  onShootProgress?: (prog: { done: number; total: number }) => void;
   onDeselect: () => void;
 }) {
   const { run } = useJob();
@@ -1037,6 +1055,15 @@ function EpisodeDetail({ pid, eid, hasStyle, onEpisodesChanged, onDeselect }: {
   }, [pid, eid]);
 
   useEffect(() => { void reload(); }, [reload]);
+
+  // 出片进度上报:shots 变了(挂图/打勾/出片回写)就把「视频 N/M」递给顶部步骤条
+  useEffect(() => {
+    if (!onShootProgress) return;
+    onShootProgress({
+      done: shots.filter((s) => s.done_video).length,
+      total: shots.length,
+    });
+  }, [shots, onShootProgress]);
 
   async function refreshList() {
     try { onEpisodesChanged((await dramaApi.getEpisodes(pid)).episodes); } catch { /* 列表刷新失败不阻塞 */ }
@@ -1180,7 +1207,8 @@ function EpisodeDetail({ pid, eid, hasStyle, onEpisodesChanged, onDeselect }: {
         </>
       )}
 
-      {/* 三轨提示词 */}
+      {/* 三轨提示词 + 逐格出片(步骤条「逐格出片」步的锚点落在这里) */}
+      <div id="drama-step-shoot">
       {shots.some((s) => s.prompt_cn || s.prompt_en) && (
         <>
           <div className="card-head mb-2"><b>三轨提示词(即拿即用)</b>
@@ -1198,13 +1226,14 @@ function EpisodeDetail({ pid, eid, hasStyle, onEpisodesChanged, onDeselect }: {
               做完打个勾——导出的施工单会带上这份进度
             </span></div>
           {shots.filter((s) => s.prompt_cn || s.prompt_en).map((s) => (
-            <PromptRow key={s.id} pid={pid} shot={s} onSaved={(ns) => {
+            <PromptRow key={s.id} pid={pid} shot={s} ratio={ratio} onSaved={(ns) => {
               // 函数式更新:几十格挂图/打勾是连着点的,拿闭包里的旧 shots 算会把上一格的结果吞掉
               setShots((prev) => prev.map((x) => (x.id === ns.id ? ns : x)));
             }} onRegenerated={() => { void reload(); void refreshList(); }} />
           ))}
         </>
       )}
+      </div>
 
       {/* 视频段计划:一次生成一段,再在画布里拼(治视频站的单次时长上限) */}
       {shots.length > 0 && <ClipPlanSection pid={pid} eid={eid} sig={clipSig} />}
@@ -1386,8 +1415,8 @@ function ClipPlanSection({ pid, eid, sig }: { pid: number; eid: number; sig: str
   );
 }
 
-function PromptRow({ pid, shot, onSaved, onRegenerated }: {
-  pid: number; shot: DramaShot;
+function PromptRow({ pid, shot, ratio, onSaved, onRegenerated }: {
+  pid: number; shot: DramaShot; ratio: string;
   onSaved: (s: DramaShot) => void;
   onRegenerated: () => void;
 }) {
@@ -1425,6 +1454,9 @@ function PromptRow({ pid, shot, onSaved, onRegenerated }: {
 
   async function pickStill(file: File | undefined) {
     if (!file) return;
+    // 画幅软校验:横竖搞反的图出视频会被大幅裁切,先提醒一句(不拦,用户自己拍板)
+    const aspectWarn = await checkImageAspect(file, ratio);
+    if (aspectWarn) toast.info("画幅可能不匹配", aspectWarn);
     setAssetBusy(true);
     try {
       if (!await flush()) return;
@@ -1481,6 +1513,65 @@ function PromptRow({ pid, shot, onSaved, onRegenerated }: {
         toast.ok(`镜头 ${shot.seq} 已重出`, note ? "已按你的额外要求重写" : "画风锚/角色锚照旧注入");
       }
     } catch (e) { toast.err("重出失败", errMsg(e)); } finally { setBusy(false); }
+  }
+
+  // ===== 本站出片(轻量档):点按钮出视频草片,不出站 =====
+  const [renderCfg, setRenderCfg] = useState<RenderConfigOut | null>(null);
+  const [renderTasks, setRenderTasks] = useState<RenderTaskOut[]>([]);
+  const [renderBusy, setRenderBusy] = useState(false);
+  // 正在预览的版本 id;null = 跟随「当前成片指针」自动选
+  const [previewId, setPreviewId] = useState<number | null>(null);
+  const [previewUrl, setPreviewUrl] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    void renderApi.getConfig().then((c) => { if (alive) setRenderCfg(c); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  const reloadRenderTasks = useCallback(async () => {
+    try { setRenderTasks((await renderApi.dramaShotTasks(pid, shot.id)).tasks); }
+    catch { setRenderTasks([]); }
+  }, [pid, shot.id]);
+  useEffect(() => { void reloadRenderTasks(); setPreviewId(null); }, [reloadRenderTasks]);
+
+  // 预览跟随:明确点过某版就播那版,否则播「当前成片指针」指向的那版(对不上就播最新成功的)
+  const shownTask =
+    renderTasks.find((t) => t.id === previewId)
+    ?? renderTasks.find((t) => t.status === "success" && t.result_path === (draft.clip_ref || ""))
+    ?? renderTasks.find((t) => t.status === "success")
+    ?? null;
+  useEffect(() => {
+    let revoke = "";
+    let alive = true;
+    if (!shownTask) { setPreviewUrl(""); return; }
+    void renderApi.taskBlobUrl(shownTask.id)
+      .then((u) => { if (alive) { revoke = u; setPreviewUrl(u); } else URL.revokeObjectURL(u); })
+      .catch(() => { if (alive) setPreviewUrl(""); });
+    return () => { alive = false; if (revoke) URL.revokeObjectURL(revoke); };
+  }, [shownTask]);
+
+  async function renderNow() {
+    // 运动轨是出片提示词的原料,手改没保存等于让引擎拿旧词出片
+    if (!await flush()) return;
+    setRenderBusy(true);
+    try {
+      const r = await renderApi.submitDramaShot(pid, shot.id);
+      await run(() => Promise.resolve({ job_id: r.job_id }),
+        { kind: `render:drama:shot:${shot.id}` });
+      await reloadRenderTasks();
+      setPreviewId(null); // 回到「跟随指针」:新版本就是指针
+      toast.ok(`镜头 ${shot.seq} 的草片已出`, "不满意直接再点一次「重出一版」;版本都在下方列表里");
+    } catch (e) { toast.err("出片失败", errMsg(e)); } finally { setRenderBusy(false); }
+  }
+
+  async function adoptRender(taskId: number) {
+    try {
+      const r = await renderApi.adoptTask(taskId);
+      setDraft((d) => ({ ...d, clip_ref: r.clip_ref || d.clip_ref }));
+      setDirty(false);
+      toast.ok("已设为这一格的成片", "「视频出好了」的勾仍由你自己打");
+    } catch (e) { toast.err("设为成片失败", errMsg(e)); }
   }
 
   return (
@@ -1592,6 +1683,59 @@ function PromptRow({ pid, shot, onSaved, onRegenerated }: {
         </div>
         <PasteBox paste={draft.video_paste} stale={dirty} rows={6}
           storeKey={VIDEO_PLATFORM_KEY} title="一键粘贴 · 你用的视频站" />
+        {/* 本站出片(轻量档):不想出站折腾的,点一个按钮直接出视频草片——
+            提示词引擎按「只写运动」的口径拼好,有静帧走首尾帧,没静帧走文生视频。 */}
+        <div className="media-field">
+          <div className="card-head mb-2">
+            <b>本站直接出片</b>
+            <span className="badge">
+              {(draft.assets?.length ?? 0) > 0 ? "首尾帧 · 静帧当首帧" : "文生视频 · 未挂静帧"}
+            </span>
+            <span className="grow" />
+            <button className="btn-sm primary" disabled={renderBusy}
+              onClick={() => void renderNow()}>
+              {renderBusy ? "出片中…(约 1-3 分钟)" : renderTasks.some((t) => t.status === "success") ? "重出一版" : "出片"}
+            </button>
+          </div>
+          {renderCfg && !renderCfg.configured ? (
+            <EmptyState>
+              还没配置出片引擎:先到 <Link to="/settings">设置 → 出片引擎</Link> 填 autodl.art
+              的令牌(费用约 ¥0.02/秒),回来这个按钮就能点了。不想用也行——上面「一键粘贴」
+              把提示词搬到即梦/可灵,路还是通的。
+            </EmptyState>
+          ) : (
+            <>
+              {previewUrl
+                ? <video className="render-preview" src={previewUrl} controls preload="metadata" />
+                : <p className="hint">还没出过片:点上面的「出片」,出好的草片会显示在这里。</p>}
+              {renderTasks.length > 0 && (
+                <div className="card-head mb-2">
+                  <span className="muted">版本({renderTasks.length})</span>
+                  <select value={String(shownTask?.id ?? "")}
+                    onChange={(e) => setPreviewId(Number(e.target.value))}>
+                    {renderTasks.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        #{t.id} · {RENDER_STATUS_CN[t.status] ?? t.status}
+                        {t.status === "success" ? ` · ${t.params.duration_s ?? "?"}s` : ""}
+                        {t.result_path && t.result_path === (draft.clip_ref || "") ? " · 当前成片" : ""}
+                      </option>
+                    ))}
+                  </select>
+                  {shownTask?.status === "success" && shownTask.result_path !== (draft.clip_ref || "") && (
+                    <button className="btn-sm" onClick={() => void adoptRender(shownTask.id)}>
+                      设为成片
+                    </button>
+                  )}
+                </div>
+              )}
+              <p className="hint">
+                有静帧的格走<b>首尾帧</b>工作流(静帧当首帧,长相稳);没静帧的走<b>文生视频</b>,
+                同一格每版可能换脸——先出图挂静帧再出片更稳。重 roll 免计费压力,不满意就连点几版挑最好的;
+                「视频出好了」的勾照旧由你打。
+              </p>
+            </>
+          )}
+        </div>
         <div className="media-field">
           <div className="card-head mb-2">
             <span className="muted">怎么动(中文)</span>

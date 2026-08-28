@@ -8,6 +8,7 @@
 |---|---|---|---|
 | [0001](0001-database-migration-with-alembic.md) | 用 Alembic 管理数据库迁移 | ✅ 已采纳 | 2026-08-26 |
 | [0002](0002-api-module-splitting.md) | API 层大文件按子资源拆分 | ✅ 已采纳 | 2026-08-26 |
+| [0003](0003-render-engine-control-plane-adapters.md) | 出片引擎:控制面闭环 + 执行面接入(轻量/完整双档) | ✅ 已采纳 | 2026-08-28 |
 
 ## 如何新增 ADR
 
