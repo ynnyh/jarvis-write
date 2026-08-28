@@ -173,6 +173,21 @@ def normalize_job_error(exc: Exception) -> str:
     from app.engines.render.client import RenderError
     if isinstance(exc, RenderError):
         return msg
+    # 输入+输出合计超出模型上下文窗口:各渠道报法不一(多为 HTTP 400 带英文长文),
+    # 原样上屏没法操作,统一翻译成可执行的指引。
+    lowered = msg.lower()
+    if any(
+        k in lowered
+        for k in (
+            "context length", "context_length", "maximum context",
+            "too many tokens", "input length exceed", "prompt is too long",
+            "request too large",
+        )
+    ):
+        return (
+            "内容超出模型上下文窗口(输入+输出合计过长):请精简开篇设定或减少"
+            "一次生成的章数,或在「设置」里换上下文更大的模型。"
+        )
     if "HTTP 401" in msg:
         return "模型 API Key 无效或已欠费(HTTP 401),请到「设置」检查 key 与账户余额"
     if "HTTP 402" in msg:

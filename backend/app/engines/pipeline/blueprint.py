@@ -164,56 +164,94 @@ async def generate_blueprint(
         logger.info("蓝图生成:第 %d-%d 章...", start, end)
         _report(f"生成中:第 {start}-{end} 章(本次规划到第 {last} 章 / 全书 {number_of_chapters} 章)")
 
-        if start == 1 and end == number_of_chapters:
-            # 一块装得下,用整书模板
-            prompt = CHAPTER_BLUEPRINT_PROMPT.format(
-                novel_architecture=novel_architecture,
-                number_of_chapters=number_of_chapters,
-                style_directives=style_block,
-                title_directive=title_directive,
-            )
-        else:
-            prompt = CHUNKED_BLUEPRINT_PROMPT.format(
-                novel_architecture=novel_architecture,
-                start_chapter=start,
-                end_chapter=end,
-                previous_blueprint_tail=raw_accumulated[-_TAIL_CHARS:] or "(首块,无)",
-                style_directives=style_block,
-                title_directive=title_directive,
-            )
-
         expected = end - start + 1
         min_ok = max(1, int(expected * _CHUNK_MIN_RATIO))
 
         valid: list[dict[str, Any]] = []
-        warnings: list[str] = []
+        raw_warnings: list[str] = []
         raw = ""
-        for attempt in range(1, _CHUNK_MAX_ATTEMPTS + 1):
+        # 块内续写游标:欠章(输出超长被截断是主因——设定越肥,每章简述写得越长,
+        # 20 章一块越容易顶到模型单次输出上限)时只补「最后一章之后」的尾部区间,
+        # 而不是原样重摇整块:同样的输入会得到同样的截断,重摇是烧时间。
+        seg_start = start
+        attempts = 0
+        while seg_start <= end and attempts < _CHUNK_MAX_ATTEMPTS:
+            if start == 1 and seg_start == start and end == number_of_chapters:
+                # 一块装得下,用整书模板
+                prompt = CHAPTER_BLUEPRINT_PROMPT.format(
+                    novel_architecture=novel_architecture,
+                    number_of_chapters=number_of_chapters,
+                    style_directives=style_block,
+                    title_directive=title_directive,
+                )
+            else:
+                prompt = CHUNKED_BLUEPRINT_PROMPT.format(
+                    novel_architecture=novel_architecture,
+                    start_chapter=seg_start,
+                    end_chapter=end,
+                    previous_blueprint_tail=raw_accumulated[-_TAIL_CHARS:] or "(首块,无)",
+                    style_directives=style_block,
+                    title_directive=title_directive,
+                )
+
+            expected_seg = end - seg_start + 1
             raw = await _generate_chunk(
                 adapter,
                 prompt,
-                expected=expected,
-                base_done=len(all_chapters),
+                expected=expected_seg,
+                base_done=len(all_chapters) + len(valid),
                 total=run_total,
                 report=_report,
             )
-            parsed = parse_blueprint(raw)
-            valid, warnings = validate_blueprint(parsed, start, end)
-            if len(valid) >= min_ok:
+            raw_accumulated += "\n" + raw
+            seg_valid, seg_warn = validate_blueprint(parse_blueprint(raw), seg_start, end)
+            raw_warnings.extend(seg_warn)
+            valid.extend(seg_valid)
+
+            if len(seg_valid) >= expected_seg:
                 break
-            logger.warning(
-                "蓝图块 %d-%d 第 %d/%d 次仅解析出 %d/%d 章(raw %d 字),重试...",
-                start, end, attempt, _CHUNK_MAX_ATTEMPTS, len(valid), expected, len(raw),
+            attempts += 1
+            last_num = max(
+                (
+                    int(c["chapter_number"])
+                    for c in seg_valid
+                    if c.get("chapter_number")
+                ),
+                default=seg_start - 1,
             )
-        else:
-            # 重试用尽仍不达标:明确报错,不让空/残缺蓝图静默流入逐章生成
+            seg_start = max(seg_start, last_num + 1)
+            if seg_start <= end:
+                logger.warning(
+                    "蓝图块 %d-%d 欠章(已解析至第 %d 章),第 %d/%d 次续补 %d-%d...",
+                    start, end, last_num, attempts, _CHUNK_MAX_ATTEMPTS, seg_start, end,
+                )
+                _report(
+                    f"第 {start}-{end} 章输出不完整(解析到第 {last_num} 章),"
+                    f"自动续补第 {seg_start}-{end} 章…"
+                )
+
+        # 段间续补可能重叠:同章以后者为准(与 validate_blueprint 同口径);
+        # 缺章只在块级算一次——续补过程中间态的缺章不该刷成警告
+        merged: dict[int, dict[str, Any]] = {}
+        for c in valid:
+            num = int(c.get("chapter_number") or 0)
+            if num in merged:
+                raw_warnings.append(f"第 {num} 章重复出现,以后者为准")
+            merged[num] = c
+        valid = [merged[n] for n in sorted(merged)]
+        warnings = [w for w in raw_warnings if not w.startswith("缺少章节")]
+        missing = [n for n in range(start, end + 1) if n not in merged]
+        if missing:
+            warnings.append(f"缺少章节: {missing}")
+
+        if len(valid) < min_ok:
             raise RuntimeError(
-                f"蓝图块 {start}-{end} 生成失败:{_CHUNK_MAX_ATTEMPTS} 次尝试仅解析出 "
-                f"{len(valid)}/{expected} 章。最后一次返回长度 {len(raw)} 字。"
-                "可能是模型返回格式崩坏或被截断,请重试或换模型。"
+                f"蓝图块 {start}-{end} 生成失败:含自动续补共 {attempts} 次调用后仍只有 "
+                f"{len(valid)}/{expected} 章。多半是模型单次输出上限装不下这块蓝图"
+                "(设定越肥每章写得越长),或返回格式崩坏;请重试一次,或在「设置」里"
+                "换上下文/输出上限更大的模型。"
             )
 
-        raw_accumulated += "\n" + raw
         all_chapters.extend(valid)
         all_warnings.extend(warnings)
         _report(f"第 {start}-{end} 章解析完成(累计 {len(all_chapters)} 章)")
