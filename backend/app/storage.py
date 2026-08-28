@@ -61,7 +61,8 @@ _REL_RE = re.compile(
     r"|clips/\d+/\d+-\d+\.(?:png|jpg|webp)"
     r"|birthday/\d+/\d+-\d+\.(?:png|jpg|webp)"
     r"|render/r\d+\.mp4"
-    r"|render/tts/[0-9a-f]{16}\.wav)$"
+    r"|render/tts/[0-9a-f]{16}\.wav"
+    r"|render/lf/r\d+\.png)$"
 )
 
 

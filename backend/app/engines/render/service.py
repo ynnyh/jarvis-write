@@ -166,6 +166,10 @@ async def start_render(progress, spec: dict) -> dict:
         _mark_failed(task_id, str(exc))
         raise RenderError(str(exc)) from exc
 
+    # 末帧自动接力(best-effort):抽出的 png 供下一镜「一键当首帧」。
+    # 接力是锦上添花——没装 ffmpeg / 抽帧失败都只记日志,绝不影响出片结果。
+    _extract_last_frame(task_id, storage.resolve(rel))
+
     with _db_session() as db:
         row = db.get(RenderTask, task_id)
         if row is not None:
@@ -299,6 +303,18 @@ async def _synthesize_voice(progress, base_url: str, token: str, talk: dict) -> 
         ))
         db.commit()
     return data, duration, False
+
+
+def _extract_last_frame(task_id: int, mp4_path) -> None:
+    """抽出草片末帧存 render/lf/r<task_id>.png(尽力而为:失败只记日志)。"""
+    try:
+        from app.engines.render.ffmpeg import extract_last_frame
+
+        out = storage.upload_root() / "render" / "lf" / f"r{int(task_id)}.png"
+        if extract_last_frame(mp4_path, out):
+            logger.info("末帧已存 %s", out.name)
+    except Exception:  # noqa: BLE001 — 接力失败不影响出片
+        logger.debug("末帧抽取出错 task=%s", task_id, exc_info=True)
 
 
 def _mark_failed(task_id: int, error: str) -> None:

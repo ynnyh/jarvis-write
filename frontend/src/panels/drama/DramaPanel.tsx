@@ -34,6 +34,7 @@ import { CopyBtn, selectAll } from "../../ui/copy";
 import { confirmDialog } from "../../ui/ConfirmDialog";
 import {
   checkImageAspect,
+  PrevFrameInfo,
   RENDER_STATUS_CN,
   RenderConfigOut,
   renderApi,
@@ -960,6 +961,27 @@ function CharCardRow({ pid, card, onSaved }: {
 }
 
 /** 音色参考试听:<audio src> 带不了 Authorization 头,取 blob 转本地 URL(同图片缩略图)。 */
+/** 末帧接力候选缩略图:上一镜末帧走鉴权端点,blob 转本地 URL(同图片缩略图)。 */
+function PrevFrameThumb({ taskId }: { taskId: number }) {
+  const [url, setUrl] = useState("");
+  useEffect(() => {
+    let revoke = "";
+    let alive = true;
+    renderApi.lastFrameBlobUrl(taskId)
+      .then((u) => { if (alive) { revoke = u; setUrl(u); } else URL.revokeObjectURL(u); })
+      .catch(() => { if (alive) setUrl(""); });
+    return () => { alive = false; if (revoke) URL.revokeObjectURL(revoke); };
+  }, [taskId]);
+  return (
+    <div className="ref-thumb">
+      {url
+        ? <img src={url} alt="上一镜末帧" />
+        : <div className="ref-thumb-bad">加载…</div>}
+      <div className="ref-thumb-foot"><span className="muted">上一镜末帧</span></div>
+    </div>
+  );
+}
+
 function VoicePreview({ pid, cid, src }: { pid: number; cid: number; src?: string }) {
   const [url, setUrl] = useState("");
   useEffect(() => {
@@ -1116,6 +1138,8 @@ function EpisodeDetail({ pid, eid, hasStyle, ratio, onEpisodesChanged, onShootPr
   const [err, setErr] = useState("");
   // 拆分镜的如实交代(被截断 / 总时长短于目标),留在页面上直到下次重拆
   const [boardNotice, setBoardNotice] = useState("");
+  // 末帧接力候选:seq → 上一格末帧(整集一次拉齐;出片后重拉,下一格就有候选了)
+  const [prevFrames, setPrevFrames] = useState<Record<number, PrevFrameInfo>>({});
 
   const reload = useCallback(async () => {
     try {
@@ -1127,6 +1151,13 @@ function EpisodeDetail({ pid, eid, hasStyle, ratio, onEpisodesChanged, onShootPr
       setShots(r.shots);
       setPack(pk.pack);
     } catch (e) { setErr(errMsg(e)); }
+    // 出过片的格才有末帧;拉取失败静默(接力是可选增强,别让它把分镜页搞红)
+    try {
+      const { by_seq } = await renderApi.episodePrevFrames(pid, eid);
+      setPrevFrames(Object.fromEntries(
+        Object.entries(by_seq).map(([k, v]) => [Number(k), v]),
+      ));
+    } catch { setPrevFrames({}); }
   }, [pid, eid]);
 
   useEffect(() => { void reload(); }, [reload]);
@@ -1301,7 +1332,7 @@ function EpisodeDetail({ pid, eid, hasStyle, ratio, onEpisodesChanged, onShootPr
               做完打个勾——导出的施工单会带上这份进度
             </span></div>
           {shots.filter((s) => s.prompt_cn || s.prompt_en).map((s) => (
-            <PromptRow key={s.id} pid={pid} shot={s} ratio={ratio} onSaved={(ns) => {
+            <PromptRow key={s.id} pid={pid} shot={s} ratio={ratio} prevFrame={prevFrames[s.seq]} onSaved={(ns) => {
               // 函数式更新:几十格挂图/打勾是连着点的,拿闭包里的旧 shots 算会把上一格的结果吞掉
               setShots((prev) => prev.map((x) => (x.id === ns.id ? ns : x)));
             }} onRegenerated={() => { void reload(); void refreshList(); }} />
@@ -1490,8 +1521,10 @@ function ClipPlanSection({ pid, eid, sig }: { pid: number; eid: number; sig: str
   );
 }
 
-function PromptRow({ pid, shot, ratio, onSaved, onRegenerated }: {
+function PromptRow({ pid, shot, ratio, prevFrame, onSaved, onRegenerated }: {
   pid: number; shot: DramaShot; ratio: string;
+  /** 上一镜末帧候选(整集清单里查本格 seq;有出片才有) */
+  prevFrame?: PrevFrameInfo;
   onSaved: (s: DramaShot) => void;
   onRegenerated: () => void;
 }) {
@@ -1639,6 +1672,7 @@ function PromptRow({ pid, shot, ratio, onSaved, onRegenerated }: {
         { kind: `render:drama:shot:${shot.id}` });
       await reloadRenderTasks();
       setPreviewId(null); // 回到「跟随指针」:新版本就是指针
+      onRegenerated(); // 集级刷新:本格新末帧会让下一格亮出「接力」候选
       toast.ok(`镜头 ${shot.seq} 的草片已出`, "不满意直接再点一次「重出一版」;版本都在下方列表里");
     } catch (e) { toast.err("出片失败", errMsg(e)); } finally { setRenderBusy(false); }
   }
@@ -1650,6 +1684,18 @@ function PromptRow({ pid, shot, ratio, onSaved, onRegenerated }: {
       setDirty(false);
       toast.ok("已设为这一格的成片", "「视频出好了」的勾仍由你自己打");
     } catch (e) { toast.err("设为成片失败", errMsg(e)); }
+  }
+
+  /** 末帧接力:上一镜末帧一键挂为本格静帧(服务端复制,不走本地上传)。 */
+  async function adoptPrev() {
+    setAssetBusy(true);
+    try {
+      if (!await flush()) return;
+      const r = await renderApi.adoptPrevFrame(pid, shot.id);
+      onSaved(r.shot);
+      onRegenerated();
+      toast.ok(`已用第 ${r.from_seq} 格的末帧当本格首帧`, "本格出片即以它开头,镜头自然衔接");
+    } catch (e) { toast.err("采纳上一镜末帧失败", errMsg(e)); } finally { setAssetBusy(false); }
   }
 
   return (
@@ -1723,6 +1769,19 @@ function PromptRow({ pid, shot, ratio, onSaved, onRegenerated }: {
               <RefThumb key={`${img.src}-${i}`} pid={pid} owner="shot" id={shot.id} index={i}
                 img={img} alt={`镜头 ${draft.seq} 的静帧`} onDelete={() => void removeStill(i)} />
             ))}
+          </div>
+        ) : prevFrame ? (
+          /* 末帧接力候选:上一格刚出完片,末帧就是现成的本格首帧——一键采纳 */
+          <div className="card-head mb-2 relay-offer">
+            <PrevFrameThumb taskId={prevFrame.task_id} />
+            <span className="muted">
+              上一镜(第 {prevFrame.from_seq} 格)出完的末帧——拿它当本格首帧,镜头天然衔接
+            </span>
+            <span className="grow" />
+            <button className="btn-sm primary" disabled={assetBusy}
+              onClick={() => void adoptPrev()}>
+              {assetBusy ? "采纳中…" : "用上一镜末帧当首帧"}
+            </button>
           </div>
         ) : (
           <p className="hint">

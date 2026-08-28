@@ -726,3 +726,139 @@ def test_talk_long_audio_truncated_note(client: TestClient):
         row = db.query(RT).filter(RT.shot_id == sid).first()
         assert row.params["duration_s"] == 15  # 20s 夹到上限
         assert "截断" in row.params.get("note", "")
+
+
+# =============== 末帧自动接力 ===============
+
+
+def test_ffmpeg_bin_resolution(monkeypatch, tmp_path):
+    """三级定位:环境变量 > 打包资源 bin/ > PATH;全空返回 None。"""
+    from app.engines.render import ffmpeg as ff
+
+    fake = tmp_path / "ffmpeg.exe"
+    fake.write_bytes(b"x")
+    monkeypatch.setenv("JARVIS_FFMPEG", str(fake))
+    assert ff.ffmpeg_bin() == str(fake)
+    # 环境变量指向不存在的文件 → 落到 PATH 探测(测试机多半没有,允许 None)
+    monkeypatch.setenv("JARVIS_FFMPEG", str(tmp_path / "nope.exe"))
+    monkeypatch.setattr(ff.shutil, "which", lambda name: None)
+    assert ff.ffmpeg_bin() is None
+    assert ff.available() is False
+
+
+def test_extract_last_frame_command(monkeypatch, tmp_path):
+    """抽帧命令拼装:-sseof 倒搜、单帧、高质量;命令成功且产物存在才算成功。"""
+    from app.engines.render import ffmpeg as ff
+
+    mp4 = tmp_path / "r1.mp4"
+    mp4.write_bytes(_MINI_MP4)
+    out = tmp_path / "lf" / "r1.png"
+    captured = {}
+
+    def fake_run(cmd, capture_output, timeout):
+        captured["cmd"] = cmd
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"\x89PNG\r\n\x1a\n")
+        class _P:
+            returncode = 0
+            stderr = b""
+        return _P()
+
+    monkeypatch.setattr(ff, "ffmpeg_bin", lambda: "/fake/ffmpeg")
+    monkeypatch.setattr(ff.subprocess, "run", fake_run)
+    assert ff.extract_last_frame(mp4, out) is True
+    cmd = captured["cmd"]
+    assert "-sseof" in cmd and "0.1" in cmd
+    assert "-frames:v" in cmd and str(out) in cmd
+    # 命令失败 → False 不抛
+    monkeypatch.setattr(ff.subprocess, "run", lambda *a, **k: type("P", (), {"returncode": 1, "stderr": b"x"})())
+    assert ff.extract_last_frame(mp4, out) is False
+
+
+def test_prev_frames_relay(client: TestClient):
+    """接力全流程:上一格出片存末帧 → 整集清单亮出候选 → 一键挂为本格静帧。"""
+    from app.db.session import SessionLocal
+
+    headers = _auth(client, "relay_a")
+    pid = client.post("/api/projects", headers=headers, json={"title": "接力书"}).json()["id"]
+    from app.db.models import DramaEpisode, DramaShot
+    from app.db.session import SessionLocal as _SL
+
+    with _SL() as db:
+        ep = DramaEpisode(project_id=pid, ep_index=1, title="第一集")
+        db.add(ep)
+        db.flush()
+        s1 = DramaShot(episode_id=ep.id, seq=1, camera="固定", duration_s=3)
+        s2 = DramaShot(episode_id=ep.id, seq=2, camera="推", duration_s=3)
+        db.add_all([s1, s2])
+        db.commit()
+        sid1, sid2 = s1.id, s2.id
+    _config_token(client, headers)
+
+    # 第 1 格出片(fake 引擎),然后手工补上末帧文件(模拟 ffmpeg 抽帧的产物)
+    fake = _FakeRender()
+    with patch("app.api.render.start_render", fake):
+        r = client.post(f"/api/projects/{pid}/drama/shots/{sid1}/render", headers=headers)
+        assert _wait_job(client, headers, r.json()["job_id"])["status"] == "done"
+    task_id = r.json()["task_id"]
+    lf_dir = storage.upload_root() / "render" / "lf"
+    lf_dir.mkdir(parents=True, exist_ok=True)
+    (lf_dir / f"r{task_id}.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+
+    # 整集清单:第 2 格亮出「上一格末帧」候选;第 1 格没有
+    r = client.get(f"/api/projects/{pid}/drama/episodes/{ep.id}/prev-frames", headers=headers)
+    by_seq = r.json()["by_seq"]
+    assert by_seq.get("2", {}).get("task_id") == task_id
+    assert by_seq.get("2", {}).get("from_seq") == 1
+    assert "1" not in by_seq
+
+    # 末帧文件鉴权可读
+    r = client.get(f"/api/render/tasks/{task_id}/last-frame", headers=headers)
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+
+    # 一键采纳:第 2 格挂上末帧静帧 + 自动勾「静帧出好了」
+    r = client.post(f"/api/projects/{pid}/drama/shots/{sid2}/adopt-prev-frame", headers=headers)
+    assert r.status_code == 200, r.text
+    shot2 = r.json()["shot"]
+    assert shot2["done_still"] is True
+    assert "末帧" in shot2["assets"][0]["note"]
+
+    # 挂满 2 张再采纳 → 400;第 1 格(没有上一格)→ 404;他人项目 → 404
+    from app.db.models import DramaShot as DS
+
+    with _SL() as db:
+        db.get(DS, sid2).assets = shot2["assets"] + [{"kind": "upload", "src": "drama/1/shot9-1.png", "note": ""}]
+        db.commit()
+    r = client.post(f"/api/projects/{pid}/drama/shots/{sid2}/adopt-prev-frame", headers=headers)
+    assert r.status_code == 400
+    r = client.post(f"/api/projects/{pid}/drama/shots/{sid1}/adopt-prev-frame", headers=headers)
+    assert r.status_code == 404
+    hb = _auth(client, "relay_b")
+    assert client.post(f"/api/projects/{pid}/drama/shots/{sid2}/adopt-prev-frame", headers=hb).status_code == 404
+
+
+def test_purge_removes_last_frame(client: TestClient):
+    """删项目时,末帧文件跟着渲染任务一起清(不留在卷里吃空间)。"""
+    headers = _auth(client, "relay_purge")
+    pid = client.post("/api/projects", headers=headers, json={"title": "清库书"}).json()["id"]
+    from app.db.models import DramaEpisode, DramaShot, RenderTask
+    from app.db.session import SessionLocal
+
+    with SessionLocal() as db:
+        ep = DramaEpisode(project_id=pid, ep_index=1, title="e1")
+        db.add(ep)
+        db.flush()
+        s = DramaShot(episode_id=ep.id, seq=1, duration_s=3)
+        db.add(s)
+        db.flush()
+        t = RenderTask(user_id=1, line="drama", project_id=pid, shot_id=s.id,
+                       kind="i2v", status="success", result_path="render/r999.mp4")
+        db.add(t)
+        db.flush()
+        lf = storage.upload_root() / "render" / "lf" / f"r{t.id}.png"
+        lf.parent.mkdir(parents=True, exist_ok=True)
+        lf.write_bytes(b"\x89PNG\r\n\x1a\n")
+        lf_id = t.id
+        db.commit()
+    assert client.delete(f"/api/projects/{pid}", headers=headers).status_code == 200
+    assert not (storage.upload_root() / "render" / "lf" / f"r{lf_id}.png").exists()

@@ -22,6 +22,15 @@ echo "==> [2/4] 冻结后端为 onedir(PyInstaller)→ backend/dist/jarvis-write
 APP_VER="$(python -c 'import json;print(json.load(open("src-tauri/tauri.conf.json"))["version"])')"
 echo "$APP_VER" > backend/_version.txt
 echo "    (写入 backend/_version.txt: $APP_VER)"
+# ffmpeg(末帧自动接力):可选二进制,不进 git。放入则打包进安装包,
+# 缺失也能出包——运行时探测不到就整体隐藏接力功能。
+if [ -f "backend/bin/ffmpeg.exe" ]; then
+  echo "    (已找到 backend/bin/ffmpeg.exe,末帧接力功能将随包分发)"
+else
+  echo "提示:backend/bin/ffmpeg.exe 不存在,本安装包不含「末帧自动接力」。"
+  echo "  需要的话从 https://www.gyan.dev/ffmpeg/builds/ 下载 essentials 版,"
+  echo "  把 ffmpeg.exe 放到 backend/bin/ 后重新构建(功能会自动启用)。"
+fi
 ( cd backend && .venv/Scripts/python -m PyInstaller desktop.spec --noconfirm )
 
 echo "==> [3/4] 生成 Tauri 图标(从 src-tauri/icon-source.png → src-tauri/icons/)"

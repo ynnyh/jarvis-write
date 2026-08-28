@@ -16,6 +16,11 @@ RUN npm run build
 
 FROM python:3.12-slim
 ARG GIT_COMMIT=dev
+# ffmpeg:出片引擎「末帧自动接力」用(渲染成功的草片抽最后一帧当下一镜首帧)。
+# --no-install-recommends 控制体积;镜像里没有它其余功能完全不受影响。
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /srv
 COPY backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com

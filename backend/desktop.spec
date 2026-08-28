@@ -53,10 +53,16 @@ import os as _os
 if _os.path.exists("_version.txt"):
     datas += [("_version.txt", ".")]
 
+# ffmpeg(末帧自动接力):不进 git(体积/许可),构建前手工放入 backend/bin/。
+# 缺失时不打入——运行时 available() 探测不到就整体隐藏接力功能,其余零影响。
+binaries = []
+if _os.path.exists(_os.path.join("bin", "ffmpeg.exe")):
+    binaries += [("bin/ffmpeg.exe", "bin")]
+
 a = Analysis(
     ["desktop_main.py"],
     pathex=[],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hidden,
     hookspath=[],

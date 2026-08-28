@@ -3,6 +3,7 @@
 // 这里只管「配置读写 / 提交出片 / 版本历史 / 采用某版 / 读草片」。
 // 独立成模块的理由与 dramaApi 相同:api.ts 被主线占用,避免同文件编辑冲突。
 import { ApiError, token } from "./api";
+import type { DramaShot } from "./dramaApi";
 
 async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 30000): Promise<T> {
   const ctrl = new AbortController();
@@ -44,6 +45,8 @@ export interface RenderConfigOut {
   workflow_tts: string;    // 配音工作流 ID(完整档对白链第一步)
   workflow_talk: string;   // 对口型工作流 ID(完整档对白链第二步)
   configured: boolean;     // false = 前端把出片按钮换成「先去设置」空态
+  // 末帧自动接力:部署里有 ffmpeg 才 true;false 时前端整体隐藏候选按钮
+  last_frame_available: boolean;
 }
 export interface RenderConfigIn {
   base_url?: string;
@@ -75,6 +78,12 @@ export interface SubmitRenderResult {
   deduped: boolean; // true = 该单元已有任务在跑,复用旧 job(前端照常轮询即可)
 }
 
+/** 上一镜末帧候选(整集清单按 seq 给;seq 从 1 起,第 1 格天然没有)。 */
+export interface PrevFrameInfo {
+  task_id: number;
+  from_seq: number;
+}
+
 export const renderApi = {
   getConfig: () => req<RenderConfigOut>("GET", "/api/render/config"),
   saveConfig: (body: RenderConfigIn) => req<RenderConfigOut>("PUT", "/api/render/config", body),
@@ -99,6 +108,21 @@ export const renderApi = {
   /** 读草片视频 → 本地 blob URL(<video src> 带不了 Authorization 头,同图片缩略图的思路)。 */
   async taskBlobUrl(taskId: number): Promise<string> {
     const res = await fetch(`/api/render/tasks/${taskId}/file`, { headers: authHeaders() });
+    if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+    return URL.createObjectURL(await res.blob());
+  },
+
+  // ---- 末帧自动接力:上一镜末帧 → 下一镜首帧 ----
+  // 整集一次拉齐(seq → 候选);有出片才有候选,与轻量/完整档无关
+  episodePrevFrames: (pid: number, eid: number) =>
+    req<{ by_seq: Record<string, PrevFrameInfo> }>(
+      "GET", `/api/projects/${pid}/drama/episodes/${eid}/prev-frames`),
+  adoptPrevFrame: (pid: number, sid: number) =>
+    req<{ shot: DramaShot; from_seq: number }>(
+      "POST", `/api/projects/${pid}/drama/shots/${sid}/adopt-prev-frame`, {}),
+  /** 末帧缩略图(<img> 带不了 Authorization 头,取 blob 转本地 URL)。 */
+  async lastFrameBlobUrl(taskId: number): Promise<string> {
+    const res = await fetch(`/api/render/tasks/${taskId}/last-frame`, { headers: authHeaders() });
     if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
     return URL.createObjectURL(await res.blob());
   },

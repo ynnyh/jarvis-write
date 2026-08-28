@@ -27,7 +27,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app import storage
 from app.api.clips import _get_clip
-from app.api.drama._common import _get_shot
+from app.api.drama._common import _get_shot, get_project_or_404
 from app.api.settings import _mask
 from app.auth import get_current_user
 from app.crypto import decrypt, encrypt
@@ -68,6 +68,8 @@ def _get_config_row(db: Session, user_id: int) -> RenderConfig | None:
 
 
 def _config_out(row: RenderConfig | None) -> dict:
+    from app.engines.render.ffmpeg import available as ffmpeg_available
+
     token = decrypt(row.token) if row else ""
     return {
         "base_url": row.base_url if row else "",
@@ -80,6 +82,8 @@ def _config_out(row: RenderConfig | None) -> dict:
         "workflow_talk": row.workflow_talk if row else "",
         # 前端空态引导用:没填 token 就把出片按钮换成「先去设置」
         "configured": bool(token),
+        # 末帧自动接力:部署里有 ffmpeg 才亮(缺失时前端整体隐藏,零影响)
+        "last_frame_available": ffmpeg_available(),
     }
 
 
@@ -461,6 +465,120 @@ def purge_render_tasks(db: Session, *, project_id: int | None = None, clip_id: i
     for t in rows:
         if t.result_path:
             storage.delete_render_file(t.result_path)
+        # 末帧文件按任务号约定落位(render/lf/r<id>.png),任务删则末帧删
+        lf = storage.upload_root() / "render" / "lf" / f"r{t.id}.png"
+        lf.unlink(missing_ok=True)
     for t in rows:
         db.delete(t)
     return len(rows)
+
+
+# =============== 末帧自动接力(上一镜末帧 → 下一镜首帧)===============
+
+
+def _lf_path(task_id: int):
+    """末帧文件路径(约定落位 render/lf/r<task_id>.png)。"""
+    return storage.upload_root() / "render" / "lf" / f"r{int(task_id)}.png"
+
+
+def _latest_lf_task(db: Session, shot_id: int) -> RenderTask | None:
+    """该格最新一个「出片成功且末帧文件还在」的任务;没有则 None。"""
+    rows = (
+        db.query(RenderTask)
+        .filter(RenderTask.shot_id == shot_id, RenderTask.status == "success")
+        .order_by(RenderTask.id.desc())
+        .limit(_TASK_LIST_LIMIT)
+        .all()
+    )
+    for t in rows:
+        if _lf_path(t.id).is_file():
+            return t
+    return None
+
+
+@router.get("/api/projects/{project_id}/drama/episodes/{episode_id}/prev-frames")
+async def episode_prev_frames(
+    project_id: int, episode_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)
+):
+    """整集一次拉齐:每个分镜格的「上一格末帧」可用量。
+
+    by_seq 的 key 是分镜格 seq(seq 从 1 起,所以 seq-1 的格才可能有末帧);
+    前端据此在第 N 格显示「用上一镜末帧当首帧」的候选按钮。
+    """
+    from app.db.models import DramaEpisode
+
+    ep = (
+        db.query(DramaEpisode)
+        .filter(DramaEpisode.id == episode_id, DramaEpisode.project_id == project_id)
+        .first()
+    )
+    _ = get_project_or_404(db, project_id)  # 归属校验(顺序无所谓,先拦人再看集)
+    if ep is None:
+        raise HTTPException(status_code=404, detail="这一集不存在。")
+    from app.db.models import DramaShot
+
+    shots = (
+        db.query(DramaShot)
+        .filter(DramaShot.episode_id == episode_id)
+        .order_by(DramaShot.seq)
+        .all()
+    )
+    by_seq: dict[str, dict] = {}
+    for prev, cur in zip(shots, shots[1:]):
+        t = _latest_lf_task(db, prev.id)
+        if t is not None:
+            by_seq[str(cur.seq)] = {"task_id": t.id, "from_seq": prev.seq}
+    return {"by_seq": by_seq}
+
+
+@router.get("/api/render/tasks/{task_id}/last-frame")
+async def read_render_last_frame(
+    task_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)
+):
+    """读某次渲染的末帧 png(走鉴权,同草片文件一个待遇)。"""
+    task = _get_own_task(db, task_id, user.id)
+    path = _lf_path(task.id)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="这一版没有末帧存档(可能部署里没有 ffmpeg)。")
+    return Response(
+        content=path.read_bytes(),
+        media_type="image/png",
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
+
+
+@router.post("/api/projects/{project_id}/drama/shots/{shot_id}/adopt-prev-frame")
+async def adopt_prev_frame(
+    project_id: int, shot_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)
+):
+    """把「上一镜末帧」一键挂为本格静帧(首尾帧接力的机械实现)。
+
+    与手工上传同一落点(save_shot_asset):上一格最新成功草片的末帧 → 本格
+    assets + done_still=True。段计划的「首帧图已就位」立刻亮,出片就有衔接。
+    """
+    shot = _get_shot(db, project_id, shot_id)
+    prev = (
+        db.query(DramaShot)
+        .filter(DramaShot.episode_id == shot.episode_id, DramaShot.seq == shot.seq - 1)
+        .first()
+    )
+    task = _latest_lf_task(db, prev.id) if prev is not None else None
+    if task is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"第 {shot.seq - 1} 格还没有可用的末帧(先出片,且部署里要有 ffmpeg)。",
+        )
+    assets = shot_asset_list(shot)
+    if len(assets) >= storage.MAX_ASSETS_PER_SHOT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"一格最多挂 {storage.MAX_ASSETS_PER_SHOT} 张静帧,先删掉一张再采纳上一镜末帧。",
+        )
+    png = _lf_path(task.id).read_bytes()
+    rel = storage.save_shot_asset(project_id, shot_id, png, len(assets))
+    shot.assets = assets + [{"kind": "upload", "src": rel, "note": f"上一镜(第 {prev.seq} 格)末帧"}]
+    shot.done_still = True
+    db.commit()
+    from app.engines.drama.common import shots_payload
+
+    return {"shot": shots_payload(db, project_id, [shot])[0], "from_seq": prev.seq}
