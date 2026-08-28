@@ -32,6 +32,14 @@ class RenderError(RuntimeError):
     """出片相关的业务性错误(信息直接上屏,不丢堆栈)。"""
 
 
+class PollTransientError(RuntimeError):
+    """轮询时的瞬时故障(网络抖动/5xx/响应截断):可重试,由上层带计数地容忍。
+
+    与 RenderError 的分工:长轮询要打几百次请求,单次抖动是常态,吞掉继续等;
+    但连续失败说明链路真断了,计数由 poll_with_retry 管,到顶翻译成明确错误。
+    """
+
+
 def _headers(token: str) -> dict[str, str]:
     return {"Authorization": token, "Content-Type": "application/json"}
 
@@ -91,21 +99,28 @@ async def submit(base_url: str, token: str, workflow_id: str, params: dict) -> s
 
 
 async def poll(base_url: str, token: str, task_id: str) -> tuple[str, list[str]]:
-    """查一次任务状态,返回 (归一化状态, 结果文件 URL 列表)。"""
+    """查一次任务状态,返回 (归一化状态, 结果文件 URL 列表)。
+
+    故障分三档:401/402/403 是令牌/余额问题,快失败说人话;网络异常、其他非 200、
+    响应截断是瞬时故障,抛 PollTransientError 交 poll_with_retry 带计数容忍。
+    """
     url = f"{_api_base(base_url)}/api/v1/comfyui/comfyui_workflow/result/{task_id}"
     try:
         async with httpx.AsyncClient(timeout=POLL_TIMEOUT_S) as client:
             resp = await client.get(url, headers=_headers(token))
     except httpx.HTTPError as exc:
-        # 单次轮询网络抖动不当失败:交由上层循环继续等,这里按 running 处理
-        logger.warning("轮询出片任务 %s 网络异常(继续等): %s", task_id, exc)
-        return "running", []
+        raise PollTransientError(f"网络异常:{exc}") from exc
+    if resp.status_code in (401, 402, 403):
+        raise RenderError(
+            f"出片平台拒绝了查询请求(HTTP {resp.status_code}):令牌无效或余额不足,"
+            "请到「设置 → 出片引擎」检查令牌与账户余额。"
+        )
     if resp.status_code != 200:
-        raise RenderError(f"查询出片任务失败(HTTP {resp.status_code})。")
+        raise PollTransientError(f"平台返回 HTTP {resp.status_code}")
     try:
         body = resp.json()
     except ValueError as exc:
-        raise RenderError("出片平台返回了无法解析的轮询响应。") from exc
+        raise PollTransientError("平台返回了无法解析的响应") from exc
     data = body.get("data") or {}
     status = normalize_status(str(data.get("status") or ""))
     urls = [
@@ -114,6 +129,28 @@ async def poll(base_url: str, token: str, task_id: str) -> tuple[str, list[str]]
         if isinstance(r, dict) and r.get("url")
     ]
     return status, urls
+
+
+# 连续瞬时失败的容忍上限:单次抖动常见,连着 5 次基本就是链路断了——
+# 及时给用户一个明确说法,别把 10 分钟轮询预算全烧在无效重试上。
+MAX_CONSECUTIVE_POLL_FAILURES = 5
+
+
+async def poll_with_retry(base_url: str, token: str, task_id: str) -> tuple[str, list[str]]:
+    """轮询一次任务状态,对瞬时故障带计数容忍;终态(成功/失败)与钱的问题直接返回/抛出。"""
+    streak = 0
+    while True:
+        try:
+            status, urls = await poll(base_url, token, task_id)
+        except PollTransientError as exc:
+            streak += 1
+            if streak >= MAX_CONSECUTIVE_POLL_FAILURES:
+                raise RenderError(
+                    f"多次查询出片任务均失败({exc}),请检查网络后重试。"
+                ) from exc
+            logger.warning("轮询 %s 第 %d 次瞬时失败,继续等: %s", task_id, streak, exc)
+            continue
+        return status, urls
 
 
 async def fetch_bytes(url: str, timeout_s: int = DOWNLOAD_TIMEOUT_S) -> bytes:

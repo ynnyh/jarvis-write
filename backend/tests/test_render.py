@@ -659,7 +659,7 @@ def test_talk_full_pipeline_with_tts_cache(client: TestClient):
         return _make_wav(8000, 3) if state["kind"] == "wav" else _MINI_MP4
 
     with patch("app.engines.render.service.submit", fake_submit), \
-         patch("app.engines.render.service.poll", fake_poll), \
+         patch("app.engines.render.service.poll_with_retry", fake_poll), \
          patch("app.engines.render.service.fetch_bytes", fake_fetch):
         r = client.post(f"/api/projects/{pid}/drama/shots/{sid}/render", headers=headers)
         assert _wait_job(client, headers, r.json()["job_id"])["status"] == "done", r.text
@@ -714,7 +714,7 @@ def test_talk_long_audio_truncated_note(client: TestClient):
         return w
 
     with patch("app.engines.render.service.submit", fake_submit), \
-         patch("app.engines.render.service.poll", fake_poll), \
+         patch("app.engines.render.service.poll_with_retry", fake_poll), \
          patch("app.engines.render.service.fetch_bytes", fake_fetch):
         r = client.post(f"/api/projects/{pid}/drama/shots/{sid}/render", headers=headers)
         job = _wait_job(client, headers, r.json()["job_id"])

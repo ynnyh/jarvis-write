@@ -20,7 +20,7 @@ from app.engines.render.client import (
     RenderError,
     fetch_bytes,
     file_data_uri,
-    poll,
+    poll_with_retry,
     submit,
 )
 from app.engines.render.emotion import emotion_weights, normalize_emotion
@@ -232,7 +232,7 @@ async def _wait_result(progress, base_url: str, token: str, provider_task_id: st
     while waited < POLL_BUDGET_S:
         await asyncio.sleep(POLL_INTERVAL_S)
         waited += POLL_INTERVAL_S
-        status, urls = await poll(base_url, token, provider_task_id)
+        status, urls = await poll_with_retry(base_url, token, provider_task_id)
         if status == "success":
             return [u for u in urls if u]
         if status == "failed":
