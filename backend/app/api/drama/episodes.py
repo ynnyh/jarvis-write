@@ -12,11 +12,13 @@ from sqlalchemy.orm import Session
 from app import storage
 
 from app.api.drama._common import (
+    FilmPromptIn,
     PlanIn,
     _episode_job,
     _get_episode,
     _load_for_job,
     _require_approved,
+    build_episode_film_prompt,
     build_production_pack,
     build_storyboard,
     clips_payload,
@@ -212,6 +214,44 @@ async def prompts(project_id: int, episode_id: int, db: Session = Depends(get_db
             return await render_shot_prompts(session, proj, ep, progress)
 
     return {"job_id": spawn_job(kind, work)}
+
+
+# =============== 整片提示词(端到端音频原生视频模型) ===============
+
+
+@router.post("/episodes/{episode_id}/film-prompt")
+async def build_film_prompt(project_id: int, episode_id: int, db: Session = Depends(get_db)):
+    """把分镜+角色卡+画风组装成一条「一次出一整片」的成片提示词(覆盖旧稿)。"""
+    _get_episode(db, project_id, episode_id)
+    kind = f"drama-film-prompt-{episode_id}"
+    if (existing := _episode_job(kind)):
+        return existing
+
+    async def work(progress):
+        from app.db.session import SessionLocal
+
+        with SessionLocal() as session:
+            proj, ep = _load_for_job(session, project_id, episode_id)
+            return await build_episode_film_prompt(session, proj, ep, progress)
+
+    return {"job_id": spawn_job(kind, work)}
+
+
+@router.get("/episodes/{episode_id}/film-prompt")
+async def get_film_prompt(project_id: int, episode_id: int, db: Session = Depends(get_db)):
+    ep = _get_episode(db, project_id, episode_id)
+    return {"film_prompt": ep.film_prompt or ""}
+
+
+@router.put("/episodes/{episode_id}/film-prompt")
+async def save_film_prompt(
+    project_id: int, episode_id: int, body: FilmPromptIn, db: Session = Depends(get_db)
+):
+    """整段替换保存:手改后的稿子、或用户自己写的版本都存这一列。"""
+    ep = _get_episode(db, project_id, episode_id)
+    ep.film_prompt = (body.film_prompt or "").strip()
+    db.commit()
+    return {"film_prompt": ep.film_prompt}
 
 
 # =============== 成片包(阶段 2:配音稿 + 剪辑清单) ===============

@@ -841,6 +841,23 @@ def _add_render_episode_id_column() -> None:
             logger.info("迁移:render_tasks 补 episode_id 列")
 
 
+def _add_episode_film_prompt_column() -> None:
+    """drama_episodes 补 film_prompt 列(整片提示词,幂等)。
+
+    给端到端音频原生视频模型的一次性成片提示词,由引擎生成后整段存 TEXT;
+    手改/粘贴也落这列,「生成即覆盖,保存即替换」是唯一语义,不存历史。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "drama_episodes" not in insp.get_table_names():
+            return  # create_all 会按新模型建表,无需补列
+        if not _column_exists("drama_episodes", "film_prompt"):
+            conn.execute(
+                text("ALTER TABLE drama_episodes ADD COLUMN film_prompt TEXT DEFAULT ''")
+            )
+            logger.info("迁移:drama_episodes 补 film_prompt 列")
+
+
 def run_migrations() -> None:
     """启动时调用。幂等。"""
     _add_user_id_columns()
@@ -877,6 +894,7 @@ def run_migrations() -> None:
     _add_project_render_mode_column()
     _add_drama_dialogue_chain_columns()
     _add_render_episode_id_column()
+    _add_episode_film_prompt_column()
     _disable_word_guard_default()
     _migrate_finalized_to_approved()
     # 先补加密老表存量明文 key,再拷到新表,保证 provider_configs 落库必为密文

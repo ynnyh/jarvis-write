@@ -29,6 +29,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.engines.drama import (
+    build_episode_film_prompt,
     build_production_pack,
     build_storyboard,
     export_csv,
@@ -138,6 +139,12 @@ class PlanIn(BaseModel):
     to_chapter: int = Field(ge=1)
     mode: str = "dialogue"
     duration_s: int = Field(default=90, ge=30, le=180)
+
+
+class FilmPromptIn(BaseModel):
+    """整片提示词手动保存:整段替换(粘贴自己写的版本也走这里)。"""
+
+    film_prompt: str = ""
 
 
 class TrailerIn(BaseModel):

@@ -149,6 +149,10 @@ class DramaEpisode(Base, TimestampMixin):
     duration_target_s: Mapped[int] = mapped_column(Integer, default=90)
     script: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     status: Mapped[str] = mapped_column(String(20), default="planned")
+    # 整片提示词:给端到端音频原生视频模型(Sora/Veo/可灵这类「一条提示词出一整片」)
+    # 的一次性成片提示词,由分镜+角色卡+画风卡组装生成;可手改,也可整段粘贴保存
+    # 自己写的版本。与三轨提示词的分工:那份是逐格出图的原料,这份是整片一发的成品稿。
+    film_prompt: Mapped[str] = mapped_column(Text, default="")
 
     __table_args__ = (UniqueConstraint("project_id", "ep_index", name="uq_drama_ep_index"),)
 

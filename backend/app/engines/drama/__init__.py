@@ -13,6 +13,7 @@ from .characters import (
     generate_scene_cards,
     regenerate_character_card,
 )
+from .film_prompt import FilmPromptError, build_episode_film_prompt
 from .exporter import (
     export_csv,
     export_json,
@@ -37,6 +38,7 @@ from .voice import DramaVoiceError, generate_voice_cast
 
 __all__ = [
     "DramaAssetError",
+    "FilmPromptError",
     "DramaPlanError",
     "DramaScriptError",
     "DramaStoryboardError",
@@ -59,6 +61,7 @@ __all__ = [
     "render_shot_prompts",
     "render_single_shot_prompt",
     "build_production_pack",
+    "build_episode_film_prompt",
     "generate_trailer",
     "export_markdown",
     "export_csv",
