@@ -17,12 +17,14 @@ from app import storage
 from app.crypto import decrypt
 from app.db.models import RenderConfig, RenderTask
 from app.engines.render.client import (
+    SSRFBlocked,
     RenderError,
     fetch_bytes,
     file_data_uri,
     poll_with_retry,
     submit,
 )
+from app.net_guard import check_public_url
 from app.engines.render.emotion import emotion_weights, normalize_emotion
 
 logger = logging.getLogger("jarvis-write.render")
@@ -53,8 +55,17 @@ async def _resolve_first_frame(src: str, kind: str) -> bytes:
         return path.read_bytes()
     from app.engines.render.client import fetch_bytes as _fetch
 
+    reason = check_public_url(src)
+    if reason:
+        raise RenderError(f"外链首帧不安全:{reason}。请把图下载后在本格重新上传,再出片。")
+
     try:
         return await _fetch(src, timeout_s=60)
+    except SSRFBlocked as exc:
+        # 入口过审但中途跳进了内网:照外链不安全的口径说,别误导成"外链失效了"
+        raise RenderError(
+            f"外链首帧不安全:{exc}。请把图下载后在本格重新上传,再出片。"
+        ) from exc
     except RenderError as exc:
         raise RenderError(
             f"首帧用的是外链,但拉取失败({exc})。生图站的外链普遍带时效签名,"
@@ -161,6 +172,10 @@ async def start_render(progress, spec: dict) -> dict:
         _mark_failed(task_id, "平台没返回视频文件")
         raise RenderError("出片平台没有返回视频文件,请重试一次。")
     progress("下载成片…")
+    reason = check_public_url(video_urls[0])
+    if reason:
+        _mark_failed(task_id, f"成片下载被拒:{reason}")
+        raise RenderError(f"出片平台返回的视频地址不安全({reason}),请重试一次。")
     data = await fetch_bytes(video_urls[0])
     try:
         rel = storage.save_render_result(task_id, data)
@@ -294,6 +309,9 @@ async def _synthesize_voice(progress, base_url: str, token: str, talk: dict) -> 
     urls = await _wait_result(progress, base_url, token, provider_task_id, "配音")
     if not urls:
         raise RenderError("配音平台没有返回音频文件,请重试一次。")
+    reason = check_public_url(urls[0])
+    if reason:
+        raise RenderError(f"配音下载被拒:{reason},请重试一次。")
     data = await fetch_bytes(urls[0])
     try:
         rel = storage.save_tts_cache(key, data)

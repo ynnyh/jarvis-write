@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 from app.engines.render import client
-from app.engines.render.client import RenderError
+from app.engines.render.client import RenderError, SSRFBlocked
 
 BASE = "https://platform.example"
 
@@ -300,6 +300,52 @@ def test_voice_cache_key_changes_with_content(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# 外链下载过 SSRF 校验:首帧与配音结果不得指向内网
+# ---------------------------------------------------------------------------
+
+def test_external_first_frame_ssrf_blocked():
+    """外链首帧指向内网:拒绝下载,不当内网跳板。"""
+    from app.engines.render import service
+
+    with pytest.raises(RenderError, match="内网"):
+        asyncio.run(service._resolve_first_frame("http://10.0.0.5/img.png", "url"))
+
+
+def test_tts_result_url_ssrf_blocked(monkeypatch):
+    """配音平台回跳内网地址:拒绝下载,且绝不能真发出请求。"""
+    from app import storage
+    from app.db import models  # noqa: F401 — 注册全部模型
+    from app.db.base import Base
+    from app.db.session import engine
+    from app.engines.render import service
+
+    Base.metadata.create_all(engine)  # 幂等:不起 app 单跑时自建表
+
+    async def fake_submit(base_url, token, workflow_id, params):
+        return "pt-tts"
+
+    async def fake_wait(progress, base_url, token, provider_task_id, what):
+        return ["http://169.254.169.254/dub.wav"]  # 云元数据端点
+
+    async def must_not_fetch(url, timeout_s=120):
+        raise AssertionError("should have been blocked by net_guard")
+
+    monkeypatch.setattr(service, "submit", fake_submit)
+    monkeypatch.setattr(service, "_wait_result", fake_wait)
+    monkeypatch.setattr(service, "fetch_bytes", must_not_fetch)
+
+    rel = "drama/9998/voice78.mp3"
+    d = storage.upload_root() / "drama" / "9998"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "voice78.mp3").write_bytes(b"ID3\x04" + b"\x03" * 64)
+    talk = {"workflow_tts": "indextts2-v1", "voice_src": rel,
+            "emotion": "happy", "text": "SSRF 探针", "user_id": 1}
+
+    with pytest.raises(RenderError, match="内网"):
+        asyncio.run(service._synthesize_voice(lambda s: None, BASE, "tok", talk))
+
+
+# ---------------------------------------------------------------------------
 # fetch_bytes
 # ---------------------------------------------------------------------------
 
@@ -312,3 +358,55 @@ def test_fetch_bytes_non200(monkeypatch):
 def test_fetch_bytes_ok(monkeypatch):
     _patch_transport(monkeypatch, lambda req: httpx.Response(200, content=b"vid"))
     assert asyncio.run(client.fetch_bytes("https://cdn.example/v.mp4")) == b"vid"
+
+
+def test_fetch_bytes_blocks_internal_url(monkeypatch):
+    """下载器自己也不碰内网:入口地址就是内网时,请求根本不许发出。"""
+    def handler(req):
+        raise AssertionError(f"内网地址不该发出请求: {req.url}")
+
+    _patch_transport(monkeypatch, handler)
+    with pytest.raises(SSRFBlocked, match="内网"):
+        asyncio.run(client.fetch_bytes("http://10.0.0.5/v.mp4"))
+
+
+def test_fetch_bytes_blocks_redirect_to_internal(monkeypatch):
+    """入口是公网、302 跳进内网——最经典的绕过,逐跳校验必须兜住。"""
+    seen = []
+
+    def handler(req):
+        seen.append(str(req.url))
+        if len(seen) == 1:
+            return httpx.Response(
+                302, headers={"Location": "http://169.254.169.254/latest/meta-data/"}
+            )
+        raise AssertionError(f"不该请求第二跳: {req.url}")
+
+    _patch_transport(monkeypatch, handler)
+    with pytest.raises(SSRFBlocked, match="内网"):
+        asyncio.run(client.fetch_bytes("https://cdn.example/v.mp4"))
+    assert len(seen) == 1, "第二跳要在发请求之前就被拦下"
+
+
+def test_fetch_bytes_follows_public_redirect(monkeypatch):
+    """公网内部的重定向照常跟跳,相对 Location 也要能解析对。"""
+    seen = []
+
+    def handler(req):
+        seen.append(str(req.url))
+        if len(seen) == 1:
+            return httpx.Response(302, headers={"Location": "/final/v.mp4"})
+        return httpx.Response(200, content=b"vid")
+
+    _patch_transport(monkeypatch, handler)
+    assert asyncio.run(client.fetch_bytes("https://cdn.example/a/v.mp4")) == b"vid"
+    assert seen[-1] == "https://cdn.example/final/v.mp4"
+
+
+def test_fetch_bytes_redirect_loop_gives_up(monkeypatch):
+    """被遛着转圈就放弃,别把下载超时预算烧在无限重定向里。"""
+    _patch_transport(
+        monkeypatch, lambda req: httpx.Response(302, headers={"Location": "/next"})
+    )
+    with pytest.raises(RenderError, match="重定向"):
+        asyncio.run(client.fetch_bytes("https://cdn.example/v.mp4"))

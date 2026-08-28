@@ -12,6 +12,8 @@ backend/chroma_data/
 backend/.env
 backend/app.log
 backend/server.log
+backend/.coverage
+backend/uploads/
 
 # Node
 frontend/node_modules/

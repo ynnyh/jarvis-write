@@ -684,6 +684,30 @@ def test_talk_full_pipeline_with_tts_cache(client: TestClient):
         assert db.get(DramaShot, sid).clip_ref
 
 
+def test_result_url_ssrf_blocked(client: TestClient):
+    """平台返回的成片地址指向内网:拒绝下载,任务失败并说人话,不当内网跳板。"""
+    headers, pid, sid, _ = _seed_talk_scene(client, "ssrf_result", with_voice=False)
+
+    async def fake_submit(base_url, token, workflow_id, params):
+        return "pt-ssrf"
+
+    async def fake_poll(base_url, token, task_id):
+        return "success", ["http://10.0.0.5/v.mp4"]
+
+    async def must_not_fetch(url, timeout_s=120):
+        raise AssertionError("should have been blocked by net_guard")
+
+    with patch("app.engines.render.service.submit", fake_submit), \
+         patch("app.engines.render.service.poll_with_retry", fake_poll), \
+         patch("app.engines.render.service.fetch_bytes", must_not_fetch):
+        r = client.post(f"/api/projects/{pid}/drama/shots/{sid}/render", headers=headers)
+        assert r.status_code == 200, r.text
+        job = _wait_job(client, headers, r.json()["job_id"])
+
+    assert job["status"] == "error", job
+    assert "内网" in job["error"]
+
+
 def _make_wav(rate: int, seconds: float) -> bytes:
     import struct
 

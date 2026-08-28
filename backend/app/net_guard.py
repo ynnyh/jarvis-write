@@ -2,12 +2,18 @@
 # -*- coding: utf-8 -*-
 """出站地址校验:拦截把 provider base_url 指向私网/环回/元数据地址的配置。
 
-SSRF 防线:用户能在设置页自定义 base_url,服务器会拿它发出站请求。若指向内网
-(127.0.0.1 / 10.x / 169.254.169.254 云元数据等),可被用来探测内网服务。
-在"保存配置"这个低频入口做一次 DNS 解析 + IP 段判断,挡掉绝大多数尝试。
+SSRF 防线,两道:
+1. 配置入口(base_url):用户能在设置页自定义,服务器会拿它发出站请求。若指向内网
+   (127.0.0.1 / 10.x / 169.254.169.254 云元数据等),可被用来探测内网服务。
+   在"保存配置"这个低频入口做一次 DNS 解析 + IP 段判断,挡掉绝大多数尝试。
+2. 下载链路(引擎拿到的文件地址):平台返回或用户粘贴的 URL 同样不可信,由
+   `engines/render/client.fetch_bytes` 在**每一跳**现校验——重定向自己跟,
+   所以"入口是公网、302 跳进内网"这种经典绕过也挡得住。
 
-局限:DNS rebinding(解析时公网、请求时内网)绕得过——那要在发请求时再校验,
-成本高;对试用场景先接受,记 TODO。空 base_url 放行(回落 .env 默认,可信)。
+已知局限(两道都绕得过,未修):DNS rebinding(校验时解析到公网 IP、真正连接时
+解析到内网)。要在建连那一刻锁 IP 才堵得上(httpcore 支持 sni_hostname,可做),
+代价是证书校验与 Host 头都要手工接管;当前部署形态(桌面版/小团队多用户)风险
+可控,先记账。空 base_url 放行(回落 .env 默认,可信)。
 """
 from __future__ import annotations
 
@@ -50,6 +56,27 @@ def assert_public_base_url(base_url: str) -> None:
             raise HTTPException(
                 status_code=400, detail="base_url 不能指向内网/本机地址"
             )
+
+
+def check_public_url(url: str) -> str | None:
+    """出站 URL 是否指向内网:返回拦截理由(上屏文案)或 None(放行)。
+
+    与 assert_public_base_url 同一套判断,但给引擎链路用——那边抛 400,
+    这里返回理由字符串,调用方自己决定包装成什么错误。
+    """
+    parsed = urlparse((url or "").strip())
+    host = parsed.hostname
+    if not host:
+        return "下载地址格式不正确"
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        # 解析不了的域名连不上,放行(真正外呼会自然失败),不误伤
+        return None
+    for info in infos:
+        if _is_blocked(info[4][0]):
+            return f"下载地址不能指向内网/本机({host})"
+    return None
 
 
 # ---------------------------------------------------------------------------

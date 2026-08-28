@@ -73,6 +73,47 @@ def test_save_provider_rejects_internal_base_url(client):
     assert "内网" in r.json()["detail"]
 
 
+# ---------- check_public_url:引擎链路用的出站校验(返回理由,不抛) ----------
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1/x.mp4",
+        "http://10.0.0.5/img.png",
+        "http://192.168.1.1/v.mp4",
+        "http://169.254.169.254/latest/meta-data/",  # 云元数据
+        "http://[::1]/x",
+    ],
+)
+def test_check_public_url_blocks_internal(url):
+    from app.net_guard import check_public_url
+
+    reason = check_public_url(url)
+    assert reason is not None and "内网" in reason
+
+
+def test_check_public_url_allows_public_literal_ip():
+    from app.net_guard import check_public_url
+
+    assert check_public_url("https://8.8.8.8/v.mp4") is None
+
+
+def test_check_public_url_allows_unresolvable_host():
+    # 解析不了的域名连不上,放行(真正外呼会自然失败),不误伤
+    from app.net_guard import check_public_url
+
+    assert check_public_url("https://no-such-host-jarvis.invalid/v.mp4") is None
+
+
+@pytest.mark.parametrize("url", ["", "   ", "not a url"])
+def test_check_public_url_rejects_hostless(url):
+    from app.net_guard import check_public_url
+
+    reason = check_public_url(url)
+    assert reason is not None and "格式" in reason
+
+
 # ---------- Cloudflare CDN 检测(提示用,不拦截) ----------
 
 

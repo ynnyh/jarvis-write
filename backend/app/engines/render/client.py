@@ -13,8 +13,11 @@ from __future__ import annotations
 
 import base64
 import logging
+from urllib.parse import urljoin
 
 import httpx
+
+from app.net_guard import check_public_url
 
 logger = logging.getLogger("jarvis-write.render")
 
@@ -37,6 +40,13 @@ class PollTransientError(RuntimeError):
 
     与 RenderError 的分工:长轮询要打几百次请求,单次抖动是常态,吞掉继续等;
     但连续失败说明链路真断了,计数由 poll_with_retry 管,到顶翻译成明确错误。
+    """
+
+
+class SSRFBlocked(RenderError):
+    """下载地址指向内网/本机:由调用方按场景包成人话再上屏(各自话术不同)。
+
+    继承 RenderError 是有意的——漏 catch 时上屏仍是一句人话,不会甩堆栈给用户。
     """
 
 
@@ -153,10 +163,32 @@ async def poll_with_retry(base_url: str, token: str, task_id: str) -> tuple[str,
         return status, urls
 
 
+# 重定向跟跳上限:正常 CDN 一两次到位,转圈超过 5 次基本是在被遛,别陪跑。
+MAX_REDIRECTS = 5
+_REDIRECT_CODES = (301, 302, 303, 307, 308)
+
+
 async def fetch_bytes(url: str, timeout_s: int = DOWNLOAD_TIMEOUT_S) -> bytes:
-    """下载一个远程文件(渲染结果 / 外链首帧)。"""
-    async with httpx.AsyncClient(timeout=timeout_s, follow_redirects=True) as client:
-        resp = await client.get(url)
+    """下载一个远程文件(渲染结果 / 外链首帧),**每一跳**都过 SSRF 校验。
+
+    重定向自己跟、不用 httpx 的 follow_redirects:入口是公网不代表跳完还是公网,
+    「给你一个公网地址,302 到 169.254.169.254」是最经典的绕过套路,交给库自动
+    跟跳就只剩入口那一跳有校验。逐跳校验在这里兜住,顺带给以后新增的下载点
+    兜底——只要走这个函数,就碰不到内网。
+    """
+    current = url
+    for _ in range(MAX_REDIRECTS + 1):
+        reason = check_public_url(current)
+        if reason:
+            raise SSRFBlocked(reason)
+        async with httpx.AsyncClient(timeout=timeout_s, follow_redirects=False) as client:
+            resp = await client.get(current)
+        location = resp.headers.get("location") if resp.status_code in _REDIRECT_CODES else None
+        if not location:
+            break
+        current = urljoin(current, location)  # 相对 Location 要按当前跳解析
+    else:
+        raise RenderError(f"下载地址重定向次数过多(超过 {MAX_REDIRECTS} 次),已放弃。")
     if resp.status_code != 200:
         raise RenderError(f"下载文件失败(HTTP {resp.status_code}):{url[:120]}")
     return resp.content
