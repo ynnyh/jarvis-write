@@ -16,6 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import storage
+from app.engines.render.client import RenderError
 from app.main import app
 
 INVITE = "test-invite"
@@ -706,6 +707,26 @@ def test_result_url_ssrf_blocked(client: TestClient):
 
     assert job["status"] == "error", job
     assert "内网" in job["error"]
+
+
+def test_presubmit_failure_marks_task_failed(client: TestClient):
+    """submit 前失败(此处:提交被平台拒)也要把任务行标成 failed,不许永挂「排队中」。"""
+    headers, pid, sid, _ = _seed_talk_scene(client, "presubmit_fail", with_voice=False)
+
+    async def boom(base_url, token, workflow_id, params):
+        raise RenderError("提交就被平台拒了(测试)")
+
+    with patch("app.engines.render.service.submit", boom):
+        r = client.post(f"/api/projects/{pid}/drama/shots/{sid}/render", headers=headers)
+        assert r.status_code == 200, r.text
+        job = _wait_job(client, headers, r.json()["job_id"])
+
+    assert job["status"] == "error", job
+    tasks = client.get(
+        f"/api/projects/{pid}/drama/shots/{sid}/render/tasks", headers=headers
+    ).json()["tasks"]
+    assert tasks[0]["status"] == "failed", tasks[0]
+    assert "平台拒了" in tasks[0]["error"]
 
 
 def _make_wav(rate: int, seconds: float) -> bytes:

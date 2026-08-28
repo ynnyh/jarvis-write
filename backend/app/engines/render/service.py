@@ -100,11 +100,25 @@ def apply_pointer(line: str, shot_id: int | None, clip_id: int | None, chunk_ind
 
 
 async def start_render(progress, spec: dict) -> dict:
-    """跑一次出片(异步 worker)。spec 字段见 api/render.py 的提交端点。"""
+    """跑一次出片(异步 worker)。spec 字段见 api/render.py 的提交端点。
+
+    失败标记在这里统一兜底:任何一步失败都把任务行标成 failed 再原样上抛。
+    此前只有部分路径记得标,首帧解析/配音/提交平台被拒这些 submit 前的失败
+    会让任务行永挂「排队中」,只能等服务重启被启动清理捞走。
+    """
     task_id = int(spec["task_id"])
+    try:
+        if spec["kind"] == "synth":
+            return await _run_synth_job(progress, spec, task_id)
+        return await _run_shot_render(progress, spec, task_id)
+    except Exception as exc:  # noqa: BLE001 — 标完失败原样上抛,文案归一化在 job 层
+        _mark_failed(task_id, str(exc))
+        raise
+
+
+async def _run_shot_render(progress, spec: dict, task_id: int) -> dict:
+    """单镜/单段出片:读首帧 → (对白先配音) → 提交 → 轮询 → 当场下载落盘。"""
     kind = spec["kind"]
-    if kind == "synth":
-        return await _run_synth_job(progress, spec, task_id)
     line = spec["line"]
     workflow_id = spec["workflow_id"]
 
@@ -118,7 +132,6 @@ async def start_render(progress, spec: dict) -> dict:
         token = decrypt(cfg.token) if cfg else ""
         base_url = cfg.base_url if cfg else ""
         if not token:
-            _mark_failed(task_id, "尚未配置出片引擎令牌")
             raise RenderError("尚未配置出片引擎的令牌(token),请先到「设置 → 出片引擎」填写。")
 
     params = dict(spec.get("params") or {})
@@ -127,7 +140,6 @@ async def start_render(progress, spec: dict) -> dict:
         frame = spec.get("first_frame") or {}
         src = str(frame.get("src") or "")
         if not src:
-            _mark_failed(task_id, "缺首帧静帧")
             raise RenderError("这一格没有可用的首帧静帧,请先挂静帧或改走文生视频。")
         data = await _resolve_first_frame(src, str(frame.get("kind") or "upload"))
         # 首尾帧工作流吃 first_frame,对口型工作流吃 ref_image_0(文档字段名不同)
@@ -163,24 +175,17 @@ async def start_render(progress, spec: dict) -> dict:
             row.provider_task_id = provider_task_id
             db.commit()
 
-    try:
-        video_urls = await _wait_result(progress, base_url, token, provider_task_id, "生成")
-    except RenderError as exc:
-        _mark_failed(task_id, str(exc))
-        raise
+    video_urls = await _wait_result(progress, base_url, token, provider_task_id, "生成")
     if not video_urls:
-        _mark_failed(task_id, "平台没返回视频文件")
         raise RenderError("出片平台没有返回视频文件,请重试一次。")
     progress("下载成片…")
     reason = check_public_url(video_urls[0])
     if reason:
-        _mark_failed(task_id, f"成片下载被拒:{reason}")
         raise RenderError(f"出片平台返回的视频地址不安全({reason}),请重试一次。")
     data = await fetch_bytes(video_urls[0])
     try:
         rel = storage.save_render_result(task_id, data)
     except storage.UploadError as exc:
-        _mark_failed(task_id, str(exc))
         raise RenderError(str(exc)) from exc
 
     # 末帧自动接力(best-effort):抽出的 png 供下一镜「一键当首帧」。
@@ -370,7 +375,6 @@ async def _run_synth_job(progress, spec: dict, task_id: int) -> dict:
     progress("收集片段…")
     plan = await asyncio.to_thread(_collect)
     if not plan.items:
-        _mark_failed(task_id, "没有可合成的片段")
         raise SynthError("这一集还没有可合成的片段:先出几格草片,或给分镜格挂静帧当占位。")
 
     project_id = int(spec["project_id"])
@@ -394,7 +398,6 @@ async def _run_synth_job(progress, spec: dict, task_id: int) -> dict:
     try:
         await asyncio.to_thread(_run)
     except SynthError as exc:
-        _mark_failed(task_id, str(exc))
         raise RenderError(str(exc)) from exc
 
     removed = synthesis.cleanup_old_synth(episode_id, out_abs)

@@ -167,6 +167,11 @@ async def poll_with_retry(base_url: str, token: str, task_id: str) -> tuple[str,
 MAX_REDIRECTS = 5
 _REDIRECT_CODES = (301, 302, 303, 307, 308)
 
+# 下载体积上限:成片/配音正常几十 MB,给足余量。超限基本是地址被喂了垃圾,
+# 流式边收边数,别让几个 GB 的响应体一口吞进内存。
+MAX_DOWNLOAD_BYTES = 500 * 1024 * 1024
+_OVERSIZE_MSG = f"下载的文件超过 {MAX_DOWNLOAD_BYTES // (1024 * 1024)} MB 上限,已中止。"
+
 
 async def fetch_bytes(url: str, timeout_s: int = DOWNLOAD_TIMEOUT_S) -> bytes:
     """下载一个远程文件(渲染结果 / 外链首帧),**每一跳**都过 SSRF 校验。
@@ -182,13 +187,25 @@ async def fetch_bytes(url: str, timeout_s: int = DOWNLOAD_TIMEOUT_S) -> bytes:
         if reason:
             raise SSRFBlocked(reason)
         async with httpx.AsyncClient(timeout=timeout_s, follow_redirects=False) as client:
-            resp = await client.get(current)
-        location = resp.headers.get("location") if resp.status_code in _REDIRECT_CODES else None
-        if not location:
-            break
-        current = urljoin(current, location)  # 相对 Location 要按当前跳解析
+            # 流式读 + 体积两头堵:Content-Length 声明超限一个字节都不读,
+            # 实际字节收满上限即断连接,内存占用封顶
+            async with client.stream("GET", current) as resp:
+                if resp.status_code in _REDIRECT_CODES and resp.headers.get("location"):
+                    current = urljoin(current, resp.headers["location"])  # 相对 Location 要按当前跳解析
+                    continue
+                if resp.status_code != 200:
+                    raise RenderError(f"下载文件失败(HTTP {resp.status_code}):{url[:120]}")
+                declared = resp.headers.get("content-length")
+                if declared and declared.isdigit() and int(declared) > MAX_DOWNLOAD_BYTES:
+                    raise RenderError(_OVERSIZE_MSG)
+                chunks: list[bytes] = []
+                received = 0
+                async for chunk in resp.aiter_bytes():
+                    received += len(chunk)
+                    if received > MAX_DOWNLOAD_BYTES:
+                        raise RenderError(_OVERSIZE_MSG)
+                    chunks.append(chunk)
+        break
     else:
         raise RenderError(f"下载地址重定向次数过多(超过 {MAX_REDIRECTS} 次),已放弃。")
-    if resp.status_code != 200:
-        raise RenderError(f"下载文件失败(HTTP {resp.status_code}):{url[:120]}")
-    return resp.content
+    return b"".join(chunks)

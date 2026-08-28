@@ -410,3 +410,24 @@ def test_fetch_bytes_redirect_loop_gives_up(monkeypatch):
     )
     with pytest.raises(RenderError, match="重定向"):
         asyncio.run(client.fetch_bytes("https://cdn.example/v.mp4"))
+
+
+def test_fetch_bytes_rejects_oversize_declared(monkeypatch):
+    """Content-Length 声明超限:一个字节都不读,当场拒。"""
+    monkeypatch.setattr(client, "MAX_DOWNLOAD_BYTES", 1024)
+    _patch_transport(monkeypatch, lambda req: httpx.Response(
+        200, headers={"Content-Length": str(10 * 1024 * 1024)}, content=b""))
+    with pytest.raises(RenderError, match="上限"):
+        asyncio.run(client.fetch_bytes("https://cdn.example/big.mp4"))
+
+
+def test_fetch_bytes_rejects_oversize_streamed(monkeypatch):
+    """没声明长度(分块传输)、实际字节超限:边收边数,收满即断。"""
+    async def body():
+        yield b"12345678"
+        yield b"9abcdefg"
+
+    monkeypatch.setattr(client, "MAX_DOWNLOAD_BYTES", 8)
+    _patch_transport(monkeypatch, lambda req: httpx.Response(200, content=body()))
+    with pytest.raises(RenderError, match="上限"):
+        asyncio.run(client.fetch_bytes("https://cdn.example/big.mp4"))
