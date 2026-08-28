@@ -161,8 +161,72 @@ def test_poll_with_retry_success_resets_streak(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# fetch_bytes
+# job 体系兜底:取消不永挂、启动清理出片任务
 # ---------------------------------------------------------------------------
+
+def test_spawn_job_cancelled_marks_failed():
+    """worker 被 asyncio 取消时,job 不能永远停在 running(CancelledError 是
+    BaseException,裸 except Exception 兜不住)。"""
+    from contextlib import suppress
+
+    from app import jobs
+
+    async def driver():
+        started = asyncio.Event()
+
+        async def work(progress):
+            started.set()
+            await asyncio.sleep(60)
+
+        job_id = jobs.spawn_job("render-cancel-test", work)
+        await started.wait()
+        victim = next((t for t in jobs._bg_tasks if not t.done()), None)
+        assert victim is not None
+        victim.cancel()
+        with suppress(asyncio.CancelledError):
+            await victim
+        return job_id
+
+    job_id = asyncio.run(driver())
+    job = jobs.get_job(job_id)
+    assert job is not None and job["status"] == "error"
+    assert "取消" in job["error"]
+
+
+def test_cleanup_stuck_render_tasks():
+    """启动清理:queued/running 的 RenderTask 随进程死了,一并标 failed;
+    已成功的任务不动。"""
+    from app.db import models  # noqa: F401 — 注册全部模型
+    from app.db.base import Base
+    from app.db.models import RenderTask, User
+    from app.db.session import SessionLocal, engine
+    from app.jobs import cleanup_stuck_jobs
+
+    Base.metadata.create_all(engine)  # 幂等:不起 app 单跑时自建表
+
+    with SessionLocal() as db:
+        user = db.query(User).filter(User.username == "render_cleanup_user").first()
+        if user is None:
+            user = User(username="render_cleanup_user")
+            db.add(user)
+            db.commit()
+        r1 = RenderTask(user_id=user.id, line="drama", kind="i2v",
+                        status="running", provider_task_id="pt-x")
+        r2 = RenderTask(user_id=user.id, line="drama", kind="i2v", status="queued")
+        r3 = RenderTask(user_id=user.id, line="drama", kind="i2v",
+                        status="success", result_path="render/r1.mp4")
+        db.add_all([r1, r2, r3])
+        db.commit()
+        id1, id2, id3 = r1.id, r2.id, r3.id
+
+    cleanup_stuck_jobs()
+
+    with SessionLocal() as db:
+        assert db.get(RenderTask, id1).status == "failed"
+        assert "重启" in db.get(RenderTask, id1).error
+        assert db.get(RenderTask, id2).status == "failed"
+        assert db.get(RenderTask, id3).status == "success"
+
 
 def test_fetch_bytes_non200(monkeypatch):
     _patch_transport(monkeypatch, lambda req: httpx.Response(404))

@@ -214,6 +214,11 @@ def spawn_job(kind: str, work: Callable[[Callable[[str], None]], Awaitable[Any]]
         try:
             result = await work(lambda s: update_stage(job_id, s))
             finish_job(job_id, result)
+        except asyncio.CancelledError:
+            # CancelledError 是 BaseException,下面的 except Exception 兜不住——
+            # 不单独接住,任务会永远停在 running(重启清理才捞得回来)
+            fail_job(job_id, "任务被取消")
+            raise
         except Exception as exc:  # noqa: BLE001
             logger.warning("任务 %s(%s) 失败: %s", job_id, kind, exc, exc_info=True)
             fail_job(job_id, normalize_job_error(exc)[:500])
@@ -230,9 +235,11 @@ def cleanup_stuck_jobs() -> None:
     """服务启动时调用:把 DB 中 running 超时的任务标记为 failed。
 
     进程重启后,之前 running 的任务不可能还活着(asyncio task 随进程消亡)。
+    出片任务同理:queued/running 的 RenderTask 一并标 failed,不然任务历史里
+    永远显示"进行中",同一格还会被误判为"出片中"。
     """
     try:
-        from app.db.models import Job
+        from app.db.models import Job, RenderTask
         session = _db_session()
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=_STUCK_MINUTES)
         stuck = (
@@ -244,9 +251,21 @@ def cleanup_stuck_jobs() -> None:
             job.status = "error"
             job.stage = "失败"
             job.error = "服务重启,任务中断(超时自动标记)"
-        if stuck:
+        # 出片任务不看超时时长:启动那一刻还停在排队/进行中的,必然随上个进程死了
+        stuck_renders = (
+            session.query(RenderTask)
+            .filter(RenderTask.status.in_(["queued", "running"]))
+            .all()
+        )
+        for task in stuck_renders:
+            task.status = "failed"
+            task.error = "服务重启,出片任务中断"
+        if stuck or stuck_renders:
             session.commit()
-            logger.info("启动清理:%d 个 stuck 任务标记为 failed", len(stuck))
+            logger.info(
+                "启动清理:%d 个 stuck 任务、%d 个出片任务标记为失败",
+                len(stuck), len(stuck_renders),
+            )
         session.close()
     except Exception:  # noqa: BLE001 — 清理失败不阻塞启动
         logger.debug("启动清理 stuck jobs 失败", exc_info=True)
