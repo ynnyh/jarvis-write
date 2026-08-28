@@ -25,7 +25,22 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.pool import NullPool
 
-from app.db.migration import BASELINE_REVISION, run_alembic_migrations
+from app.db.migration import (
+    _alembic_dir,
+    _alembic_ini_path,
+    run_alembic_migrations,
+)
+
+
+def _chain_head() -> str:
+    """迁移链当前头版本。断言跟链头走而不是钉死基线:以后每次新增迁移,
+    这里自动跟上,不用回来改测试(基线号只在 stamp 语义里用)。"""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    cfg = Config(_alembic_ini_path())
+    cfg.set_main_option("script_location", str(_alembic_dir()))
+    return ScriptDirectory.from_config(cfg).get_current_head()
 
 
 @pytest.fixture
@@ -68,7 +83,7 @@ def test_fresh_db_upgrade_creates_all_model_tables(isolated_db):
     version = sqlite3.connect(db_path).execute(
         "SELECT version_num FROM alembic_version"
     ).fetchall()
-    assert version == [(BASELINE_REVISION,)]
+    assert version == [(_chain_head(),)]
 
 
 def inspect_tables(engine) -> list[str]:
@@ -78,11 +93,18 @@ def inspect_tables(engine) -> list[str]:
 
 
 def test_legacy_db_stamps_without_touching_data(isolated_db):
-    """老库(pre-Alembic):有业务表、无 alembic_version → 只 stamp,数据分毫不动。"""
+    """老库(pre-Alembic):有业务表、无 alembic_version → stamp 基线后 upgrade head。
+
+    夹具带上 drama_episodes(新迁移要改的表):真实老库升级 = stamp + 逐个应用
+    新迁移,缺列被补上、数据分毫不动——而不是靠「迁移报错被兜底吞掉」碰巧绿。
+    """
     db_path, engine = isolated_db
     conn = sqlite3.connect(db_path)
     conn.execute("CREATE TABLE projects (id INTEGER PRIMARY KEY, title TEXT)")
     conn.execute("INSERT INTO projects (title) VALUES ('用户的真实作品')")
+    # drama_episodes 按老库形态建(没有 film_prompt 列),0002 要给它补列
+    conn.execute("CREATE TABLE drama_episodes (id INTEGER PRIMARY KEY, title TEXT)")
+    conn.execute("INSERT INTO drama_episodes (title) VALUES ('第一集')")
     conn.commit()
     conn.close()
 
@@ -91,9 +113,16 @@ def test_legacy_db_stamps_without_touching_data(isolated_db):
     conn = sqlite3.connect(db_path)
     assert conn.execute(
         "SELECT version_num FROM alembic_version"
-    ).fetchall() == [(BASELINE_REVISION,)]
-    # stamp 不许重建表、不许丢数据
+    ).fetchall() == [(_chain_head(),)]
+    # stamp+upgrade 不许重建表、不许丢数据
     assert conn.execute("SELECT title FROM projects").fetchall() == [("用户的真实作品",)]
+    assert conn.execute("SELECT title FROM drama_episodes").fetchall() == [("第一集",)]
+    # 新迁移把缺的列补上了(NOT NULL 带 server_default,老行落默认值)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(drama_episodes)").fetchall()}
+    assert "film_prompt" in cols
+    assert conn.execute(
+        "SELECT film_prompt FROM drama_episodes"
+    ).fetchall() == [("",)]
     conn.close()
     # 之后 create_all(lifespan 的兜底步骤)能安全补齐其余表
     import app.db.models  # noqa: F401
