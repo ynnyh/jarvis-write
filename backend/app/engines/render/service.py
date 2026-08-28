@@ -189,11 +189,15 @@ async def start_render(progress, spec: dict) -> dict:
     return {"task_id": task_id, "status": "success", "result_path": rel}
 
 
-def _cache_key(talk: dict) -> str:
-    """配音缓存键:工作流|音色源|情绪|台词。任一变了就是新配音。"""
+def _cache_key(talk: dict, voice_digest: str) -> str:
+    """配音缓存键:工作流|音色源|音色内容摘要|情绪|台词。任一变了就是新配音。
+
+    音色文件是固定路径覆盖重传的,只看路径会脏读旧配音,所以并入内容哈希。
+    """
     raw = "|".join([
         str(talk.get("workflow_tts") or ""),
         str(talk.get("voice_src") or ""),
+        voice_digest,
         normalize_emotion(str(talk.get("emotion") or "")),
         str(talk.get("text") or "").strip(),
     ])
@@ -248,21 +252,10 @@ async def _wait_result(progress, base_url: str, token: str, provider_task_id: st
 async def _synthesize_voice(progress, base_url: str, token: str, talk: dict) -> tuple[bytes, float, bool]:
     """台词 → 配音 wav 字节 + 真实时长(秒)。缓存命中直接读文件,零调用零等待。
 
-    台词/音色/情绪/工作流任一变了 key 就变,自然重新合成;缓存文件丢了
-    (用户清盘)也当未命中,照常重合。
+    缓存键并入音色内容哈希:重传覆盖同一路径也会重新合成,不脏读旧配音;
+    缓存文件丢了(用户清盘)也当未命中,照常重合。
     """
     from app.db.models import TtsTrack
-
-    key = _cache_key(talk)
-    with _db_session() as db:
-        row = db.query(TtsTrack).filter(TtsTrack.cache_key == key).first()
-        if row is not None and row.path:
-            try:
-                path = storage.resolve(row.path)
-                if path.is_file():
-                    return path.read_bytes(), float(row.duration_s or 0), True
-            except storage.UploadError:
-                logger.warning("配音缓存 %s 读取失败,重新合成", key)
 
     text = str(talk.get("text") or "").strip()
     voice_src = str(talk.get("voice_src") or "")
@@ -277,6 +270,18 @@ async def _synthesize_voice(progress, base_url: str, token: str, talk: dict) -> 
         raise RenderError(
             f"该角色的音色参考已失效({exc}),请到角色卡重新上传后再出片。"
         ) from exc
+
+    voice_digest = hashlib.sha256(voice_bytes).hexdigest()[:16]
+    key = _cache_key(talk, voice_digest)
+    with _db_session() as db:
+        row = db.query(TtsTrack).filter(TtsTrack.cache_key == key).first()
+        if row is not None and row.path:
+            try:
+                cached = storage.resolve(row.path)
+                if cached.is_file():
+                    return cached.read_bytes(), float(row.duration_s or 0), True
+            except storage.UploadError:
+                logger.warning("配音缓存 %s 读取失败,重新合成", key)
 
     params = {
         "prompt_text": text,

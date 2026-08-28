@@ -228,6 +228,81 @@ def test_cleanup_stuck_render_tasks():
         assert db.get(RenderTask, id3).status == "success"
 
 
+# ---------------------------------------------------------------------------
+# TTS 缓存:音色内容哈希并进缓存键
+# ---------------------------------------------------------------------------
+
+def _mini_wav(rate: int = 8000, seconds: float = 1.0) -> bytes:
+    import struct
+
+    data = b"\x00" * int(rate * seconds)
+    fmt = struct.pack("<HHIIHH", 1, 1, rate, rate, 1, 8)
+    return (b"RIFF" + struct.pack("<I", 4 + 8 + len(fmt) + 8 + len(data)) + b"WAVE"
+            + b"fmt " + struct.pack("<I", len(fmt)) + fmt
+            + b"data" + struct.pack("<I", len(data)) + data)
+
+
+def test_voice_cache_key_changes_with_content(monkeypatch):
+    """音色重传覆盖同一路径:内容变了缓存键必须变,不能命中旧配音;
+    内容不变再调仍命中缓存(不白付钱)。"""
+    from app import storage
+    from app.db import models  # noqa: F401 — 注册全部模型
+    from app.db.base import Base
+    from app.db.session import engine
+    from app.engines.render import service
+
+    Base.metadata.create_all(engine)  # 幂等:不起 app 单跑时自建表
+
+    submits = {"n": 0}
+
+    async def fake_submit(base_url, token, workflow_id, params):
+        submits["n"] += 1
+        return f"pt-{submits['n']}"
+
+    async def fake_wait(progress, base_url, token, provider_task_id, what):
+        return ["https://fake/dub.wav"]
+
+    async def fake_fetch(url, timeout_s=120):
+        return _mini_wav()
+
+    monkeypatch.setattr(service, "submit", fake_submit)
+    monkeypatch.setattr(service, "_wait_result", fake_wait)
+    monkeypatch.setattr(service, "fetch_bytes", fake_fetch)
+
+    rel = "drama/9999/voice77.mp3"
+    d = storage.upload_root() / "drama" / "9999"
+    d.mkdir(parents=True, exist_ok=True)
+    voice_path = d / "voice77.mp3"
+    talk = {"workflow_tts": "indextts2-v1", "voice_src": rel,
+            "emotion": "happy", "text": "缓存键探针", "user_id": 1}
+
+    async def drive():
+        voice_path.write_bytes(b"ID3\x04voice-v1" + b"\x01" * 64)
+        _, _, cached1 = await service._synthesize_voice(lambda s: None, BASE, "tok", talk)
+        voice_path.write_bytes(b"ID3\x04voice-v2" + b"\x02" * 64)  # 重传覆盖
+        _, _, cached2 = await service._synthesize_voice(lambda s: None, BASE, "tok", talk)
+        _, _, cached3 = await service._synthesize_voice(lambda s: None, BASE, "tok", talk)
+        return cached1, cached2, cached3
+
+    cached1, cached2, cached3 = asyncio.run(drive())
+    assert cached1 is False  # 首次合成
+    assert cached2 is False  # 换音色不能命中旧配音
+    assert cached3 is True   # 内容不变,缓存照旧
+    assert submits["n"] == 2
+
+    # 会话内共享测试库:清掉本测试的缓存行,避免串扰他处全表断言
+    from app.db.models import TtsTrack
+    from app.db.session import SessionLocal
+
+    with SessionLocal() as db:
+        db.query(TtsTrack).filter(TtsTrack.text == "缓存键探针").delete()
+        db.commit()
+
+
+# ---------------------------------------------------------------------------
+# fetch_bytes
+# ---------------------------------------------------------------------------
+
 def test_fetch_bytes_non200(monkeypatch):
     _patch_transport(monkeypatch, lambda req: httpx.Response(404))
     with pytest.raises(RenderError, match="HTTP 404"):
