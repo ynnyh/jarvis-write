@@ -1,7 +1,7 @@
 // src/ui/FilmPromptCard.tsx — 各工坊共用的「整片提示词」卡片。
 // 一份实现四处用(漫剧/情绪·灵感·故事/宣传片):生成走各自工坊的 job,
 // 文本框可手改、可整段粘贴自己写的版本(保存即替换),CopyBtn 一键复制。
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { errMsg } from "../pollJob";
 import { CopyBtn } from "./copy";
@@ -16,6 +16,7 @@ export function FilmPromptCard({
   ready = true,
   readyHint = "先完成分镜,才有原料组装整片提示词",
   generateDetail = "文本框可直接改;一键复制贴去 Sora/Veo/可灵一次出一整片",
+  headerExtra,
 }: {
   /** 读当前稿(空串 = 还没生成过) */
   load: () => Promise<string>;
@@ -29,6 +30,8 @@ export function FilmPromptCard({
   ready?: boolean;
   readyHint?: string;
   generateDetail?: string;
+  /** 头部插槽:生成参数控件(如宣传片的单段时长选择) */
+  headerExtra?: ReactNode;
 }) {
   const { run } = useJob();
   const [text, setText] = useState("");
@@ -71,6 +74,7 @@ export function FilmPromptCard({
       <div className="card-head mb-2">
         <b>整片提示词(端到端模型)</b>
         <span className="badge">Sora / Veo / 可灵</span>
+        {headerExtra}
         <span className="grow" />
         {text && !loading && (
           <CopyBtn text={text} label="一键复制" title="整段复制,贴进端到端视频模型直接生成" />

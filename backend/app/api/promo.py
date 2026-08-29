@@ -115,6 +115,11 @@ class ChunksIn(BaseModel):
     chunk_s: int = Field(default=15)
 
 
+class FilmPromptGenIn(BaseModel):
+    """整片提示词生成参数:单段时长上限(外部模型单次生成的现实上限)。"""
+    segment_s: int = Field(default=15)
+
+
 class FilmPromptIn(BaseModel):
     """整片提示词手动保存:整段替换(粘贴自己写的版本也走这里)。"""
     film_prompt: str = ""
@@ -417,14 +422,31 @@ async def promo_chunks(plan_id: int, body: ChunksIn | None = None, db: Session =
     return _plan_job(plan_id, "chunks", _ChunksAction(chunk_s))
 
 
-# ---- 整片提示词(端到端音频原生视频模型) ----
+# ---- 整片提示词(端到端音频原生视频模型,按单段上限切分段落) ----
+
+
+class _FilmPromptAction:
+    """把 segment_s 参数绑进 engine_fn(session, plan, progress) 签名的适配器。"""
+
+    def __init__(self, segment_s: int):
+        self.segment_s = segment_s
+
+    async def __call__(self, session, plan, progress):
+        return await build_promo_film_prompt(
+            session, plan, progress, segment_s=self.segment_s
+        )
 
 
 @router.post("/{plan_id}/film-prompt")
-async def promo_film_prompt(plan_id: int, db: Session = Depends(get_db)):
-    """把分镜+解说词+地标卡组装成一条「一次出一整片」的成片提示词(覆盖旧稿)。"""
+async def promo_film_prompt(
+    plan_id: int, body: FilmPromptGenIn | None = None, db: Session = Depends(get_db)
+):
+    """把分镜切成 ≤单段上限的段,组装成 N 段各自独立可用的成片提示词(覆盖旧稿)。"""
     _get_plan(db, plan_id)
-    return _plan_job(plan_id, "film-prompt", build_promo_film_prompt)
+    segment_s = (body.segment_s if body else 15) or 15
+    if segment_s not in (15, 30):
+        raise HTTPException(status_code=400, detail="单段时长只支持 15 / 30 秒。")
+    return _plan_job(plan_id, "film-prompt", _FilmPromptAction(segment_s))
 
 
 @router.get("/{plan_id}/film-prompt")

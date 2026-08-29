@@ -88,11 +88,8 @@ _CLIP_REPLY = (
 )
 
 _PROMO_REPLY = (
-    "一条 8 秒、9:16 竖屏的西安宣传片。总述:城墙灯影,烟火食事。\n"
-    "【画面一致性】暖金主色全片统一。\n"
-    "【镜头一|0.0—5.0秒】城墙全景,缓慢推近。旁白:千年城墙,烟火人家。\n"
-    "【声音设计】解说逐句同步,垫底 BGM 低音量。【影像限制】不要 logo 水印。\n"
-    "【核心要求】让游客想立刻订一张票。"
+    "【第1段|0—5秒】实拍电影感,暖金主色,城墙灯影。全景缓慢推近:明代城墙砖石斑驳,"
+    "灯笼成排摇曳。旁白:千年城墙,烟火人家。衔接:硬切。"
 )
 
 
@@ -115,7 +112,7 @@ def _seed_clip(uid: int, *, with_shots: bool = True) -> int:
         return row.id
 
 
-def _seed_promo(uid: int, *, with_shots: bool = True) -> int:
+def _seed_promo(uid: int, *, with_shots: bool = True, shot_count: int = 1) -> int:
     from app.db.models import PromoPlan, PromoShot
     from app.db.session import SessionLocal
 
@@ -130,11 +127,12 @@ def _seed_promo(uid: int, *, with_shots: bool = True) -> int:
         s.add(plan)
         s.flush()
         if with_shots:
-            s.add(PromoShot(
-                promo_id=plan.id, seq=1, scene_name="西安城墙", shot_type="全景",
-                camera="推", duration_s=5, action_desc="城墙全景缓慢推近,灯笼摇曳",
-                dialogue="千年城墙,烟火人家。",
-            ))
+            for n in range(shot_count):
+                s.add(PromoShot(
+                    promo_id=plan.id, seq=n + 1, scene_name="西安城墙", shot_type="全景",
+                    camera="推", duration_s=5, action_desc=f"城墙全景缓慢推近(镜{n + 1})",
+                    dialogue="千年城墙,烟火人家。" if n == 0 else "",
+                ))
         s.commit()
         return plan.id
 
@@ -204,6 +202,7 @@ def test_promo_film_prompt_requires_shots(client):
 
 
 def test_promo_film_prompt_generate_and_get(client):
+    """分段版:文档头(使用说明)+ 分段提示词块;原料注入齐活。"""
     headers = _auth(client, "pfp_gen")
     pid = _seed_promo(_uid(client, "pfp_gen"))
     adapter = _TextAdapter(_PROMO_REPLY)
@@ -215,13 +214,53 @@ def test_promo_film_prompt_generate_and_get(client):
 
     assert job["status"] == "done", job
     got = client.get(f"/api/promos/{pid}/film-prompt", headers=headers)
-    assert got.json()["film_prompt"] == _PROMO_REPLY
+    doc = got.json()["film_prompt"]
+    assert doc.startswith("【使用说明】")  # 引擎写的确定性文档头
+    assert _PROMO_REPLY in doc  # 模型的分段提示词块整段保存
 
     prompt = adapter.prompts[0]
     assert "西安城墙" in prompt  # 地标卡进原料
     assert "13.74 公里" in prompt  # 素材点(硬约束)进原料
-    assert "旁白:千年城墙,烟火人家。" in prompt  # 解说带说话人
+    assert "解说词(旁白):千年城墙,烟火人家。" in prompt  # 解说带说话人
     assert "宣传片" in prompt  # 类型定位进原料
+    assert "切成 1 段" in prompt  # 单段计划(5 秒镜头 ≤15s 上限 → 一段)
+
+
+def test_promo_film_prompt_segments_split_by_limit(client):
+    """20 秒分镜、单段上限 15s → 贪心切成 2 段,分段计划进原料;30s 上限只切 1 段。"""
+    headers = _auth(client, "pfp_seg")
+    pid = _seed_promo(_uid(client, "pfp_seg"), shot_count=4)  # 4 镜 × 5s = 20s
+    adapter = _TextAdapter(_PROMO_REPLY)
+
+    with patch("app.engines.promo.film_prompt.get_adapter_for", return_value=adapter):
+        r = client.post(f"/api/promos/{pid}/film-prompt", headers=headers,
+                        json={"segment_s": 15})
+        assert r.status_code == 200, r.text
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+
+    prompt = adapter.prompts[0]
+    assert "切成 2 段" in prompt
+    assert "【第2段|15—20秒】" in prompt  # 贪心装满:3 镜 0-15 / 1 镜 15-20,边界落镜头边界
+
+    # 30s 上限:同样 20s 全片装进一段
+    adapter30 = _TextAdapter(_PROMO_REPLY)
+    with patch("app.engines.promo.film_prompt.get_adapter_for", return_value=adapter30):
+        r = client.post(f"/api/promos/{pid}/film-prompt", headers=headers,
+                        json={"segment_s": 30})
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    assert "切成 1 段" in adapter30.prompts[0]
+
+
+def test_promo_film_prompt_rejects_bad_segment_s(client):
+    """单段时长白名单外(20s):400 说人话。"""
+    headers = _auth(client, "pfp_badseg")
+    pid = _seed_promo(_uid(client, "pfp_badseg"))
+
+    r = client.post(f"/api/promos/{pid}/film-prompt", headers=headers,
+                    json={"segment_s": 20})
+    assert r.status_code == 400 and "15 / 30" in r.json()["detail"]
 
 
 def test_promo_film_prompt_save_and_ownership(client):

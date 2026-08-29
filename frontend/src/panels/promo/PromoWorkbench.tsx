@@ -27,6 +27,8 @@ export default function PromoWorkbench({ pid, meta }: {
   const [plan, setPlan] = useState<PromoPlan | null>(null);
   const [shots, setShots] = useState<PromoShot[]>([]);
   const [loadErr, setLoadErr] = useState("");
+  // 整片提示词的单段时长上限:外部模型多数单条 15s,少数支持 30s
+  const [segS, setSegS] = useState<15 | 30>(15);
 
   const reload = useCallback(async () => {
     try {
@@ -125,14 +127,23 @@ export default function PromoWorkbench({ pid, meta }: {
             <ChunksSection plan={plan} shotCount={shots.length} jobs={jobs}
               onBuild={(cs) => void jobs.act("chunks", () => promoApi.chunks(pid, cs),
                 `切段已生成(每段 ≤${cs}s)`)} />
-            {/* 整片提示词(端到端音频原生视频模型):一条出一整片,与逐段生成互补 */}
+            {/* 整片提示词(端到端音频原生视频模型):按单段上限切好段,逐段生成后拼接 */}
             <FilmPromptCard
               load={() => promoApi.getFilmPrompt(pid).then((r) => r.film_prompt)}
               save={(t) => promoApi.saveFilmPrompt(pid, t).then((r) => r.film_prompt)}
-              generate={() => promoApi.buildFilmPrompt(pid)}
+              generate={() => promoApi.buildFilmPrompt(pid, segS)}
               jobKind={`promo-film-prompt-${pid}`}
               ready={shots.length > 0}
               readyHint="先生成分镜,才有原料组装整片提示词"
+              generateDetail="文档已按段切好:每段单独复制生成,按段号拼接成片"
+              headerExtra={
+                <select value={segS} title="单段时长上限:外部模型单次生成的上限"
+                  onChange={(e) => setSegS(Number(e.target.value) as 15 | 30)}
+                  style={{ padding: "2px 6px" }}>
+                  <option value={15}>单段 ≤15s</option>
+                  <option value={30}>单段 ≤30s</option>
+                </select>
+              }
             />
             <PackSection pid={pid} plan={plan} shotCount={shots.length} jobs={jobs}
               onBuild={() => void jobs.act("pack", () => promoApi.pack(pid), "成片包已生成")} />
