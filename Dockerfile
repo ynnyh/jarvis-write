@@ -18,7 +18,16 @@ FROM python:3.12-slim
 ARG GIT_COMMIT=dev
 # ffmpeg:出片引擎「末帧自动接力」用(渲染成功的草片抽最后一帧当下一镜首帧)。
 # --no-install-recommends 控制体积;镜像里没有它其余功能完全不受影响。
-RUN apt-get update \
+# apt 源换腾讯云镜像:deb.debian.org 从国内服务器拉 ffmpeg 的 ~180 个依赖包
+# 能慢到一个多小时(2026-08-28 实测卡 libllvm19 半小时+);腾讯镜像分钟级。
+# trixie 的源在 debian.sources,老格式 sources.list 一并兜住。
+RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i 's|deb.debian.org|mirrors.cloud.tencent.com|g' /etc/apt/sources.list.d/debian.sources; \
+    fi; \
+    if [ -f /etc/apt/sources.list ]; then \
+        sed -i 's|deb.debian.org|mirrors.cloud.tencent.com|g' /etc/apt/sources.list; \
+    fi; \
+    apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /srv
