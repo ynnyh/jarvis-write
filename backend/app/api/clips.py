@@ -238,7 +238,7 @@ def _clean_shoot(units) -> list[dict]:
 
 def _validate_common(
     theme: str, custom_theme: str, duration_s: int, direction: str,
-    mode: str = "mood", inspiration: str = "",
+    mode: str = "mood", inspiration: str = "", derived: bool = False,
 ) -> None:
     if mode not in VALID_MODES:
         raise HTTPException(status_code=400, detail=f"未知工坊类型:{mode}")
@@ -247,7 +247,9 @@ def _validate_common(
         # 标题(custom_theme)可选,theme 恒空。
         if not inspiration.strip():
             raise HTTPException(status_code=400, detail="先把你的点子写下来(一句话到一段话都行)。")
-    else:
+    elif not derived:
+        # 小说衍生(投流页签)theme 留空是合法的——「AI 按书自动挑」,
+        # 选材引擎读正文自己定,不强制命题;独立工坊仍必须有命题。
         valid = VALID_PLAYS if mode == "play" else VALID_THEMES
         kind = "玩法" if mode == "play" else "情绪主题"
         if theme and theme not in valid:
@@ -328,6 +330,7 @@ async def create_clip(body: ClipCreateIn, db: Session = Depends(get_db)):
     _validate_common(
         body.theme, body.custom_theme, body.duration_s, body.direction,
         body.mode, inspiration=body.inspiration,
+        derived=body.source_project_id is not None,
     )
     if body.source_project_id is not None:
         project = db.get(Project, body.source_project_id)

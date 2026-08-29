@@ -259,6 +259,24 @@ def test_standalone_list_excludes_novel_derived(client):
     assert [c["id"] for c in r.json()["clips"]] == [novel_cid]
 
 
+def test_novel_derived_allows_empty_theme(client):
+    """回归:小说投流页签情绪侧重留空(「AI 按书自动挑」)必须放行。
+
+    投流页签的表单没有命题目录,下拉第一项就是空值=AI 自动挑;命题必填校验
+    只该管独立工坊。曾因校验不分场景,选着默认项点生成就被「先选命题」拦下。
+    独立工坊缺命题仍须 400(见 test_clips_generic_flow)。
+    """
+    headers = _auth(client, "clips_auto_theme")
+    r = client.post("/api/projects", headers=headers, json={"title": "自动挑书"})
+    pid = r.json()["id"]
+    r = client.post("/api/clips", headers=headers, json={
+        "theme": "", "custom_theme": "", "duration_s": 15, "source_project_id": pid,
+    })
+    assert r.status_code == 200, r.text
+    row = r.json()["clip_row"]
+    assert row["theme"] == "" and row["source_project_id"] == pid
+
+
 def test_one_take_failure_still_delivers_the_rest(client):
     """②三发并行:一发展开失败,另外两个本子照样交付(旧实现是一截断全批白跑)。"""
     headers = _auth(client, "clips_partial")

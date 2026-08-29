@@ -66,7 +66,8 @@ export function ClipsList({ projectId, mode = "mood" }: { projectId: number | nu
       if (!inspiration.trim()) { toast.err("先写点子", "把你想到的场景/对话随手写下来,一句话到一段话都行"); return; }
     } else {
       const kind = isPlay ? "玩法" : "情绪主题";
-      if (!theme && !custom.trim()) { toast.err("先选命题", `选一个${kind},或填自定义`); return; }
+      // 小说投流页签:情绪侧重留空 = 「AI 按书自动挑」,选材引擎自己定,不算缺命题
+      if (!novelMode && !theme && !custom.trim()) { toast.err("先选命题", `选一个${kind},或填自定义`); return; }
     }
     setBusy(true);
     try {
