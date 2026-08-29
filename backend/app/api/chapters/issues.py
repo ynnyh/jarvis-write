@@ -8,9 +8,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_project_or_404
-from app.db.models import ChapterIssue, Project
+from app.chapter_versions import snapshot_chapter
+from app.db.models import Chapter, ChapterIssue, Project
 from app.db.session import SessionLocal, get_db
-from app.engines.pipeline.chapter import generate_chapter
+from app.engines.consistency.checker import blockers_of, check_chapter, persist_issues
+from app.engines.editorial import apply_gate_fixes, content_hash, repair_chapter
+from app.engines.pipeline.chapter import _rolling_summary, generate_chapter
 from app.engines.pipeline.handoff import handoff_payload
 from app.jobs import create_job, fail_job, finish_job, fire_and_track, list_running, normalize_job_error, update_stage
 from app.schemas.canon import coerce_canon
@@ -178,6 +181,118 @@ async def apply_issue_revision(
                 "handoff_contract": handoff["contract"],
                 "handoff_extract_status": handoff["status"],
                 "handoff_extract_error": handoff["error"],
+            })
+        except Exception as exc:  # noqa: BLE001 — 任务失败进 job 状态
+            session.rollback()
+            fail_job(job_id, normalize_job_error(exc)[:500])
+        finally:
+            session.close()
+
+    fire_and_track(runner())
+    return {"job_id": job_id}
+
+
+@router.post("/{chapter_number}/issues/{issue_id}/spot-repair")
+async def spot_repair_issue(
+    project_id: int, chapter_number: int, issue_id: int,
+    db: Session = Depends(get_db),
+):
+    """单条问题定点修复(分级回炉的手动入口):AI 原位改句,不整章重写。
+
+    与 apply-revision(整章重写)相对的轻量路径:repair_chapter 出「逐字锚 →
+    最小改动」替换对(与生成回炉循环同一套实现),唯一锚校验应用后重跑门禁,
+    **复查干净才落库**——复查仍有 blocker 则什么都不写,issue 保持 open,
+    结果里建议改走按建议修订。quarantined 章修干净后仍处隔离:放行(补走
+    抽取/摘要/契约)留给用户点 gate-release,不自动放行。
+    """
+    get_project_or_404(db, project_id)
+    ch = _get_chapter_or_404(db, project_id, chapter_number)
+    issue = _get_issue_or_404(db, ch.id, issue_id)
+    if issue.status != "open":
+        raise HTTPException(status_code=400, detail=f"该问题已是 {issue.status} 状态,无需修复")
+    if not issue.evidence.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="该问题没有逐字证据,无法定点定位;请走「按建议修订」或人工修改",
+        )
+    if not ch.final_content.strip():
+        raise HTTPException(status_code=400, detail="本章尚无定稿正文,无法定点修复")
+    busy = (
+        list_running(f"chapter-{project_id}-")
+        + list_running(f"re-extract-{project_id}-")
+        + list_running(f"gate-release-{project_id}-")
+    )
+    if busy:
+        raise HTTPException(
+            status_code=409,
+            detail=f"已有章节任务在进行中({busy[0][1]['stage']}),等它完成再修复。",
+        )
+    job_id = create_job(f"chapter-{project_id}-{chapter_number}")
+    # chapter_issues 不存 conflicting_fact(检查时的对照事实),修复 prompt 里缺省即可
+    issue_payload = {
+        "severity": issue.severity,
+        "type": issue.issue_type,
+        "description": issue.description,
+        "evidence": issue.evidence,
+        "suggestion": issue.suggestion,
+    }
+
+    async def runner() -> None:
+        session = SessionLocal()
+        try:
+            session.get(Project, project_id)
+            ch2 = (
+                session.query(Chapter)
+                .filter(
+                    Chapter.project_id == project_id,
+                    Chapter.chapter_number == chapter_number,
+                )
+                .first()
+            )
+            update_stage(job_id, "1/3 生成定点修复方案")
+            old_text = ch2.final_content
+            fixes = await repair_chapter(chapter_number, old_text, [issue_payload])
+            new_text, applied, failed = apply_gate_fixes(old_text, fixes)
+            if not applied:
+                finish_job(job_id, {
+                    "ok": False,
+                    "reason": "AI 给出的修改在正文中定位不到(证据失配或片段不唯一),正文未改动",
+                    "failed": failed,
+                })
+                return
+            update_stage(job_id, "2/3 应用修改,重跑一致性门禁复查")
+            # 复查对照源与生成时同口径(含滚动摘要);失败即一切未写,无需回滚动作
+            rolling = _rolling_summary(session, project_id, chapter_number)
+            recheck = await check_chapter(
+                session, project_id, chapter_number, new_text, rolling_summary=rolling
+            )
+            reblockers = blockers_of(recheck)
+            if reblockers:
+                finish_job(job_id, {
+                    "ok": False,
+                    "reason": "定点修复后门禁复查仍有硬矛盾,本次修改未生效;建议改走「按建议修订」",
+                    "recheck": reblockers[:3],
+                })
+                return
+            update_stage(job_id, "3/3 落库")
+            snapshot_chapter(session, ch2, source="spot_repair")
+            ch2.final_content = new_text
+            ch2.word_count = len(new_text)
+            fixed_row = session.get(ChapterIssue, issue_id)
+            fixed_row.status = "resolved"
+            # 决议指纹锚定修复后的正文:persist 清账只删「指纹已变」的旧记录,
+            # 不改指纹这条 resolved 会被当成过期记录清掉,面板上就看不到已解决了
+            fixed_row.content_hash = content_hash(new_text)
+            # 复查发现的 major/minor(含未修干净的同类问题)照常重建 open,面板可见不漏报
+            persist_issues(session, ch2, recheck, source="gate", text=new_text)
+            session.commit()
+            finish_job(job_id, {
+                "ok": True,
+                "applied": applied,
+                "failed": failed,
+                "word_count": len(new_text),
+                "status": ch2.status,
+                "final_content": new_text,
             })
         except Exception as exc:  # noqa: BLE001 — 任务失败进 job 状态
             session.rollback()

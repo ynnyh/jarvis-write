@@ -819,3 +819,169 @@ def test_gate_release_endpoint(client):
     r = client.get(f"/api/projects/{pid}/chapters/2/issues", headers=headers)
     assert r.status_code == 200
     assert r.json()[0]["status"] == "ignored"
+
+
+# ---------- API 层:单条问题定点修复(spot-repair,分级回炉手动入口) ----------
+
+async def _fake_spot_recheck_clean(*a, **k):
+    return []
+
+
+async def _fake_spot_recheck_blocker(*a, **k):
+    return [dict(BLOCKER_ISSUE)]
+
+
+DAWN_FIX = {
+    "issue_index": 0,
+    "original": "篝火只剩一点余烬。",
+    "replacement": "不知过了多久,天将破晓,篝火只剩一点余烬。",
+}
+
+
+def _seed_repairable_issue(username: str, client, *, evidence: str = "篝火只剩一点余烬。"):
+    """直接落库:一个项目 + 第 2 章正文与 open gate issue。返回 (headers, pid, issue_id)。"""
+    from app.db.session import SessionLocal
+    from app.db.models import Chapter, ChapterIssue, Outline
+    from app.engines.editorial import content_hash
+
+    headers = _auth(client, username)
+    r = client.post("/api/projects", headers=headers,
+                    json={"title": f"定点修复测试书-{username}", "target_chapters": 2})
+    assert r.status_code == 200, r.text
+    pid = r.json()["id"]
+
+    text = "沈墨在破庙里醒来。篝火只剩一点余烬。"
+    session = SessionLocal()
+    try:
+        session.add(Outline(
+            project_id=pid, chapter_number=2, title="破庙清晨",
+            chapter_purpose="推进主线", summary="第2章剧情", current_version=1,
+        ))
+        ch = Chapter(project_id=pid, chapter_number=2, final_content=text,
+                     word_count=len(text), status="quarantined")
+        session.add(ch)
+        session.flush()
+        row = ChapterIssue(
+            chapter_id=ch.id, source="gate", severity="blocker", issue_type="state",
+            description="上章末刚入睡,本章却清醒活动,无时间跳跃交代",
+            evidence=evidence, suggestion="开头补一段时间流逝的交代",
+            status="open", content_hash=content_hash(text),
+        )
+        session.add(row)
+        session.commit()
+        return headers, pid, row.id
+    finally:
+        session.close()
+
+
+def test_spot_repair_success(client):
+    """定点修复:锚唯一命中 + 复查干净 → 正文更新、issue resolved、留版本快照。"""
+    from app.api.chapters import issues as issues_mod
+
+    headers, pid, issue_id = _seed_repairable_issue("spot_repair_ok_user", client)
+
+    async def _fake_repair(*a, **k):
+        return [dict(DAWN_FIX)]
+
+    with (
+        patch.object(issues_mod, "repair_chapter", new=_fake_repair),
+        patch.object(issues_mod, "check_chapter", new=_fake_spot_recheck_clean),
+    ):
+        r = client.post(
+            f"/api/projects/{pid}/chapters/2/issues/{issue_id}/spot-repair",
+            headers=headers,
+        )
+        assert r.status_code == 200, r.text
+        job = _wait_job(client, headers, r.json()["job_id"])
+
+    assert job["status"] == "done", job
+    assert job["result"]["ok"] is True
+    assert len(job["result"]["applied"]) == 1
+
+    rows = _db_rows(pid)
+    ch2 = rows["chapters"][2]
+    assert "天将破晓" in ch2.final_content
+    assert ch2.word_count == len(ch2.final_content)
+    issue_row = [i for i in rows["issues"][2] if i.id == issue_id][0]
+    assert issue_row.status == "resolved"
+    # 修复前正文留了版本快照,可回滚
+    from app.db.session import SessionLocal
+    from app.db.models import ChapterVersion
+
+    session = SessionLocal()
+    try:
+        versions = session.query(ChapterVersion).filter(
+            ChapterVersion.chapter_id == ch2.id).all()
+    finally:
+        session.close()
+    assert len(versions) == 1 and versions[0].source == "spot_repair"
+    assert "天将破晓" not in versions[0].final_content
+
+
+def test_spot_repair_recheck_blocker_keeps_text_open(client):
+    """复查仍有 blocker:一字不落,issue 保持 open,结果说明原因。"""
+    from app.api.chapters import issues as issues_mod
+
+    headers, pid, issue_id = _seed_repairable_issue("spot_repair_blocker_user", client)
+
+    async def _fake_repair(*a, **k):
+        return [dict(DAWN_FIX)]
+
+    with (
+        patch.object(issues_mod, "repair_chapter", new=_fake_repair),
+        patch.object(issues_mod, "check_chapter", new=_fake_spot_recheck_blocker),
+    ):
+        r = client.post(
+            f"/api/projects/{pid}/chapters/2/issues/{issue_id}/spot-repair",
+            headers=headers,
+        )
+        job = _wait_job(client, headers, r.json()["job_id"])
+
+    assert job["status"] == "done", job
+    assert job["result"]["ok"] is False
+    assert "按建议修订" in job["result"]["reason"]
+    rows = _db_rows(pid)
+    assert "天将破晓" not in rows["chapters"][2].final_content
+    issue_row = [i for i in rows["issues"][2] if i.id == issue_id][0]
+    assert issue_row.status == "open"
+
+
+def test_spot_repair_anchor_miss_noop(client):
+    """锚在正文中定位不到:修复一律不应用,正文与 issue 状态都不变。"""
+    from app.api.chapters import issues as issues_mod
+
+    headers, pid, issue_id = _seed_repairable_issue("spot_repair_miss_user", client)
+
+    async def _fake_repair(*a, **k):
+        return [{"issue_index": 0, "original": "正文里没有这句话。", "replacement": "x"}]
+
+    with (
+        patch.object(issues_mod, "repair_chapter", new=_fake_repair),
+        patch.object(issues_mod, "check_chapter", new=_fake_spot_recheck_clean),
+    ):
+        r = client.post(
+            f"/api/projects/{pid}/chapters/2/issues/{issue_id}/spot-repair",
+            headers=headers,
+        )
+        job = _wait_job(client, headers, r.json()["job_id"])
+
+    assert job["status"] == "done", job
+    assert job["result"]["ok"] is False
+    assert "定位不到" in job["result"]["reason"]
+    rows = _db_rows(pid)
+    assert "天将破晓" not in rows["chapters"][2].final_content
+    issue_row = [i for i in rows["issues"][2] if i.id == issue_id][0]
+    assert issue_row.status == "open"
+
+
+def test_spot_repair_rejects_issue_without_evidence(client):
+    """没有逐字证据的问题无法定点:400 拒绝,不建任务。"""
+    headers, pid, issue_id = _seed_repairable_issue(
+        "spot_repair_noev_user", client, evidence="")
+
+    r = client.post(
+        f"/api/projects/{pid}/chapters/2/issues/{issue_id}/spot-repair",
+        headers=headers,
+    )
+    assert r.status_code == 400
+    assert "逐字证据" in r.json()["detail"]

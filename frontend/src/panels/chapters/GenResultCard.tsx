@@ -5,7 +5,7 @@
 // 承接,这里只做完整报告明细,不重复出卡。
 import { useCallback, useEffect, useState } from "react";
 import {
-  api, ChapterIssue, flavorTitle, GenerateChapterResponse,
+  api, ChapterIssue, flavorTitle, GenerateChapterResponse, SpotRepairResult,
 } from "../../api";
 import { errMsg } from "../../pollJob";
 import { dispatchAction } from "../../ui/actions";
@@ -108,6 +108,36 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, onClo
       }
     } catch (e) {
       toast.err("修订失败", errMsg(e));
+      await reloadIssues();
+    } finally {
+      setBusyIssue(null);
+    }
+  }
+
+  // 定点修复:AI 原位改句消掉这条矛盾(不重写),门禁复查干净才落库;
+  // ok=false 时正文未动,issue 保持 open,提示改走「按建议修订」
+  async function spotRepair(issue: ChapterIssue) {
+    setBusyIssue(issue.id);
+    try {
+      const res = await run<SpotRepairResult>(
+        () => api.spotRepairIssue(pid, n, issue.id),
+        { kind: `chapter-${pid}-${n}` },
+      );
+      if (res?.ok) {
+        toast.ok(
+          "已定点修复",
+          res.status === "quarantined"
+            ? "矛盾已清零;本章仍在隔离中,可点「放行」补走抽取/摘要/契约"
+            : "正文已更新,门禁复查通过",
+        );
+        await reloadIssues();
+        onChanged();
+      } else {
+        toast.err("定点修复未生效", res?.reason || "正文未改动;建议改走「按建议修订」");
+        await reloadIssues();
+      }
+    } catch (e) {
+      toast.err("定点修复失败", errMsg(e));
       await reloadIssues();
     } finally {
       setBusyIssue(null);
@@ -225,6 +255,7 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, onClo
           <IssueRow key={issue.id} issue={issue} busy={busyIssue === issue.id}
             genBlocked={genBlocked} genHint={genHint}
             onApply={() => applyRevision(issue)}
+            onSpotRepair={() => spotRepair(issue)}
             onResolve={() => markIssue(issue, "resolved")}
             onIgnore={() => markIssue(issue, "ignored")}
             onAdopt={() => adoptCanon(issue)} />
@@ -287,7 +318,7 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, onClo
 }
 
 // 单条问题:severity 徽标 + 来源 + 描述 + 可折叠证据 + 建议;open 状态给三个操作
-function IssueRow({ issue, busy, done, genBlocked, genHint, onApply, onResolve, onIgnore, onAdopt }: {
+function IssueRow({ issue, busy, done, genBlocked, genHint, onApply, onSpotRepair, onResolve, onIgnore, onAdopt }: {
   issue: ChapterIssue;
   busy: boolean;
   done?: boolean;
@@ -295,6 +326,8 @@ function IssueRow({ issue, busy, done, genBlocked, genHint, onApply, onResolve, 
   genBlocked?: boolean;
   genHint?: string;
   onApply?: () => void;
+  // 定点修复:仅带逐字证据的 open 问题显示(没有锚无法定位),失败正文不变
+  onSpotRepair?: () => void;
   onResolve?: () => void;
   onIgnore?: () => void;
   // 宪法建议(source=canon)专用:采纳进 project.canon
@@ -335,6 +368,13 @@ function IssueRow({ issue, busy, done, genBlocked, genHint, onApply, onResolve, 
               title={genBlocked ? genHint : "把该问题的修正建议交给 AI 走重写链路(受理即标记解决,门禁会重跑验证)"}
               onClick={onApply}>
               {busy && <span className="spin spin-sm" />}按建议修订
+            </button>
+          )}
+          {!isCanon && issue.evidence && (
+            <button className="btn-sm" disabled={busy || genBlocked}
+              title={genBlocked ? genHint : "AI 原位改句消掉这条矛盾(不整章重写),门禁复查干净才生效;失败正文不变"}
+              onClick={onSpotRepair}>
+              定点修复
             </button>
           )}
           {!isCanon && (

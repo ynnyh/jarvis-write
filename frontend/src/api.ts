@@ -698,6 +698,17 @@ export interface GateRepairDetail {
   applied: { original: string; replacement: string }[];
   failed: { original: string; reason: string }[];
 }
+/** 定点修复 job 结果:ok=false 时正文未动(锚失配或复查仍有硬矛盾),reason 说明原因 */
+export interface SpotRepairResult {
+  ok: boolean;
+  reason?: string;
+  applied?: GateRepairDetail["applied"];
+  failed?: GateRepairDetail["failed"];
+  recheck?: Record<string, string>[];
+  word_count?: number;
+  status?: string;
+  final_content?: string;
+}
 export interface ChapterReview {
   chapter_number: number;
   // 四维+continuity(连续性,新维度;旧快照无该键,Object.entries 遍历天然兼容)
@@ -943,6 +954,9 @@ export const api = {
   // 采纳单条问题的修正建议:异步修订 job(409=本章有任务在跑),result 含 applied_issue_id
   applyIssueRevision: (pid: number, n: number, issueId: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/chapters/${n}/issues/${issueId}/apply-revision`),
+  // 单条问题定点修复(分级回炉):AI 原位改句不重写,门禁复查干净才落库(409=本章有任务在跑)
+  spotRepairIssue: (pid: number, n: number, issueId: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/chapters/${n}/issues/${issueId}/spot-repair`),
   // 采纳一条「故事宪法建议」(source=canon)进 project.canon,并标 issue 为 resolved;
   // changed=false 表示该建议内容此前已在宪法里(仍视作已采纳)。返回更新后的 canon + issue。
   adoptCanonSuggestion: (pid: number, n: number, issueId: number) =>
