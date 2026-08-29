@@ -86,9 +86,12 @@
   --shadow-md: 0 1px 2px rgba(31, 32, 36, 0.05), 0 4px 12px rgba(31, 32, 36, 0.06);
   --shadow-lg: 0 16px 40px rgba(31, 32, 36, 0.16);
 
-  /* 控件尺寸(移动端在媒体查询里调大) */
-  --ctl-h: 36px;
-  --ctl-h-sm: 28px;
+  /* 控件尺寸(移动端在媒体查询里调大);
+     --ctl-r 控件圆角、--ctl-inset 输入框内阴影(轻陷感),输入/按钮共用 */
+  --ctl-h: 40px;
+  --ctl-h-sm: 32px;
+  --ctl-r: 10px;
+  --ctl-inset: inset 0 1px 2px rgba(31, 32, 36, 0.04);
 
   /* 层级 */
   --z-topbar: 10;
@@ -136,6 +139,8 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.35);
   --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.5);
+
+  --ctl-inset: inset 0 1px 2px rgba(0, 0, 0, 0.28);
 }
 
 /* ---------- 基础 ---------- */
@@ -214,7 +219,7 @@ a:focus-visible,
 button {
   height: var(--ctl-h);
   padding: 0 14px;
-  border-radius: var(--r-md);
+  border-radius: var(--ctl-r);
   border: 1px solid var(--line-strong);
   background: var(--surface);
   color: var(--text);
@@ -233,8 +238,8 @@ button.primary:hover:not(:disabled) { background: var(--brand-hover); }
 button.danger { background: var(--surface); border-color: var(--err-line); color: var(--err); }
 button.danger:hover:not(:disabled) { background: var(--err-weak); border-color: var(--err); }
 
-button.btn-sm { height: var(--ctl-h-sm); padding: 0 10px; font-size: var(--fs-xs); border-radius: var(--r-sm); }
-button.btn-lg { height: 42px; font-size: var(--fs-md); padding: 0 18px; }
+button.btn-sm { height: var(--ctl-h-sm); padding: 0 10px; font-size: var(--fs-xs); border-radius: var(--r-md); }
+button.btn-lg { height: 46px; font-size: var(--fs-md); padding: 0 18px; }
 button.btn-block { width: 100%; }
 
 button:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -268,46 +273,67 @@ button.reader-toc-item { width: 100%; border: 0; background: none; font-size: va
 button.ts-item, button.wiz-step { border: 0; background: none; }
 button.guide-mini { color: var(--text-2); font-size: var(--fs-sm); }
 
-/* ---------- 表单控件(全站统一高度/边框/聚焦环) ---------- */
-input[type="text"],
-input[type="password"],
-input[type="number"],
+/* ---------- 表单控件(全站统一高度/边框/聚焦环) ----------
+   选择器用 :where() 压到零优先级:组件级覆写(.cmdk-input 等类名)不需要
+   再跟基础样式比权重。排除清单只留非文本控件(checkbox/file 等);
+   没写 type 的裸 <input>(默认就是 text)也一并吃到统一样式——
+   之前这批框全是浏览器裸默认:矮、直角、深灰边,是全站最难看的输入框。 */
+input:where(:not([type="checkbox"]):not([type="radio"]):not([type="range"])
+  :not([type="color"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"])),
 textarea,
 select {
   width: 100%;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-md);
+  height: var(--ctl-h);
+  border: 1px solid var(--line);
+  border-radius: var(--ctl-r);
   background: var(--surface);
+  box-shadow: var(--ctl-inset);
   color: var(--text);
   font-family: inherit;
   font-size: var(--fs-md);
   padding: 0 var(--sp-3);
   outline: none;
-  transition: border-color 0.12s, box-shadow 0.12s;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
-input[type="text"],
-input[type="password"],
-input[type="number"],
-select { height: var(--ctl-h); }
 
-textarea { padding: 9px var(--sp-3); line-height: 1.7; resize: vertical; }
+textarea { height: auto; padding: 10px var(--sp-3); line-height: 1.7; resize: vertical; }
 
-input:hover, textarea:hover, select:hover { border-color: var(--text-3); }
+input:hover:not(:focus), textarea:hover:not(:focus), select:hover:not(:focus) {
+  border-color: var(--line-strong);
+}
 input:focus, textarea:focus, select:focus {
   border-color: var(--brand);
-  box-shadow: 0 0 0 3px var(--brand-ring);
+  box-shadow: 0 0 0 4px var(--brand-ring);
 }
 input::placeholder, textarea::placeholder { color: var(--text-3); }
 
-select { cursor: pointer; }
+/* 浏览器自动填充的黄底会击穿圆角与主题,统一压成表面色 */
+input:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0 1000px var(--surface) inset;
+  -webkit-text-fill-color: var(--text);
+  caret-color: var(--text);
+}
+
+/* select 去掉原生箭头(Windows 下尤其笨重),换自绘细箭头,随主题换色 */
+select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='M4 6.5 8 10.5 12 6.5' fill='none' stroke='%23767a83' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 32px;
+}
+[data-theme="dark"] select {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='M4 6.5 8 10.5 12 6.5' fill='none' stroke='%23858a92' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
 
 /* 字段标签(全站统一):表单字段、设置组、面板小标题共用 */
 .fl {
   display: block;
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   font-weight: 500;
   color: var(--text-2);
-  margin: var(--sp-3) 0 5px;
+  margin: var(--sp-3) 0 6px;
 }
 
 .input-xs { max-width: 84px; }
@@ -1639,7 +1665,7 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 }
 
 @media (max-width: 640px) {
-  :root { --ctl-h: 40px; --ctl-h-sm: 34px; }
+  :root { --ctl-h: 44px; --ctl-h-sm: 36px; }
 
   h1 { font-size: 18px; }
   .card { padding: 16px; }
