@@ -353,9 +353,9 @@ export const dramaApi = {
     req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/episodes/${eid}/storyboard`, undefined, LLM_TIMEOUT),
   prompts: (pid: number, eid: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/episodes/${eid}/prompts`, undefined, LLM_TIMEOUT),
-  // 整片提示词(端到端音频原生视频模型用):生成 / 读取 / 整段保存(手改或粘贴自己的版本)
-  buildFilmPrompt: (pid: number, eid: number) =>
-    req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/episodes/${eid}/film-prompt`, undefined, LLM_TIMEOUT),
+  // 整片提示词(端到端音频原生视频模型用,按单段上限切分段落):生成 / 读取 / 整段保存
+  buildFilmPrompt: (pid: number, eid: number, segmentS: 15 | 30 = 15) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/episodes/${eid}/film-prompt`, { segment_s: segmentS }, LLM_TIMEOUT),
   getFilmPrompt: (pid: number, eid: number) =>
     req<{ film_prompt: string }>("GET", `/api/projects/${pid}/drama/episodes/${eid}/film-prompt`),
   saveFilmPrompt: (pid: number, eid: number, film_prompt: string) =>

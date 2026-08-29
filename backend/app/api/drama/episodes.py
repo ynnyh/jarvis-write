@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app import storage
 
 from app.api.drama._common import (
+    FilmPromptGenIn,
     FilmPromptIn,
     PlanIn,
     _episode_job,
@@ -220,9 +221,15 @@ async def prompts(project_id: int, episode_id: int, db: Session = Depends(get_db
 
 
 @router.post("/episodes/{episode_id}/film-prompt")
-async def build_film_prompt(project_id: int, episode_id: int, db: Session = Depends(get_db)):
-    """把分镜+角色卡+画风组装成一条「一次出一整片」的成片提示词(覆盖旧稿)。"""
+async def build_film_prompt(
+    project_id: int, episode_id: int,
+    body: FilmPromptGenIn | None = None, db: Session = Depends(get_db),
+):
+    """把分镜切成 ≤单段上限的段,组装成 N 段各自独立可用的成片提示词(覆盖旧稿)。"""
     _get_episode(db, project_id, episode_id)
+    segment_s = (body.segment_s if body else 15) or 15
+    if segment_s not in (15, 30):
+        raise HTTPException(status_code=400, detail="单段时长只支持 15 / 30 秒。")
     kind = f"drama-film-prompt-{episode_id}"
     if (existing := _episode_job(kind)):
         return existing
@@ -232,7 +239,9 @@ async def build_film_prompt(project_id: int, episode_id: int, db: Session = Depe
 
         with SessionLocal() as session:
             proj, ep = _load_for_job(session, project_id, episode_id)
-            return await build_episode_film_prompt(session, proj, ep, progress)
+            return await build_episode_film_prompt(
+                session, proj, ep, progress, segment_s=segment_s
+            )
 
     return {"job_id": spawn_job(kind, work)}
 

@@ -167,6 +167,8 @@ export default function ShootWorkbench({ clipId, card, onProgress }: {
 }) {
   const [units, setUnits] = useState<ClipShootUnit[] | null>(null);
   const [saving, setSaving] = useState(false);
+  // 整片提示词的单段时长上限:30s 档短片需要切成两段,15s 档一段装下
+  const [segS, setSegS] = useState<15 | 30>(15);
   // 每段「贴外链参考图」的临时输入(回车确认);空串=收着不显示
   const [linkIdx, setLinkIdx] = useState(-1);
   const [linkVal, setLinkVal] = useState("");
@@ -278,14 +280,23 @@ export default function ShootWorkbench({ clipId, card, onProgress }: {
         成片地址贴回「成品链接」存档。段号与手卡切段一致,手卡改过会按新切段自动归并。
       </p>
 
-      {/* 整片提示词(端到端音频原生视频模型):一条出一整片,不想逐段出片就用它 */}
+      {/* 整片提示词(端到端音频原生视频模型):按单段上限切好段,逐段生成后拼接。
+          15s 短片一段装下,选择器只对超过 15s 的(30s 档)显示 */}
       <FilmPromptCard
         load={() => clipsApi.getFilmPrompt(clipId).then((r) => r.film_prompt)}
         save={(t) => clipsApi.saveFilmPrompt(clipId, t).then((r) => r.film_prompt)}
-        generate={() => clipsApi.buildFilmPrompt(clipId)}
+        generate={() => clipsApi.buildFilmPrompt(clipId, segS)}
         jobKind={`clips-film-prompt-${clipId}`}
         ready={(card.shots ?? []).length > 0}
         readyHint="先「三选一」选定本子并生成分镜,才有原料组装整片提示词"
+        headerExtra={(card.chunks ?? []).reduce((s, c) => s + (c.duration_s || 0), 0) > 15 ? (
+          <select value={segS} title="单段时长上限:外部模型单次生成的上限"
+            onChange={(e) => setSegS(Number(e.target.value) as 15 | 30)}
+            style={{ padding: "2px 6px" }}>
+            <option value={15}>单段 ≤15s</option>
+            <option value={30}>单段 ≤30s</option>
+          </select>
+        ) : undefined}
       />
 
       {units === null ? (

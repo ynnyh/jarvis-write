@@ -1437,13 +1437,24 @@ function EpisodeDetail({ pid, eid, hasStyle, ratio, renderMode, onEpisodesChange
  *  逻辑在各工坊完全一致,收敛在共享的 FilmPromptCard,这里只接本工坊的数据源。
  */
 function FilmPromptSection({ pid, eid }: { pid: number; eid: number }) {
+  // 单段时长上限:外部模型多数单条 15s,少数支持 30s
+  const [segS, setSegS] = useState<15 | 30>(15);
   return (
     <FilmPromptCard
       load={() => dramaApi.getFilmPrompt(pid, eid).then((r) => r.film_prompt)}
       save={(t) => dramaApi.saveFilmPrompt(pid, eid, t).then((r) => r.film_prompt)}
-      generate={() => dramaApi.buildFilmPrompt(pid, eid)}
+      generate={() => dramaApi.buildFilmPrompt(pid, eid, segS)}
       jobKind={`drama-film-prompt-${eid}`}
       readyHint="先拆分镜,才有原料组装整片提示词"
+      generateDetail="文档已按段切好:每段单独复制生成,按段号拼接成集"
+      headerExtra={
+        <select value={segS} title="单段时长上限:外部模型单次生成的上限"
+          onChange={(e) => setSegS(Number(e.target.value) as 15 | 30)}
+          style={{ padding: "2px 6px" }}>
+          <option value={15}>单段 ≤15s</option>
+          <option value={30}>单段 ≤30s</option>
+        </select>
+      }
     />
   );
 }

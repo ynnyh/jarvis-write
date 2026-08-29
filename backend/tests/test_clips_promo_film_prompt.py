@@ -163,12 +163,13 @@ def test_clip_film_prompt_generate_and_get(client):
 
     assert job["status"] == "done", job
     got = client.get(f"/api/clips/{eid}/film-prompt", headers=headers)
-    assert got.json()["film_prompt"] == _CLIP_REPLY  # 围栏已剥,整段保存
+    assert got.json()["film_prompt"].startswith("【使用说明】")  # 分段文档头(引擎写)
+    assert _CLIP_REPLY in got.json()["film_prompt"]  # 围栏已剥,分段块整段保存
 
     prompt = adapter.prompts[0]
     assert "写实电影质感" in prompt  # 风格锚进原料
     assert "异地恋的最后一通电话" in prompt  # 点子进原料
-    assert "她:你为什么还要听?" in prompt  # 台词带说话人(lines 文本反查)
+    assert "台词(她):你为什么还要听?" in prompt  # 台词带说话人(lines 文本反查)
     assert "到站了,别下车。" in prompt  # 金句进原料
 
 

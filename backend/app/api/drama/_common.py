@@ -147,6 +147,12 @@ class FilmPromptIn(BaseModel):
     film_prompt: str = ""
 
 
+class FilmPromptGenIn(BaseModel):
+    """整片提示词生成参数:单段时长上限(外部模型单次生成的现实上限)。"""
+
+    segment_s: int = Field(default=15)
+
+
 class TrailerIn(BaseModel):
     from_ep: int = Field(default=1, ge=1)
     to_ep: int = Field(default=9999, ge=1)

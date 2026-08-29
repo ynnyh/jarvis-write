@@ -116,6 +116,11 @@ class FilmPromptIn(BaseModel):
     film_prompt: str = ""
 
 
+class FilmPromptGenIn(BaseModel):
+    """整片提示词生成参数:单段时长上限(外部模型单次生成的现实上限)。"""
+    segment_s: int = Field(default=15)
+
+
 class ShootUpdateIn(BaseModel):
     """出片工作台整卡更新:前端按段归并好后整卡回传(段数 ≤ 个位数,整卡写一次更安全)。"""
     shoot: list[dict] = []
@@ -424,9 +429,14 @@ async def reexpand_clip(clip_id: int, body: ReexpandIn, db: Session = Depends(ge
 
 
 @router.post("/{clip_id}/film-prompt")
-async def build_film_prompt(clip_id: int, db: Session = Depends(get_db)):
-    """把选中本子的分镜+台词+风格组装成一条「一次出一整片」的成片提示词(覆盖旧稿)。"""
+async def build_film_prompt(
+    clip_id: int, body: FilmPromptGenIn | None = None, db: Session = Depends(get_db)
+):
+    """把选中本子的分镜切成 ≤单段上限的段,组装成 N 段各自独立可用的成片提示词。"""
     _get_clip(db, clip_id)
+    segment_s = (body.segment_s if body else 15) or 15
+    if segment_s not in (15, 30):
+        raise HTTPException(status_code=400, detail="单段时长只支持 15 / 30 秒。")
     kind = f"clips-film-prompt-{clip_id}"
     for jid, job in list_running("clips-"):
         if job["kind"] == kind:
@@ -439,7 +449,9 @@ async def build_film_prompt(clip_id: int, db: Session = Depends(get_db)):
             row = session.get(MoodClip, clip_id)
             if row is None:
                 raise ValueError("短片已被删除,任务取消。")
-            return await build_clip_film_prompt(session, row, progress)
+            return await build_clip_film_prompt(
+                session, row, progress, segment_s=segment_s
+            )
 
     return {"job_id": spawn_job(kind, work)}
 

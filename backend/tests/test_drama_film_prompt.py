@@ -67,8 +67,11 @@ class _TextAdapter:
         return self.text
 
 
-def _seed_episode(pid: int, *, with_shots: bool = True) -> int:
-    """种一集:画风卡 + 角色卡 + 剧本 lines + 两格分镜(带台词,供说话人反查)。"""
+def _seed_episode(pid: int, *, with_shots: bool = True, shot_count: int | None = None) -> int:
+    """种一集:画风卡 + 角色卡 + 剧本 lines + 分镜(带台词,供说话人反查)。
+
+    shot_count 给定时种 N 个 5s 镜头(验分段切分);否则按默认两镜 4s+3s。
+    """
     from app.db.models import DramaCharacterCard, DramaEpisode, DramaShot, DramaStyleCard
     from app.db.session import SessionLocal
 
@@ -91,17 +94,29 @@ def _seed_episode(pid: int, *, with_shots: bool = True) -> int:
         s.add(ep)
         s.flush()
         if with_shots:
-            s.add(DramaShot(
-                episode_id=ep.id, seq=1, scene_name="茶室", characters=["苏曼"],
-                shot_type="近景", camera="固定", duration_s=4,
-                action_desc="她垂眼看戒指,指尖停在杯沿,再抬眼",
-                dialogue="你为什么还要听?",
-            ))
-            s.add(DramaShot(
-                episode_id=ep.id, seq=2, scene_name="茶室", characters=["苏曼"],
-                shot_type="特写", camera="推", duration_s=3,
-                action_desc="她眼眶泛起微弱水光,把话咽了回去", dialogue="",
-            ))
+            default_shots = [
+                DramaShot(
+                    episode_id=ep.id, seq=1, scene_name="茶室", characters=["苏曼"],
+                    shot_type="近景", camera="固定", duration_s=4,
+                    action_desc="她垂眼看戒指,指尖停在杯沿,再抬眼",
+                    dialogue="你为什么还要听?",
+                ),
+                DramaShot(
+                    episode_id=ep.id, seq=2, scene_name="茶室", characters=["苏曼"],
+                    shot_type="特写", camera="推", duration_s=3,
+                    action_desc="她眼眶泛起微弱水光,把话咽了回去", dialogue="",
+                ),
+            ]
+            shots = default_shots if shot_count is None else [
+                DramaShot(
+                    episode_id=ep.id, seq=n + 1, scene_name="茶室", characters=["苏曼"],
+                    shot_type="近景", camera="固定", duration_s=5,
+                    action_desc=f"茶室对峙的第 {n + 1} 个回合",
+                    dialogue="你为什么还要听?" if n == 0 else "",
+                )
+                for n in range(shot_count)
+            ]
+            s.add_all(shots)
         s.commit()
         return ep.id
 
@@ -126,6 +141,42 @@ def test_film_prompt_requires_shots(client):
     assert "分镜" in job["error"]
 
 
+def test_film_prompt_segments_split_by_limit(client):
+    """20 秒分镜、单段上限 15s → 贪心切 2 段;30s 上限 → 1 段。段边界落镜头边界。"""
+    headers = _auth(client, "fp_seg")
+    pid = _create_project(client, headers)
+    eid = _seed_episode(pid, shot_count=4)  # 4 镜 × 5s = 20s
+    adapter = _TextAdapter(_FILM_REPLY)
+
+    with patch("app.engines.drama.film_prompt.get_adapter_for", return_value=adapter):
+        r = client.post(f"/api/projects/{pid}/drama/episodes/{eid}/film-prompt",
+                        headers=headers, json={"segment_s": 15})
+        assert r.status_code == 200, r.text
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    assert "切成 2 段" in adapter.prompts[0]
+    assert "【第2段|15—20秒】" in adapter.prompts[0]
+
+    adapter30 = _TextAdapter(_FILM_REPLY)
+    with patch("app.engines.drama.film_prompt.get_adapter_for", return_value=adapter30):
+        r = client.post(f"/api/projects/{pid}/drama/episodes/{eid}/film-prompt",
+                        headers=headers, json={"segment_s": 30})
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    assert "切成 1 段" in adapter30.prompts[0]
+
+
+def test_film_prompt_rejects_bad_segment_s(client):
+    """单段时长白名单外(20s):400 说人话。"""
+    headers = _auth(client, "fp_badseg")
+    pid = _create_project(client, headers)
+    eid = _seed_episode(pid)
+
+    r = client.post(f"/api/projects/{pid}/drama/episodes/{eid}/film-prompt",
+                    headers=headers, json={"segment_s": 20})
+    assert r.status_code == 400 and "15 / 30" in r.json()["detail"]
+
+
 def test_film_prompt_generate_and_get(client):
     """生成跑通:原料注入齐活,markdown 围栏被剥掉,结果落库可读。"""
     headers = _auth(client, "fp_gen")
@@ -141,12 +192,13 @@ def test_film_prompt_generate_and_get(client):
     assert job["status"] == "done", job
     got = client.get(f"/api/projects/{pid}/drama/episodes/{eid}/film-prompt", headers=headers)
     assert got.status_code == 200, got.text
-    assert got.json()["film_prompt"] == _FILM_REPLY  # 围栏已剥,整段保存
+    assert got.json()["film_prompt"].startswith("【使用说明】")  # 分段文档头(引擎写)
+    assert _FILM_REPLY in got.json()["film_prompt"]  # 围栏已剥,分段块整段保存
 
     prompt = adapter.prompts[0]
     assert "黑色卷发贴近脸侧" in prompt  # 角色卡外貌逐字进原料
     assert "深宝蓝丝质旗袍" in prompt  # 服饰进原料
-    assert "苏曼:你为什么还要听?" in prompt  # 台词带说话人(按剧本 lines 反查)
+    assert "台词(苏曼):你为什么还要听?" in prompt  # 台词带说话人(按剧本 lines 反查)
     assert "写实电影质感" in prompt  # 画风锚进原料
 
 
