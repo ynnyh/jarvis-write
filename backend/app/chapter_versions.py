@@ -6,11 +6,12 @@
 核心约定:**任何会覆盖 chapters.final_content 的写入点,覆盖前先调
 snapshot_chapter()**。这样被顶替的那一版永远留得下、回得去。
 
-写入点(三处)当前:
-  - 章节重生成  app/engines/pipeline/chapter.py(source="generated")
-  - 整章润色应用 app/api/polish.py            (source="polished")
-  - 手动编辑正文 app/api/chapters.py           (source="edited")
-  - 回滚         app/api/chapters.py           (source="restored")
+写入点当前:
+  - 章节重生成   app/engines/pipeline/chapter.py(source="generated")
+  - 整章润色应用 app/api/polish.py             (source="polished")
+  - 手动编辑正文 app/api/chapters.py            (source="edited")
+  - 回滚         app/api/chapters.py            (source="restored")
+  - 问题定点修复 app/api/chapters/issues.py     (source="spot_repair")
 """
 from __future__ import annotations
 

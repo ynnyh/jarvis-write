@@ -383,7 +383,7 @@ export interface GenerateChapterResponse extends ChapterDetail {
   // 写前审核警告(docs/08 §5.3):只警告不阻断
   preflight?: { warnings: PreflightWarning[] };
 }
-/** 章节正文历史版本(覆盖前的快照)。source: generated/polished/edited/restored */
+/** 章节正文历史版本(覆盖前的快照)。source: generated/polished/edited/restored/spot_repair */
 export interface ChapterVersionBrief {
   id: number; version: number; source: string; word_count: number; created_at: string;
 }
@@ -393,6 +393,7 @@ export interface ChapterVersionDetail extends ChapterVersionBrief {
 /** 版本来源的中文说明 */
 export const VERSION_SOURCE_CN: Record<string, string> = {
   generated: "重写前", polished: "润色前", edited: "编辑前", restored: "回滚前",
+  spot_repair: "定点修复前",
 };
 /** AI 味报告:score/summary 必备;categories 分类得分明细(新版后端返回,旧格式没有) */
 export interface FlavorInfo {
