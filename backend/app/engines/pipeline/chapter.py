@@ -24,6 +24,7 @@ from app.engines.consistency import (
 )
 from app.engines.consistency.checker import (
     blockers_of,
+    blocker_fingerprint,
     check_chapter,
     continuity_score,
     persist_issues,
@@ -38,6 +39,8 @@ from app.engines.devices import devices_reminder_block, persist_device_issues
 from app.engines.polish import ai_flavor_report
 from app.engines.polish.polisher import _flavor_hits_block, deai_self_heal
 from app.engines.editorial import (
+    CONTINUITY_DIM,
+    DIMS,
     apply_gate_fixes,
     apply_proofread_fixes,
     build_revision_directive,
@@ -381,6 +384,12 @@ _PROSE_REWRITE_DIRECTIVE = (
     "⑤长短句交错,连续三句同一结构必改写。"
 )
 
+# 维度中文名(死锁提示文案用)
+_DIM_CN = {
+    "plot": "情节", "prose": "文笔", "pacing": "节奏",
+    "character": "人物", "continuity": "连续性",
+}
+
 
 def _with_prose_directive(directive: str, scores: dict, threshold: int) -> str:
     """prose 维低于阈值时,把「去 AI 腔」的具体禁则追加进重写指令。
@@ -628,6 +637,10 @@ async def generate_chapter(
     repair_rounds = 0  # 定点修复轮数(计入 revision_rounds,单独回显)
     last_repairs: dict = {}  # 末次定点修复明细 {applied, failed}(回显用)
     patch_tried = False  # 上一轮是否刚做过定点修复(修不掉的连续问题强制重写,防烧轮)
+    rework_log: list[dict] = []  # 逐轮回炉原因(落快照:checker 意见稳不稳一眼可辨)
+    prev_dim_scores: dict[str, int] = {}  # 上一轮主审各维得分(判断「无改善」)
+    stalled_dims: set[str] = set()  # 连续 2 轮无改善的维度:不再为它重写
+    prev_blocker_fps: set[str] = set()  # 上一轮 blocker 指纹(识别「同一问题复现」)
     while True:
         # ---- ① 一致性门禁(docs/08 §5.4):对照圣经 + 上章契约 + 上章结尾原文 ----
         # 有 blocker 不进精修:分诊后定点修复或重写,复查通过才往下走。门禁在落库前,
@@ -646,7 +659,28 @@ async def generate_chapter(
         review_result.setdefault("scores", {})["continuity"] = continuity_score(gate_issues)
         if blockers:
             review_result["passed"] = False
+            blocker_fps = {blocker_fingerprint(b) for b in blockers}
+            all_recurring = bool(blocker_fps) and blocker_fps <= prev_blocker_fps
+            prev_blocker_fps = blocker_fps
             if not auto_revise or revision_rounds >= max_revisions:
+                break
+            if all_recurring:
+                # 同一批 blocker 上一轮就原样出现过:重写=重新抽签,消不掉还烧钱。
+                # 止损隔离(矛盾照旧不进圣经),「疑似误报」的判断交给人工。
+                # 本轮没有花任何重工作量,不计回炉轮数。
+                review_result["gate_note"] = (
+                    f"{len(blockers)} 个 blocker 连续 2 轮重写后仍未消除,"
+                    "疑似检查误报;本章已隔离,请人工判断正文后放行或重写"
+                )
+                rework_log.append({
+                    "round": revision_rounds, "trigger": "gate",
+                    "blockers": [b.get("description", "")[:80] for b in blockers],
+                    "note": "连续复现,止损隔离",
+                })
+                logger.info(
+                    "第 %d 章 blocker 连续复现(%s…),止损隔离",
+                    chapter_number, sorted(blocker_fps)[0][:40] if blocker_fps else "",
+                )
                 break
             revision_rounds += 1
             # 分诊:全部可定点修且上一轮没刚修过 → patch(一次小调用,保住好文);
@@ -672,6 +706,10 @@ async def generate_chapter(
                     chapter_number, len(fixes),
                 )
             patch_tried = False
+            rework_log.append({
+                "round": revision_rounds, "trigger": "gate",
+                "blockers": [b.get("description", "")[:80] for b in blockers],
+            })
             logger.info(
                 "第 %d 章门禁拦截 %d 个 blocker,第 %d/%d 轮回炉(重写)",
                 chapter_number, len(blockers), revision_rounds, max_revisions,
@@ -710,27 +748,72 @@ async def generate_chapter(
             break
         if not auto_revise or revision_rounds >= max_revisions:
             break
-        # 不达标 → 主审意见(+prose 禁则)拼成重写指令,回炉重写,回①先过门禁
+        # ---- 回炉原因记账:同一维度连续 2 轮无改善 → 退出重写原因集 ----
+        # 重写对同一个模型就是重新抽签:prose 6→6→6 的死锁靠它破——第 2 轮
+        # 还停在原地,就不再为这个维度烧草稿+定稿(实测 4 章 12 轮 prose 纹丝不动)。
+        scores_now = review_result["scores"]
+        failing = [
+            d for d in (*DIMS, CONTINUITY_DIM)
+            if int(scores_now.get(d) or 0) < threshold
+        ]
+        stalled_dims &= set(failing)  # 已达标的维度不再算停滞
+        retryable: list[str] = []
+        for d in failing:
+            now_v, prev_v = int(scores_now.get(d) or 0), prev_dim_scores.get(d)
+            if prev_v is not None and now_v <= prev_v:
+                stalled_dims.add(d)
+            elif prev_v is not None and now_v > prev_v:
+                stalled_dims.discard(d)  # 有改善,再给一轮机会
+            if d not in stalled_dims:
+                retryable.append(d)
+        rework_log.append({
+            "round": revision_rounds + 1, "trigger": "review",
+            "failing": list(failing), "stalled": sorted(stalled_dims),
+        })
+        if not retryable:
+            # 所有未达标维度都连续两轮无改善:再重写注定同样结果,接受当前版本
+            review_result["stall_note"] = (
+                "未达标维度连续 2 轮回炉无改善,已停止重写并接受当前版本;"
+                "建议写手与审校使用不同模型,或适当调低达标线"
+            )
+            logger.info(
+                "第 %d 章 %s 维连续无改善,停止重写,接受当前版本",
+                chapter_number, "/".join(failing),
+            )
+            break
         revision_rounds += 1
         logger.info(
-            "第 %d 章未通过(五维=%s,阈值=%d),第 %d/%d 轮回炉",
+            "第 %d 章未通过(五维=%s,阈值=%d,待改维度=%s),第 %d/%d 轮回炉",
             chapter_number, review_result["scores"], threshold,
-            revision_rounds, max_revisions,
+            "/".join(retryable), revision_rounds, max_revisions,
         )
         directive = build_revision_directive(review_result)
-        directive = _with_prose_directive(
-            directive, review_result.get("scores") or {}, threshold
-        )
+        if "prose" in retryable:
+            directive = _with_prose_directive(
+                directive, review_result.get("scores") or {}, threshold
+            )
         draft, final = await _compose(
             _revision_block(directive, final),
             f"4/6 审校把关(第 {revision_rounds}/{max_revisions} 轮回炉·草稿)",
             f"4/6 审校把关(第 {revision_rounds}/{max_revisions} 轮回炉·定稿)",
         )
+        prev_dim_scores = {
+            d: int(scores_now.get(d) or 0) for d in (*DIMS, CONTINUITY_DIM)
+        }
     review_result["revision_rounds"] = revision_rounds
     review_result["repair_rounds"] = repair_rounds
     review_result["repairs"] = last_repairs
+    review_result["rework_log"] = rework_log
     review_result["threshold"] = threshold
     review_result["proofread_fixed"] = proofread_fixed
+    # 死锁提示:停滞维度显式告知(模型配比可能系统性不可达),决策留给作者
+    if stalled_dims:
+        review_result["hints"] = [
+            f"「{_DIM_CN.get(d, d)}」维连续多轮回炉无改善:当前写手/审校模型配比下"
+            f"该维度可能无法稳定达到阈值 {threshold}。建议写手与审校使用不同模型,"
+            "或在项目设置中适当调低达标线。"
+            for d in sorted(stalled_dims)
+        ]
     reviewed_text = final  # 审校/门禁对应的正文(字数守卫可能在其后改动,指纹以此为准)
     logger.info(
         "第 %d 章审校+门禁完成:通过=%s,五维=%s,blocker=%d,回炉 %d 轮(定点修 %d)",

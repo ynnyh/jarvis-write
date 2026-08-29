@@ -77,7 +77,7 @@ def test_build_revision_directive():
     assert "主编总评:节奏偏慢" in directive
     assert '"他慢慢走"这里:拖沓,改法:加快' in directive
     assert "对话太少" in directive
-    assert len(directive) <= 500
+    assert len(directive) <= 800
 
 
 # ---------- review_chapter:分数钳制 + 建议幻觉过滤 ----------
@@ -110,6 +110,9 @@ def test_review_chapter_clamps_and_filters():
     assert result["suggestions"][0]["evidence"] == ""
     assert result["suggestions"][0]["issue"] == "问题A"
     assert result["suggestions"][1]["evidence"] == "她的脸"
+    # 锚点化评分:score_reasons 缺失时 defensively 补空串,键与四维对齐
+    assert set(result["score_reasons"]) == {"plot", "prose", "pacing", "character"}
+    assert result["score_reasons"]["plot"] == ""
 
 
 # ---------- proofread_chapter:幻觉/无效问题过滤 ----------
@@ -249,8 +252,10 @@ def test_gate_caps_at_max_revisions_no_infinite_loop():
     review = _ScriptedReview([LOW, LOW, LOW, LOW])  # 一直不达标
     result = _run(db, project, review)
     assert result["passed"] is False
-    assert result["revision_rounds"] == 2  # 封顶 2 轮就接受当前版本
-    assert review.calls == 3               # 初审 1 + 回炉 2
+    # 同分停滞止损:第 2 轮各维与上轮持平 → 判定「无改善」,不再烧满预算
+    assert result["revision_rounds"] == 1
+    assert review.calls == 2               # 初审 1 + 回炉 1
+    assert result["stall_note"]
 
 
 def test_gate_no_revision_when_auto_revise_off():

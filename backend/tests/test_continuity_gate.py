@@ -177,15 +177,19 @@ def test_normalize_issue_severity_and_evidence():
     i2 = _normalize_issue({"severity": "fatal", "type": "other", "description": "x"}, text)
     assert i2["severity"] == "minor"
     assert i2["type"] == "state"
-    # 幻觉举证(正文里引不到)→ 清空
+    # 幻觉举证(正文里引不到)→ 清空,且 major 失去举证资格降为 minor
     i3 = _normalize_issue(
         {"severity": "major", "type": "state", "description": "x", "evidence": "正文里没有这句"},
         text,
     )
     assert i3["evidence"] == ""
+    assert i3["severity"] == "minor"
     # 新增维度 ambient(环境氛围连续性)/ cast(凭空常驻角色)是合法类型,不被降级为 state
     for t in ("ambient", "cast"):
-        it = _normalize_issue({"severity": "blocker", "type": t, "description": "x"}, text)
+        it = _normalize_issue(
+            {"severity": "blocker", "type": t, "description": "x", "evidence": "沈墨在破庙里醒来"},
+            text,
+        )
         assert it["type"] == t
         assert it["severity"] == "blocker"
 
@@ -240,7 +244,10 @@ def test_continuity_score_mapping():
 
     assert continuity_score([]) == 9
     assert continuity_score([{"severity": "minor"}]) == 8
-    assert continuity_score([{"severity": "major"}, {"severity": "minor"}]) == 6
+    # 单条 major = 「尚存解释空间」,不注定回炉(折算 7 = 恰好达常规阈值)
+    assert continuity_score([{"severity": "major"}, {"severity": "minor"}]) == 7
+    # 多条 major 叠加才拉到 6(阈值 7 下必回炉)
+    assert continuity_score([{"severity": "major"}, {"severity": "major"}]) == 6
     assert continuity_score([{"severity": "blocker"}, {"severity": "major"}]) == 4
 
 
@@ -438,18 +445,33 @@ def test_gate_quarantines_immediately_when_auto_revise_off():
 
 
 def test_gate_major_only_still_finalizes():
-    """major(非 blocker):continuity=6 不达阈值 → 回炉;封顶后无 blocker 仍 pending_review。"""
+    """单条 major(非 blocker):continuity 折算 7 恰好达标 → 不回炉直接过。"""
     major = dict(BLOCKER_ISSUE, severity="major")
     db, project, _ch1 = _make_db(review_max_revisions=0)
     check = _ScriptedCheck([[major]])
     extract = _SpyExtract()
     _adapter, (chapter, issues, _s, _g, review, _pf) = _run_generate(db, project, 2, check, extract)
 
-    assert review["scores"]["continuity"] == 6
-    assert review["passed"] is False  # 五维判定不达阈值,但接受当前版本
-    assert chapter.status == "pending_review"  # major 不隔离
+    assert review["scores"]["continuity"] == 7  # 单 major 不再一票拉死
+    assert review["passed"] is True
+    assert review["revision_rounds"] == 0
+    assert chapter.status == "pending_review"
     assert extract.calls == 1
     assert issues[0]["severity"] == "major"
+
+
+def test_gate_double_major_still_reworks():
+    """两条 major 叠加:continuity=6 不达阈值 → 回炉;封顶后仍 pending_review。"""
+    major = dict(BLOCKER_ISSUE, severity="major")
+    db, project, _ch1 = _make_db(review_max_revisions=0)
+    check = _ScriptedCheck([[major, dict(major, description="另一处时间表述与前文对不上")]])
+    extract = _SpyExtract()
+    _adapter, (chapter, issues, _s, _g, review, _pf) = _run_generate(db, project, 2, check, extract)
+
+    assert review["scores"]["continuity"] == 6
+    assert review["passed"] is False
+    assert chapter.status == "pending_review"  # 无 blocker 不隔离
+    assert extract.calls == 1
 
 
 # ---------- 分级回炉:门禁先行 + 定点修复(docs/08 §5.4) ----------
@@ -520,9 +542,15 @@ def test_gate_patches_blocker_then_passes():
 
 
 def test_gate_patch_miss_falls_back_to_rewrite():
-    """定点修复后仍有 blocker:下一轮强制重写,不再连续 patch(防烧轮)。"""
+    """定点修复后仍有**新** blocker:下一轮强制重写,不再连续 patch(防烧轮)。"""
     db, project, _ch1 = _make_db(review_max_revisions=3)
-    check = _ScriptedCheck([[BLOCKER_ISSUE], [BLOCKER_ISSUE], []])
+    # 第二轮的 blocker 与首轮描述不同 → 不算「复现」,正常走重写
+    new_blocker = dict(
+        BLOCKER_ISSUE,
+        description="周小满左手伤势凭空消失,与上章契约的「左臂刀伤未愈」冲突",
+        suggestion="补一句伤口崩开的描写",
+    )
+    check = _ScriptedCheck([[BLOCKER_ISSUE], [new_blocker], []])
     extract = _SpyExtract()
     repair, repair_state = _scripted_repair([[TIME_FIX], []])
     adapter = _PatchAdapter()
@@ -547,6 +575,77 @@ def test_gate_patch_miss_falls_back_to_rewrite():
     assert review["repair_rounds"] == 1
     assert review["passed"] is True
     assert _chapter.status == "pending_review"
+
+
+def test_gate_recurring_blocker_stops_early():
+    """同一个 blocker 上一轮刚被重写/定点修过仍复现 → 止损隔离,不再陪跑重写。"""
+    db, project, _ch1 = _make_db(review_max_revisions=3)
+    check = _ScriptedCheck([[BLOCKER_ISSUE], [BLOCKER_ISSUE]])
+    extract = _SpyExtract()
+    repair, repair_state = _scripted_repair([[TIME_FIX]])
+    adapter = _PatchAdapter()
+    from app.engines.pipeline import chapter as ch_mod
+
+    with (
+        patch.object(ch_mod, "get_adapter_for", return_value=adapter),
+        patch.object(ch_mod, "check_chapter", new=check),
+        patch.object(ch_mod, "extract_and_apply", new=extract),
+        patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
+        patch.object(ch_mod, "review_chapter", new=_fake_review_high),
+        patch.object(ch_mod, "preflight_chapter", new=_fake_preflight),
+        patch.object(ch_mod, "repair_chapter", new=repair),
+    ):
+        _chapter, _issues, _stats, _guard, review, _pf = asyncio.run(
+            ch_mod.generate_chapter(db, project, 2)
+        )
+
+    assert repair_state["calls"] == 1
+    # 复现即止损:没有重写(草稿只调一次),提前隔离
+    assert len([p for p in adapter.prompts if "现在开始写" in p]) == 1
+    assert review["revision_rounds"] == 1
+    assert "疑似检查误报" in (review.get("gate_note") or "")
+    assert _chapter.status == "quarantined"
+    assert extract.calls == 0  # 隔离不抽取
+
+
+def test_stalled_dim_stops_rework():
+    """prose 连续 2 轮无改善 → 不再为它重写,接受当前版本并给出死锁提示。"""
+    db, project, _ch1 = _make_db(review_max_revisions=3)
+    check = _ScriptedCheck([[]])
+    extract = _SpyExtract()
+
+    low_prose = dict(HIGH, prose=6)
+    review_calls = {"n": 0}
+
+    async def _review_low_prose(content, outline_block):
+        review_calls["n"] += 1
+        return {"scores": dict(low_prose), "comment": "", "suggestions": []}
+
+    adapter = _PatchAdapter()
+    from app.engines.pipeline import chapter as ch_mod
+
+    with (
+        patch.object(ch_mod, "get_adapter_for", return_value=adapter),
+        patch.object(ch_mod, "check_chapter", new=check),
+        patch.object(ch_mod, "extract_and_apply", new=extract),
+        patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
+        patch.object(ch_mod, "review_chapter", new=_review_low_prose),
+        patch.object(ch_mod, "preflight_chapter", new=_fake_preflight),
+        patch.object(ch_mod, "repair_chapter", new=_fake_repair_no_fixes),
+    ):
+        _chapter, _issues, _stats, _guard, review, _pf = asyncio.run(
+            ch_mod.generate_chapter(db, project, 2)
+        )
+
+    # 第 1 轮 prose=6 → 重写 1 次;第 2 轮仍 6 → 停滞止损,不再重写
+    assert review_calls["n"] == 2
+    assert len([p for p in adapter.prompts if "现在开始写" in p]) == 2
+    assert review["revision_rounds"] == 1
+    assert review["passed"] is False
+    assert review["stall_note"]
+    assert any("文笔" in h for h in review.get("hints") or [])
+    assert _chapter.status == "pending_review"  # 门禁干净,正常可用
+    assert extract.calls == 1
 
 
 def test_gate_unpatchable_blocker_rewrites_directly():
@@ -577,6 +676,25 @@ def test_gate_unpatchable_blocker_rewrites_directly():
     assert review["revision_rounds"] == 1
     assert review["repair_rounds"] == 0
     assert review["passed"] is True
+
+
+def test_normalize_issue_evidence_quotes_and_downgrade():
+    """证据归一:包裹引号剥掉后逐字命中;引不到的 blocker 降 minor(幻觉无否决权)。"""
+    from app.engines.consistency.checker import _normalize_issue
+
+    text = "放学后的教学楼很安静,走廊尽头的光线正在变暗。"
+    kept = _normalize_issue({
+        "description": "x", "severity": "blocker", "type": "timeline",
+        "evidence": "「放学后的教学楼很安静」",
+    }, text)
+    assert kept["evidence"] == "放学后的教学楼很安静"
+    assert kept["severity"] == "blocker"
+    downgraded = _normalize_issue({
+        "description": "x", "severity": "blocker",
+        "evidence": "正文里根本不存在这句",
+    }, text)
+    assert downgraded["evidence"] == ""
+    assert downgraded["severity"] == "minor"
 
 
 def test_triage_and_apply_gate_fixes():

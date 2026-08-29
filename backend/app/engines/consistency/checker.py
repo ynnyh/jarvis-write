@@ -20,6 +20,7 @@ fix_mode(patch|rewrite,分级回炉的分诊依据)。
 from __future__ import annotations
 
 import logging
+import re
 
 from sqlalchemy.orm import Session
 
@@ -72,6 +73,23 @@ def _prev_chapter_context(db: Session, project_id: int, chapter_number: int) -> 
     return block, tail
 
 
+def _evidence_verbatim(raw_evidence: str, chapter_text: str) -> str:
+    """把模型给的证据归一成正文逐字引用;引不到返回空串(幻觉举证清空)。
+
+    模型爱给证据包一层引号/强调符('…'、「…」),逐字匹配就挂在引号上——
+    剥掉包裹符再试一次;还引不到就是幻觉,清空。
+    """
+    e = raw_evidence.strip()
+    if not e:
+        return ""
+    if e in chapter_text:
+        return e
+    stripped = e.strip("「」『』\"'“”‘’*_`…—·")
+    if stripped and stripped != e and stripped in chapter_text:
+        return stripped
+    return ""
+
+
 def _normalize_issue(raw: dict, chapter_text: str) -> dict:
     """归一一条 LLM 问题:severity/type 钳制到约定枚举,幻觉举证清空。
 
@@ -87,9 +105,7 @@ def _normalize_issue(raw: dict, chapter_text: str) -> dict:
     if issue_type not in _TYPES:
         issue_type = "state"
     # 证据必须是本章正文逐字引用(对齐 review_chapter 的防幻觉举证):引不到置空
-    evidence = str(raw.get("evidence") or "").strip()
-    if evidence and evidence not in chapter_text:
-        evidence = ""
+    evidence = _evidence_verbatim(str(raw.get("evidence") or ""), chapter_text)
     description = str(raw.get("description") or "").strip()
     suggestion = str(raw.get("suggestion") or "").strip()
     # severity 护栏:模型「宁高勿低」,而 blocker 一票否决误报代价最大。描述里
@@ -100,6 +116,11 @@ def _normalize_issue(raw: dict, chapter_text: str) -> dict:
     if severity in ("blocker", "major") and any(
         m in description for m in _NOT_CONFLICT_MARKERS
     ):
+        severity = "minor"
+    # 举证联动降级:blocker/major 的证据清空(引不到正文/只差一层引号)后,这条
+    # 问题就失去了「直接冲突」的举证资格——继续一票否决等于让幻觉掌舵。降为
+    # minor 留档可见,人工可在问题面板复核。
+    if severity in ("blocker", "major") and not evidence:
         severity = "minor"
     # fix_mode(回炉分诊用):缺失/非法 → patch。乐观缺省是有算账的:分诊错了的
     # 代价只是一次小修复调用 + 门禁复查(复查不过自动回退重写),而把可定点修的
@@ -221,17 +242,26 @@ def triage_issues(issues: list[dict]) -> str:
 def continuity_score(issues: list[dict]) -> int:
     """门禁结果折算审校第五维「连续性」分数(docs/08 §5.4.4)。
 
-    简单映射:blocker → 4(必不达常规阈值,触发回炉);major → 6;
-    仅 minor → 8;干净 → 9。
+    映射:blocker → 4(必不达常规阈值,触发回炉);major ≥2 → 6(多条模糊
+    矛盾叠加,大概率真有问题);major ==1 → 7(major 的定义是「尚存解释空间」,
+    单条不该在阈值 7 下注定回炉);仅 minor → 8;干净 → 9。
     """
-    severities = {i.get("severity") for i in issues}
+    severities = [i.get("severity") for i in issues]
     if "blocker" in severities:
         return 4
-    if "major" in severities:
+    majors = severities.count("major")
+    if majors >= 2:
         return 6
+    if majors == 1:
+        return 7
     if "minor" in severities:
         return 8
     return 9
+
+
+def blocker_fingerprint(issue: dict) -> str:
+    """blocker 指纹:描述去空白后取前 60 字,供回炉循环识别「同一问题复现」。"""
+    return re.sub(r"\s+", "", str(issue.get("description") or ""))[:60]
 
 
 def persist_issues(

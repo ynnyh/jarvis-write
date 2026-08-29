@@ -377,6 +377,19 @@ export interface GenerateChapterResponse extends ChapterDetail {
     // 定点修复轮数与明细(旧响应无该键,渲染时兼容)
     repair_rounds?: number;
     repairs?: GateRepairDetail;
+    // 锚点化评分依据 / 回炉轨迹 / 止损与死锁提示(旧响应无该键)
+    score_reasons?: Record<string, string>;
+    rework_log?: {
+      round: number;
+      trigger: string;
+      failing?: string[];
+      stalled?: string[];
+      blockers?: string[];
+      note?: string;
+    }[];
+    gate_note?: string;
+    stall_note?: string;
+    hints?: string[];
   };
   // 一致性门禁结果(docs/08 §5.4):quarantined 时正文已存但未进圣经/摘要
   gate?: { status: "passed" | "quarantined"; blockers: PreflightWarning[] };
@@ -728,6 +741,21 @@ export interface ChapterReview {
   // 分级回炉:门禁定点修复轮数与明细(回炉轮数含修复轮;旧快照无该键)
   repair_rounds?: number;
   repairs?: GateRepairDetail;
+  // 锚点化评分:每维一句话依据(旧快照无该键)
+  score_reasons?: Record<string, string>;
+  // 逐轮回炉原因(门禁/主审触发,检查意见是否稳定一目了然)
+  rework_log?: {
+    round: number;
+    trigger: string;
+    failing?: string[];
+    stalled?: string[];
+    blockers?: string[];
+    note?: string;
+  }[];
+  // 止损与死锁提示:疑似误报的 blocker / 连续无改善的维度
+  gate_note?: string;
+  stall_note?: string;
+  hints?: string[];
 }
 export interface ProofIssue { type: string; original: string; suggestion: string; reason: string; }
 // 校对快照回显:issues=问题清单;source=generation(生成时已自动修复,只读)/

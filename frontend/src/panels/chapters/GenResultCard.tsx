@@ -290,6 +290,15 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, onClo
             </span>
           )}
           <GateRepairDetails repairs={result.review.repairs} />
+          {result.review.gate_note && (
+            <div className="notice notice-warn mt-2">{result.review.gate_note}</div>
+          )}
+          {result.review.stall_note && (
+            <div className="notice notice-info mt-2">{result.review.stall_note}</div>
+          )}
+          {result.review.hints?.map((h, i) => (
+            <div key={i} className="notice notice-warn mt-1">{h}</div>
+          ))}
           {result.review.comment && (
             <div className="muted">主审:{result.review.comment}</div>
           )}

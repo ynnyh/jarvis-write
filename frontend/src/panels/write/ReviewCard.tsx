@@ -84,12 +84,35 @@ export default function ReviewCard({ pid, chapterNum, onRevise }: Props) {
           <GateRepairDetails repairs={review.repairs} />
           <div className="score-row">
             {Object.entries(review.scores).map(([k, v]) => (
-              <div key={k} className={"score-item" + (v > 0 && v < 6 ? " low" : "")}>
+              <div
+                key={k}
+                className={"score-item" + (v > 0 && v < 6 ? " low" : "")}
+                title={review.score_reasons?.[k] || undefined}
+              >
                 <b>{v || "—"}</b>
                 <span>{SCORE_LABEL[k] ?? k}</span>
               </div>
             ))}
           </div>
+          {review.gate_note && <div className="notice notice-warn mt-2">{review.gate_note}</div>}
+          {review.stall_note && <div className="notice notice-info mt-2">{review.stall_note}</div>}
+          {review.hints?.map((h, i) => (
+            <div key={i} className="notice notice-warn mt-1">{h}</div>
+          ))}
+          {!!review.rework_log?.length && (
+            <details className="issue-ev mt-2">
+              <summary>回炉轨迹({review.rework_log.length} 条记录)</summary>
+              {review.rework_log.map((r, k) => (
+                <div key={k} className="fact-line muted">
+                  第{r.round}轮 · {r.trigger === "gate" ? "门禁" : "主审"}
+                  {r.failing?.length ? ` 未达标:${r.failing.map((d) => SCORE_LABEL[d] ?? d).join("/")}` : ""}
+                  {r.stalled?.length ? `;无改善:${r.stalled.map((d) => SCORE_LABEL[d] ?? d).join("/")}` : ""}
+                  {r.blockers?.length ? `;blocker:${r.blockers.join("；")}` : ""}
+                  {r.note ? `(${r.note})` : ""}
+                </div>
+              ))}
+            </details>
+          )}
           {review.passed !== undefined && (
             <div className="mt-2">
               <span className={"badge " + (review.passed ? "ok" : "err")}>

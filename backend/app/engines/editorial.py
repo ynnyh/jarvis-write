@@ -84,6 +84,11 @@ async def review_chapter(content: str, outline_block: str) -> dict:
         })
     return {
         "scores": clean,
+        # 每维一句话评分依据(锚点化评分的可解释性;缺失/超长 defensively 收敛)
+        "score_reasons": {
+            k: str((data.get("score_reasons") or {}).get(k) or "").strip()[:120]
+            for k in DIMS
+        },
         "comment": str(data.get("comment") or "").strip(),
         "suggestions": [s for s in suggestions if s["issue"] or s["fix"]],
     }
@@ -211,7 +216,11 @@ def apply_gate_fixes(
 
 
 def build_revision_directive(review: dict) -> str:
-    """把主审短评+建议拼成可注入 _revision_block 的重写意见文本(<=500 字)。"""
+    """把主审短评+建议拼成可注入 _revision_block 的重写意见文本(<=800 字)。
+
+    上限从 500 放宽到 800:回炉指令里常含多条建议+门禁 blocker 的「证据+改法」,
+    500 字会把排在后面的 blocker 修法截掉——writer 没看到要改什么,重写自然不收敛。
+    """
     parts = []
     comment = (review.get("comment") or "").strip()
     if comment:
@@ -225,7 +234,7 @@ def build_revision_directive(review: dict) -> str:
             seg += f",改法:{s['fix']}"
         if seg:
             parts.append(seg)
-    return ";".join(parts)[:500]
+    return ";".join(parts)[:800]
 
 
 # ---------- 审校快照(编辑部回显用) ----------
