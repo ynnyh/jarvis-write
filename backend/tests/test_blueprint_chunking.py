@@ -100,6 +100,30 @@ def test_persistent_underparse_fails_loudly():
         _run(ad, 20)
 
 
+def test_zero_parse_retry_appends_format_hint():
+    """0 章解析(格式崩坏,如模型输出 JSON/markdown)→ 续补的提示词附加格式强提醒。"""
+    import json
+
+    garbage = "好的,以下是您要的蓝图:" + json.dumps(
+        {"chapters": [{"title": "雨夜"}, {"title": "追猎"}]}, ensure_ascii=False
+    )
+    ad = ScriptedAdapter([garbage, _chapters(1, 11)])
+    chapters, ad = _run(ad, 11)
+
+    assert [c["chapter_number"] for c in chapters] == list(range(1, 12))
+    assert "输出格式强调" in ad.prompts[1]  # 第二次调用被打上格式补丁
+    assert "输出格式强调" not in ad.prompts[0]
+
+
+def test_failure_error_carries_raw_preview():
+    """最终失败的报错带原文开头,线上不用再猜模型到底吐了什么。"""
+    garbage = "模型拒答:内容涉及违规。"
+    ad = ScriptedAdapter([garbage] * 4)
+
+    with pytest.raises(RuntimeError, match="模型拒答"):
+        _run(ad, 11)
+
+
 def test_context_overflow_error_humanized():
     """上游「上下文超限」的英文长文被翻译成可操作的中文指引。"""
     raw = (

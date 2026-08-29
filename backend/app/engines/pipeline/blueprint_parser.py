@@ -10,10 +10,22 @@ from __future__ import annotations
 import re
 from typing import Any
 
-# "第12章 - 标题" / "第 12 章 - 标题" / "**第12章 - 标题**"
+# "第12章 - 标题" / "第 12 章 - 标题" / "**第12章 - 标题**" / "# 第1章 - 标题"
+# markdown 标题前缀(#/##/###)必须容忍:实测 deepseek 系模型会按 markdown 一级
+# 标题输出章节头,只有 * 加粗容忍度时整块解析为 0 章(2026-08-29 线上事故)。
 _CHAPTER_HEAD = re.compile(
-    r"^\s*\**\s*第\s*(\d+)\s*章\s*[-—–\s]*\s*(.*?)\s*\**\s*$"
+    r"^\s*#{0,6}\s*\**\s*第\s*(\d+)\s*章\s*[-—–:：\s]*\s*(.*?)\s*#*\s*\**\s*$",
+    re.MULTILINE,  # count_chapter_heads 整文 findall 依赖它;逐行 match 不受影响
 )
+
+
+def count_chapter_heads(text: str) -> int:
+    """已成形的「第N章」章节头个数(宽松匹配:允许 markdown #/加粗前缀)。
+
+    流式进度与解析器必须同一套匹配口径——曾因两边正则漂移,进度为 0 而
+    解析正常;统一从这里出,不许再各写一份。
+    """
+    return len(_CHAPTER_HEAD.findall(text))
 
 # 字段名 -> outlines 表字段
 _FIELD_MAP = {

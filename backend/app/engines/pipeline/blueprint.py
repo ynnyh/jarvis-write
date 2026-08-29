@@ -14,13 +14,16 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import re
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.db.models import Chapter, Outline, OutlineVersion, Project
-from app.engines.pipeline.blueprint_parser import parse_blueprint, validate_blueprint
+from app.engines.pipeline.blueprint_parser import (
+    count_chapter_heads,
+    parse_blueprint,
+    validate_blueprint,
+)
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import render_style_block
 from app.engines.title_style import DEFAULT_TITLE_DIRECTIVE
@@ -44,14 +47,25 @@ _CHUNK_MAX_ATTEMPTS = 3
 # 一块解析出的章数低于应有章数的这个比例,视为本块失败需重试。
 _CHUNK_MIN_RATIO = 0.6
 
-# 流式进度用:统计已成形的「第N章」章节头个数。与解析器同源的宽松匹配——
-# 允许行首 markdown 星号/空白 + 全角/半角数字,不要求后面的分隔符已吐出来
-# (章节头一冒出来就算这章"开始生成了")。
-_HEAD_RE = re.compile(r"^\s*\**\s*第\s*\d+\s*章", re.MULTILINE)
 
+def _format_hint(start: int, end: int) -> str:
+    """续补时的格式强提醒:上一轮一章都没解析出来(格式崩坏/用了中文数字/输出了
+    JSON 等),原样重摇没有意义,必须把格式要求敲打进提示词。"""
+    return (
+        "\n\n【输出格式强调(上一次输出完全无法解析,务必严格遵守)】\n"
+        "每一章必须以独占一行「第N章 - 标题」开头,N 是阿拉伯数字且与章号对应"
+        "(如「第3章 - 夜行」;允许在行首加 markdown 的 # 号,但必须有「第N章」"
+        "字样且数字是半角)。\n"
+        "章内字段逐行写「字段名:值」(本章定位/核心作用/悬念密度/伏笔操作/认知颠覆/"
+        "涉及人物/关键道具/场景地点/本章简述/本章节拍)。\n"
+        "不要输出 JSON、表格、代码块或任何解释;现在只输出"
+        f"第{start}章到第{end}章的蓝图正文。"
+    )
 
+# 流式进度用:统计已成形的「第N章」章节头个数。与解析器同一套匹配口径
+# (允许行首 markdown #/星号 + 全角/半角数字),实现统一从解析器出,不许漂移。
 def _count_heads(text: str) -> int:
-    return len(_HEAD_RE.findall(text))
+    return count_chapter_heads(text)
 
 
 def _outline_content_hash(data: dict[str, Any]) -> str:
@@ -175,6 +189,7 @@ async def generate_blueprint(
         # 而不是原样重摇整块:同样的输入会得到同样的截断,重摇是烧时间。
         seg_start = start
         attempts = 0
+        parse_failed = False  # 上一次输出一章都没解析出来 → 重试时附加格式强提醒
         while seg_start <= end and attempts < _CHUNK_MAX_ATTEMPTS:
             if start == 1 and seg_start == start and end == number_of_chapters:
                 # 一块装得下,用整书模板
@@ -193,6 +208,8 @@ async def generate_blueprint(
                     style_directives=style_block,
                     title_directive=title_directive,
                 )
+            if parse_failed:
+                prompt += _format_hint(seg_start, end)
 
             expected_seg = end - seg_start + 1
             raw = await _generate_chunk(
@@ -211,6 +228,7 @@ async def generate_blueprint(
             if len(seg_valid) >= expected_seg:
                 break
             attempts += 1
+            parse_failed = not seg_valid  # 一章都没解析出来 = 格式崩坏,重试要敲打格式
             last_num = max(
                 (
                     int(c["chapter_number"])
@@ -249,7 +267,7 @@ async def generate_blueprint(
                 f"蓝图块 {start}-{end} 生成失败:含自动续补共 {attempts} 次调用后仍只有 "
                 f"{len(valid)}/{expected} 章。多半是模型单次输出上限装不下这块蓝图"
                 "(设定越肥每章写得越长),或返回格式崩坏;请重试一次,或在「设置」里"
-                "换上下文/输出上限更大的模型。"
+                f"换上下文/输出上限更大的模型。最后一次输出的开头:{raw[:150]!r}"
             )
 
         all_chapters.extend(valid)
