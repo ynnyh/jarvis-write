@@ -53,8 +53,8 @@ export function ProviderRow({ p, onChanged, onEdit }: {
     } finally { setBusy(false); }
   }
 
-  // 一键设为默认/快档:PUT 全量字段,只翻转目标标记(后端会清掉其他配置的同名标记)
-  async function setFlag(flag: "is_default" | "is_default_fast") {
+  // 一键设为默认/快档/审校档:PUT 全量字段,只翻转目标标记(后端会清掉其他配置的同名标记)
+  async function setFlag(flag: "is_default" | "is_default_fast" | "is_default_review") {
     setBusy(true); setTestMsg(null);
     try {
       await api.updateProvider(p.id, {
@@ -66,7 +66,11 @@ export function ProviderRow({ p, onChanged, onEdit }: {
         max_tokens: p.max_tokens,
         [flag]: true,
       });
-      toast.ok(flag === "is_default" ? `「${p.name}」已设为默认` : `「${p.name}」已设为快档`);
+      toast.ok(
+        flag === "is_default" ? `「${p.name}」已设为默认`
+          : flag === "is_default_fast" ? `「${p.name}」已设为快档`
+          : `「${p.name}」已设为审校档`,
+      );
       onChanged();
     } catch (e) {
       toast.err("设置失败", errMsg(e));
@@ -83,6 +87,7 @@ export function ProviderRow({ p, onChanged, onEdit }: {
         </span>
         {p.is_default && <span className="badge">默认</span>}
         {p.is_default_fast && <span className="badge">快档</span>}
+        {p.is_default_review && <span className="badge">审校</span>}
       </div>
       <p className="provider-desc">
         {cat?.desc || ""}
@@ -113,6 +118,12 @@ export function ProviderRow({ p, onChanged, onEdit }: {
         {!p.is_default_fast && (
           <button className="btn-sm" onClick={() => setFlag("is_default_fast")} disabled={busy}>
             设为快档
+          </button>
+        )}
+        {!p.is_default_review && (
+          <button className="btn-sm" title="主审评分/一致性门禁/定点修复将使用这套模型——写手与审校分模型,评分更客观"
+            onClick={() => setFlag("is_default_review")} disabled={busy}>
+            设为审校
           </button>
         )}
         <button className="btn-sm danger" onClick={remove} disabled={busy}>删除</button>

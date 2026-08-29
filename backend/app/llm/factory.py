@@ -61,6 +61,8 @@ def _row_to_config(row) -> dict:
         "thinking_mode": getattr(row, "thinking_mode", "") or "",
         "is_default": row.is_default,
         "is_default_fast": row.is_default_fast,
+        # 迁移前的旧行可能没有该属性,getattr 兜底
+        "is_default_review": getattr(row, "is_default_review", False),
     }
 
 
@@ -112,7 +114,7 @@ def _env_config(provider: str) -> dict:
 
 
 def resolve_tier_config(tier: str = "quality") -> dict:
-    """档位(quality/fast) → 当前生效的配置,按优先级回落:
+    """档位(quality/fast/review) → 当前生效的配置,按优先级回落:
 
     quality 档:
     ① 数据库里标了 is_default 且有 key 的;② 数据库里任一有 key 的(按创建序);
@@ -122,11 +124,18 @@ def resolve_tier_config(tier: str = "quality") -> dict:
 
     fast 档:先找标了 is_default_fast 且有 key 的,没有则完全跟随 quality 链
     (快档未单独指定 = 与主档同配置)。
+
+    review 档(主审/一致性门禁/定点修复):先找标了 is_default_review 且有 key
+    的,没有则跟随 quality 链——写手与审校分模型是可选项,不设=行为与旧版一致。
     """
     valid = [c for c in _db_configs() if c["api_key"]]
     if tier == "fast":
         for c in valid:
             if c["is_default_fast"]:
+                return c
+    if tier == "review":
+        for c in valid:
+            if c["is_default_review"]:
                 return c
     for c in valid:
         if c["is_default"]:

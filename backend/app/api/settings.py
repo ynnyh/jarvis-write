@@ -72,6 +72,7 @@ class ProviderConfigOut(BaseModel):
     thinking_mode: str = ""
     is_default: bool
     is_default_fast: bool
+    is_default_review: bool
     default_base_url: str
     default_model: str
     # base_url 套了 Cloudflare CDN(国内直连常见间歇性失败,前端据此显示提醒条)
@@ -93,6 +94,7 @@ class ProviderConfigIn(BaseModel):
     )
     is_default: bool | None = None
     is_default_fast: bool | None = None
+    is_default_review: bool | None = None
 
 
 def _norm_thinking_mode(mode: str) -> str:
@@ -118,6 +120,7 @@ def _out(row: ProviderConfig, plain_key: str, *, cloudflare: bool = False) -> Pr
         thinking_mode=getattr(row, "thinking_mode", "") or "",
         is_default=row.is_default,
         is_default_fast=row.is_default_fast,
+        is_default_review=getattr(row, "is_default_review", False),
         default_base_url=preset["base_url"],
         default_model=preset["model"],
         cloudflare=cloudflare,
@@ -159,7 +162,7 @@ def _check_format(interface_format: str) -> str:
 def _apply_default_flags(
     db: Session, user: User, row: ProviderConfig, req: ProviderConfigIn
 ) -> None:
-    """默认/快档标记全用户唯一:置 True 时先清掉其他配置的同名标记。"""
+    """默认/快档/审校档标记全用户唯一:置 True 时先清掉其他配置的同名标记。"""
     if req.is_default:
         db.query(ProviderConfig).filter(
             ProviderConfig.user_id == user.id, ProviderConfig.id != row.id
@@ -174,6 +177,13 @@ def _apply_default_flags(
         row.is_default_fast = True
     elif req.is_default_fast is False:
         row.is_default_fast = False
+    if req.is_default_review:
+        db.query(ProviderConfig).filter(
+            ProviderConfig.user_id == user.id, ProviderConfig.id != row.id
+        ).update({ProviderConfig.is_default_review: False}, synchronize_session=False)
+        row.is_default_review = True
+    elif req.is_default_review is False:
+        row.is_default_review = False
 
 
 class ProviderStatus(BaseModel):

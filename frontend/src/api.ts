@@ -535,12 +535,13 @@ export interface ProviderConfigOut {
   thinking_mode: string; // "" = 跟随全局默认(关思考);low/high/max = 按配置强制
   is_default: boolean;
   is_default_fast: boolean;
+  is_default_review: boolean; // 审校档:主审评分/一致性门禁/定点修复用(未设时跟随默认)
   default_base_url: string;
   default_model: string;
   cloudflare: boolean; // base_url 套了 CF CDN,国内直连常见间歇性失败(黄条提醒用)
 }
 // 新增/更新配置:api_key 留空/不传 = 不改动已存 key(仅更新);
-// is_default/is_default_fast 传 true 时后端会清掉该用户其他配置的同名标记(全用户唯一)
+// is_default/is_default_fast/is_default_review 传 true 时后端会清掉该用户其他配置的同名标记(全用户唯一)
 export interface ProviderConfigIn {
   name?: string;
   interface_format?: string;
@@ -552,6 +553,7 @@ export interface ProviderConfigIn {
   thinking_mode?: string;
   is_default?: boolean | null;
   is_default_fast?: boolean | null;
+  is_default_review?: boolean | null;
 }
 export interface AuthResult { token: string; username: string; is_admin: boolean; }
 export interface Me { id: number; username: string; is_admin: boolean; }

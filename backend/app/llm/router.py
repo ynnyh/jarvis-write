@@ -5,8 +5,9 @@
 
 不同生成任务用不同档位的配置，平衡成本与质量：
 - 架构/蓝图/定稿/润色 → 强模型（quality 档 = 设置页标「默认」的配置）
-- 草稿/摘要/事实抽取/一致性校验 → 快模型（fast 档 = 设置页标「快档」的配置,
-  未单独指定时跟随 quality 档）
+- 草稿/摘要 → 快模型（fast 档 = 设置页标「快档」的配置, 未单独指定时跟随 quality 档）
+- 主审评分/一致性门禁/定点修复 → 审校档（review = 设置页标「审校」的配置,
+  未单独指定时跟随 quality 档）——写手与审校分模型,治「同模型自审自写」
 """
 from __future__ import annotations
 
@@ -59,6 +60,7 @@ class Task(str, Enum):
 class Tier(str, Enum):
     QUALITY = "quality"  # 强模型
     FAST = "fast"        # 快模型
+    REVIEW = "review"    # 审校档:主审/门禁/定点修复专用;未设置跟随 quality 档
 
 
 # 任务 -> 档位。见 docs/01-architecture.md 第四节。
@@ -71,7 +73,9 @@ _TASK_TIER: dict[Task, Tier] = {
     Task.HANDOFF_EXTRACT: Tier.QUALITY,  # 章末契约是下章衔接与门禁比对的事实源,理由同上
     Task.FINALIZE: Tier.QUALITY,
     Task.POLISH: Tier.QUALITY,
-    Task.CONSISTENCY: Tier.FAST,
+    # 主审评分/一致性门禁/定点修复走审校档:写手(fast)与审校分模型,治
+    # 「同模型自审自写」的评分偏差与误报;审校档未设置时回落 quality 档
+    Task.CONSISTENCY: Tier.REVIEW,
     Task.IMPACT: Tier.QUALITY,
     # 漫剧四步管线:改编质量优先,全部走强档(提示词锚段注入对模型服从性有要求)
     Task.DRAMA_ASSET: Tier.QUALITY,

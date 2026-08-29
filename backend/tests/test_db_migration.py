@@ -109,6 +109,8 @@ def test_legacy_db_stamps_without_touching_data(isolated_db):
     conn.execute("INSERT INTO drama_episodes (title) VALUES ('第一集')")
     conn.execute("CREATE TABLE mood_clips (id INTEGER PRIMARY KEY)")
     conn.execute("CREATE TABLE promo_plans (id INTEGER PRIMARY KEY)")
+    # 0004(审校档)要改 provider_configs,同法补最小同构表
+    conn.execute("CREATE TABLE provider_configs (id INTEGER PRIMARY KEY)")
     conn.commit()
     conn.close()
 

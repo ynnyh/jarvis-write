@@ -46,8 +46,11 @@ class ProviderConfig(Base, TimestampMixin):
 
     - interface_format: 协议卡(deepseek/openai/gemini),决定用哪个适配器;
     - is_default: quality 档(架构/定稿/抽取等重活)用的配置,全用户唯一;
-    - is_default_fast: fast 档(草稿/摘要/校验)用的配置,全用户唯一,
+    - is_default_fast: fast 档(草稿/摘要)用的配置,全用户唯一,
       未设置时 fast 档回落到 quality 档配置;
+    - is_default_review: review 档(主审评分/一致性门禁/定点修复)用的配置,
+      全用户唯一,未设置时回落到 quality 档——写手与审校分模型,治「同模型
+      自审自写」的评分死锁;
     - timeout / max_tokens: 0 = 跟随全局 default_* 与任务级默认;
     - thinking_mode: 思考模式控制,空串 = 跟随全局默认(关思考,
       见 config.default_thinking_mode);low/high/max = 按配置强制指定。
@@ -69,3 +72,4 @@ class ProviderConfig(Base, TimestampMixin):
     thinking_mode: Mapped[str] = mapped_column(String(10), default="", server_default="")
     is_default: Mapped[bool] = mapped_column(default=False)
     is_default_fast: Mapped[bool] = mapped_column(default=False)
+    is_default_review: Mapped[bool] = mapped_column(default=False, server_default="0")

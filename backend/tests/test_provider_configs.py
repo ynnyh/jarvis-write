@@ -276,3 +276,52 @@ def test_migrate_old_provider_settings_to_configs(client):
         assert deep.is_default_fast is False
     finally:
         db.close()
+
+
+# ---------- 审校档(review):主审/门禁/定点修复专用档位 ----------
+
+def test_review_tier_resolution_and_flag_uniqueness(client):
+    """审校档:标「审校」的配置生效;未设置回落 quality 档;标记全用户唯一。"""
+    from app.auth import current_user_id
+    from app.llm.factory import resolve_tier_config
+    from app.llm.router import Task, Tier, tier_of
+
+    headers, uid = _auth(client, "tier_review_user")
+    a = _create(client, headers, name="主力")
+    b = _create(client, headers, name="审校专用")
+
+    def _resolve(tier: str) -> dict:
+        tok = current_user_id.set(uid)
+        try:
+            return resolve_tier_config(tier)
+        finally:
+            current_user_id.reset(tok)
+
+    # 路由表:CONSISTENCY(主审/门禁/定点修复)绑 review 档
+    assert tier_of(Task.CONSISTENCY) == Tier.REVIEW
+    # 未设审校档 → 回落 quality 档(与旧版行为一致,写手审校同模型)
+    assert _resolve("review")["name"] == "主力"
+    assert _resolve("quality")["name"] == "主力"
+
+    # 标 b 为审校档 → review 档走 b,quality 档仍是 a(写手审校分家)
+    r = client.put(
+        f"/api/settings/providers/{b['id']}", headers=headers,
+        json={"name": b["name"], "interface_format": b["interface_format"],
+              "is_default_review": True},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["is_default_review"] is True
+    assert _resolve("review")["name"] == "审校专用"
+    assert _resolve("quality")["name"] == "主力"
+    assert _resolve("fast")["name"] == "主力"  # 快档未单独设置,跟随 quality
+
+    # 标记唯一:a 再标审校档 → b 自动让位
+    r = client.put(
+        f"/api/settings/providers/{a['id']}", headers=headers,
+        json={"name": a["name"], "interface_format": a["interface_format"],
+              "is_default_review": True},
+    )
+    assert r.status_code == 200, r.text
+    rows = {c["name"]: c for c in client.get("/api/settings/providers", headers=headers).json()}
+    assert rows["主力"]["is_default_review"] is True
+    assert rows["审校专用"]["is_default_review"] is False
