@@ -1396,6 +1396,7 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 }
 .reader-toc-item:not(.off):hover { background: var(--surface-2); color: var(--text); }
 .reader-toc-item.on { background: var(--brand-weak); color: var(--brand); font-weight: 600; }
+.reader-toc-item.on:hover { background: var(--brand-weak); color: var(--brand); }
 .reader-toc-item.off { opacity: 0.45; cursor: default; }
 /* 目录栏顶部:书名 + 简介(简介最多 3 行,悬浮 title 看全文) */
 .reader-toc-book {
@@ -1740,6 +1741,7 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
   font-size: var(--fs-md);
 }
 .wiz-step.on { color: var(--brand); font-weight: 600; }
+.wiz-step.on:hover { color: var(--brand); }
 .wiz-step.done { color: var(--ok); cursor: pointer; }
 .wiz-step .no {
   width: 22px; height: 22px;
@@ -2601,6 +2603,8 @@ html, body { max-width: 100%; overflow-x: hidden; }
 }
 .pj-zone:hover { background: var(--surface-2); color: var(--text); }
 .pj-zone.on { background: var(--brand); color: var(--on-brand); font-weight: 600; }
+/* 选中态不被全局 button:hover 灰底覆盖(否则白字落在灰底上看不清) */
+.pj-zone.on:hover { background: var(--brand); color: var(--on-brand); }
 .pj-zone .no {
   width: 22px; height: 22px; border-radius: 50%;
   background: var(--surface-2); color: var(--text-2);
@@ -2624,6 +2628,7 @@ html, body { max-width: 100%; overflow-x: hidden; }
 }
 .pj-sub-tab:hover { background: var(--surface-2); color: var(--text); }
 .pj-sub-tab.on { background: var(--brand-weak); color: var(--brand); font-weight: 600; }
+.pj-sub-tab.on:hover { background: var(--brand-weak); color: var(--brand); }
 
 /* ==========================================================================
    「正文即界面」P1(docs/10):write 区从三栏工作台改为单列居中正文。
