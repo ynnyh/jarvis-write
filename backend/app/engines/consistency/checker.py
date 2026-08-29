@@ -40,6 +40,17 @@ _PREV_TAIL_CHARS = 900  # 上一章结尾原文截断长度(对齐 chapter.py �
 _SEVERITIES = {"blocker", "major", "minor"}
 _TYPES = {"state", "knowledge", "timeline", "worldrule", "ambient", "cast"}
 
+# severity 护栏措辞:模型描述里出现这些「自己打圆场」的信号,说明它并不认为
+# 是硬矛盾——blocker(一票否决)误报代价最大,出现即降级,宁可低估。
+_HEDGE_MARKERS = (
+    "尚可解释", "可解释为", "可推断", "需注意", "需确认", "有待确认",
+    "建议在后续", "避免突兀", "可能是", "或许是",
+)
+_NOT_CONFLICT_MARKERS = (
+    "无矛盾", "无需修改", "不属于与已确立事实的冲突", "不是矛盾", "非矛盾",
+    "不构成矛盾", "属于正常", "合理推进",
+)
+
 
 def _prev_chapter_context(db: Session, project_id: int, chapter_number: int) -> tuple[str, str]:
     """取上一章的对照材料:(契约文本块, 结尾原文块);无上一章/无正文 → ("", "")。"""
@@ -77,13 +88,24 @@ def _normalize_issue(raw: dict, chapter_text: str) -> dict:
     evidence = str(raw.get("evidence") or "").strip()
     if evidence and evidence not in chapter_text:
         evidence = ""
+    description = str(raw.get("description") or "").strip()
+    suggestion = str(raw.get("suggestion") or "").strip()
+    # severity 护栏:模型「宁高勿低」,而 blocker 一票否决误报代价最大。描述里
+    # 出现打圆场措辞(「尚可解释」「建议在后续补充」)不配一票否决,降为 major;
+    # 自认「无矛盾/属于新设定」的条目降为 minor。
+    if severity == "blocker" and any(m in description for m in _HEDGE_MARKERS):
+        severity = "major"
+    if severity in ("blocker", "major") and any(
+        m in description for m in _NOT_CONFLICT_MARKERS
+    ):
+        severity = "minor"
     return {
         "severity": severity,
         "type": issue_type,
-        "description": str(raw.get("description") or "").strip(),
+        "description": description,
         "evidence": evidence,
         "conflicting_fact": str(raw.get("conflicting_fact") or "").strip(),
-        "suggestion": str(raw.get("suggestion") or "").strip(),
+        "suggestion": suggestion,
     }
 
 

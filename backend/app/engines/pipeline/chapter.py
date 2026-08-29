@@ -366,6 +366,37 @@ async def apply_chapter_tail(
     return extraction_stats
 
 
+# prose 维未达标时的定向重写要求:「AI 腔/套话」靠同一模型自由发挥修不掉
+# (实测每轮都因 prose=6 烧满回炉预算),必须把要求落到具体禁则上。
+_PROSE_REWRITE_DIRECTIVE = (
+    "文笔硬要求(上轮 prose 维未达标,重写必须逐条执行):"
+    "①每段以具体画面、动作或对白开笔,禁止以心理独白或情绪陈述开段;"
+    "②情绪一律外化成动作与感官细节,不写「他很紧张/她很难过」这类直陈;"
+    "③比喻每段至多一处,禁用「仿佛/宛如/像是」连用,禁用「空气中弥漫着」"
+    "「不知过了多久」「一瞬间,他明白了」这类万能套话;"
+    "④对话删解释性台词,每句要么推进信息要么暴露性格;"
+    "⑤长短句交错,连续三句同一结构必改写。"
+)
+
+
+def _with_prose_directive(directive: str, scores: dict, threshold: int) -> str:
+    """prose 维低于阈值时,把「去 AI 腔」的具体禁则追加进重写指令。
+
+    审校没报这一维(None/缺字段/脏值)视为不适用,原样返回——禁则只该在
+    prose 确实挂了的时候出现。
+    """
+    raw = scores.get("prose")
+    if raw is None:
+        return directive
+    try:
+        prose = int(raw)
+    except (TypeError, ValueError):
+        return directive
+    if prose >= threshold:
+        return directive
+    return f"{directive};{_PROSE_REWRITE_DIRECTIVE}" if directive else _PROSE_REWRITE_DIRECTIVE
+
+
 def _gate_merged_review(review_result: dict, blockers: list[dict]) -> dict:
     """把门禁 blocker 问题并入主审结果,供 build_revision_directive 拼修订指令。"""
     merged = dict(review_result)
@@ -629,6 +660,9 @@ async def generate_chapter(
             len(blockers), revision_rounds, max_revisions,
         )
         directive = build_revision_directive(_gate_merged_review(review_result, blockers))
+        directive = _with_prose_directive(
+            directive, review_result.get("scores") or {}, threshold
+        )
         draft, final = await _compose(
             _revision_block(directive, final),
             f"3/6 审校把关(第 {revision_rounds}/{max_revisions} 轮回炉·草稿)",
