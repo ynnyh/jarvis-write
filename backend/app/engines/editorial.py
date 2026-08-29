@@ -10,11 +10,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from datetime import datetime, timezone
 
 from app.engines.consistency.extractor import parse_llm_json
 from app.llm.router import Task, get_adapter_for
+from app.prompts.consistency import GATE_REPAIR_PROMPT
 from app.prompts.editorial import PROOFREAD_PROMPT, REVIEW_PROMPT
+
+logger = logging.getLogger("jarvis-write.editorial")
 
 # 主审四维(与前端 SCORE_LABEL / ChapterReview.scores 对应)
 DIMS = ("plot", "prose", "pacing", "character")
@@ -130,6 +134,79 @@ def apply_proofread_fixes(
             continue
         content = content[:at] + suggestion + content[at + len(original):]
         applied.append({"original": original, "suggestion": suggestion})
+    return content, applied, failed
+
+
+# ---------- 门禁问题定点修复(分级回炉的 patch 路径,docs/08 §5.4) ----------
+
+async def repair_chapter(chapter_number: int, content: str, issues: list[dict]) -> list[dict]:
+    """门禁 blocker 定点修复:调 LLM 出「逐字锚 → 最小改动」替换对,返回 fixes(可空)。
+
+    只产出修复方案,不改正文——应用与校验在 apply_gate_fixes。调用失败/解析失败
+    返回空列表(定点修复是省重写的优化路径,失败由调用方回退重写,不拖垮生成)。
+    """
+    lines = []
+    for idx, i in enumerate(issues):
+        lines.append(
+            f"{idx}. [{i.get('type') or 'state'}] {i.get('description')}\n"
+            f"   证据:{i.get('evidence')}\n"
+            f"   被违反事实:{i.get('conflicting_fact') or '(未给出)'}\n"
+            f"   修正建议:{i.get('suggestion') or '(未给出)'}"
+        )
+    prompt = GATE_REPAIR_PROMPT.format(
+        chapter_number=chapter_number,
+        chapter_text=content[:12000],  # 对齐 checker 的正文截断口径
+        issues_block="\n".join(lines) or "(无)",
+    )
+    try:
+        raw = await get_adapter_for(Task.CONSISTENCY).ask(prompt)
+    except Exception as exc:  # noqa: BLE001 — 修复失败回退重写,不阻塞生成
+        logger.warning("第 %d 章门禁定点修复调用失败(将回退重写): %s", chapter_number, exc)
+        return []
+    data = parse_llm_json(raw)
+    fixes = []
+    for f in (data.get("fixes") or [])[:20]:
+        if not isinstance(f, dict):
+            continue
+        original = str(f.get("original") or "")
+        replacement = str(f.get("replacement") or "")
+        if not original or original == replacement:
+            continue
+        fixes.append({
+            "issue_index": f.get("issue_index"),
+            "original": original,
+            "replacement": replacement,
+        })
+    return fixes
+
+
+def apply_gate_fixes(
+    content: str, fixes: list[dict]
+) -> tuple[str, list[dict], list[dict]]:
+    """把定点修复逐条应用:锚必须逐字且全篇唯一。返回 (new_content, applied, failed)。
+
+    与 apply_proofread_fixes 的差别在唯一性校验:修复改的是事实点,锚不唯一时
+    首处替换可能改错位置(校对改错字无此顾虑)——宁可 failed 也不误伤;没修干净
+    的问题门禁复查会重新报,调用方据此回退重写。纯字符串操作,顺序应用,
+    前一条替换使后一条锚失效时后者自然记 failed。
+    """
+    applied, failed = [], []
+    for it in fixes:
+        original = str(it.get("original") or "")
+        replacement = str(it.get("replacement") or "")
+        if not original or original == replacement:
+            failed.append({"original": original, "reason": "无效修复项"})
+            continue
+        hits = content.count(original)
+        if hits == 0:
+            failed.append({"original": original, "reason": "正文中找不到该片段"})
+            continue
+        if hits > 1:
+            failed.append({"original": original, "reason": "片段不唯一,拒绝误伤"})
+            continue
+        at = content.find(original)
+        content = content[:at] + replacement + content[at + len(original):]
+        applied.append({"original": original, "replacement": replacement})
     return content, applied, failed
 
 

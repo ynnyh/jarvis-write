@@ -9,6 +9,7 @@ import {
 } from "../../api";
 import { errMsg } from "../../pollJob";
 import { dispatchAction } from "../../ui/actions";
+import GateRepairDetails from "../../ui/GateRepairDetails";
 import { useJob } from "../../ui/useJob";
 import { toast } from "../../ui/Toaster";
 import GateResolve from "./GateResolve";
@@ -252,6 +253,12 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, onClo
           {result.review.revision_rounds > 0 && (
             <span className="badge"> 自动回炉 {result.review.revision_rounds} 轮</span>
           )}
+          {(result.review.repair_rounds ?? 0) > 0 && (
+            <span className="badge ok" title="一致性矛盾由 AI 定点改句消除,未整章重写">
+              定点修复 {result.review.repairs?.applied.length ?? 0} 处
+            </span>
+          )}
+          <GateRepairDetails repairs={result.review.repairs} />
           {result.review.comment && (
             <div className="muted">主审:{result.review.comment}</div>
           )}

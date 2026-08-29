@@ -27,6 +27,7 @@ from app.engines.consistency.checker import (
     check_chapter,
     continuity_score,
     persist_issues,
+    triage_issues,
 )
 from app.engines.consistency.extractor import extract_and_apply, parse_llm_json
 from app.engines.consistency.preflight import preflight_chapter
@@ -37,10 +38,12 @@ from app.engines.devices import devices_reminder_block, persist_device_issues
 from app.engines.polish import ai_flavor_report
 from app.engines.polish.polisher import _flavor_hits_block, deai_self_heal
 from app.engines.editorial import (
+    apply_gate_fixes,
     apply_proofread_fixes,
     build_revision_directive,
     judge_passed,
     proofread_chapter,
+    repair_chapter,
     review_chapter,
     store_proofread_snapshot,
     store_review_snapshot,
@@ -425,20 +428,23 @@ async def generate_chapter(
     revision: 重写时用户的修改意见;仅当本章已有正文时连同上一版
         (截断)注入草稿 prompt,首次生成传了也会被忽略。
 
-    审校把关(第 3 段):定稿后自动校对(硬伤精确替换自修)+ 主审打分,按项目
-    review_pass_threshold 硬判达标;不达标且 review_auto_revise 开启时,带主审意见
-    回炉重走草稿+定稿,封顶 review_max_revisions 轮,到点接受当前最好的一版。
-
-    一致性门禁(第 4 段,docs/08 §5.4):在回炉循环内对当前定稿跑 checker
-    (对照圣经 + 上一章契约 + 上一章结尾原文),结果折算审校第五维「连续性」
-    纳入达标判定;有 blocker 时把问题拼进修订指令一并回炉(与审校共享
-    review_max_revisions 上限)。回炉封顶仍有 blocker → 落库但
+    审校把关与一致性门禁(第 3/4 段,分级回炉):**门禁先行**——先确认事实对,
+    再做文字精修,精修成果不会因方向错而作废。回炉循环(封顶 review_max_revisions
+    轮,共享预算):
+      ① 一致性门禁(checker:对照圣经 + 上一章契约 + 上章结尾原文)有 blocker →
+         分诊(triage_issues):全部可定点修 → repair_chapter 一次小调用出精确
+         替换对(apply_gate_fixes 逐字+唯一锚校验后应用),回门禁复查;修不掉/
+         锚全失配/上轮刚修过 → 整章重写。auto_revise 关 → 不回炉直接隔离。
+      ② 门禁干净才精修:校对硬伤自修(精确替换)+ 主审四维打分,continuity=9
+         并入五维阈值硬判;不达标带主审意见(+prose 禁则)回炉重写。
+    到点无论是否达标都接受当前最好的一版;回炉封顶仍有 blocker → 落库但
     status="quarantined":不做章后抽取(矛盾不进圣经)、不更新滚动摘要、
     不提契约;无 blocker 才走章后链路(apply_chapter_tail)。
 
     返回 (Chapter, 一致性门禁问题列表, 抽取统计, 字数守卫结果, 审校结果 dict, 写前审核警告列表)。
     审校结果含 scores(四维+continuity)/comment/suggestions/passed/
-    revision_rounds/threshold;quarantined 时抽取统计为空 dict。
+    revision_rounds/threshold/repair_rounds/repairs(定点修复明细);
+    quarantined 时抽取统计为空 dict。
     写前审核警告(docs/08 §5.3)severity 一律 major,只警告不阻断,已随落库
     持久化(source="preflight");无契约/LLM 失败时为空列表。
     """
@@ -603,9 +609,11 @@ async def generate_chapter(
     logger.info("第 %d 章:生成草稿...", chapter_number)
     draft, final = await _compose(revision_block, "1/6 生成草稿", "2/6 定稿修订")
 
-    # ---- 审校把关:校对硬伤自修 + 主审达标判定 + 有上限自动回炉 ----
-    # 达标与否由后端按项目阈值硬判;不达标则带主审意见回炉重走草稿+定稿,封顶
-    # review_max_revisions 轮,到点无论是否达标都接受当前最好的一版(不会无限回炉)。
+    # ---- 分级回炉:门禁先行(先修对,再修好),封顶 review_max_revisions 轮 ----
+    # 循环两段:①一致性门禁有 blocker → 定点修复(patch)或整章重写,回门禁复查;
+    # ②门禁干净才精修:校对自修 + 主审四维,不达标带意见(+prose 禁则)回炉重写。
+    # 精修永远只发生在门禁干净的文本上——方向错了不浪费文字加工;主审触发的重写
+    # 也回到①先过门禁,「精修完才发现方向错」从结构上不会发生。
     threshold = project.review_pass_threshold
     auto_revise = project.review_auto_revise
     max_revisions = project.review_max_revisions
@@ -617,11 +625,70 @@ async def generate_chapter(
     proofread_fixed = 0  # 校对累计自动修复的硬伤数(回显给用户看"校对跑过了")
     last_fixed_issues: list[dict] = []  # 末轮校对自动修复的清单(对应最终正文,回显用)
     gate_issues: list[dict] = []  # 末轮一致性门禁结果(对应最终正文,落 chapter_issues 用)
+    repair_rounds = 0  # 定点修复轮数(计入 revision_rounds,单独回显)
+    last_repairs: dict = {}  # 末次定点修复明细 {applied, failed}(回显用)
+    patch_tried = False  # 上一轮是否刚做过定点修复(修不掉的连续问题强制重写,防烧轮)
     while True:
+        # ---- ① 一致性门禁(docs/08 §5.4):对照圣经 + 上章契约 + 上章结尾原文 ----
+        # 有 blocker 不进精修:分诊后定点修复或重写,复查通过才往下走。门禁在落库前,
+        # 拦住的矛盾不会抽进圣经。
         _report(
-            "3/6 审校把关"
+            "3/6 一致性门禁"
             if revision_rounds == 0
-            else f"3/6 审校把关(第 {revision_rounds}/{max_revisions} 轮回炉)"
+            else f"3/6 一致性门禁(第 {revision_rounds}/{max_revisions} 轮回炉)"
+        )
+        gate_issues = await check_chapter(
+            db, project.id, chapter_number, final, rolling_summary=rolling
+        )
+        blockers = blockers_of(gate_issues)
+        # continuity 随门禁结果先入 scores:精修段靠它判达标;预算烧在门禁段时
+        # 主审没跑过,scores 至少带上 continuity 供 API/前端回显
+        review_result.setdefault("scores", {})["continuity"] = continuity_score(gate_issues)
+        if blockers:
+            review_result["passed"] = False
+            if not auto_revise or revision_rounds >= max_revisions:
+                break
+            revision_rounds += 1
+            # 分诊:全部可定点修且上一轮没刚修过 → patch(一次小调用,保住好文);
+            # 否则整章重写。修完不在这里复查——回到循环顶,门禁说了算。
+            if not patch_tried and triage_issues(blockers) == "patch":
+                patch_tried = True
+                repair_rounds += 1
+                _report(
+                    f"3/6 一致性门禁(第 {revision_rounds}/{max_revisions} 轮·定点修复)"
+                )
+                fixes = await repair_chapter(chapter_number, final, blockers)
+                new_final, applied, failed = apply_gate_fixes(final, fixes)
+                if applied:
+                    final = new_final
+                    last_repairs = {"applied": applied, "failed": failed}
+                    logger.info(
+                        "第 %d 章门禁定点修复:%d 处(失配 %d 处),回门禁复查",
+                        chapter_number, len(applied), len(failed),
+                    )
+                    continue
+                logger.info(
+                    "第 %d 章门禁问题不可定点修(%d 条修复全部未应用),转整章重写",
+                    chapter_number, len(fixes),
+                )
+            patch_tried = False
+            logger.info(
+                "第 %d 章门禁拦截 %d 个 blocker,第 %d/%d 轮回炉(重写)",
+                chapter_number, len(blockers), revision_rounds, max_revisions,
+            )
+            directive = build_revision_directive(_gate_merged_review(review_result, blockers))
+            draft, final = await _compose(
+                _revision_block(directive, final),
+                f"3/6 一致性门禁(第 {revision_rounds}/{max_revisions} 轮回炉·重写草稿)",
+                f"3/6 一致性门禁(第 {revision_rounds}/{max_revisions} 轮回炉·定稿)",
+            )
+            continue
+        # ---- ② 门禁干净,精修:校对硬伤自修 + 主审四维达标判定 ----
+        patch_tried = False
+        _report(
+            "4/6 审校把关"
+            if revision_rounds == 0
+            else f"4/6 审校把关(第 {revision_rounds}/{max_revisions} 轮回炉)"
         )
         # 校对硬伤:错字/语病/标点/重复,精确替换自修(幻觉片段已在引擎里过滤)
         proof = await proofread_chapter(final)
@@ -633,49 +700,43 @@ async def generate_chapter(
             applied_originals = {a["original"] for a in _applied}
             round_fixed = [it for it in proof["issues"] if it["original"] in applied_originals]
         last_fixed_issues = round_fixed
-        # 主审打分(四维)
+        # 主审打分(四维);continuity 已由门禁段写入(干净 → 9)
         review_result = await review_chapter(final, outline_block)
-        # ---- 一致性门禁(docs/08 §5.4):对照圣经 + 上章契约 + 上章结尾原文 ----
-        # 在回炉循环内检查:结果折算第五维「连续性」纳入达标判定;blocker 拼进
-        # 修订指令一并回炉(与审校共享 review_max_revisions 上限)。门禁在落库前,
-        # 拦住的矛盾不会抽进圣经。
-        _report("4/6 一致性门禁")
-        gate_issues = await check_chapter(
-            db, project.id, chapter_number, final, rolling_summary=rolling
-        )
         review_result["scores"]["continuity"] = continuity_score(gate_issues)
-        blockers = blockers_of(gate_issues)
-        # 达标判定:五维阈值硬判 + blocker 一票否决(阈值调得再低 blocker 也不过)
-        passed = judge_passed(review_result["scores"], threshold) and not blockers
+        # 达标判定:五维阈值硬判(阈值调得再低,blocker 也已在①被拦)
+        passed = judge_passed(review_result["scores"], threshold)
         review_result["passed"] = passed
         if passed:
             break
         if not auto_revise or revision_rounds >= max_revisions:
             break
-        # 不达标 → 主审意见 + 门禁 blocker 拼成重写指令,回炉重走草稿+定稿
+        # 不达标 → 主审意见(+prose 禁则)拼成重写指令,回炉重写,回①先过门禁
         revision_rounds += 1
         logger.info(
-            "第 %d 章未通过(五维=%s,阈值=%d,blocker=%d),第 %d/%d 轮回炉",
+            "第 %d 章未通过(五维=%s,阈值=%d),第 %d/%d 轮回炉",
             chapter_number, review_result["scores"], threshold,
-            len(blockers), revision_rounds, max_revisions,
+            revision_rounds, max_revisions,
         )
-        directive = build_revision_directive(_gate_merged_review(review_result, blockers))
+        directive = build_revision_directive(review_result)
         directive = _with_prose_directive(
             directive, review_result.get("scores") or {}, threshold
         )
         draft, final = await _compose(
             _revision_block(directive, final),
-            f"3/6 审校把关(第 {revision_rounds}/{max_revisions} 轮回炉·草稿)",
-            f"3/6 审校把关(第 {revision_rounds}/{max_revisions} 轮回炉·定稿)",
+            f"4/6 审校把关(第 {revision_rounds}/{max_revisions} 轮回炉·草稿)",
+            f"4/6 审校把关(第 {revision_rounds}/{max_revisions} 轮回炉·定稿)",
         )
     review_result["revision_rounds"] = revision_rounds
+    review_result["repair_rounds"] = repair_rounds
+    review_result["repairs"] = last_repairs
     review_result["threshold"] = threshold
     review_result["proofread_fixed"] = proofread_fixed
     reviewed_text = final  # 审校/门禁对应的正文(字数守卫可能在其后改动,指纹以此为准)
     logger.info(
-        "第 %d 章审校+门禁完成:通过=%s,五维=%s,blocker=%d,回炉 %d 轮",
+        "第 %d 章审校+门禁完成:通过=%s,五维=%s,blocker=%d,回炉 %d 轮(定点修 %d)",
         chapter_number, review_result.get("passed"),
-        review_result.get("scores"), len(blockers_of(gate_issues)), revision_rounds,
+        review_result.get("scores"), len(blockers_of(gate_issues)),
+        revision_rounds, repair_rounds,
     )
 
     # ---- 字数守卫:超标压缩/拆章(只对审校后的最终定稿跑一次) ----

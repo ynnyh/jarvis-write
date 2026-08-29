@@ -365,7 +365,7 @@ export interface GenerateChapterResponse extends ChapterDetail {
     total_chapters_now: number;
     reason: string;
   };
-  // 生成时编辑部审校把关结果(校对+主审+有上限回炉)
+  // 生成时编辑部审校把关结果(校对+主审+有上限回炉;分级回炉含门禁定点修复)
   review?: {
     // 五维评分;continuity(连续性)为新维度,旧四维快照无该键(渲染时兼容)
     scores: { plot: number; prose: number; pacing: number; character: number; continuity?: number };
@@ -374,6 +374,9 @@ export interface GenerateChapterResponse extends ChapterDetail {
     passed: boolean;
     revision_rounds: number;
     threshold: number;
+    // 定点修复轮数与明细(旧响应无该键,渲染时兼容)
+    repair_rounds?: number;
+    repairs?: GateRepairDetail;
   };
   // 一致性门禁结果(docs/08 §5.4):quarantined 时正文已存但未进圣经/摘要
   gate?: { status: "passed" | "quarantined"; blockers: PreflightWarning[] };
@@ -690,6 +693,11 @@ export interface InviteCodeListOut {
 /** 编辑部预设优化动作 */
 export interface EditorAction { key: string; label: string; directive: string; }
 export interface ReviewSuggestion { evidence: string; issue: string; fix: string; }
+/** 门禁定点修复明细(分级回炉):applied=已应用的替换对;failed=未应用及原因 */
+export interface GateRepairDetail {
+  applied: { original: string; replacement: string }[];
+  failed: { original: string; reason: string }[];
+}
 export interface ChapterReview {
   chapter_number: number;
   // 四维+continuity(连续性,新维度;旧快照无该键,Object.entries 遍历天然兼容)
@@ -705,6 +713,9 @@ export interface ChapterReview {
   reviewed_at?: string;
   revision_rounds?: number;
   proofread_fixed?: number;
+  // 分级回炉:门禁定点修复轮数与明细(回炉轮数含修复轮;旧快照无该键)
+  repair_rounds?: number;
+  repairs?: GateRepairDetail;
 }
 export interface ProofIssue { type: string; original: string; suggestion: string; reason: string; }
 // 校对快照回显:issues=问题清单;source=generation(生成时已自动修复,只读)/

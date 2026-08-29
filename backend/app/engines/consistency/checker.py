@@ -10,7 +10,8 @@
 
 输出格式:每条问题含 问题点(description)/证据段落(evidence,正文逐字引用,
 引不到的幻觉举证清空)/被违反事实(conflicting_fact)/修正建议(suggestion)/
-severity(blocker|major|minor)/type(state|knowledge|timeline|worldrule)。
+severity(blocker|major|minor)/type(state|knowledge|timeline|worldrule)/
+fix_mode(patch|rewrite,分级回炉的分诊依据)。
 
 检查结果落 chapter_issues 表(persist_issues,purge 旧 open 幂等重建),
 供门禁判定(quarantined)与 P1 审核面板使用。检查失败(LLM 异常/解析失败)
@@ -39,6 +40,7 @@ _PREV_TAIL_CHARS = 900  # 上一章结尾原文截断长度(对齐 chapter.py �
 
 _SEVERITIES = {"blocker", "major", "minor"}
 _TYPES = {"state", "knowledge", "timeline", "worldrule", "ambient", "cast"}
+_FIX_MODES = {"patch", "rewrite"}
 
 # severity 护栏措辞:模型描述里出现这些「自己打圆场」的信号,说明它并不认为
 # 是硬矛盾——blocker(一票否决)误报代价最大,出现即降级,宁可低估。
@@ -99,6 +101,12 @@ def _normalize_issue(raw: dict, chapter_text: str) -> dict:
         m in description for m in _NOT_CONFLICT_MARKERS
     ):
         severity = "minor"
+    # fix_mode(回炉分诊用):缺失/非法 → patch。乐观缺省是有算账的:分诊错了的
+    # 代价只是一次小修复调用 + 门禁复查(复查不过自动回退重写),而把可定点修的
+    # 判成重写,代价是整章两次大调用 + 已达标维度全部重掷。
+    fix_mode = str(raw.get("fix_mode") or "").strip().lower()
+    if fix_mode not in _FIX_MODES:
+        fix_mode = "patch"
     return {
         "severity": severity,
         "type": issue_type,
@@ -106,6 +114,7 @@ def _normalize_issue(raw: dict, chapter_text: str) -> dict:
         "evidence": evidence,
         "conflicting_fact": str(raw.get("conflicting_fact") or "").strip(),
         "suggestion": suggestion,
+        "fix_mode": fix_mode,
     }
 
 
@@ -189,6 +198,24 @@ async def check_chapter(
 def blockers_of(issues: list[dict]) -> list[dict]:
     """筛出 blocker 级问题(门禁阻断项)。"""
     return [i for i in issues if i.get("severity") == "blocker"]
+
+
+def triage_issues(issues: list[dict]) -> str:
+    """门禁 blocker 分诊(docs/08 §5.4 分级回炉):全部可定点修 → "patch",否则 "rewrite"。
+
+    patch 判据(按条否决,一条不满足整批走重写):
+    - 每条都必须带逐字 evidence——幻觉举证在归一时已清空,没有锚就没法定点;
+    - 检查器没有显式标注 fix_mode="rewrite"(要调整情节走向/整场戏才能消除的矛盾)。
+
+    分诊只决定第一次尝试走哪条路:定点修之后门禁必复查,修不掉自动回退重写,
+    所以判错 patch 的代价是一次小调用 + 一次复查,方向是安全的。
+    """
+    for i in issues:
+        if not str(i.get("evidence") or "").strip():
+            return "rewrite"
+        if i.get("fix_mode") == "rewrite":
+            return "rewrite"
+    return "patch"
 
 
 def continuity_score(issues: list[dict]) -> int:

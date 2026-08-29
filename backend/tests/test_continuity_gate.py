@@ -6,8 +6,10 @@
 - checker 升级:对照上章契约+结尾原文(prompt 注入);圣经为空走"仅对照上章"降级;
   三路对照源全空才跳过;severity 归一(critical→blocker,未知→minor);幻觉举证清空
 - chapter_issues 落库幂等:purge 旧 open 重建;指纹失效的 ignored 清除,未失效保留
-- 门禁判定:blocker 拼修订指令回炉(共享 review_max_revisions);封顶 → quarantined
-  (不抽圣经/不更新摘要/不提契约,issues 落 open);auto_revise 关 → 直接隔离
+- 门禁判定:分级回炉(docs/08 §5.4)——门禁先行,blocker 先分诊定点修复
+  (逐字+唯一锚替换,复查通过即出循环),修不掉回退整章重写;封顶 → quarantined
+  (不抽圣经/不更新摘要/不提契约,issues 落 open);auto_revise 关 → 直接隔离;
+  精修(校对+主审)只在门禁干净后跑,主审触发的重写也回门禁复查
 - 第五维 continuity:blocker→4 / major→6 / minor→8 / 干净→9,纳入 judge_passed
 - quarantined 出口:重写成功回 pending_review(旧 open 清账);gate-release 放行端点
   (issues 标 ignored + 状态回 pending_review + 补走抽取/摘要/契约)
@@ -290,8 +292,36 @@ async def _fake_review_high(*a, **k):
     return {"scores": dict(HIGH), "comment": "", "suggestions": []}
 
 
-def _run_generate(db, project, n, check_fn, extract_fn, adapter=None):
-    """mock LLM 跑一遍 generate_chapter;check/extract 由参数注入(脚本化)。"""
+async def _fake_repair_no_fixes(*a, **k):
+    """定点修复默认不给方案(→ 同轮转重写);patch 用例单独注入。"""
+    return []
+
+
+def _counting(fake):
+    """包一层调用计数,断言「精修只在门禁干净后跑」。"""
+    state = {"calls": 0}
+
+    async def _inner(*a, **k):
+        state["calls"] += 1
+        return await fake(*a, **k)
+
+    return _inner, state
+
+
+def _scripted_repair(seq: list[list[dict]]):
+    """按脚本依次返回定点修复方案;记录收到的正文。"""
+    state = {"calls": 0, "texts": []}
+
+    async def _inner(chapter_number, content, issues):
+        state["calls"] += 1
+        state["texts"].append(content)
+        return seq.pop(0) if seq else []
+
+    return _inner, state
+
+
+def _run_generate(db, project, n, check_fn, extract_fn, adapter=None, repair_fn=None):
+    """mock LLM 跑一遍 generate_chapter;check/extract/repair 由参数注入(脚本化)。"""
     from app.engines.pipeline import chapter as ch_mod
 
     adapter = adapter or _PipelineAdapter()
@@ -302,6 +332,7 @@ def _run_generate(db, project, n, check_fn, extract_fn, adapter=None):
         patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
         patch.object(ch_mod, "review_chapter", new=_fake_review_high),
         patch.object(ch_mod, "preflight_chapter", new=_fake_preflight),
+        patch.object(ch_mod, "repair_chapter", new=repair_fn or _fake_repair_no_fixes),
     ):
         result = asyncio.run(ch_mod.generate_chapter(db, project, n))
     return adapter, result
@@ -343,7 +374,7 @@ class _AlwaysCheck:
 
 
 def test_gate_revises_on_blocker_then_passes():
-    """首轮 blocker → 拼进修订指令回炉 → 次轮干净 → pending_review,共享回炉计数。"""
+    """首轮 blocker(默认无修复方案)→ 转整章重写 → 次轮干净 → pending_review,共享回炉计数。"""
     db, project, _ch1 = _make_db(review_max_revisions=3)
     check = _ScriptedCheck([[BLOCKER_ISSUE], []])
     extract = _SpyExtract()
@@ -419,6 +450,167 @@ def test_gate_major_only_still_finalizes():
     assert chapter.status == "pending_review"  # major 不隔离
     assert extract.calls == 1
     assert issues[0]["severity"] == "major"
+
+
+# ---------- 分级回炉:门禁先行 + 定点修复(docs/08 §5.4) ----------
+
+class _PatchAdapter:
+    """定点修复用例的假 LLM:定稿返回非周期文本,替换锚可全篇唯一。"""
+
+    def __init__(self):
+        self.prompts: list[str] = []
+
+    async def ask(self, prompt: str, system=None) -> str:
+        self.prompts.append(prompt)
+        if "现在开始写" in prompt:
+            return "草稿正文。"
+        if "修订后的" in prompt:
+            return "沈墨在破庙里醒来。篝火只剩一点余烬。"
+        if "场记" in prompt:
+            return CONTRACT_JSON
+        return "前情摘要。"
+
+
+TIME_FIX = {
+    "issue_index": 0,
+    "original": "篝火只剩一点余烬。",
+    "replacement": "不知过了多久,天将破晓,篝火只剩一点余烬。",
+}
+
+
+def test_gate_patches_blocker_then_passes():
+    """blocker 可定点修:一次小调用修掉 → 门禁复查通过,不重写(草稿只调一次)。"""
+    db, project, _ch1 = _make_db(review_max_revisions=3)
+    check = _ScriptedCheck([[BLOCKER_ISSUE], []])
+    extract = _SpyExtract()
+    repair, repair_state = _scripted_repair([[TIME_FIX]])
+    proofread, proof_state = _counting(_fake_proofread)
+    review_fn, review_state = _counting(_fake_review_high)
+    adapter = _PatchAdapter()
+    from app.engines.pipeline import chapter as ch_mod
+
+    with (
+        patch.object(ch_mod, "get_adapter_for", return_value=adapter),
+        patch.object(ch_mod, "check_chapter", new=check),
+        patch.object(ch_mod, "extract_and_apply", new=extract),
+        patch.object(ch_mod, "proofread_chapter", new=proofread),
+        patch.object(ch_mod, "review_chapter", new=review_fn),
+        patch.object(ch_mod, "preflight_chapter", new=_fake_preflight),
+        patch.object(ch_mod, "repair_chapter", new=repair),
+    ):
+        _chapter, _issues, _stats, _guard, review, _pf = asyncio.run(
+            ch_mod.generate_chapter(db, project, 2)
+        )
+
+    assert repair_state["calls"] == 1
+    # 修复收到的是定稿原文;门禁复查收到的是修复后的正文
+    assert repair_state["texts"][0].startswith("沈墨在破庙里醒来。")
+    assert "天将破晓" in check.calls[1]
+    # 精修(校对+主审)只在门禁干净后跑了一次,脏轮次没跑
+    assert proof_state["calls"] == 1
+    assert review_state["calls"] == 1
+    # 没有重写:草稿 prompt 只出现一次
+    assert len([p for p in adapter.prompts if "现在开始写" in p]) == 1
+    assert review["passed"] is True
+    assert review["revision_rounds"] == 1
+    assert review["repair_rounds"] == 1
+    assert len(review["repairs"]["applied"]) == 1
+    assert _chapter.status == "pending_review"
+    assert extract.calls == 1
+
+
+def test_gate_patch_miss_falls_back_to_rewrite():
+    """定点修复后仍有 blocker:下一轮强制重写,不再连续 patch(防烧轮)。"""
+    db, project, _ch1 = _make_db(review_max_revisions=3)
+    check = _ScriptedCheck([[BLOCKER_ISSUE], [BLOCKER_ISSUE], []])
+    extract = _SpyExtract()
+    repair, repair_state = _scripted_repair([[TIME_FIX], []])
+    adapter = _PatchAdapter()
+    from app.engines.pipeline import chapter as ch_mod
+
+    with (
+        patch.object(ch_mod, "get_adapter_for", return_value=adapter),
+        patch.object(ch_mod, "check_chapter", new=check),
+        patch.object(ch_mod, "extract_and_apply", new=extract),
+        patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
+        patch.object(ch_mod, "review_chapter", new=_fake_review_high),
+        patch.object(ch_mod, "preflight_chapter", new=_fake_preflight),
+        patch.object(ch_mod, "repair_chapter", new=repair),
+    ):
+        _chapter, _issues, _stats, _guard, review, _pf = asyncio.run(
+            ch_mod.generate_chapter(db, project, 2)
+        )
+
+    assert repair_state["calls"] == 1  # 只 patch 一次
+    assert len([p for p in adapter.prompts if "现在开始写" in p]) == 2  # 转重写
+    assert review["revision_rounds"] == 2
+    assert review["repair_rounds"] == 1
+    assert review["passed"] is True
+    assert _chapter.status == "pending_review"
+
+
+def test_gate_unpatchable_blocker_rewrites_directly():
+    """证据缺失的问题无法定位 → 分诊直接重写,不浪费修复调用。"""
+    no_ev = dict(BLOCKER_ISSUE, evidence="")
+    db, project, _ch1 = _make_db(review_max_revisions=3)
+    check = _ScriptedCheck([[no_ev], []])
+    extract = _SpyExtract()
+    repair, repair_state = _scripted_repair([[TIME_FIX]])
+    adapter = _PatchAdapter()
+    from app.engines.pipeline import chapter as ch_mod
+
+    with (
+        patch.object(ch_mod, "get_adapter_for", return_value=adapter),
+        patch.object(ch_mod, "check_chapter", new=check),
+        patch.object(ch_mod, "extract_and_apply", new=extract),
+        patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
+        patch.object(ch_mod, "review_chapter", new=_fake_review_high),
+        patch.object(ch_mod, "preflight_chapter", new=_fake_preflight),
+        patch.object(ch_mod, "repair_chapter", new=repair),
+    ):
+        _chapter, _issues, _stats, _guard, review, _pf = asyncio.run(
+            ch_mod.generate_chapter(db, project, 2)
+        )
+
+    assert repair_state["calls"] == 0
+    assert len([p for p in adapter.prompts if "现在开始写" in p]) == 2
+    assert review["revision_rounds"] == 1
+    assert review["repair_rounds"] == 0
+    assert review["passed"] is True
+
+
+def test_triage_and_apply_gate_fixes():
+    """分诊规则 + 定点替换的唯一锚校验(纯函数)。"""
+    from app.engines.consistency.checker import _normalize_issue, triage_issues
+    from app.engines.editorial import apply_gate_fixes
+
+    # 分诊:有证据且未标 rewrite → patch(缺省乐观);缺证据/标 rewrite → 重写
+    assert triage_issues([dict(BLOCKER_ISSUE)]) == "patch"
+    assert triage_issues([dict(BLOCKER_ISSUE, fix_mode="patch")]) == "patch"
+    assert triage_issues([dict(BLOCKER_ISSUE, evidence="")]) == "rewrite"
+    assert triage_issues([dict(BLOCKER_ISSUE, fix_mode="rewrite")]) == "rewrite"
+    assert triage_issues([
+        dict(BLOCKER_ISSUE), dict(BLOCKER_ISSUE, fix_mode="rewrite"),
+    ]) == "rewrite"
+    # 归一:fix_mode 缺失/非法 → patch
+    text = "沈墨在破庙里醒来。"
+    assert _normalize_issue({"description": "x", "evidence": "沈墨在破庙里醒来"}, text)["fix_mode"] == "patch"
+    assert _normalize_issue({"description": "x", "fix_mode": "rewrite"}, text)["fix_mode"] == "rewrite"
+    assert _normalize_issue({"description": "x", "fix_mode": "WILD"}, text)["fix_mode"] == "patch"
+
+    # 应用:唯一锚应用;不唯一/找不到/无效 → failed,不误伤
+    content = "山上有个庙。庙里有个老和尚。山上有个庙。"
+    new, applied, failed = apply_gate_fixes(content, [
+        {"original": "庙里有个老和尚", "replacement": "庙里有个小和尚"},
+        {"original": "山上有个庙", "replacement": "山下有个庙"},
+        {"original": "不存在", "replacement": "x"},
+        {"original": "同文", "replacement": "同文"},
+    ])
+    assert "小和尚" in new and "老和尚" not in new
+    assert len(applied) == 1
+    assert {f["reason"] for f in failed} == {
+        "片段不唯一,拒绝误伤", "正文中找不到该片段", "无效修复项",
+    }
 
 
 def test_rewrite_clears_quarantine():

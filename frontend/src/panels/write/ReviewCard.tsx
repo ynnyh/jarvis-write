@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, ChapterReview, ReviewSuggestion } from "../../api";
 import { useJob } from "../../ui/useJob";
+import GateRepairDetails from "../../ui/GateRepairDetails";
 import { errMsg } from "../../pollJob";
 
 const SCORE_LABEL: Record<string, string> = {
@@ -73,8 +74,14 @@ export default function ReviewCard({ pid, chapterNum, onRevise }: Props) {
               })}</span>
             )}
             {!!review.revision_rounds && <span className="hint">回炉 {review.revision_rounds} 轮</span>}
+            {!!review.repair_rounds && (
+              <span className="hint" title="一致性矛盾由 AI 定点改句消除,未整章重写">
+                门禁定点修复 {review.repairs?.applied.length ?? 0} 处
+              </span>
+            )}
             {!!review.proofread_fixed && <span className="hint">已自动修复 {review.proofread_fixed} 处硬伤</span>}
           </div>
+          <GateRepairDetails repairs={review.repairs} />
           <div className="score-row">
             {Object.entries(review.scores).map(([k, v]) => (
               <div key={k} className={"score-item" + (v > 0 && v < 6 ? " low" : "")}>

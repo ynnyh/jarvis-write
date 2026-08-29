@@ -36,7 +36,8 @@ class GenerateChapterResponse(ChapterDetail):
     # 字数守卫:none / compressed / split
     word_guard_action: str = "none"
     split_info: dict = {}
-    # 编辑部审校把关:scores(四维+continuity)/comment/suggestions/passed/revision_rounds/threshold
+    # 编辑部审校把关:scores(四维+continuity)/comment/suggestions/passed/
+    # revision_rounds/threshold/repair_rounds/repairs(门禁定点修复明细)
     review: dict = {}
     # 一致性门禁结果(docs/08 §5.4):{"status": "passed"|"quarantined", "blockers": [...]}
     gate: dict = {}
