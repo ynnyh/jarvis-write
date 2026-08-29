@@ -210,12 +210,47 @@ def normalize_job_error(exc: Exception) -> str:
 # 模块级 set、完成时用回调移除,确保任务活到跑完。
 _bg_tasks: set[asyncio.Task[Any]] = set()
 
+# job_id → 运行中的 asyncio.Task:手动终止(cancel_running_job)的依据。
+# fire_and_track 里登记(同一上下文里 create_job 刚 set 过 live.current_job_id,
+# 读回来即本次任务),任务结束时清除。
+_TASKS: dict[str, asyncio.Task[Any]] = {}
+
+
+def cancel_running_job(job_id: str) -> bool:
+    """手动终止一个运行中的任务:向其 asyncio 任务发取消,在下一个 await 点生效。
+
+    进行中的 LLM HTTP 请求随之一并中止(省 token 的关键:复读/跑偏的长生成
+    不用陪跑到轮次结束)。返回 False 表示任务不在注册表或已结束,无法终止。
+    """
+    task = _TASKS.get(job_id)
+    if task is None or task.done():
+        return False
+    update_stage(job_id, "正在终止…")
+    task.cancel()
+    return True
+
 
 def fire_and_track(coro: Coroutine[Any, Any, Any]) -> None:
-    """起后台任务并保留强引用(防 create_task 的任务被 GC 中途回收)。"""
+    """起后台任务并保留强引用(防 create_task 的任务被 GC 中途回收)。
+
+    同时登记 job_id → task 供手动终止用;结束时清除。裸 fire_and_track 模式的
+    runner 只兜 Exception,手动终止的 CancelledError 会穿透到这——补记失败
+    状态,否则任务永远停在 running(重启清理才捞得回来)。
+    """
     task = asyncio.create_task(coro)
     _bg_tasks.add(task)
-    task.add_done_callback(_bg_tasks.discard)
+    jid = live.current_job_id.get()
+    if jid:
+        _TASKS[jid] = task
+
+    def _cleanup(t: asyncio.Task[Any]) -> None:
+        _bg_tasks.discard(t)
+        if jid and _TASKS.get(jid) is t:
+            _TASKS.pop(jid, None)
+        if jid and t.cancelled() and (get_job(jid) or {}).get("status") == "running":
+            fail_job(jid, "已手动终止")
+
+    task.add_done_callback(_cleanup)
 
 
 def spawn_job(kind: str, work: Callable[[Callable[[str], None]], Awaitable[Any]]) -> str:
@@ -232,7 +267,7 @@ def spawn_job(kind: str, work: Callable[[Callable[[str], None]], Awaitable[Any]]
         except asyncio.CancelledError:
             # CancelledError 是 BaseException,下面的 except Exception 兜不住——
             # 不单独接住,任务会永远停在 running(重启清理才捞得回来)
-            fail_job(job_id, "任务被取消")
+            fail_job(job_id, "已手动终止")
             raise
         except Exception as exc:  # noqa: BLE001
             logger.warning("任务 %s(%s) 失败: %s", job_id, kind, exc, exc_info=True)

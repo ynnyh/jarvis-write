@@ -563,6 +563,19 @@ class LLMAdapter(abc.ABC):
         return await complete_text_with_budget(self, messages)
 
 
+def _looks_degenerate(text: str) -> bool:
+    """复读退化检测:长正文里同一批句子反复出现(模型陷入生成循环)。
+
+    按中英文句读+换行切句,句长 >=6 字才计入,句子总数 >=24 才判(短文天然
+    重复率高,不冤枉);唯一句占比不足一半即判退化。实测退化形态(同一句连抄
+    几十遍)比率趋近 1,正常章节在 0.1 以下,阈值 0.5 两边都有足够余量。
+    """
+    sents = [s.strip() for s in re.split(r"[。!?!.!?\n]", text) if len(s.strip()) >= 6]
+    if len(sents) < 24:
+        return False
+    return len(set(sents)) / len(sents) < 0.5
+
+
 async def complete_text_with_budget(adapter, messages: list[LLMMessage]) -> str:
     """调一次模型拿纯文本:空正文/被截断都放大预算重试(最多 3 轮)+ 用量记账。
 
@@ -615,6 +628,16 @@ async def complete_text_with_budget(adapter, messages: list[LLMMessage]) -> str:
                 logger.warning(
                     "正文被截断(model=%s, 第 %d/3 次): %s", model, attempt + 1, diag
                 )
+                if _looks_degenerate(content):
+                    # 复读退化:同一批句子反复填充直到烧光输出预算。这不是预算不足,
+                    # 翻倍重试只会再陪跑几分钟、烧更多 token、产出更多复读——快败,
+                    # 把「直接重试还是换模型」的决定交回用户。
+                    raise UpstreamError(
+                        f"模型输出陷入复读退化(正文 {len(content)} 字几乎全是重复句子,"
+                        f"已耗尽输出预算),已终止本次调用不再重试,以免继续烧 token。"
+                        "请直接重试;反复出现请到「设置」更换模型",
+                        retryable=False,
+                    )
                 if adapter.max_tokens >= 32768:
                     break  # 预算已到顶,再翻倍也没有意义
                 adapter.max_tokens = min(adapter.max_tokens * 2, 32768)

@@ -820,6 +820,9 @@ export const api = {
   myJobs: (all = false) =>
     req<{ jobs: { job_id: string; kind: string; status: string; stage: string; error?: string | null }[] }>(
       "GET", `/api/jobs${all ? "?all=true" : ""}`),
+  // 手动终止一个运行中的后台任务:进行中的 LLM 请求一并掐断,已耗 token 不退
+  cancelJob: (jobId: string) =>
+    req<{ ok: boolean }>("POST", `/api/jobs/${jobId}/cancel`),
   // 订阅某任务的「实时正文」(SSE):模型正在吐的字逐帧到达。
   // 帧:step(换屏/初始快照)/token(增量)/reset(整屏重置)/ping(心跳)/done(结束)。
   // cursor 传已收到的字数,断线重连可续;返回的 Promise 在流结束时 resolve。

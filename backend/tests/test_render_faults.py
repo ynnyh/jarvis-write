@@ -190,7 +190,7 @@ def test_spawn_job_cancelled_marks_failed():
     job_id = asyncio.run(driver())
     job = jobs.get_job(job_id)
     assert job is not None and job["status"] == "error"
-    assert "取消" in job["error"]
+    assert "终止" in job["error"]  # 手动终止语义(旧文案为「取消」)
 
 
 def test_cleanup_stuck_render_tasks():

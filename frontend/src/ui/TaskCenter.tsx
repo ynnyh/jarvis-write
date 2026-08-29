@@ -4,6 +4,9 @@ import {
   createContext, ReactNode, useCallback, useContext, useEffect, useRef, useState,
 } from "react";
 import { api } from "../api";
+import { errMsg } from "../pollJob";
+import { confirmDialog } from "./ConfirmDialog";
+import { toast } from "./Toaster";
 
 export interface BgJob {
   job_id: string;
@@ -124,10 +127,28 @@ export function TaskCenterProvider({ children, enabled }: { children: ReactNode;
 
 /** 顶栏角标 + 下拉任务抽屉 */
 export function TaskCenterBadge() {
-  const { jobs, running, focusLive } = useTaskCenter();
+  const { jobs, running, focusLive, refresh } = useTaskCenter();
   const [open, setOpen] = useState(false);
   const recent = [...jobs].reverse().slice(0, 12);
   if (!jobs.length) return null;
+
+  async function stopJob(jobId: string) {
+    const ok = await confirmDialog({
+      title: "终止这个任务?",
+      body: "进行中的模型调用会立刻掐断;已消耗的 token 不退,半成品不会保存。连写队列会整条停止。",
+      confirmText: "终止",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.cancelJob(jobId);
+      toast.ok("已请求终止", "任务正在停止");
+      await refresh();
+    } catch (e) {
+      toast.err("终止失败", errMsg(e));
+    }
+  }
+
   return (
     <div className="tc-wrap">
       <button
@@ -153,15 +174,24 @@ export function TaskCenterBadge() {
                     {j.status === "running" && <span className="spin" />}
                     {stageText}
                   </span>
-                  {/* 在跑的任务可以直接盯着看模型写字(实时正文窗) */}
+                  {/* 在跑的任务可以直接盯着看模型写字(实时正文窗),或就地终止 */}
                   {j.status === "running" && (
-                    <button
-                      className="tc-live-btn"
-                      title="看模型正在写什么"
-                      onClick={() => { focusLive(j.job_id); setOpen(false); }}
-                    >
-                      看正文
-                    </button>
+                    <>
+                      <button
+                        className="tc-live-btn"
+                        title="看模型正在写什么"
+                        onClick={() => { focusLive(j.job_id); setOpen(false); }}
+                      >
+                        看正文
+                      </button>
+                      <button
+                        className="tc-live-btn"
+                        title="终止这个任务(立刻掐断模型调用)"
+                        onClick={() => stopJob(j.job_id)}
+                      >
+                        终止
+                      </button>
+                    </>
                   )}
                 </div>
               );

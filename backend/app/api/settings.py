@@ -365,7 +365,12 @@ async def test_provider_config(
         )
 
     # max_tokens 给到 1024:100 对推理模型连"思考"都不够,会白白测出空正文
-    adapter = create_llm_adapter(config_id=config_id, max_tokens=1024, timeout=60)
+    # 工厂对不支持/配置非法直接抛 ValueError(如类型选成 embedding):这里是
+    # 「测试连接」按钮,原样转成 400 文案,不能 500
+    try:
+        adapter = create_llm_adapter(config_id=config_id, max_tokens=1024, timeout=60)
+    except ValueError as exc:
+        return TestResult(ok=False, provider=row.interface_format, error=str(exc))
     warnings: list[str] = []
     resp = None
     try:

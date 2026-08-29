@@ -4,7 +4,11 @@
 // 逐个面板加直播必漏;而任务中心已经汇总了所有任务,这里跟着"当前在跑的那个任务"
 // 订阅即可,天然覆盖全链路(含以后新增的任务),也不用改各面板。
 import { useEffect, useMemo, useRef, useState } from "react";
+import { api } from "../api";
+import { errMsg } from "../pollJob";
+import { confirmDialog } from "./ConfirmDialog";
 import { jobLabel, useTaskCenter } from "./TaskCenter";
+import { toast } from "./Toaster";
 import { useJobLive } from "./useJobLive";
 
 const OPEN_KEY = "jarvis_live_dock_open";
@@ -38,6 +42,28 @@ export function LiveDock() {
     if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
   }, [text]);
 
+  // 手动终止正在盯的任务:掐断进行中的模型调用,省下后续 token
+  const [stopping, setStopping] = useState(false);
+  async function stopTarget() {
+    if (!target) return;
+    const ok = await confirmDialog({
+      title: "终止这个任务?",
+      body: "进行中的模型调用会立刻掐断;已消耗的 token 不退,半成品不会保存。连写队列会整条停止。",
+      confirmText: "终止",
+      danger: true,
+    });
+    if (!ok) return;
+    setStopping(true);
+    try {
+      await api.cancelJob(target.job_id);
+      toast.ok("已请求终止", "任务正在停止");
+    } catch (e) {
+      toast.err("终止失败", errMsg(e));
+    } finally {
+      setStopping(false);
+    }
+  }
+
   if (!target) return null;
 
   const idx = running.findIndex((j) => j.job_id === target.job_id);
@@ -65,6 +91,12 @@ export function LiveDock() {
             >›</button>
           </>
         )}
+        <button
+          className="live-btn"
+          title="终止这个任务(立刻掐断模型调用)"
+          disabled={stopping}
+          onClick={stopTarget}
+        >■</button>
         <button
           className="live-btn"
           title={open ? "收起(不再接收实时正文)" : "展开看模型正在写什么"}

@@ -27,7 +27,7 @@ from app.api.sse import STREAM_HEADERS, sse_event
 from app.auth import assert_project_owner, current_user_id, get_current_user
 from app.db.models import Chapter, LlmUsage, Outline, Project
 from app.db.session import get_db
-from app.jobs import get_job, list_for_user, list_running
+from app.jobs import cancel_running_job, get_job, list_for_user, list_running
 
 router = APIRouter(tags=["misc"], dependencies=[Depends(get_current_user)])
 
@@ -58,6 +58,24 @@ async def job_status(job_id: str):
         raise HTTPException(status_code=404, detail="任务不存在或已被清理")
     job.pop("owner_id", None)  # 内部字段,不下发
     return job
+
+
+@router.post("/api/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str):
+    """手动终止一个运行中的后台任务(docs/08 补课:此前只能陪跑到任务自然结束)。
+
+    向任务发 asyncio 取消,在下一个 await 点生效——进行中的 LLM 请求一并掐断,
+    已耗的 token 不退还,但至少不再继续烧。半成品事务按既有失败语义回滚;
+    连写队列终止即整条停(某章失败即停止的同一语义)。
+    """
+    job = get_job(job_id)
+    if job is None or job.get("owner_id") != current_user_id.get():
+        raise HTTPException(status_code=404, detail="任务不存在或已被清理")
+    if job["status"] != "running":
+        raise HTTPException(status_code=400, detail="任务已结束,无需终止")
+    if not cancel_running_job(job_id):
+        raise HTTPException(status_code=400, detail="任务已结束,无需终止")
+    return {"ok": True}
 
 
 @router.get("/api/jobs/{job_id}/live")
