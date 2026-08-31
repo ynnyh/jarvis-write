@@ -13,6 +13,7 @@ DELETE /api/admin/invite-codes/{id}           删除邀请码
 """
 from __future__ import annotations
 
+import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -33,6 +34,12 @@ from app.db.models import (
     User,
 )
 from app.db.session import get_db
+from app.engines.polish.ai_flavor import (
+    rule_config,
+    set_gate_override,
+    set_weight_overrides,
+    weight_overrides,
+)
 
 logger = logging.getLogger("jarvis-write.admin")
 
@@ -316,3 +323,114 @@ async def delete_invite_code(
     db.commit()
     logger.info("管理员删除了邀请码 %s", row.code)
     return {"ok": True}
+
+
+# ---------- AI 味检测热更配置(类别权重 + 自愈门槛) ----------
+# 检测规则/权重改代码要发版;线上某类误伤/漏杀时,这里在线调参立即生效,
+# 配置本体存 AppSetting(key=ai_flavor_config),启动时 load 进内存。
+
+_FLAVOR_CFG_KEY = "ai_flavor_config"
+_FLAVOR_WEIGHT_RANGE = (0.0, 5.0)
+_FLAVOR_GATE_RANGE = (0.0, 30.0)
+
+
+class AiFlavorConfigOut(BaseModel):
+    gate_score: float                    # 当前生效的自愈门槛(默认或覆盖)
+    weights: dict[str, float]            # 当前生效的类别权重(默认+覆盖合并)
+    categories: list[dict]               # 类别目录(类别名/出厂权重/当前权重/规则数)
+
+
+class AiFlavorConfigIn(BaseModel):
+    gate_score: float = Field(ge=_FLAVOR_GATE_RANGE[0], le=_FLAVOR_GATE_RANGE[1])
+    # 只收覆盖项(与出厂相同的也允许,落库时一并存);类别名不存在的被忽略
+    weights: dict[str, float]
+
+
+def _save_flavor_config(db: Session, cfg: dict) -> None:
+    row = db.get(AppSetting, _FLAVOR_CFG_KEY)
+    if row is None:
+        row = AppSetting(key=_FLAVOR_CFG_KEY)
+        db.add(row)
+    row.value = json.dumps(cfg, ensure_ascii=False)
+    db.commit()
+
+
+def load_ai_flavor_config() -> None:
+    """启动时把 AppSetting 里的热更配置载进检测模块内存(找不到就维持出厂值)。
+
+    供 main.lifespan 调用;DB 异常不阻断启动(检测回落到代码常量,行为同未配置)。
+    """
+    from app.db.session import SessionLocal
+
+    try:
+        session = SessionLocal()
+        try:
+            row = session.get(AppSetting, _FLAVOR_CFG_KEY)
+        finally:
+            session.close()
+    except Exception:  # noqa: BLE001 — 配置加载失败不拦启动
+        logger.warning("读取 AI 味热更配置失败,维持出厂值", exc_info=True)
+        return
+    if not row or not row.value:
+        return
+    try:
+        cfg = json.loads(row.value)
+        set_weight_overrides(cfg.get("weights") or {})
+        set_gate_override(cfg.get("gate_score"))
+    except (ValueError, TypeError):
+        logger.warning("AI 味热更配置损坏(%r),维持出厂值", row.value[:200])
+
+
+def _apply_flavor_config(db: Session, req: AiFlavorConfigIn) -> AiFlavorConfigOut:
+    """落库 + 更新内存 + 返回生效后的全量配置(GET/PUT 共用的单一出口)。"""
+    valid = {c["category"] for c in rule_config()}
+    unknown = [k for k in req.weights if k not in valid]
+    if unknown:
+        raise HTTPException(
+            status_code=400, detail=f"未知规则类别:{'、'.join(unknown)}"
+        )
+    for k, v in req.weights.items():
+        if not (_FLAVOR_WEIGHT_RANGE[0] <= v <= _FLAVOR_WEIGHT_RANGE[1]):
+            raise HTTPException(
+                status_code=400,
+                detail=f"类别「{k}」权重 {v} 超出范围 {_FLAVOR_WEIGHT_RANGE}",
+            )
+    set_weight_overrides(req.weights)
+    set_gate_override(req.gate_score)
+    _save_flavor_config(
+        db, {"gate_score": req.gate_score, "weights": req.weights}
+    )
+    return AiFlavorConfigOut(
+        gate_score=req.gate_score,
+        weights={c["category"]: c["weight"] for c in rule_config()},
+        categories=rule_config(),
+    )
+
+
+@router.get("/ai-flavor-config", response_model=AiFlavorConfigOut)
+async def get_ai_flavor_config(
+    _admin: User = Depends(get_current_admin),
+):
+    """AI 味检测当前配置:生效门槛 + 各类别生效权重(含出厂值对照)。"""
+    from app.engines.polish.polisher import get_deai_gate
+
+    return AiFlavorConfigOut(
+        gate_score=get_deai_gate(),
+        weights={c["category"]: c["weight"] for c in rule_config()},
+        categories=rule_config(),
+    )
+
+
+@router.put("/ai-flavor-config", response_model=AiFlavorConfigOut)
+async def put_ai_flavor_config(
+    req: AiFlavorConfigIn,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(get_current_admin),
+):
+    """在线调参:整组覆盖类别权重 + 自愈门槛,落库并立即生效(不重启)。"""
+    out = _apply_flavor_config(db, req)
+    logger.info(
+        "管理员更新了 AI 味检测配置:门槛 %.1f,权重覆盖 %s",
+        out.gate_score, weight_overrides() or "(无)",
+    )
+    return out

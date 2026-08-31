@@ -1,6 +1,6 @@
-// 后台管理页(仅管理员):用户列表 + 多邀请码管理
+// 后台管理页(仅管理员):用户列表 + 多邀请码管理 + AI 味检测调参
 import { useCallback, useEffect, useState } from "react";
-import { api, AdminUser, InviteCodeItem } from "../api";
+import { api, AdminUser, AiFlavorConfig, InviteCodeItem } from "../api";
 import { errMsg } from "../pollJob";
 import { CopyBtn } from "../ui/copy";
 
@@ -284,9 +284,131 @@ export default function AdminPage() {
         {!users.length && !err && <div className="muted">加载中…</div>}
       </div>
 
+      <FlavorConfigCard />
+
       {msg && <div className="msg-ok page-flash">{msg}</div>}
       {err && <div className="msg-err page-flash">{err}</div>}
     </>
+  );
+}
+
+// AI 味检测调参:规则类别权重 + 自愈门槛,保存后立即生效(不重启)。
+// 某类误伤(人类好文被标脏)就压权重,漏杀就抬;门槛是定稿自动去味的触发线。
+function FlavorConfigCard() {
+  const [cfg, setCfg] = useState<AiFlavorConfig | null>(null);
+  const [gate, setGate] = useState("");
+  // 类别 → 编辑中的权重值(string 便于空态处理)
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    api.adminGetAiFlavorConfig()
+      .then((c) => {
+        setCfg(c);
+        setGate(String(c.gate_score));
+      })
+      .catch((e) => setErr(errMsg(e)));
+  }, []);
+
+  async function save() {
+    if (!cfg) return;
+    const gateVal = Number(gate.trim());
+    if (!(gateVal >= 0 && gateVal <= 30)) {
+      setErr("自愈门槛需在 0-30 之间(每千字 AI 味分,干净文本通常 <5)");
+      return;
+    }
+    const weights: Record<string, number> = {};
+    for (const c of cfg.categories) {
+      const raw = (edits[c.category] ?? "").trim();
+      if (raw === "") continue; // 留空 = 用默认
+      const v = Number(raw);
+      if (!(v >= 0 && v <= 5)) {
+        setErr(`「${c.category}」权重需在 0-5 之间`);
+        return;
+      }
+      weights[c.category] = v;
+    }
+    setBusy(true); setErr(""); setMsg("");
+    try {
+      const out = await api.adminPutAiFlavorConfig(gateVal, weights);
+      setCfg(out);
+      setEdits({});
+      setMsg("AI 味检测配置已保存并生效");
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!cfg) {
+    return (
+      <div className="card">
+        <div className="card-head"><h2>AI 味检测调参</h2></div>
+        <div className="muted">{err ? `加载失败:${err}` : "加载中…"}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card">
+      <div className="card-head"><h2>AI 味检测调参</h2></div>
+      <p className="card-desc">
+        生成时的 AI 味检测与自动去味重写的参数:某类误伤(人类好文被标脏)就压权重,
+        漏杀就抬;「自愈门槛」是定稿 AI 味分数超过即触发自动重写的线。
+        保存后立即生效,无需重启。
+      </p>
+      <div className="form-grid mt-2">
+        <div className="field">
+          <label className="fl">自愈门槛(每千字)</label>
+          <input
+            type="number" min={0} max={30} step={0.5} className="input-sm"
+            value={gate}
+            onChange={(e) => setGate(e.target.value)}
+          />
+          <div className="field-note">干净文本通常 &lt;5,套话偏多会到 6+;调高触发更少,调低更敏感</div>
+        </div>
+      </div>
+      <div className="tbl-wrap mt-2">
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>规则类别</th>
+              <th>出厂权重</th>
+              <th>当前权重</th>
+              <th>规则数</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cfg.categories.map((c) => (
+              <tr key={c.category}>
+                <td>{c.category}</td>
+                <td className="muted">{c.default_weight}</td>
+                <td>
+                  <input
+                    type="number" min={0} max={5} step={0.1} className="input-sm"
+                    placeholder={String(cfg.weights[c.category] ?? c.default_weight)}
+                    value={edits[c.category] ?? ""}
+                    onChange={(e) => setEdits({ ...edits, [c.category]: e.target.value })}
+                  />
+                </td>
+                <td className="muted">{c.rules}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="form-actions">
+        <button className="primary" disabled={busy} onClick={save}>
+          {busy && <span className="spin" />}保存并生效
+        </button>
+        <span className="muted">权重留空 = 沿用当前值;改回与出厂相同即恢复默认</span>
+      </div>
+      {msg && <div className="msg-ok">{msg}</div>}
+      {err && <div className="msg-err">{err}</div>}
+    </div>
   );
 }
 

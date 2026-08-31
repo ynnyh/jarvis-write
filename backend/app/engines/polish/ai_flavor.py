@@ -50,7 +50,10 @@ _RULES: list[tuple[str, float, list[tuple[str, str]]]] = [
         (r"在这个[^。,,]{0,20}的世界里", "在这个……的世界里"),
     ]),
     ("说教报告腔", 1.0, [
-        (_phrases("这个故事告诉我们", "可想而知", "换言之", "值得一提", "不得不说"), None),
+        (_phrases(
+            "这个故事告诉我们", "可想而知", "换言之", "值得一提", "不得不说",
+            "深入探讨", "深入剖析", "深入解读", "深入挖掘",
+        ), None),
     ]),
     ("逻辑连接癖", 0.8, [
         (r"(?:^|[。!?!?\n])\s*(?:首先|其次|再次|最后)[,,、]", "首先/其次/最后"),
@@ -101,6 +104,24 @@ _RULES: list[tuple[str, float, list[tuple[str, str]]]] = [
     ("比喻连接词癖", 0.6, [
         (_phrases("仿佛", "宛如", "彷佛", "好似", "恍若"), None),
     ]),
+    # 欧化中文/翻译腔:Renwei 单列的一大类,中文 AI 味最重的一层——
+    # 系动词回避("作为…存在")、介词滥用("对于…而言")、"被"字句、
+    # 否定式排比、夸大意义、万能开头("随着…的发展")、名物化("进行了…")。
+    ("欧化中文(翻译腔)", 1.2, [
+        (r"随着[^。,,;;\n]{1,12}的(?:不断)?(?:发展|进步|普及|深入|推进|加快)",
+         "随着X的发展(万能开头)"),
+        (r"(?:扮演|充当)着?[^。,,;;\n]{0,12}的?角色", "扮演着…角色(系动词回避)"),
+        (r"发挥着[^。,,;;\n]{0,10}的?作用", "发挥着…作用(系动词回避)"),
+        (r"进行了[^。,,;;\n]{1,12}(?:的)?(?:讨论|分析|研究|交流|沟通|探索|思考|总结)",
+         "进行了…(弱动词名物化)"),
+        (r"不仅仅?是[^。,,;;\n]{1,20}而是", "不仅仅是…而是(否定式排比)"),
+        (r"标志着[^。,,;;\n]{0,20}(?:时刻|里程碑|转折|纪元|开端|意义)", "夸大意义(标志着…)"),
+        (r"对于[^。,,;;\n]{1,15}而言", "对于X而言(介词滥用)"),
+        (r"在[^。,,;;\n]{1,10}的(?:背景|过程|框架|语境|层面|语境)下", "在X的…下(介词框架)"),
+        (r"(?:愈发|日益|日趋)[^。,,;;\n]{0,8}(?:凸显|明显|重要|突出|显著)", "愈发凸显(空泛升格)"),
+        (r"被(?:赋予了|视为|认为是|誉为|赋予了)", "被字句滥用"),
+        (_phrases("未来可期", "拭目以待", "不可或缺", "日益复杂", "显著提升"), None),
+    ]),
 ]
 
 # 段尾总结句词表(段落结构指标用):总结过渡腔 + 说教腔的收尾高频词
@@ -120,6 +141,62 @@ _REPEAT_STEP = 100      # 重复扫描步长
 _REPEAT_MAX_CHECKS = 200  # 扫描窗口上限(防爆)
 _HIT_CAP_PER_CATEGORY = 20  # 每类命中明细上限
 
+# =============== 对白/引用保护区间(zh-ai-flavor-refiner 的 protected-spans 思路) ===============
+# 引号(对白)/书名号(引用)内的命中按折扣计分:对白要保人物声线,
+# 神态词在对白里是"人物性格"不是 AI 腔;命中明细打 dialogue 标记,
+# 让重写 prompt 拿到"这里要谨慎"的信号。
+_DIALOGUE_DISCOUNT = 0.3
+_QUOTE_PAIRS = {"“": "”", "「": "」", "『": "』", "《": "》"}
+
+# =============== 第二裁判:零依赖统计判据(破同源耦合) ===============
+# 正则规则抓"套话",统计判据抓"用词太稳"(AI 味的统计指纹)。四个指标
+# 只作前后对比用(同篇幅文本间的相对变化),不设绝对合格线——
+# TTR/新颖率随文本长度单调变化,跨长度比绝对值没有意义。
+_JUDGE_MIN_CHARS = 400  # 汉字少于这个数统计噪声太大(短片段 TTR 天然偏高),全部置 None
+_HANZI_RE = re.compile(r"[\u4e00-\u9fff]")
+# 高频虚词单字表:密度过高是"用词太稳"的指纹之一
+_FUNC_CHARS = set("的了着是在和与就也都还而且但或没很太更最被把让叫向从对给跟同呢吗吧啊呀")
+_CLOSERS = {"”", "」", "』", "》"}
+
+
+def _protected_spans(text: str) -> list[tuple[int, int]]:
+    """引号/书名号覆盖区间(栈式配对,容忍嵌套)。"""
+    spans: list[tuple[int, int]] = []
+    stack: list[tuple[str, int]] = []
+    for i, ch in enumerate(text):
+        if ch in _QUOTE_PAIRS:          # 开引号:入栈
+            stack.append((ch, i))
+            continue
+        if ch not in _CLOSERS:          # 闭引号:与最近的同款开引号配对
+            continue
+        for j in range(len(stack) - 1, -1, -1):
+            if _QUOTE_PAIRS[stack[j][0]] == ch:
+                spans.append((stack[j][1], i))
+                del stack[j]
+                break
+    return spans
+
+
+def _judges_metrics(text: str) -> dict:
+    """第二裁判指标:词汇丰富度(TTR)、4字片段新颖率、「的」字频率、虚词密度。
+
+    全部基于纯汉字串计算(剔除标点空白),零依赖零成本;短文本(<80 汉字)
+    统计不稳,指标置 None,复合验收按"不倒退"处理。
+    """
+    core = "".join(_HANZI_RE.findall(text))
+    n = len(core)
+    if n < _JUDGE_MIN_CHARS:
+        return {"ttr": None, "novelty_4gram": None,
+                "de_ratio": None, "funcword_density": None}
+    grams = [core[i:i + 4] for i in range(n - 3)]
+    return {
+        "ttr": round(len(set(core)) / n, 3),
+        "novelty_4gram": round(len(set(grams)) / max(len(grams), 1), 3),
+        "de_ratio": round(core.count("的") / n, 4),
+        "funcword_density": round(
+            sum(core.count(c) for c in _FUNC_CHARS) / n, 4),
+    }
+
 
 @dataclass
 class FlavorHit:
@@ -129,6 +206,7 @@ class FlavorHit:
     phrase: str     # 命中的套话/规则名
     sentence: str   # 命中句原文
     start: int      # 命中处在原文中的字符位置
+    dialogue: bool = False  # 命中落在对白/引用区间内(计分打折,改写保声线)
 
 
 @dataclass
@@ -199,6 +277,16 @@ class FlavorReport:
             )
         if m.get("repeats"):
             tips.append(f"检出 {len(m['repeats'])} 处较长的重复表述;删去重复,只留最有力的一次。")
+        if (m.get("de_ratio") or 0) > 0.06:
+            tips.append(
+                f"「的」字密度偏高({m['de_ratio'] * 100:.1f}%):连续多个「的」拆掉,"
+                "能用动词直接带的就别用「的」字结构(如「他愤怒的目光」→「他瞪过去」)。"
+            )
+        if m.get("novelty_4gram") is not None and m["novelty_4gram"] < 0.6:
+            tips.append(
+                f"4 字片段重复率高(新颖率 {m['novelty_4gram']},有自我复述倾向):"
+                "同一个意思换了好几遍说法,删掉冗余复述,只留最有力的一处。"
+            )
         if not tips:
             return ""
         return "【节奏与结构诊断(逐条落实)】\n" + "\n".join(f"- {t}" for t in tips) + "\n"
@@ -279,36 +367,98 @@ def _find_repeats(text: str) -> list[dict]:
     return repeats
 
 
+# =============== 权重/门槛热更(管理端在线调参,不重启) ===============
+# _RULES 里的权重是"出厂值":线上某类误伤/漏杀时,管理端把覆盖值写进
+# AppSetting(key=ai_flavor_config)并同步进这份内存覆盖,检测立即生效。
+# 覆盖只调权重,不动规则本身(改正则要改代码发版,那里才是误伤的根)。
+_WEIGHT_OVERRIDES: dict[str, float] = {}
+_GATE_OVERRIDE: float | None = None
+
+
+def set_weight_overrides(overrides: dict[str, float]) -> None:
+    """整体替换权重覆盖(空 dict = 全部回到出厂值)。类别名不存在的直接忽略。"""
+    valid = {name for name, _w, _r in _RULES}
+    _WEIGHT_OVERRIDES.clear()
+    _WEIGHT_OVERRIDES.update(
+        {k: float(v) for k, v in overrides.items() if k in valid}
+    )
+
+
+def weight_overrides() -> dict[str, float]:
+    return dict(_WEIGHT_OVERRIDES)
+
+
+def set_gate_override(value: float | None) -> None:
+    """自愈门槛覆盖(None = 回落代码常量,由调用方 polisher.DEAI_GATE_SCORE 兜底)。"""
+    global _GATE_OVERRIDE
+    _GATE_OVERRIDE = float(value) if value is not None else None
+
+
+def gate_override() -> float | None:
+    return _GATE_OVERRIDE
+
+
+def rule_config() -> list[dict]:
+    """类别目录(类别名/出厂权重/当前生效权重/规则条数),供管理端展示。"""
+    return [
+        {
+            "category": name,
+            "default_weight": weight,
+            "weight": _WEIGHT_OVERRIDES.get(name, weight),
+            "rules": len(rules),
+        }
+        for name, weight, rules in _RULES
+    ]
+
+
 # =============== 主入口 ===============
 
 def ai_flavor_report(text: str) -> FlavorReport:
-    """统计文本的 AI 腔特征。score = 每千字加权命中数(含统计指标罚分)。"""
+    """统计文本的 AI 腔特征。score = 每千字加权命中数(含统计指标罚分)。
+
+    对白/引用区间内的命中按 _DIALOGUE_DISCOUNT 折扣计入加权分(原始 count
+    不折),类别明细里单列 dialogue_count 供前端/回流分析。
+    """
     spans = _sentence_spans(text)
+    protected = _protected_spans(text)
+
+    def _in_protected(pos: int) -> bool:
+        return any(s <= pos < e for s, e in protected)
+
     hits: list[FlavorHit] = []
     categories: dict[str, dict] = {}
     weighted = 0.0
 
     for name, weight, rules in _RULES:
+        weight = _WEIGHT_OVERRIDES.get(name, weight)  # 热更覆盖优先于出厂值
         count = 0
+        dialogue_count = 0
+        cat_weighted = 0.0
         for pattern, label in rules:
             for m in re.finditer(pattern, text):
+                in_dlg = _in_protected(m.start())
                 count += 1
+                cat_weighted += weight * (_DIALOGUE_DISCOUNT if in_dlg else 1.0)
+                if in_dlg:
+                    dialogue_count += 1
                 if count <= _HIT_CAP_PER_CATEGORY:
                     hits.append(FlavorHit(
                         category=name,
                         phrase=label or m.group(),
                         sentence=_find_sentence(spans, text, m.start()),
                         start=m.start(),
+                        dialogue=in_dlg,
                     ))
         if count:
             categories[name] = {
                 "count": count,
                 "weight": weight,
-                "score": round(count * weight, 2),
+                "score": round(cat_weighted, 2),
+                "dialogue_count": dialogue_count,
             }
-            weighted += count * weight
+            weighted += cat_weighted
 
-    # ---- 统计指标 ----
+    # ---- 统计指标(第一裁判:节奏/结构)+ 第二裁判(用词统计) ----
     sent_lens = [e - s for s, e in spans]
     cv, burst_flag = _burstiness(sent_lens)
     metronome = _metronome_groups(sent_lens)
@@ -321,6 +471,7 @@ def ai_flavor_report(text: str) -> FlavorReport:
         "metronome_groups": metronome,
         **para,
         "repeats": repeats,
+        **_judges_metrics(text),
     }
 
     # 指标罚分(flat 加分,不随字数折算:避免短文本被固定罚分放大)

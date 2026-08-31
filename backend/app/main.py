@@ -146,6 +146,9 @@ async def lifespan(app: FastAPI):
     run_migrations()
     from app.jobs import cleanup_stuck_jobs
     cleanup_stuck_jobs()
+    # AI 味检测热更配置(管理端在线调过的权重/门槛)载进内存;失败不拦启动
+    from app.api.admin import load_ai_flavor_config
+    load_ai_flavor_config()
     logger.info("服务就绪。")
     yield
 

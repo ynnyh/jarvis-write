@@ -19,7 +19,12 @@ import re
 from typing import Any, Callable, Iterable
 
 from app.engines.consistency.extractor import parse_llm_json
-from app.engines.polish.ai_flavor import FlavorReport, ai_flavor_report
+from app.engines.polish.ai_flavor import (
+    _RULES,
+    FlavorReport,
+    ai_flavor_report,
+    gate_override,
+)
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import render_style_block, voice_block_of
 from app.engines.tendency.cards import render_cards_block
@@ -50,9 +55,41 @@ _MAX_HITS_IN_PROMPT = 10  # 贴进 prompt 的命中点上限,防 token 膨胀
 
 # AI 味自愈门槛:定稿终版 score 超过此值触发定向去味重写。score = 每千字加权命中 +
 # 统计罚分,干净文本通常 <5,套话偏多或有节奏/结构问题会到 6+。实测可调。
+# 管理端可通过 ai_flavor_config 在线热更(覆盖值优先生效,不重启)。
 DEAI_GATE_SCORE = 6.0
+
+
+def get_deai_gate() -> float:
+    """当前生效的自愈门槛:热更覆盖优先,无覆盖回落代码常量。"""
+    return gate_override() if gate_override() is not None else DEAI_GATE_SCORE
+
+
 # 自愈重写的安全阀:重写稿相对原文的篇幅比,越界(缩水/膨胀过多)视为跑偏并丢弃
 _DEAI_LEN_LO, _DEAI_LEN_HI = 0.75, 1.25
+
+# ---- 第二裁判容差(复合验收):统计判据组倒退超过容差即判"改坏了" ----
+# 借鉴 stop-slop 五维评分思路:正则分(第一裁判)下降还不够,词汇丰富度/
+# 新颖率被洗没、虚词「的」字密度反而升高,说明把人味也洗掉了,不采纳。
+_JUDGE_TOL = {"ttr": 0.05, "novelty": 0.05, "de": 0.015, "func": 0.02}
+
+
+def judges_regress(before: FlavorReport, after: FlavorReport) -> bool:
+    """第二裁判:重写稿的统计判据组是否相对原稿倒退(Writer↔Critic 的 Critic)。
+
+    只做同篇幅文本的前后对比;任一指标为 None(短文本)时不参与判断。
+    """
+    b, a = before.metrics, after.metrics
+    if b.get("ttr") is None or a.get("ttr") is None:
+        return False
+    if a["ttr"] < b["ttr"] - _JUDGE_TOL["ttr"]:
+        return True
+    if (a.get("novelty_4gram") or 1.0) < (b.get("novelty_4gram") or 1.0) - _JUDGE_TOL["novelty"]:
+        return True
+    if (a.get("de_ratio") or 0.0) > (b.get("de_ratio") or 0.0) + _JUDGE_TOL["de"]:
+        return True
+    if (a.get("funcword_density") or 0.0) > (b.get("funcword_density") or 0.0) + _JUDGE_TOL["func"]:
+        return True
+    return False
 
 
 def _flavor_hits_block(report: FlavorReport) -> str:
@@ -62,7 +99,8 @@ def _flavor_hits_block(report: FlavorReport) -> str:
     lines = []
     for h in report.hits[:_MAX_HITS_IN_PROMPT]:
         sent = h.sentence if len(h.sentence) <= 60 else h.sentence[:60] + "……"
-        lines.append(f"- [{h.category}] 命中「{h.phrase}」:{sent}")
+        dlg = "(对白,谨慎:保人物声线,仅当确属 AI 腔才动)" if h.dialogue else ""
+        lines.append(f"- [{h.category}]{dlg} 命中「{h.phrase}」:{sent}")
     return "\n".join(lines)
 
 
@@ -72,6 +110,69 @@ def _strip_rewrite_meta(raw: str) -> str:
     s = re.sub(r"^```[a-zA-Z]*\s*", "", s)
     s = re.sub(r"\s*```$", "", s)
     return s.strip()
+
+
+# =============== 生成端疲劳词表(P5 治本项,InkOS 疲劳词表思路) ===============
+# 事后洗(自愈)是补救,生成时就别写才是治本:静态黑名单(全站高危套话)+
+# 动态病灶(本书最近几章实际高频的类别)。克制原则(Humanizer-zh 的教训):
+# 只列 top_k 类,规则全塞会把正文逼成避雷安全文,反而更 AI。
+_FATIGUE_STATIC = (
+    "【本章禁写的高危句式(出现即返工)】\n"
+    "- 神态套话:眼中闪过一丝/嘴角勾起/眸光一沉/空气仿佛凝固/命运的齿轮/不禁、下意识地\n"
+    "- 稳妥套话:沉默片刻/微微一笑/轻声说道/缓缓开口/淡淡地道\n"
+    "- 欧化句式:随着…的发展/扮演着…角色/不仅仅是…而是/标志着…/对于…而言/被赋予了\n"
+    "- 总结升华:综上所述/总而言之/段尾点题说教\n"
+    "- 情绪直喊:他感到无比绝望/心中五味杂陈 —— 情绪一律用动作、细节、对话呈现\n"
+)
+
+
+def fatigue_block(recent_texts: list[str], top_k: int = 3) -> str:
+    """生成端疲劳词表:静态黑名单 + 最近几章体检出的本书特有高频 AI 腔。
+
+    recent_texts: 最近几章的定稿正文(生成下一章草稿前传入);
+    空列表/全书干净时只给静态黑名单。
+    """
+    agg: dict[str, dict] = {}
+    for t in recent_texts:
+        for name, cat in ai_flavor_report(t).categories.items():
+            slot = agg.setdefault(name, {"count": 0, "weight": cat["weight"]})
+            slot["count"] += cat["count"]
+    lines = ["" + _FATIGUE_STATIC]
+    top = sorted(agg.items(), key=lambda kv: -kv[1]["count"] * kv[1]["weight"])[:top_k]
+    if top:
+        detail = "、".join(
+            f"{name}×{v['count']}(如:{_category_samples(name)})" for name, v in top
+        )
+        lines.append(
+            "【本书最近几章反复出现的 AI 腔(本章严禁再犯,改用具体动作/细节/对话)】\n"
+            f"- {detail}\n"
+        )
+    return "\n".join(lines)
+
+
+def _category_samples(name: str) -> str:
+    """某类别的高频命中套话样例(取检测规则的规则名/短语,静态即可)。"""
+    for cat, _w, rules in _RULES:
+        if cat == name:
+            return "、".join(label or "…" for _p, label in rules[:3])
+    return "…"
+
+
+def memo_notes_block(report: FlavorReport) -> str:
+    """病灶回流文风备忘:本章体检出的高频类别 → 备忘「要避开的」小节的素材。
+
+    干净章节返回空串(prompt 里整块省略,与 advice_block 同一套约定)。
+    """
+    if not report.categories:
+        return ""
+    top = sorted(report.categories.items(), key=lambda kv: -kv[1]["count"])[:3]
+    detail = "、".join(f"{k}×{v['count']}" for k, v in top)
+    return (
+        "【本章 AI 味体检(规则检测,供备忘第 5 节「要避开的」沉淀)】\n"
+        f"- {detail}\n"
+        "把上述本书反复出现的腔调沉淀进「要避开的」小节(具体到句式名),"
+        "后续章草稿会以此为黑名单。\n"
+    )
 
 
 async def deai_rewrite(text: str, report: FlavorReport, style_block: str = "") -> str:
@@ -91,7 +192,7 @@ async def deai_rewrite(text: str, report: FlavorReport, style_block: str = "") -
 async def deai_self_heal(
     text: str,
     style_block: str = "",
-    threshold: float = DEAI_GATE_SCORE,
+    threshold: float | None = None,
     max_rounds: int = 2,
     progress: Callable[[str], None] | None = None,
 ) -> tuple[str, FlavorReport, FlavorReport]:
@@ -101,8 +202,12 @@ async def deai_self_heal(
     - 重写调用异常 / 输出为空 → 丢弃本轮,保留当前最好版本
     - 篇幅越界(缩水或膨胀超阈值)→ 视为跑偏,丢弃本轮
     - score 未下降 → 没改好,丢弃本轮
+    - 复合验收:score 降了但统计判据组倒退(judges_regress,把人味洗没了)→ 丢弃本轮
     任一轮丢弃即停(不硬撑),绝不返回比原文更差的版本。
+    threshold 不传时读热更门槛(get_deai_gate,管理端可在线调)。
     """
+    if threshold is None:
+        threshold = get_deai_gate()
     before = ai_flavor_report(text)
     if before.score <= threshold:
         return text, before, before
@@ -128,6 +233,12 @@ async def deai_self_heal(
         after = ai_flavor_report(rewritten)
         if after.score >= best_report.score:
             logger.info("去味重写未降分(%.1f→%.1f),丢弃本轮", best_report.score, after.score)
+            break
+        if judges_regress(best_report, after):
+            logger.info(
+                "去味重写统计判据倒退(正则分 %.1f→%.1f 但人味指标变差),丢弃本轮",
+                best_report.score, after.score,
+            )
             break
         best_text, best_report = rewritten, after
         logger.info("去味重写第 %d 轮:score → %.1f", i + 1, best_report.score)

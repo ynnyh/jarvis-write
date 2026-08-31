@@ -59,6 +59,8 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, onClo
   const [issuesErr, setIssuesErr] = useState("");
   // 单条问题操作进行中(禁用该条按钮)
   const [busyIssue, setBusyIssue] = useState<number | null>(null);
+  // 「放弃去味」回退进行中(去味自愈采纳过才有按钮)
+  const [deaiBusy, setDeaiBusy] = useState(false);
 
   const reloadIssues = useCallback(async () => {
     try {
@@ -167,6 +169,28 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, onClo
   const warnings = result.preflight?.warnings ?? [];
   const openIssues = (issues ?? []).filter((i) => i.status === "open");
   const doneIssues = (issues ?? []).filter((i) => i.status !== "open");
+
+  // 放弃去味:回退到去味前的正文快照(source=deai,版本列表最新在前)。
+  // 回退本身可再回滚(restore 前会把当前版留痕),不需二次确认。
+  async function revertDeai() {
+    setDeaiBusy(true);
+    try {
+      const versions = await api.listChapterVersions(pid, n);
+      const snap = versions.find((v) => v.source === "deai");
+      if (!snap) {
+        toast.err("找不到去味前的版本", "可能已被后续操作顶替,可在版本历史里人工对比");
+        return;
+      }
+      await api.restoreChapterVersion(pid, n, snap.id);
+      toast.ok("已放弃去味,恢复去味前正文", "回退前的版本仍留在版本历史里");
+      await reloadIssues();
+      onChanged();
+    } catch (e) {
+      toast.err("放弃去味失败", errMsg(e));
+    } finally {
+      setDeaiBusy(false);
+    }
+  }
 
   return (
     <div className={"card " + (quarantined ? "card-warn" : "card-ok")}>
@@ -288,6 +312,18 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, onClo
             <span className="badge ok" title="一致性矛盾由 AI 定点改句消除,未整章重写">
               定点修复 {result.review.repairs?.applied.length ?? 0} 处
             </span>
+          )}
+          {result.review.deai && result.review.deai.before > result.review.deai.after && (
+            <>
+              <span className="badge ok"
+                title="定稿 AI 味超标,已自动定向去味重写(带篇幅/统计判据安全阀);去味前的正文存在版本历史里,不满意可放弃">
+                去味自愈 {result.review.deai.before.toFixed(1)}→{result.review.deai.after.toFixed(1)}
+              </span>
+              <button className="btn-sm" disabled={deaiBusy} onClick={revertDeai}
+                title="回退到去味前的正文快照;回退前的当前版也会留在版本历史,随时可再切回">
+                {deaiBusy && <span className="spin spin-sm" />}放弃去味
+              </button>
+            </>
           )}
           <GateRepairDetails repairs={result.review.repairs} />
           {result.review.gate_note && (

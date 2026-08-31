@@ -14,7 +14,14 @@ import re
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Chapter, ChapterSummary, Outline, Project, WritingCard
+from app.db.models import (
+    Chapter,
+    ChapterSummary,
+    ChapterVersion,
+    Outline,
+    Project,
+    WritingCard,
+)
 from app.engines.common import chapter_architecture_brief, get_outline
 from app.engines.consistency import (
     RESOURCE_FACT_TYPES,
@@ -37,7 +44,12 @@ from app.engines.pipeline.handoff import extract_handoff_contract, load_handoff_
 from app.engines.timeline import persist_clock_issues
 from app.engines.devices import devices_reminder_block, persist_device_issues
 from app.engines.polish import ai_flavor_report
-from app.engines.polish.polisher import _flavor_hits_block, deai_self_heal
+from app.engines.polish.polisher import (
+    _flavor_hits_block,
+    deai_self_heal,
+    fatigue_block,
+    memo_notes_block,
+)
 from app.engines.editorial import (
     CONTINUITY_DIM,
     DIMS,
@@ -187,12 +199,18 @@ def _rolling_summary(db: Session, project_id: int, current: int) -> str:
 
 
 async def update_style_memo(
-    db: Session, project: Project, chapter_number: int, chapter_text: str
+    db: Session,
+    project: Project,
+    chapter_number: int,
+    chapter_text: str,
+    flavor_notes: str = "",
 ) -> str | None:
     """写完一章后增量更新文风备忘(快模型档,失败不阻塞主流程)。
 
     与滚动摘要互补:摘要记"发生了什么",备忘记"这本书怎么写"(调性/人物声音/意象)。
     随书累积,注入后续章草稿,防长篇后段人物声音漂移、调性变淡。返回更新后的备忘。
+    flavor_notes:本章 AI 味体检的高频类别(memo_notes_block 渲染,病灶回流 P5),
+    沉淀进备忘「要避开的」小节;干净章节传空串,整块省略。
     """
     prev = (project.style_memo or "").strip() or "(尚无,这是第一次积累)"
     try:
@@ -201,6 +219,7 @@ async def update_style_memo(
                 previous_memo=prev,
                 chapter_number=chapter_number,
                 chapter_text=chapter_text[:8000],
+                flavor_notes=flavor_notes,
             )
         )
     except Exception:  # noqa: BLE001 — 备忘更新失败不影响正文与主流程
@@ -543,6 +562,11 @@ async def generate_chapter(
     ]
     avoid_repetition = avoid_block(recent_full)
 
+    # 生成端疲劳词表(P5 治本项):最近几章体检出的高频 AI 腔 → 本章草稿的黑名单,
+    # 生成时就别写,别全靠事后洗(InkOS 疲劳词表思路)。追加进 style_block,
+    # 草稿/定稿/守卫压缩/去味重写全链路都吃得到;全书干净时只有静态黑名单。
+    style_block += fatigue_block(recent_full)
+
     # 重写场景:失配章(大纲已更新)→ 按新蓝图重新构思,不注入旧正文;
     # 常规重写 → 用户修改意见连同上一版正文(截断)注入草稿 prompt
     existing = (
@@ -588,6 +612,8 @@ async def generate_chapter(
             chapter_beats=_beats_block(outline),
             next_chapter_brief=_next_chapter_brief(next_outline),
             word_number=project.target_words_per_chapter,
+            word_floor=project.target_words_per_chapter * 4 // 5,
+            word_ceil=project.target_words_per_chapter * 6 // 5,
             scene_count=max(2, project.target_words_per_chapter // 1000),
             scene_words=project.target_words_per_chapter // max(2, project.target_words_per_chapter // 1000),
             style_directives=style_block,
@@ -834,12 +860,20 @@ async def generate_chapter(
     # deai_self_heal 内:未降分/篇幅越界/空输出一律丢弃回退,绝不落一版比守卫后更差的
     # 正文;干净文本(score≤门槛)直接短路、不调 LLM。style_block 带正向锚+配对反例。
     _report("5/6 AI 味自愈")
+    _heal_input = final  # 去味前正文(P4 自愈埋记录:采纳了重写就存版本快照)
     final, _deai_before, _deai_after = await deai_self_heal(
         final, style_block, progress=_report
     )
+    # 采纳了去味重写:去味前正文留一版快照(source=deai,前端「放弃去味」回退用),
+    # 分数变化透传 review.deai(生成结果卡展示)。dedup 只删不写,发生在其后。
+    pre_deai_final: str | None = None
     if _deai_after.score < _deai_before.score:
+        pre_deai_final = _heal_input
+        review_result["deai"] = {
+            "before": _deai_before.score, "after": _deai_after.score,
+        }
         logger.info(
-            "第 %d 章 AI 味自愈:%.1f → %.1f",
+            "第 %d 章 AI 味自愈:%.1f → %.1f(去味前正文已存版本快照)",
             chapter_number, _deai_before.score, _deai_after.score,
         )
 
@@ -893,6 +927,19 @@ async def generate_chapter(
     # 校对快照落库:回显生成时自动修复了哪些硬伤(指纹与主审一致,正文改动同步失效)
     store_proofread_snapshot(chapter, last_fixed_issues, "generation", reviewed_text)
     db.flush()
+    # P4 自愈埋记录:去味前的正文在此存一版快照(source=deai)。挪到这里是因为
+    # 新建章的 id 要 flush 后才有;不 commit,随下面的正文提交一起落。
+    if pre_deai_final is not None:
+        from app.chapter_versions import next_version_number
+
+        db.add(ChapterVersion(
+            chapter_id=chapter.id,
+            version=next_version_number(db, chapter.id),
+            draft_content=draft,
+            final_content=pre_deai_final,
+            word_count=len(pre_deai_final),
+            source="deai",
+        ))
     # 正文立刻提交:后面章后链路还有数分钟 LLM 调用,
     # 不能拿着写锁跨这些 await(会把并发写卡到超时),失败也不该丢正文。
     db.commit()
@@ -918,9 +965,14 @@ async def generate_chapter(
     )
 
     # ---- 重写场景:下游章节的滚动摘要基于旧文,重建 ----
-    # 文风备忘:随书累积"这本书怎么写"(与摘要互补),注入后续章草稿
+    # 文风备忘:随书累积"这本书怎么写"(与摘要互补),注入后续章草稿;
+    # flavor_notes = 本章 AI 味体检的高频类别(病灶回流):沉淀进备忘
+    # 「要避开的」小节,下一章草稿的黑名单由此长出本书特有的部分。
     _report("文风备忘更新")
-    await update_style_memo(db, project, chapter_number, final)
+    await update_style_memo(
+        db, project, chapter_number, final,
+        flavor_notes=memo_notes_block(_deai_after),
+    )
 
     rebuilt = await rebuild_summaries_after(db, project, chapter_number, progress)
     if rebuilt:
