@@ -2930,10 +2930,11 @@ html, body { max-width: 100%; overflow-x: hidden; }
 /* 移动端展开:sheet 内对话流纵向撑满 */
 .ai-dock-sheet { display: flex; flex-direction: column; }
 
-/* 沉浸模式:AI 窄栏一并退场,只留正文 */
+/* 沉浸模式:AI 窄栏与新手引导条一并退场,只留正文 */
 .write-zone.immersive .ai-dock,
 .write-zone.immersive .ai-dock-mini,
-.write-zone.immersive .m-ai-bar { display: none; }
+.write-zone.immersive .m-ai-bar,
+.write-zone.immersive .write-guide { display: none; }
 
 /* ==========================================================================
    「正文即界面」P3(docs/10 §4/§6):四档修改的「验收即 diff」+ ②档批注。
