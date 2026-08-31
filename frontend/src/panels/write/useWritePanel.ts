@@ -115,7 +115,7 @@ export function useWritePanel({ pid, outlines }: UseWritePanelArgs) {
   // (重写完弹对比)/setChapterNum(生成后自动选章)/clearAct 等联动;genBlocked/genHint 因依赖
   // 当前 chapterNum,留壳做纯派生(见下)。
   const {
-    genJob, genResult, setGenResult,
+    genJob, genResult, setGenResult, genDurSec,
     genTendency, setGenTendency,
     queueMode, setQueueMode, queuePicked, setQueuePicked,
     generate, startQueue, pickNextBatch, reconnectGenerate,
@@ -306,7 +306,7 @@ export function useWritePanel({ pid, outlines }: UseWritePanelArgs) {
     // useChapterVersions
     versionsFor, versions, compareVer, closeVersions, openVersions, selectVersion, restoreVersion,
     // useChapterGeneration
-    genJob, genResult, setGenResult, genTendency, setGenTendency,
+    genJob, genResult, setGenResult, genDurSec, genTendency, setGenTendency,
     queueMode, setQueueMode, queuePicked, setQueuePicked,
     generate, startQueue, pickNextBatch,
     // useReader

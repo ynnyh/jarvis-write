@@ -2,6 +2,7 @@
 // 有未写章 → 「让 AI 写」下一章;全部写完 → 引导去书房导出/投稿。
 // 当前选中章未写(empty)时不渲染——空态由正文区大卡承担(见 WritePanel)。
 import { useNavigate } from "react-router-dom";
+import { estimateText } from "./genDuration";
 
 interface Props {
   pid: number;
@@ -25,7 +26,7 @@ export default function NextChapterCard({
             下一章:第 {nextNum} 章{nextTitle ? `《${nextTitle}》` : ""}
           </span>
           <button className="primary" disabled={genBlocked}
-            title={genBlocked ? genHint : "按蓝图生成本章,完成后自动选中"}
+            title={genBlocked ? genHint : `按蓝图生成本章,${estimateText(pid)},完成后自动选中`}
             onClick={() => onGenerate(nextNum)}>
             让 AI 写
           </button>

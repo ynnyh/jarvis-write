@@ -1050,6 +1050,14 @@ button.head { height: auto; margin-left: 0; padding: 0; border: 0; background: n
 .issue-done { opacity: 0.55; }
 .issue-done-box summary { cursor: pointer; font-size: var(--fs-xs); }
 
+/* 生成结果卡·检查明细折叠区(P2 信息分层):轻边框区分"结论区/明细区" */
+.gen-detail-box { border-top: 1px solid var(--line); }
+.gen-detail-box > summary {
+  cursor: pointer; font-size: var(--fs-xs); color: var(--text-3);
+  padding: var(--sp-2) 0;
+}
+.gen-detail-box[open] > summary { color: var(--text-2); }
+
 .entity { margin-bottom: 10px; }
 
 /* ---------- 看板页签 / 人物卡 ---------- */
@@ -2668,6 +2676,28 @@ html, body { max-width: 100%; overflow-x: hidden; }
 /* 单列正文:视觉重心居中,正文阅读宽度 ~760px(含卡片内边距取 800px) */
 .write-main { max-width: 800px; margin: 0 auto; width: 100%; }
 
+/* 首次进入的 3 步引导条(WriteGuide):一行三步 + 关闭,读 5 秒的事 */
+.write-guide {
+  display: flex; align-items: center; gap: var(--sp-4);
+  max-width: 800px; margin: 0 auto var(--sp-3); width: 100%;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--brand-weak);
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-lg);
+}
+.write-guide-steps {
+  display: flex; flex: 1; gap: var(--sp-5); flex-wrap: wrap;
+}
+.write-guide-step { display: flex; flex-direction: column; gap: 2px; min-width: 180px; flex: 1; }
+.write-guide-step b { font-size: var(--fs-sm); color: var(--brand); }
+.write-guide-step span { font-size: var(--fs-xs); color: var(--text-2); line-height: 1.5; }
+@media (max-width: 640px) {
+  .write-guide { flex-direction: column; align-items: stretch; }
+  .write-guide-steps { flex-direction: column; gap: var(--sp-2); }
+  .write-guide-step { min-width: 0; }
+  .write-guide .btn-sm { align-self: flex-end; }
+}
+
 /* 主场正文:段落可点选(与 .reader-content p.pickable/.sel 同一视觉语言) */
 .prose p.pickable { cursor: pointer; border-radius: var(--r-sm); }
 .prose p.sel {
@@ -2676,6 +2706,10 @@ html, body { max-width: 100%; overflow-x: hidden; }
 }
 /* 气泡/段内编辑框的锚点容器(相对定位,气泡贴选中段下沿) */
 .prose-wrap { position: relative; }
+/* 编辑态正文排版(P3):与阅读器同一套排版语言——行宽 38em(≈38 汉字)居中、
+   两端对齐;700px 宽卡里的正文不再是"一行 50 字"的横排长行,长时间盯屏不累 */
+.write-main .prose-wrap { max-width: 38em; margin-inline: auto; }
+.write-main .prose { text-align: justify; }
 .prose-bubble {
   position: absolute;
   left: 0; right: 0;

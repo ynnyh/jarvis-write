@@ -30,10 +30,18 @@ const SOURCE_CN: Record<string, string> = {
 const ISSUE_STATUS_CN: Record<string, string> = { resolved: "已人工解决", ignored: "已忽略" };
 // AI 味偏高分界线(/千字,加权命中+统计罚分;经验值,可调):超过即提示一键去味
 const FLAVOR_HIGH = 6;
+// AI 味说人话分档(P0 术语减负):轻/中/重 + 一句人话,具体分值收进 tooltip
+function flavorLevel(score: number): { label: string; cn: string } {
+  if (score < 3) return { label: "轻", cn: "读起来基本像人写的,可以不管" };
+  if (score < FLAVOR_HIGH) return { label: "中", cn: "有点 AI 腔(套话/翻译腔),在意文风的话去过一遍去味" };
+  return { label: "重", cn: "AI 腔明显,建议过一遍去味再看" };
+}
 
 interface Props {
   pid: number;
   result: GenerateChapterResponse;
+  // 本次生成实耗秒数(P1 成本透明;重连/历史模式无当次数据不传)
+  durationSec?: number | null;
   // 章节数据有变(修订完成/放行后状态变化):刷新章节列表与打开的正文
   onChanged: () => void;
   // 「重写」引导:展开本章的行内重写框
@@ -50,7 +58,7 @@ interface Props {
   historical?: boolean;
 }
 
-export default function GenResultCard({ pid, result, onChanged, onRewrite, onClose, genBlocked, genHint, historical }: Props) {
+export default function GenResultCard({ pid, result, durationSec, onChanged, onRewrite, onClose, genBlocked, genHint, historical }: Props) {
   const { run } = useJob();
   const invalidateProject = useInvalidateProject(pid);
   const n = result.chapter_number;
@@ -203,12 +211,19 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, onClo
         )}
       </div>
       {result.word_count} 字
-      {result.ai_flavor && (
-        <span className={"badge" + (result.ai_flavor.score >= FLAVOR_HIGH ? " warn" : "")}
-          title={flavorTitle(result.ai_flavor)}>
-          AI味 {result.ai_flavor.score} /千字
-        </span>
+      {durationSec != null && durationSec >= 60 && (
+        <span className="badge"
+          title="本章从发起到落地的实际用时(含草稿/审校/自愈等全部环节)">用时 {Math.round(durationSec / 60)} 分钟</span>
       )}
+      {result.ai_flavor && (() => {
+        const lv = flavorLevel(result.ai_flavor.score);
+        return (
+          <span className={"badge" + (result.ai_flavor.score >= FLAVOR_HIGH ? " warn" : "")}
+            title={`${lv.cn}\n${flavorTitle(result.ai_flavor)}`}>
+            AI味·{lv.label}
+          </span>
+        );
+      })()}
       {result.ai_flavor && result.ai_flavor.score >= FLAVOR_HIGH && (
         <>
           <span className="muted"> 腔调偏重,建议过一遍去味</span>
@@ -218,6 +233,40 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, onClo
           </button>
         </>
       )}
+      {result.review?.deai && result.review.deai.before > result.review.deai.after && (
+        <>
+          <span className="badge ok"
+            title="定稿 AI 味超标,已自动定向去味重写(带篇幅/统计判据安全阀);去味前的正文存在版本历史里,不满意可放弃">
+            去味自愈 {result.review.deai.before.toFixed(1)}→{result.review.deai.after.toFixed(1)}
+          </span>
+          <button className="btn-sm" disabled={deaiBusy} onClick={revertDeai}
+            title="回退到去味前的正文快照;回退前的当前版也会留在版本历史,随时可再切回">
+            {deaiBusy && <span className="spin spin-sm" />}放弃去味
+          </button>
+        </>
+      )}
+
+      {/* 快捷徽标行(P2 分层):一眼看结论——一致性/审校过没过;细节在下方折叠区 */}
+      <div className="mt-1">
+        {!historical && (result.consistency_issues.length
+          ? <span className="badge err"
+              title="AI 复核发现人物状态、时间线或设定有前后矛盾,明细见下方「检查明细」">
+              一致性问题 {result.consistency_issues.length}
+            </span>
+          : <span className="badge ok"
+              title="AI 自动核对了人物状态、时间线、设定等有没有前后矛盾,没发现冲突">一致性✓</span>
+        )}
+        {result.review && (
+          <span className={"badge " + (result.review.passed ? "ok" : "err")}
+            title="AI 主审按情节/文笔/节奏/人物/连续性五个维度打分,达到达标线即通过;分数见下方「检查明细」">
+            {result.review.passed ? "审校✓" : "审校未达标"}
+          </span>
+        )}
+        {issues !== null && openIssues.length > 0 && (
+          <span className="badge warn"
+            title="需要你过目的问题(下面可直接按建议修订/人工解决/忽略)">待处理 {openIssues.length}</span>
+        )}
+      </div>
 
       {/* 门禁拦截(仅刚生成完的非历史卡):顶部出统一处理卡,说人话三选一。
           历史模式由章首 ChapterStatusCard 的 GateResolve 承接,这里不重复出卡。 */}
@@ -234,120 +283,35 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, onClo
         </div>
       )}
 
-      {warnings.length > 0 && (
+      {/* 可操作区(P2 分层):有需要拍板的问题才占屏;干净章节这里什么都不出 */}
+      {issuesErr && (
         <div className="mt-2">
-          <span className="badge warn">写前提醒 {warnings.length}</span>
-          <span className="muted"> 写前审核发现的疑似矛盾,只提醒不阻断</span>
-          {warnings.map((w, k) => (
-            <div key={k} className="fact-line">
-              <b>[{w.type === "timeline" ? "时间线" : "状态"}]</b> {w.description}
-              {w.evidence && <div className="muted">证据: {w.evidence}</div>}
-              {w.conflicting_fact && <div className="muted">冲突设定: {w.conflicting_fact}</div>}
-              {w.suggestion && <div className="muted">建议: {w.suggestion}</div>}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {result.consistency_issues.length
-        ? <div className="mt-2">
-            <span className="badge err">一致性问题 {result.consistency_issues.length}</span>
-            {result.consistency_issues.map((i, k) => (
-              <div key={k} className="fact-line">
-                <b>[{i.severity}]</b> {i.description}
-                <div className="muted">建议: {i.suggestion}</div>
-              </div>
-            ))}
-          </div>
-        // 历史模式没有当次一致性检查数据,不显示"检查通过"(避免误导)
-        : (!historical && <span className="badge ok">一致性检查通过</span>)}
-
-      <div className="mt-2">
-        <b>问题清单</b>
-        {issues === null && !issuesErr && (
-          <span className="muted"> 加载中…</span>
-        )}
-        {issuesErr && (
-          <span className="msg-err"> 加载失败:{issuesErr}
+          <span className="msg-err"> 问题清单加载失败:{issuesErr}
             <button className="btn-sm" onClick={reloadIssues}>重试</button>
           </span>
-        )}
-        {issues !== null && !issues.length && (
-          <span className="badge ok"> 暂无未处理问题</span>
-        )}
-        {openIssues.map((issue) => (
-          <IssueRow key={issue.id} issue={issue} busy={busyIssue === issue.id}
-            genBlocked={genBlocked} genHint={genHint}
-            onApply={() => applyRevision(issue)}
-            onSpotRepair={() => spotRepair(issue)}
-            onResolve={() => markIssue(issue, "resolved")}
-            onIgnore={() => markIssue(issue, "ignored")}
-            onAdopt={() => adoptCanon(issue)} />
-        ))}
-        {doneIssues.length > 0 && (
-          <details className="issue-done-box mt-1">
-            <summary className="muted">已处理 {doneIssues.length} 条(已解决/已忽略)</summary>
-            {doneIssues.map((issue) => (
-              <IssueRow key={issue.id} issue={issue} busy={false} done />
-            ))}
-          </details>
-        )}
-      </div>
-
-      {result.review && (
+        </div>
+      )}
+      {openIssues.length > 0 && (
         <div className="mt-2">
-          <span className={"badge " + (result.review.passed ? "ok" : "err")}>
-            {result.review.passed ? "审校达标" : "审校未达标"}
-          </span>
-          <span className="muted">
-            {" "}{Object.entries(result.review.scores)
-              .map(([k, v]) => `${SCORE_LABEL[k] ?? k}${v}`)
-              .join("·")}
-            （达标线{result.review.threshold}）
-          </span>
-          {result.review.revision_rounds > 0 && (
-            <span className="badge"> 自动回炉 {result.review.revision_rounds} 轮</span>
-          )}
-          {(result.review.repair_rounds ?? 0) > 0 && (
-            <span className="badge ok" title="一致性矛盾由 AI 定点改句消除,未整章重写">
-              定点修复 {result.review.repairs?.applied.length ?? 0} 处
-            </span>
-          )}
-          {result.review.deai && result.review.deai.before > result.review.deai.after && (
-            <>
-              <span className="badge ok"
-                title="定稿 AI 味超标,已自动定向去味重写(带篇幅/统计判据安全阀);去味前的正文存在版本历史里,不满意可放弃">
-                去味自愈 {result.review.deai.before.toFixed(1)}→{result.review.deai.after.toFixed(1)}
-              </span>
-              <button className="btn-sm" disabled={deaiBusy} onClick={revertDeai}
-                title="回退到去味前的正文快照;回退前的当前版也会留在版本历史,随时可再切回">
-                {deaiBusy && <span className="spin spin-sm" />}放弃去味
-              </button>
-            </>
-          )}
-          <GateRepairDetails repairs={result.review.repairs} />
-          {result.review.gate_note && (
-            <div className="notice notice-warn mt-2">{result.review.gate_note}</div>
-          )}
-          {result.review.stall_note && (
-            <div className="notice notice-info mt-2">{result.review.stall_note}</div>
-          )}
-          {result.review.hints?.map((h, i) => (
-            <div key={i} className="notice notice-warn mt-1">{h}</div>
+          <b>问题清单</b>
+          <span className="muted"> 逐条处理,或全部留到最后一起看</span>
+          {openIssues.map((issue) => (
+            <IssueRow key={issue.id} issue={issue} busy={busyIssue === issue.id}
+              genBlocked={genBlocked} genHint={genHint}
+              onApply={() => applyRevision(issue)}
+              onSpotRepair={() => spotRepair(issue)}
+              onResolve={() => markIssue(issue, "resolved")}
+              onIgnore={() => markIssue(issue, "ignored")}
+              onAdopt={() => adoptCanon(issue)} />
           ))}
-          {result.review.comment && (
-            <div className="muted">主审:{result.review.comment}</div>
-          )}
         </div>
       )}
-      {result.word_guard_action === "compressed" && (
-        <div className="mt-2">
-          <span className="badge">字数守卫:已压缩至目标范围</span>
-        </div>
-      )}
+
+      {/* 拆章改了书的结构,必须常驻可见;压缩只是措辞层面的,收进明细 */}
       {result.word_guard_action === "split" && result.split_info && (
         <div className="mt-2">
-          <span className="badge err">字数守卫:已自动拆章</span>
+          <span className="badge err"
+            title="这章写得太长(超出上限较多),AI 按情节断点拆成了两章,后续章节号自动顺延">字数守卫:已自动拆章</span>
           <div className="fact-line">
             原第{result.split_info.original_chapter}章 →
             第{result.split_info.original_chapter}章({result.split_info.part_a_words}字)
@@ -358,6 +322,105 @@ export default function GenResultCard({ pid, result, onChanged, onRewrite, onClo
           )}
         </div>
       )}
+
+      {/* 检查明细(P2 分层):写前提醒/一致性明细/五维分/守卫/已处理问题——
+          想深究再展开;历史模式(用户主动点「审核报告」来的)默认展开 */}
+      <details className="gen-detail-box mt-2" open={historical}>
+        <summary className="muted">检查明细(写前提醒 · 五维评分 · 处理记录)</summary>
+        <div className="mt-1">
+
+        {warnings.length > 0 && (
+          <div>
+            <span className="badge warn">写前提醒 {warnings.length}</span>
+            <span className="muted"> 写前审核发现的疑似矛盾,只提醒不阻断</span>
+            {warnings.map((w, k) => (
+              <div key={k} className="fact-line">
+                <b>[{w.type === "timeline" ? "时间线" : "状态"}]</b> {w.description}
+                {w.evidence && <div className="muted">证据: {w.evidence}</div>}
+                {w.conflicting_fact && <div className="muted">冲突设定: {w.conflicting_fact}</div>}
+                {w.suggestion && <div className="muted">建议: {w.suggestion}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {result.consistency_issues.length > 0 && (
+          <div className="mt-2">
+            <span className="badge err">一致性问题 {result.consistency_issues.length}</span>
+            {result.consistency_issues.map((i, k) => (
+              <div key={k} className="fact-line">
+                <b>[{i.severity}]</b> {i.description}
+                <div className="muted">建议: {i.suggestion}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {result.review && (
+          <div className="mt-2">
+            <span className={"badge " + (result.review.passed ? "ok" : "err")}
+              title="AI 主审按情节/文笔/节奏/人物/连续性五个维度打分,达到达标线即通过;未达标会有具体扣分原因">
+              {result.review.passed ? "审校达标" : "审校未达标"}
+            </span>
+            <span className="muted"
+              title="AI 主审的五维打分(满分10):情节·文笔·节奏·人物·连续性">
+              {" "}{Object.entries(result.review.scores)
+                .map(([k, v]) => `${SCORE_LABEL[k] ?? k}${v}`)
+                .join("·")}
+              （达标线{result.review.threshold}）
+            </span>
+            {result.review.revision_rounds > 0 && (
+              <span className="badge"
+                title="审校没过,AI 按扣分意见自动重写改进了几轮才交出这版"> 自动回炉 {result.review.revision_rounds} 轮</span>
+            )}
+            {(result.review.repair_rounds ?? 0) > 0 && (
+              <span className="badge ok" title="一致性矛盾由 AI 定点改句消除,未整章重写">
+                定点修复 {result.review.repairs?.applied.length ?? 0} 处
+              </span>
+            )}
+            <GateRepairDetails repairs={result.review.repairs} />
+            {result.review.gate_note && (
+              <div className="notice notice-warn mt-2">{result.review.gate_note}</div>
+            )}
+            {result.review.stall_note && (
+              <div className="notice notice-info mt-2">{result.review.stall_note}</div>
+            )}
+            {result.review.hints?.map((h, i) => (
+              <div key={i} className="notice notice-warn mt-1">{h}</div>
+            ))}
+            {result.review.comment && (
+              <div className="muted">主审:{result.review.comment}</div>
+            )}
+          </div>
+        )}
+
+        {result.word_guard_action === "compressed" && (
+          <div className="mt-2">
+            <span className="badge"
+              title="生成字数超出每章目标,AI 已自动压缩回目标范围(可在项目设置里关掉)">字数守卫:已压缩至目标范围</span>
+          </div>
+        )}
+
+        {/* 空态收进明细:干净章节的"暂无未处理问题"不是需要占屏的信息 */}
+        {issues !== null && !issues.length && (
+          <div className="mt-2">
+            <span className="badge ok"> 暂无未处理问题</span>
+          </div>
+        )}
+        {issues === null && !issuesErr && (
+          <span className="muted"> 问题清单加载中…</span>
+        )}
+        {doneIssues.length > 0 && (
+          <details className="issue-done-box mt-1">
+            <summary className="muted">已处理 {doneIssues.length} 条(已解决/已忽略)</summary>
+            {doneIssues.map((issue) => (
+              <IssueRow key={issue.id} issue={issue} busy={false} done />
+            ))}
+          </details>
+        )}
+
+        </div>
+      </details>
     </div>
   );
 }

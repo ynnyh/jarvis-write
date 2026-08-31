@@ -29,6 +29,8 @@ import AiDock from "./write/AiDock";
 import PolishCompareCard from "./write/PolishCompareCard";
 import AnnotatedReviseCard from "./write/AnnotatedReviseCard";
 import ChapterTitleEdit from "./write/ChapterTitleEdit";
+import WriteGuide from "./write/WriteGuide";
+import { estimateText } from "./write/genDuration";
 import { useWritePanel, ACT_TITLE } from "./write/useWritePanel";
 import { useScrollOnAppear } from "./write/useScrollOnAppear";
 
@@ -61,7 +63,7 @@ export default function WritePanel({ pid, outlines }: Props) {
     // useChapterVersions
     versionsFor, versions, compareVer, closeVersions, openVersions, selectVersion, restoreVersion,
     // useChapterGeneration
-    genJob, genResult, setGenResult, genTendency, setGenTendency,
+    genJob, genResult, setGenResult, genDurSec, genTendency, setGenTendency,
     queueMode, setQueueMode, queuePicked, setQueuePicked,
     generate, startQueue, pickNextBatch,
     // useReader
@@ -110,6 +112,9 @@ export default function WritePanel({ pid, outlines }: Props) {
       ))}
       {err && <div className="msg-err">{err}</div>}
 
+      {/* 首次进入的 3 步引导(点「知道了」后 localStorage 记住,不再出现) */}
+      <WriteGuide />
+
       {/* ---- 移动端顶栏:←返回项目列表 + 当前章(点击开目录抽屉)+ 阅读入口 ---- */}
       {isMobile && (
         <div className="m-topbar">
@@ -153,6 +158,7 @@ export default function WritePanel({ pid, outlines }: Props) {
             <GenResultCard
               pid={pid}
               result={genResult}
+              durationSec={genDurSec}
               genBlocked={genBlocked}
               genHint={genHint}
               onClose={() => setGenResult(null)}
@@ -330,7 +336,8 @@ export default function WritePanel({ pid, outlines }: Props) {
               )}
               <div className="mt-2">
                 <button className="primary" disabled={genBlocked}
-                  title={genBlocked ? genHint : "按蓝图生成本章,生成时自动注入:本章蓝图、前情摘要、人物状态、到期伏笔"}
+                  title={genBlocked ? genHint
+                    : `按蓝图生成本章,${estimateText(pid)};生成时自动注入:本章蓝图、前情摘要、人物状态、到期伏笔`}
                   onClick={() => void generate(chapterNum)}>
                   让 AI 写这一章
                 </button>

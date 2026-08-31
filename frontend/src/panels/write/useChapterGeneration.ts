@@ -10,6 +10,8 @@ import {
 } from "../../api";
 import { pollJob, errMsg } from "../../pollJob";
 import { toast } from "../../ui/Toaster";
+import { confirmDialog } from "../../ui/ConfirmDialog";
+import { chapterEstimateMin, recordGenDuration } from "./genDuration";
 
 // running-jobs 单项(api.runningJobs 的 jobs 元素,无导出类型名,此处按结构声明)
 type RunningJob = { job_id: string; kind: string; stage: string };
@@ -34,6 +36,8 @@ export function useChapterGeneration(
   // 进行中的「生成/重写」任务:阻塞式(顶部横幅 + 锁住章级动作)。
   const [genJob, setGenJob] = useState<{ num: number; stage: string } | null>(null);
   const [genResult, setGenResult] = useState<GenerateChapterResponse | null>(null);
+  // 本次生成实耗(秒,P1 成本透明:结果卡展示"用时 X 分钟");null=无当次数据
+  const [genDurSec, setGenDurSec] = useState<number | null>(null);
   const [genTendency, setGenTendency] = useState<Tendency>({});
   // 连写队列:勾选多章 → 后端一个 job 串行生成(状态在此持有,目录抽屉头部跟随切换)
   const [queueMode, setQueueMode] = useState(false);
@@ -89,7 +93,7 @@ export function useChapterGeneration(
   const generate = useCallback(async (n: number, revision = "") => {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    setErr(""); setGenResult(null);
+    setErr(""); setGenResult(null); setGenDurSec(null);
     if (revision) clearAct(); // 带着意见重生成:收起动作卡,结果走生成结果卡
     setGenJob({ num: n, stage: "排队中…" });
     let jobId: string;
@@ -100,17 +104,35 @@ export function useChapterGeneration(
       setGenJob(null);
       return;
     }
+    // 实耗记账(P1):完成(非中断)才入账,异常值由 recordGenDuration 护栏过滤
+    const t0 = Date.now();
     await trackGenerate(n, jobId, ctrl);
+    if (!ctrl.signal.aborted) {
+      const sec = Math.round((Date.now() - t0) / 1000);
+      setGenDurSec(sec);
+      recordGenDuration(pid, sec);
+    }
   }, [pid, genTendency, clearAct, setErr, trackGenerate]);
 
   const startQueue = useCallback(async () => {
     const nums = [...queuePicked].sort((a, b) => a - b);
     if (!nums.length) return;
+    // 发起前成本预估(P1 成本透明):按本书最近每章均速估总时长,确认后再开跑
+    const per = chapterEstimateMin(pid);
+    const total = per * nums.length;
+    const ok = await confirmDialog({
+      title: `开始连写 ${nums.length} 章?`,
+      body: `按本书最近的生成速度,约需 ${total} 分钟(每章约 ${per} 分钟)。`
+        + "期间可以离开页面,回来后随时查看进度;中途某章被门禁拦截时会暂停。",
+      confirmText: "开始连写",
+    });
+    if (!ok) return;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setErr(""); setGenResult(null);
     setGenJob({ num: nums[0], stage: `队列 ${nums.length} 章:排队中…` });
     setQueueMode(false); setQueuePicked(new Set());
+    const t0 = Date.now();
     try {
       const { job_id } = await api.generateQueue(pid, nums, genTendency);
       await pollJob(job_id, {
@@ -118,6 +140,8 @@ export function useChapterGeneration(
         onStage: (stage) => setGenJob({ num: nums[0], stage }),
       });
       if (ctrl.signal.aborted) return;
+      // 总耗时按章数均摊入账(连写里单章无独立计时,均值口径够用)
+      recordGenDuration(pid, (Date.now() - t0) / 1000 / nums.length);
       await reload();
     } catch (e) {
       if (!ctrl.signal.aborted) {
@@ -167,7 +191,7 @@ export function useChapterGeneration(
   }, [pid, reload, trackGenerate]);
 
   return {
-    genJob, genResult, setGenResult,
+    genJob, genResult, setGenResult, genDurSec,
     genTendency, setGenTendency,
     queueMode, setQueueMode, queuePicked, setQueuePicked,
     generate, startQueue, pickNextBatch, reconnectGenerate,
