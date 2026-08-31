@@ -6,6 +6,7 @@ import { api, CanonDevice, EMPTY_CANON, IMPORTANCE_OPTIONS, Project, StoryCanon 
 import { useInvalidateProject } from "../hooks/queries";
 import { errMsg } from "../pollJob";
 import { toast } from "../ui/Toaster";
+import { confirmDialog } from "../ui/ConfirmDialog";
 
 // 每章目标字数的合法区间(前端自校验,后端 ProjectPatch 不设上下界;区间来自交互改造计划)
 const TARGET_WORDS_MIN = 200;
@@ -56,14 +57,42 @@ export default function ProjectSettingsPanel({ pid, project }: Props) {
     } catch (e) { toast.err("每章目标字数保存失败", errMsg(e)); } finally { setWordsSaving(false); }
   }
 
-  // 字数守卫开关:超标自动压缩/拆章。一个开关同时管压缩与拆章,默认关闭。
+  // 字数守卫开关(压缩):超标自动压回目标字数。默认关闭。
   async function toggleGuard(on: boolean) {
     try {
-      await api.patchProject(pid, { word_guard_enabled: on, auto_split_enabled: on });
+      await api.patchProject(pid, { word_guard_enabled: on });
       await invalidateProject();
       toast.ok(on ? "已开启字数守卫" : "已关闭字数守卫",
-        on ? "章节超出目标字数较多时会自动压缩或拆章" : "字数只做宽松参考,不再自动压缩/拆章");
+        on ? "章节超出目标字数较多时会自动压缩回目标" : "字数只做宽松参考,不再自动压缩");
     } catch (e) { toast.err("开关保存失败", errMsg(e)); }
+  }
+
+  // 自动拆章开关:严重超标(远超目标)才拆成多章。与压缩独立,默认关闭。
+  async function toggleSplit(on: boolean) {
+    try {
+      await api.patchProject(pid, { auto_split_enabled: on });
+      await invalidateProject();
+      toast.ok(on ? "已开启自动拆章" : "已关闭自动拆章",
+        on ? "严重超长的章节会自动拆分为多章" : "不再自动拆章");
+    } catch (e) { toast.err("开关保存失败", errMsg(e)); }
+  }
+
+  // 完本标记:标完本后列表卡片的重命名/删除/清空正文被锁定,需先取消完本才能操作(防误删误改)。
+  async function toggleFinished(on: boolean) {
+    if (on) {
+      const ok = await confirmDialog({
+        title: `标记《${project.title}》为「完本」?`,
+        body: "标记后该书的「重命名」「删除」「清空正文」将锁定,需先取消完本才能操作。",
+        confirmText: "标记完本",
+      });
+      if (!ok) return;
+    }
+    try {
+      await api.patchProject(pid, { finished: on });
+      await invalidateProject();
+      toast.ok(on ? "已标记为完本" : "已取消完本",
+        on ? "重命名/删除已锁定,如需改动先取消完本" : "已恢复可重命名/删除");
+    } catch (e) { toast.err("保存失败", errMsg(e)); }
   }
 
   // 编辑部审校把关配置:达标线 / 自动回炉开关 / 回炉上限 / 连写前置审核。改完即存,失效缓存重拉。
@@ -165,7 +194,27 @@ export default function ProjectSettingsPanel({ pid, project }: Props) {
             onChange={(e) => toggleGuard(e.target.checked)} />
           <span>
             字数守卫
-            <b className="hint">超标自动压缩/拆章,默认关闭</b>
+            <b className="hint">超标自动压缩回目标字数,默认关闭</b>
+          </span>
+        </label>
+      </div>
+      <div className="card card-compact mt-2">
+        <label className="guard-toggle">
+          <input type="checkbox" checked={!!project.auto_split_enabled}
+            onChange={(e) => toggleSplit(e.target.checked)} />
+          <span>
+            自动拆章
+            <b className="hint">严重超标时拆成多章,默认关闭</b>
+          </span>
+        </label>
+      </div>
+      <div className="card card-compact mt-2">
+        <label className="guard-toggle">
+          <input type="checkbox" checked={!!project.finished}
+            onChange={(e) => toggleFinished(e.target.checked)} />
+          <span>
+            完本标记
+            <b className="hint">标记后重命名/删除/清空正文锁定,需先取消完本</b>
           </span>
         </label>
       </div>

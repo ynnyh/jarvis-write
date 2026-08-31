@@ -56,6 +56,7 @@ async def generate_project_blueprint(
         tendency=req.tendency,
         global_tendency=project.global_tendency,
         title_directive=resolve_title_directive(req.title_style, req.title_directive),
+        word_number=project.target_words_per_chapter,
     )
     outlines = save_blueprint(db, project, chapters)
     db.commit()
@@ -106,6 +107,7 @@ async def generate_project_blueprint_async(
                 progress=lambda s: update_stage(job_id, s),
                 end_chapter=end_chapter,
                 title_directive=resolve_title_directive(req.title_style, req.title_directive),
+                word_number=p.target_words_per_chapter,
             )
             update_stage(job_id, "落库中")
             outlines = save_blueprint(session, p, chapters)
@@ -297,6 +299,7 @@ async def extend_blueprint_async(project_id: int, db: Session = Depends(get_db))
                 start_chapter=start,
                 end_chapter=end,
                 previous_tail=prev_tail,
+                word_number=p.target_words_per_chapter,
             )
             update_stage(job_id, "落库中")
             outlines = save_blueprint(session, p, chapters)

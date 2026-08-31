@@ -102,7 +102,11 @@ PLOT_ARCHITECTURE_PROMPT = """\
 世界观:
 {world_building}
 
-全书共{number_of_chapters}章。
+全书共{number_of_chapters}章{word_scope}。
+
+【规模纪律(硬要求)】全书的冲突升级阶梯、三幕节点落点、伏笔埋设/回收区间,都必须收在
+总字数盘子内展开;严禁规划连续大场面、多线并进的超量用墨。章节之间用墨尽量均衡,
+每章体量大致等于"总字数/章节数",不要出现个别章节过度膨胀。
 
 {style_directives}
 {directive_block}请按三幕式输出:
@@ -161,6 +165,7 @@ CHAPTER_BLUEPRINT_PROMPT = """\
 {novel_architecture}
 
 {style_directives}
+{word_scope}
 要求:
 1. 章节节奏遵循情节架构的三幕划分
 2. 伏笔操作要与情节架构中列出的主要伏笔呼应:埋设、强化、回收形成完整链条
@@ -181,6 +186,7 @@ CHUNKED_BLUEPRINT_PROMPT = """\
 {previous_blueprint_tail}
 
 {style_directives}
+{word_scope}
 要求:
 1. 与已生成蓝图自然衔接,人物、伏笔、剧情走向保持连续
 2. 伏笔操作与全书伏笔链条呼应

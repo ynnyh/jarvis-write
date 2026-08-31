@@ -510,7 +510,7 @@ export default function OnboardingFlow() {
                         {
                           key: "scale" as SetupStep, label: "篇幅", set: true,
                           body: null,
-                          text: `${project.target_chapters} 章 × ${project.target_words_per_chapter} 字`,
+                          text: `${project.target_chapters} 章 × ${project.target_words_per_chapter} 字,合计约 ${project.target_chapters * project.target_words_per_chapter} 字`,
                         },
                       ]).map((c) => {
                         const affected = !!dirty
@@ -634,7 +634,7 @@ export default function OnboardingFlow() {
                 </div>
                 <div className="dossier-row ok">
                   <span className="dr-k">篇幅</span>
-                  <span className="dr-v">{project.target_chapters} 章 × {project.target_words_per_chapter} 字</span>
+                  <span className="dr-v">{project.target_chapters} 章 × {project.target_words_per_chapter} 字,合计约 {project.target_chapters * project.target_words_per_chapter} 字</span>
                 </div>
               </div>
               {hasConcept && (

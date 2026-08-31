@@ -352,6 +352,22 @@ def _add_queue_require_approved_column() -> None:
             logger.info("迁移:projects 补 queue_require_approved 列")
 
 
+def _add_finished_column() -> None:
+    """给 projects 表补 finished 列(完本标记,幂等)。默认 False=连载/草稿。
+
+    完本后前端置灰重命名/删除,后端接口也在 finished 下拦截,防误删误改。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "projects" not in insp.get_table_names():
+            return
+        if not _column_exists("projects", "finished"):
+            conn.execute(
+                text("ALTER TABLE projects ADD COLUMN finished BOOLEAN NOT NULL DEFAULT 0")
+            )
+            logger.info("迁移:projects 补 finished 列")
+
+
 def _migrate_finalized_to_approved() -> None:
     """状态机扩展(docs/08 §5.5):存量 finalized 章节一次性映射为 approved。
 
@@ -895,6 +911,7 @@ def run_migrations() -> None:
     _add_chapter_review_snapshot_column()
     _add_chapter_proofread_snapshot_column()
     _add_queue_require_approved_column()
+    _add_finished_column()
     _add_drama_voice_columns()
     _add_drama_style_direction_column()
     _add_promo_chunks_column()

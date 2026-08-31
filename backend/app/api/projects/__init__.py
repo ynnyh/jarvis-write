@@ -147,6 +147,8 @@ class ProjectPatch(BaseModel):
     review_max_revisions: int | None = Field(default=None, ge=0, le=5)
     # 连写前置开关:True=严格(上一章 approved 才能连写),False=宽松(仅 quarantined 停)
     queue_require_approved: bool | None = None
+    # 完本标记:True=已完本。完本后重命名/删除/清空被后端拦截(见 patch/delete/reset)。
+    finished: bool | None = None
     global_tendency: dict | None = None
     concept: Concept | None = None
     # 故事 DNA / 本书基因(坐标卡产出):整段覆盖式保存,走通用 setattr 落 JSON 列
@@ -178,6 +180,9 @@ async def patch_project(
     """
     project = _get_project_or_404(db, project_id)
     updates = req.model_dump(exclude_none=True)
+    # 完本防误改:已完本的书不允许再改标题(重命名),须先取消完本标记。
+    if project.finished and "title" in updates:
+        raise HTTPException(status_code=409, detail="已标记完本,如需重命名请先取消完本标记")
     if "title" in updates:
         title = updates["title"].strip()
         if not title:
@@ -221,6 +226,8 @@ async def patch_project(
 async def delete_project(project_id: int, db: Session = Depends(get_db)) -> dict:
     """删除项目及其全部关联数据(级联逻辑见 deps.delete_project_cascade)。"""
     project = _get_project_or_404(db, project_id)
+    if project.finished:
+        raise HTTPException(status_code=409, detail="已标记完本,如需删除请先取消完本标记")
     deleted_chapters = delete_project_cascade(db, project)
     return {"ok": True, "deleted_chapters": deleted_chapters}
 
@@ -232,6 +239,8 @@ async def reset_project_content_api(project_id: int, db: Session = Depends(get_d
     前端大纲页在「基于旧架构」横幅里给作者这个选择;是破坏性操作,前端自带二次确认。
     """
     project = _get_project_or_404(db, project_id)
+    if project.finished:
+        raise HTTPException(status_code=409, detail="已标记完本,如需清空正文请先取消完本标记")
     deleted_chapters = reset_project_content(db, project)
     return {"ok": True, "deleted_chapters": deleted_chapters, "content_reset": True}
 

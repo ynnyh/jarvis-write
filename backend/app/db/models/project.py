@@ -40,6 +40,9 @@ class Project(Base, TimestampMixin):
     # 连写前置(docs/08 §5.5):True=严格模式,队列中下一章生成前要求上一章
     # 已人工审核通过(approved),否则队列暂停;False(默认,宽松)= 仅 quarantined 暂停。
     queue_require_approved: Mapped[bool] = mapped_column(default=False)
+    # 完本标记:作者手动标记全书已完成。完本后前端置灰重命名/删除,后端接口
+    # 也在 finished 下拦截(409),防误删误改。见 api/projects/__init__.py。
+    finished: Mapped[bool] = mapped_column(default=False)
     # 全局倾向:标签组合 JSON,如 {"pace": "快节奏", "tone": ["热血"], ...}
     global_tendency: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     # 结构化故事概念(灵感工坊产出):logline/hook/twist/protagonist/conflict/setting

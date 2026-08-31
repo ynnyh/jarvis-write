@@ -276,6 +276,8 @@ export interface Project {
   review_max_revisions?: number;
   // 连写前置:True=严格模式(上一章 approved 才能连写下一章,遇待审章队列暂停)
   queue_require_approved?: boolean;
+  // 完本标记:True=已完本。完本后重命名/删除/清空为置灰与后端拦截态,防误删误改。
+  finished?: boolean;
   global_tendency: Tendency; status: string;
   concept?: Concept | null;
   // 故事 DNA / 本书基因(坐标卡产出):定味道锚,治题材/口味漂移;驱动生成注入 + 题材硬门
@@ -390,6 +392,8 @@ export interface GenerateChapterResponse extends ChapterDetail {
     gate_note?: string;
     stall_note?: string;
     hints?: string[];
+    // AI 味自愈(P4):定稿超标时自动定向去味重写的分数变化;采纳了重写才有
+    deai?: { before: number; after: number };
   };
   // 一致性门禁结果(docs/08 §5.4):quarantined 时正文已存但未进圣经/摘要
   gate?: { status: "passed" | "quarantined"; blockers: PreflightWarning[] };
@@ -406,7 +410,7 @@ export interface ChapterVersionDetail extends ChapterVersionBrief {
 /** 版本来源的中文说明 */
 export const VERSION_SOURCE_CN: Record<string, string> = {
   generated: "重写前", polished: "润色前", edited: "编辑前", restored: "回滚前",
-  spot_repair: "定点修复前",
+  spot_repair: "定点修复前", deai: "去味前",
 };
 /** AI 味报告:score/summary 必备;categories 分类得分明细(新版后端返回,旧格式没有) */
 export interface FlavorInfo {
@@ -705,6 +709,12 @@ export interface InviteCodeListOut {
   items: InviteCodeItem[];
   // 表为空时仍在生效的旧单码(app_settings/env);有记录后为 null
   legacy_fallback: { code: string; source: "db" | "env" } | null;
+}
+/** AI 味检测热更配置:规则类别目录 + 自愈门槛(管理端在线调参) */
+export interface AiFlavorConfig {
+  gate_score: number;
+  weights: Record<string, number>;
+  categories: { category: string; default_weight: number; weight: number; rules: number }[];
 }
 /** 编辑部预设优化动作 */
 export interface EditorAction { key: string; label: string; directive: string; }
@@ -1170,6 +1180,10 @@ export const api = {
     req<InviteCodeItem>("PATCH", `/api/admin/invite-codes/${id}`, { is_active }),
   adminDeleteInviteCode: (id: number) =>
     req<{ ok: boolean }>("DELETE", `/api/admin/invite-codes/${id}`),
+  // AI 味检测热更配置:类别权重 + 自愈门槛,改完立即生效(不重启)
+  adminGetAiFlavorConfig: () => req<AiFlavorConfig>("GET", "/api/admin/ai-flavor-config"),
+  adminPutAiFlavorConfig: (gate_score: number, weights: Record<string, number>) =>
+    req<AiFlavorConfig>("PUT", "/api/admin/ai-flavor-config", { gate_score, weights }),
 
   // ---- 重构翻新(已有书按新逻辑翻新):都返回 job_id,配合 pollJob ----
   refreshBackfillBeats: (pid: number, chapter_numbers: number[] = []) =>

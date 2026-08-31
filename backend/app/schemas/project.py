@@ -44,6 +44,8 @@ class ProjectOut(BaseModel):
     review_max_revisions: int = 3
     # 连写前置:True=严格模式(上一章 approved 才能连写下一章),False=宽松(默认)
     queue_require_approved: bool = False
+    # 完本标记:True=已完本。完本后重命名/删除为置灰与后端拦截状态,防误删误改。
+    finished: bool = False
     global_tendency: dict[str, Any]
     concept: Concept | None = None
     dna: StoryDNA | None = None

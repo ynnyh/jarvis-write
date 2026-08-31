@@ -144,6 +144,7 @@ async def generate_blueprint(
     end_chapter: int | None = None,
     previous_tail: str = "",
     title_directive: str = "",
+    word_number: int | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """分块生成章节蓝图。返回 (章节 dict 列表, 警告列表)。纯生成,不落库。
 
@@ -152,8 +153,24 @@ async def generate_blueprint(
     number_of_chapters 始终是全书总章数(prompt 里的全局语境)。
     progress: 可选回调 fn(stage_text),每块生成前/流式逐章/解析后上报(异步任务进度用)。
     title_directive: 章节标题风格导向(预设+自由文本已在上游解析);空则回落默认(plain)。
+    word_number: 每章目标字数。蓝图此前不知道字数,节拍会按"默认 3-5 个"自由铺,
+    与正文软约束打架导致每章超发;这里把字数盘子注入草稿,让节拍数量与字数匹配。
     """
     title_directive = (title_directive or "").strip() or DEFAULT_TITLE_DIRECTIVE
+
+    # 字数盘子:换算总字数并约束节拍(每章约 N 字 → 3-4 节拍、每节拍 ≤1000 字),
+    # 从大纲层就按目标字数分配用墨,而不是正文阶段才补救。
+    word_scope = (
+        (
+            f"全书共{number_of_chapters}章、总篇幅约 {number_of_chapters * word_number} 字"
+            f"(每章约 {word_number} 字,本次规划第 {start_chapter} 章起)。"
+            f"每章目标字数约 {word_number} 字,本章节拍数量要与字数匹配"
+            f"(每章约 3000 字建议 3-4 个节拍,每节拍控制在 800-1000 字左右),"
+            "用墨紧贴全盘子、章节间尽量均衡,不要规划超出盘子的大场面。"
+        )
+        if word_number
+        else ""
+    )
 
     def _report(stage: str) -> None:
         if progress:
@@ -198,6 +215,7 @@ async def generate_blueprint(
                     number_of_chapters=number_of_chapters,
                     style_directives=style_block,
                     title_directive=title_directive,
+                    word_scope=word_scope,
                 )
             else:
                 prompt = CHUNKED_BLUEPRINT_PROMPT.format(
@@ -207,6 +225,7 @@ async def generate_blueprint(
                     previous_blueprint_tail=raw_accumulated[-_TAIL_CHARS:] or "(首块,无)",
                     style_directives=style_block,
                     title_directive=title_directive,
+                    word_scope=word_scope,
                 )
             if parse_failed:
                 prompt += _format_hint(seg_start, end)

@@ -109,6 +109,13 @@ async def generate_architecture(
     adapter = get_adapter_for(Task.ARCHITECTURE)
     topic_block = _render_topic_block(topic, concept)
     directive_block = _render_directive_block(directive)
+    # 字数盘子:只有核心种子填了每章字数,情节架构/章节蓝图此前完全不知道字数,
+    # 导致大纲按戏剧冲突自然铺、总规模放飞。这里算总盘子注入情节架构(Step4)。
+    word_scope = (
+        f"，总篇幅约 {number_of_chapters * word_number} 字（每章约 {word_number} 字）"
+        if word_number
+        else ""
+    )
 
     # Step 1: 核心种子
     logger.info("架构生成 1/4:核心种子...")
@@ -163,6 +170,7 @@ async def generate_architecture(
                 character_dynamics=character_dynamics,
                 world_building=world_building,
                 number_of_chapters=number_of_chapters,
+                word_scope=word_scope,
                 style_directives=style_block,
                 directive_block=directive_block,
             )

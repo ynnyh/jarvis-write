@@ -2144,6 +2144,8 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 }
 .queue-check { width: 16px; height: 16px; flex-shrink: 0; }
 .badge-draft { background: var(--warn-weak); color: var(--warn); border-color: var(--warn-line); }
+/* 完本徽标:示意全书已完成(绿色,与「连载中」区分);完本后重命名/删除锁定 */
+.badge-finished { background: var(--ok-weak); color: var(--ok); border-color: var(--ok-line); }
 
 /* ---------- 样式修补:步骤条断行 / 移动端横滚 ---------- */
 /* 步骤文字不许竖排断行;窄屏时步骤条整体横向滚动而不是撑破页面 */

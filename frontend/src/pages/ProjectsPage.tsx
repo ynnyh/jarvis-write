@@ -47,6 +47,7 @@ export default function ProjectsPage() {
 
   async function startDelete(p: Project) {
     setEditingId(null);
+    if (p.finished) return; // 完本后已置灰,双保险
     // 拉真实章节数给确认弹层,让用户知道要删掉多少东西
     const count = await api.listChapters(p.id).then((chs) => chs.length).catch(() => null);
     const ok = await confirmDialog({
@@ -63,6 +64,30 @@ export default function ProjectsPage() {
       toast.ok(`已删除《${p.title}》`);
     } catch (e) {
       toast.err("删除失败", errMsg(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // 完本标记:标完本后重命名/删除置灰,需先取消完本才能操作(防误删误改)
+  async function toggleFinished(p: Project) {
+    const turningOn = !p.finished;
+    if (turningOn) {
+      const ok = await confirmDialog({
+        title: `标记《${p.title}》为「完本」?`,
+        body: "标记后该书的「重命名」「删除」「清空正文」将锁定,需先取消完本才能操作。",
+        confirmText: "标记完本",
+      });
+      if (!ok) return;
+    }
+    setBusy(true); setErr("");
+    try {
+      const updated = await api.patchProject(p.id, { finished: turningOn });
+      setProjects((ps) => ps.map((x) => (x.id === p.id ? updated : x)));
+      toast.ok(turningOn ? "已标记为完本" : "已取消完本",
+        turningOn ? "重命名/删除已锁定,如需改动先取消完本" : "已恢复可重命名/删除");
+    } catch (e) {
+      toast.err("保存失败", errMsg(e));
     } finally {
       setBusy(false);
     }
@@ -110,6 +135,7 @@ export default function ProjectsPage() {
               <Link to={`/project/${p.id}`} className="proj-main">
                 <h2 className="proj-title">{p.title}
                   <span className="badge">{PROJECT_STATUS_CN[p.status] ?? p.status}</span>
+                  {p.finished && <span className="badge badge-finished">完本</span>}
                   {p.genre && <span className="badge">{p.genre}</span>}
                 </h2>
                 <div className="proj-meta">
@@ -133,8 +159,21 @@ export default function ProjectsPage() {
               {p.setup_state
                 ? <Link to={`/new/${p.id}/${p.setup_state}`} className="proj-go">继续创建 →</Link>
                 : <Link to={`/project/${p.id}`} className="proj-go">进入 →</Link>}
-              <button className="btn-sm" onClick={() => startRename(p)}>重命名</button>
-              <button className="btn-sm danger" disabled={busy} onClick={() => startDelete(p)}>删除</button>
+              <button
+                className="btn-sm"
+                disabled={p.finished || busy}
+                title={p.finished ? "已完本,需先取消完本才能重命名" : undefined}
+                onClick={() => startRename(p)}
+              >重命名</button>
+              <button
+                className={`btn-sm ${p.finished ? "" : "danger"}`}
+                disabled={p.finished || busy}
+                title={p.finished ? "已完本,需先取消完本才能删除" : undefined}
+                onClick={() => startDelete(p)}
+              >{p.finished ? "已锁定" : "删除"}</button>
+              <button className="btn-sm" disabled={busy} onClick={() => toggleFinished(p)}>
+                {p.finished ? "取消完本" : "标完本"}
+              </button>
             </div>
           </div>
         ))}
