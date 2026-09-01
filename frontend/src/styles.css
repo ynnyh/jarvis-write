@@ -3418,6 +3418,7 @@ body:has(.write-zone.immersive) .pj-cols { grid-template-columns: minmax(0, 1fr)
   gap: 4px; padding: 4px 6px; font-size: var(--fs-xs);
 }
 .ref-thumb-foot .btn-sm { padding: 2px 6px; font-size: var(--fs-xs); }
+.ref-thumb-note { color: var(--text-3); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 出片引擎的草片预览:竖屏视频限高居中,别让 9:16 的一条占满整个面板 */
 .render-preview {
@@ -3486,6 +3487,16 @@ body:has(.write-zone.immersive) .pj-cols { grid-template-columns: minmax(0, 1fr)
 /* 出片时贴在手卡旁逐条核对「这条回忆有没有被分镜落实」——定制片的施工基准 */
 .bday-mems { margin: 4px 0 0; padding-left: 18px; }
 .bday-mems li { margin: 2px 0; }
+
+/* ===== 系列短片工坊:工作台专属微调 ===== */
+/* 档案卡的 chips 行:描述和标签之间留点呼吸 */
+.series-profile-chips { margin-bottom: 8px; }
+/* 参考图操作行:和上图间距 */
+.series-ref-line { margin-top: 8px; }
+/* 成片提示词/定妆描述保留换行 */
+.pre-wrap { white-space: pre-wrap; }
+/* 负面词行:和提示词间距 */
+.series-neg { margin-top: 6px; }
 
 /* ==========================================================================
    本书四层状态条(ProjectPage)

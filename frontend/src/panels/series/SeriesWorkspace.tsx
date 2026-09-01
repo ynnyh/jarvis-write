@@ -34,7 +34,7 @@ function RefThumb({ cid, imgIndex, image, onDelete }: {
         ? (blob ? <img src={blob} alt="定妆参考图" /> : <div className="ref-thumb-bad">{bad ? "读取失败" : "加载…"}</div>)
         : <img src={image.src} alt="定妆参考图" referrerPolicy="no-referrer" />}
       <div className="ref-thumb-foot">
-        {image.note && <span className="muted" style={{ fontSize: "var(--fs-xs)" }}>{image.note}</span>}
+        {image.note && <span className="ref-thumb-note">{image.note}</span>}
         <button className="btn-sm" onClick={onDelete}>✕ 删</button>
       </div>
     </div>
@@ -278,8 +278,8 @@ export default function SeriesWorkspace({ cid }: { cid: number }) {
           </div>
         ) : (
           <>
-            <p className="card-desc" style={{ whiteSpace: "pre-wrap" }}>{character.look}</p>
-            <div className="chips" style={{ marginBottom: 8 }}>
+            <p className="card-desc">{character.look}</p>
+            <div className="chips series-profile-chips">
               <span className="badge mute">{character.direction_label}</span>
               <span className="badge mute">默认 {character.default_duration_s}s</span>
               {character.style_hints && <span className="badge mute">{character.style_hints}</span>}
@@ -290,13 +290,13 @@ export default function SeriesWorkspace({ cid }: { cid: number }) {
         {/* 定妆参考图:文生图出的定妆照,出片时丢给图生视频当人物锚 */}
         <div className="field">
           <span className="fl">定妆参考图<span className="hint">文生图出的定妆照;出片时上传给图生视频锁人物形象</span></span>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div className="ref-thumbs">
             {(character.ref_images ?? []).map((img, i) => (
               <RefThumb key={`${img.kind}-${img.src}`} cid={cid} imgIndex={i} image={img}
                 onDelete={() => void deleteRef(i)} />
             ))}
           </div>
-          <div className="clip-edit-line" style={{ marginTop: 8 }}>
+          <div className="clip-edit-line series-ref-line">
             <input placeholder="贴定妆照外链(建议下载后上传,外链会过期)" value={linkVal}
               onChange={(e) => setLinkVal(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") void linkRef(); }} />
@@ -395,9 +395,9 @@ export default function SeriesWorkspace({ cid }: { cid: number }) {
               </div>
             ) : ep.status === "done" && out.prompt_cn ? (
               <>
-                <div className="sub-summary" style={{ whiteSpace: "pre-wrap" }}>{out.prompt_cn}</div>
+                <div className="sub-summary pre-wrap">{out.prompt_cn}</div>
                 {out.negative && (
-                  <div className="muted" style={{ marginTop: 6 }}>
+                  <div className="muted series-neg">
                     负面词:{out.negative}
                     <CopyBtn text={out.negative} label="复制负面词" />
                   </div>
