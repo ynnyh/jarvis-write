@@ -118,6 +118,7 @@ export function useOnboarding() {
         if (c) {
           setSpark(c.spark); setIdeas(c.ideas); setTitleIdeas(c.titleIdeas);
           setIdeaSig(c.ideaSig ?? null); setTitleSig(c.titleSig ?? null);
+          setEngineCards(c.engineCards ?? null);
         }
         setDirty(loadJSON<Dirty>(`wiz-dirty:${pid}`));
         // 直达续建:无 step 参数时按 setup_state 落到对应屏
@@ -148,8 +149,8 @@ export function useOnboarding() {
   // 候选内容写入 localStorage:刷新后回到当前屏接着选
   useEffect(() => {
     if (pid === null || !project) return;
-    saveJSON(`wiz-cache:${pid}`, { spark, ideas, titleIdeas, ideaSig, titleSig } satisfies WizCache);
-  }, [pid, project, spark, ideas, titleIdeas, ideaSig, titleSig]);
+    saveJSON(`wiz-cache:${pid}`, { spark, ideas, titleIdeas, ideaSig, titleSig, engineCards } satisfies WizCache);
+  }, [pid, project, spark, ideas, titleIdeas, ideaSig, titleSig, engineCards]);
 
   const patch = useCallback(async (updates: Partial<Project> & { setup_state?: string }) => {
     if (pid === null) return null;

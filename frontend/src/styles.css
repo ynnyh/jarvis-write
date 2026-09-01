@@ -2093,6 +2093,9 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
    一句话内核是主角,差异坐标做角标、抓人点做次行——扫一眼就能挑 */
 .engine-list { display: flex; flex-direction: column; gap: 8px; }
 .engine-card {
+  display: block;               /* button 默认 inline-block,这里强制块级撑满 */
+  width: 100%;
+  box-sizing: border-box;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-md);
   padding: 10px 12px;
@@ -2104,13 +2107,18 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 }
 .engine-card:hover { border-color: var(--brand); background: var(--brand-weak); }
 .engine-card.on { border-color: var(--brand); background: var(--brand-weak); }
-.engine-card b { display: block; font-size: var(--fs-sm); line-height: 1.5; }
+.engine-card b {
+  display: block; font-size: var(--fs-sm); line-height: 1.5;
+  overflow-wrap: break-word;   /* 长句/无空格串不溢出 */
+  word-break: break-word;
+}
 .engine-card .engine-angle {
   display: inline-block; font-size: var(--fs-xs); color: var(--text-3);
   margin-bottom: 4px;
 }
 .engine-card .engine-hook {
   display: block; color: var(--text-2); font-size: var(--fs-xs); margin-top: 4px;
+  overflow-wrap: break-word;
 }
 
 .scale-cards { display: flex; gap: 12px; flex-wrap: wrap; }
