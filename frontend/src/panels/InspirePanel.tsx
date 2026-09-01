@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   api, ChatTurn, Concept, CONCEPT_FIELDS, EMPTY_CONCEPT, conceptIsEmpty,
   Project, Tendency,
-  StoryDNA, EMPTY_DNA, dnaIsEmpty, DnaOptions, DnaCapsuleChoice, MirrorResult,
+  StoryDNA, EMPTY_DNA, dnaIsEmpty, DnaOptions, DnaCapsuleChoice, MirrorResult, EngineCard,
 } from "../api";
 import TendencySelector from "../components/TendencySelector";
 import { useJob } from "../ui/useJob";
@@ -281,6 +281,12 @@ export default function InspirePanel({ project, onChanged, onGotoStep, outlinesC
   const [ideas, setIdeas] = useState<Concept[]>([]);
   const [comparison, setComparison] = useState("");
 
+  // 两段式(P0-A 镜像到工坊入口):没灵感时先用引擎卡(FAST 档一句话内核)便宜收敛,
+  // 选中 1-2 张再深化成完整概念——和新人引导同一套体验,工坊侧不落空
+  const [enginesOpen, setEnginesOpen] = useState(false);
+  const [engineCards, setEngineCards] = useState<EngineCard[] | null>(null);
+  const [enginePicked, setEnginePicked] = useState<string[]>([]);
+
   // 坐标卡(本书基因)+ 品味镜:定味道锚 → 照镜子确认 → 出方案(全程盯着味道写)
   const [dna, setDna] = useState<StoryDNA>(() => dnaFromProject(project));
   // 新项目(无概念/主题)默认展开坐标卡,引导先定味道;老项目收起
@@ -323,6 +329,40 @@ export default function InspirePanel({ project, onChanged, onGotoStep, outlinesC
         { kind: "inspire", onStage: (s) => setBusy(`${s}…`) },
       );
       if (r) { setIdeas(r.ideas); setComparison(r.comparison ?? ""); }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
+  }
+
+  // ---------- 两段式:先引擎卡(FAST)收敛,选中再深化 ----------
+  async function fetchEngines(avoidEngines: string[] = []) {
+    setBusy("AI 正在快速出一批故事引擎(几十秒)…"); setErr(""); setMsg("");
+    setEngineCards(null); setEnginePicked([]);
+    try {
+      const r = await runJob<{ engines: EngineCard[] }>(
+        () => api.enginesAsync(spark, tendency, 8, dnaIsEmpty(dna) ? null : dna, avoidEngines),
+        { kind: "inspire", onStage: (s) => setBusy(`${s}…`) },
+      );
+      if (r) setEngineCards(r.engines);
+    } catch (e) { setErr(errMsg(e)); setEngineCards([]); } finally { setBusy(""); }
+  }
+
+  function pickEngine(engine: string) {
+    setEnginePicked((prev) => {
+      if (prev.includes(engine)) return prev.filter((x) => x !== engine);
+      return [...prev, engine].slice(-2);
+    });
+  }
+
+  async function developConcept() {
+    if (!enginePicked.length) return;
+    setBusy("AI 正在把选中的引擎深化成完整概念(约 1 分钟)…"); setErr(""); setMsg("");
+    try {
+      const r = await runJob<{ concept: Concept }>(
+        () => api.developConceptAsync(enginePicked, spark, tendency, dnaIsEmpty(dna) ? null : dna),
+        { kind: "inspire", onStage: (s) => setBusy(`${s}…`) },
+      );
+      if (r) {
+        setIdeas([r.concept]); setComparison(""); setEnginesOpen(false); setEngineCards(null);
+      }
     } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
   }
 
@@ -541,6 +581,49 @@ export default function InspirePanel({ project, onChanged, onGotoStep, outlinesC
           <button className="primary" disabled={!!busy} onClick={brainstorm}>
             {busy && <span className="spin" />}给我灵感
           </button>
+        </div>
+        {/* 两段式二级入口:没头绪、说不出完整概念时,先出便宜的引擎卡收敛,选中再深化 */}
+        <div className="mt-1">
+          {!enginesOpen ? (
+            <button className="btn-sm" disabled={!!busy}
+              onClick={() => { setEnginesOpen(true); void fetchEngines(); }}>
+              🎯 没头绪?先挑几个「故事内核」→
+            </button>
+          ) : (
+            <div className="mt-2">
+              {engineCards === null ? (
+                <div className="muted">正在出一批故事引擎…</div>
+              ) : engineCards.length === 0 ? (
+                <div className="muted">引擎卡生成失败。<button className="btn-sm" onClick={() => fetchEngines()}>重试</button></div>
+              ) : (
+                <>
+                  <div className="muted mb-1">都只是一句话故事内核,选中后深化成完整概念(选两张 = 混搭:A 主角遇 B 局面)。</div>
+                  <div className="engine-list">
+                    {engineCards.map((card) => (
+                      <button key={card.engine} type="button"
+                        className={"engine-card" + (enginePicked.includes(card.engine) ? " on" : "")}
+                        onClick={() => pickEngine(card.engine)}>
+                        {card.angle && <span className="engine-angle">{card.angle}</span>}
+                        <b>{card.engine}</b>
+                        {card.hook && <span className="engine-hook">抓人点:{card.hook}</span>}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="actions mt-2">
+                    <button className="primary" disabled={!enginePicked.length || !!busy} onClick={developConcept}>
+                      {enginePicked.length > 1 ? "融合这两张,深化成概念 →" : "深化成完整概念 →"}
+                    </button>
+                    <button disabled={!!busy} onClick={() => fetchEngines(engineCards.map((c) => c.engine))}>
+                      都不对味,换一批
+                    </button>
+                    <button disabled={!!busy} onClick={() => { setEnginesOpen(false); setEngineCards(null); }}>
+                      算了,直接整本概念
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
         {ideas.length > 0 && (
           <div className="mt-3">
