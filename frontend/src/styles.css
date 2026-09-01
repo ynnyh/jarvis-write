@@ -2075,6 +2075,44 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 .genre-card b { display: block; font-size: var(--fs-sm); }
 .genre-card span { display: block; color: var(--text-2); font-size: var(--fs-xs); margin-top: 2px; }
 
+/* 方向卡屏·轻偏好(P0-B 偏好前移):标签行 + chips,全部可跳过;
+   布局紧凑、不抢流派卡的主次——它是"顺手勾一下",不是必答题 */
+.pref-quick {
+  border-top: 1px dashed var(--line);
+  padding-top: var(--sp-2);
+  display: flex; flex-direction: column; gap: var(--sp-1);
+}
+.pref-row { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; }
+.pref-label {
+  flex: 0 0 auto; font-size: var(--fs-xs); color: var(--text-3);
+  min-width: 6.5em;
+}
+.pref-label small { margin-left: 4px; opacity: 0.75; }
+
+/* 概念屏·两段式第一段(P0-A):故事引擎卡列表。
+   一句话内核是主角,差异坐标做角标、抓人点做次行——扫一眼就能挑 */
+.engine-list { display: flex; flex-direction: column; gap: 8px; }
+.engine-card {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  cursor: pointer;
+  text-align: left;
+  background: var(--surface);
+  color: inherit;
+  transition: border-color 0.12s, background 0.12s;
+}
+.engine-card:hover { border-color: var(--brand); background: var(--brand-weak); }
+.engine-card.on { border-color: var(--brand); background: var(--brand-weak); }
+.engine-card b { display: block; font-size: var(--fs-sm); line-height: 1.5; }
+.engine-card .engine-angle {
+  display: inline-block; font-size: var(--fs-xs); color: var(--text-3);
+  margin-bottom: 4px;
+}
+.engine-card .engine-hook {
+  display: block; color: var(--text-2); font-size: var(--fs-xs); margin-top: 4px;
+}
+
 .scale-cards { display: flex; gap: 12px; flex-wrap: wrap; }
 .scale-card {
   flex: 1 1 150px;

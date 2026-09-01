@@ -36,6 +36,8 @@ from app.prompts.dna_capsules import dna_capsule_choices, get_dna_capsule
 from app.prompts.inspire import (
     CHAT_DISTILL_PROMPT,
     CHAT_SYSTEM_PROMPT,
+    DEVELOP_PROMPT,
+    ENGINES_PROMPT,
     INSPIRE_PROMPT,
     MIRROR_DISTILL_PROMPT,
     REFINE_PROMPT,
@@ -241,6 +243,144 @@ async def inspire_async(req: InspireRequest):
         return (await _inspire_impl(req)).model_dump()
 
     return {"job_id": spawn_job(f"inspire-u{uid}", work)}
+
+
+# ============================= 两段式构思:引擎卡 + 深化 =============================
+# 动机(见 prompts/inspire.py ENGINES_PROMPT 头注):概念生成发生在偏好采集前是"信息真空",
+# 零信号下模型只能给流派平均值。第一段用 FAST 档出一批一句话引擎卡(带差异轴硬约束)让用户先挑
+# "对味的故事内核",第二段只对选中的 1-2 张花强模型深化——试错成本降一个量级,命中率先升。
+class EngineCard(BaseModel):
+    """一张故事引擎卡:一句话内核 + 差异坐标 + 抓人点。"""
+
+    engine: str = Field(description="一句话故事内核(40-60 字)")
+    angle: str = Field(default="", description="差异坐标:主角类型·冲突来源·基调")
+    hook: str = Field(default="", description="这张卡抓人的点")
+
+
+class EnginesRequest(BaseModel):
+    spark: str = Field(default="", description="灵感碎片,可为空(选流派时为流派指令)")
+    tendency: Tendency = Field(default_factory=dict)
+    count: int = Field(default=8, ge=4, le=10, description="引擎卡数量")
+    dna: StoryDNA | None = None
+    # P1 顺手项:换一批时传上一批的引擎句,让重出的一批明显不同(同输入重跑天然趋同)
+    avoid_engines: list[str] = Field(
+        default_factory=list, description="上一批引擎句,本轮要明显区别于它们",
+    )
+
+
+class EnginesResponse(BaseModel):
+    engines: list[EngineCard]
+
+
+async def _engines_impl(req: EnginesRequest) -> EnginesResponse:
+    story = _dna_of(req.dna)
+    style_block = render_style_block(assemble_tendency("outline", req.tendency))
+    style_block += dna_block_of(story)
+    # 换一批带 avoid:把上批引擎句列进去,逼模型换轴重想(而不是同输入重跑趋同)
+    avoid_block = ""
+    clean_avoid = [a.strip() for a in req.avoid_engines if a.strip()][:10]
+    if clean_avoid:
+        avoid_block = (
+            "【上一批引擎用户都不满意,本轮必须换方向:以下内核不要再现,主角类型/冲突来源至少换轴】\n"
+            + "\n".join(f"- {a}" for a in clean_avoid) + "\n"
+        )
+    prompt = ENGINES_PROMPT.format(
+        spark=req.spark.strip() or "(空白,按所选方向自由发挥)",
+        count=req.count,
+        style_directives=style_block,
+        avoid_block=avoid_block,
+        genre_boundary=_GENRE_BOUNDARY,
+    )
+    try:
+        raw = await get_adapter_for(Task.SUMMARY).ask(prompt)  # FAST 档:收敛层要快
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"引擎卡生成失败: {exc}") from exc
+    data = parse_llm_json(raw)
+    engines = [
+        EngineCard(
+            engine=str(e.get("engine") or "").strip(),
+            angle=str(e.get("angle") or "").strip(),
+            hook=str(e.get("hook") or "").strip(),
+        )
+        for e in (data.get("engines") or []) if isinstance(e, dict)
+    ]
+    engines = [e for e in engines if e.engine][: req.count]
+    if not engines:
+        raise HTTPException(status_code=502, detail="引擎卡解析失败,请重试")
+    return EnginesResponse(engines=engines)
+
+
+@router.post("/engines", response_model=EnginesResponse)
+async def engines(req: EnginesRequest) -> EnginesResponse:
+    """两段式第一段:方向+偏好 → 一批故事引擎卡(FAST 档,几十秒内)。"""
+    return await _engines_impl(req)
+
+
+@router.post("/engines/async")
+async def engines_async(req: EnginesRequest):
+    """异步版引擎卡:立即返回 job_id。"""
+    uid = current_user_id.get()
+
+    async def work(progress):
+        progress("AI 正在快速出一批故事引擎")
+        return (await _engines_impl(req)).model_dump()
+
+    return {"job_id": spawn_job(f"inspire-engines-u{uid}", work)}
+
+
+class DevelopRequest(BaseModel):
+    # 选中的引擎句(1 张深化 / 2 张混搭:A 的主角遇 B 的局面)
+    engines: list[str] = Field(min_length=1, max_length=2)
+    spark: str = Field(default="", description="灵感碎片(可选,深化参考)")
+    tendency: Tendency = Field(default_factory=dict)
+    dna: StoryDNA | None = None
+
+
+class DevelopResponse(BaseModel):
+    concept: Concept
+
+
+async def _develop_impl(req: DevelopRequest) -> DevelopResponse:
+    picked = [e.strip() for e in req.engines if e.strip()]
+    if not picked:
+        raise HTTPException(status_code=400, detail="请先选至少一张引擎卡")
+    engines_block = "\n".join(
+        f"引擎{'一' if i == 0 else '二'}:{e}" for i, e in enumerate(picked[:2])
+    ) + ("\n(用户想混搭:融合两张卡的要素)" if len(picked) > 1 else "")
+    style_block = render_style_block(assemble_tendency("outline", req.tendency))
+    style_block += dna_block_of(_dna_of(req.dna))
+    prompt = DEVELOP_PROMPT.format(
+        engines_block=engines_block,
+        spark=req.spark.strip() or "(无,以选中的引擎为准)",
+        style_directives=style_block,
+        genre_boundary=_GENRE_BOUNDARY,
+    )
+    try:
+        raw = await get_adapter_for(Task.ARCHITECTURE).ask(prompt)  # 深化才花强模型
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"概念深化失败: {exc}") from exc
+    concept = coerce_concept(parse_llm_json(raw))
+    if concept.is_empty():
+        raise HTTPException(status_code=502, detail="概念深化解析失败,请重试")
+    return DevelopResponse(concept=concept)
+
+
+@router.post("/develop", response_model=DevelopResponse)
+async def develop(req: DevelopRequest) -> DevelopResponse:
+    """两段式第二段:选中的引擎卡 → 完整六字段概念(强模型)。"""
+    return await _develop_impl(req)
+
+
+@router.post("/develop/async")
+async def develop_async(req: DevelopRequest):
+    """异步版深化:立即返回 job_id。"""
+    uid = current_user_id.get()
+
+    async def work(progress):
+        progress("AI 正在把选中的引擎深化成概念")
+        return (await _develop_impl(req)).model_dump()
+
+    return {"job_id": spawn_job(f"inspire-develop-u{uid}", work)}
 
 
 # ============================= 指令式改 =============================

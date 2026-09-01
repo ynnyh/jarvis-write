@@ -588,6 +588,12 @@ export function conceptIsEmpty(c: Concept | null | undefined): boolean {
 export interface RefineResult { concept: Concept; changed: (keyof Concept)[]; note: string; }
 export interface ChatTurn { role: "user" | "assistant"; content: string; }
 export interface ChatResult { reply: string; concept: Concept; }
+/** 两段式构思·第一段产物:一张故事引擎卡(一句话内核 + 差异坐标 + 抓人点) */
+export interface EngineCard {
+  engine: string;
+  angle: string;
+  hook: string;
+}
 
 // ---------- 故事 DNA / 本书基因(创作坐标) ----------
 /** 概念之上的「定味道」锚:治「选了青春校园却生成觉醒异能」的题材漂移。全字段可空,渐进捏成。
@@ -876,6 +882,13 @@ export const api = {
   // ---- 异步 job 版长任务(返回 job_id,配合 pollJob/任务中心) ----
   inspireAsync: (spark: string, tendency: Tendency, count = 4, dna: StoryDNA | null = null, avoid?: Concept | null) =>
     req<{ job_id: string }>("POST", "/api/inspire/async", { spark, tendency, count, dna, avoid: avoid && !conceptIsEmpty(avoid) ? avoid : undefined }),
+  // 两段式构思·第一段:方向+偏好 → 一批故事引擎卡(FAST 档,先便宜收敛)
+  enginesAsync: (spark: string, tendency: Tendency, count = 8, dna: StoryDNA | null = null, avoidEngines: string[] = []) =>
+    req<{ job_id: string }>("POST", "/api/inspire/engines/async",
+      { spark, tendency, count, dna, avoid_engines: avoidEngines.length ? avoidEngines : undefined }),
+  // 两段式构思·第二段:选中的引擎(1-2 张,可混搭)→ 深化成完整概念(强模型)
+  developConceptAsync: (engines: string[], spark = "", tendency: Tendency = {}, dna: StoryDNA | null = null) =>
+    req<{ job_id: string }>("POST", "/api/inspire/develop/async", { engines, spark, tendency, dna }),
   refineConceptAsync: (concept: Concept, directive: string, tendency: Tendency = {}, dna: StoryDNA | null = null) =>
     req<{ job_id: string }>("POST", "/api/inspire/refine-async", { concept, directive, tendency, dna }),
   polishChapterAsync: (pid: number, n: number, tendency: Tendency, directive = "") =>

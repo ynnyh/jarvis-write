@@ -19,6 +19,14 @@ import { useOnboarding } from "./onboarding/useOnboarding";
 // SetupStep 原在本文件定义,保留 re-export 以兼容潜在外部引用(现仅本文件内部使用)
 export type { SetupStep };
 
+// 方向卡屏轻偏好预置(P0-B 偏好前移):都是高频人话选项,全部可不选;
+// tone/elements 的 directive 已在后端 tag_presets 里,这里只放 label 让用户点
+const PREF_TONES = ["热血", "悬疑", "治愈", "甜", "暗黑", "爽"];
+const PREF_ELEMENTS = ["逆袭", "马甲", "身份错位", "成长蜕变", "救赎", "群像", "破镜重圆", "契约关系"];
+const PREF_PROTAGONISTS = ["小人物", "行内老手", "边缘人", "天才", "普通人"];
+// 排斥项对着题材边界最常拦的套路来(用户明确点了才允许,没点就是「不要」)
+const PREF_AVOIDS = ["系统", "重生", "穿越", "觉醒", "异能"];
+
 export default function OnboardingFlow() {
   const {
     // 基础 / 路由
@@ -28,6 +36,8 @@ export default function OnboardingFlow() {
     // 各屏 state
     spark, entry, genreDim, pickedGenreCard, chatInput, busy,
     ideas, comparison, ideaSig, customOpen, customConcept,
+    prefTone, prefElements, prefProta, prefAvoid,
+    engineCards, enginePicked, genrePath,
     inferBusy, customGenre,
     titleIdeas, titleSig, titleBusy, titleInput,
     chapters, words, advOpen,
@@ -35,6 +45,7 @@ export default function OnboardingFlow() {
     // setter
     setSpark, setEntry, setPickedGenreCard, setChatInput,
     setIdeaSig, setCustomOpen, setCustomConcept,
+    setPrefTone, setPrefElements, setPrefProta, setPrefAvoid,
     setGenreSuggests, setSuggestPage, setCustomGenre,
     setTitleSig, setTitleInput, setChapters, setWords, setAdvOpen, setDirty,
     // ref
@@ -42,6 +53,7 @@ export default function OnboardingFlow() {
     // handler
     submitSpark, pickGenreBrainstorm, sendChat,
     brainstorm, regenWithFeedback, pickConcept, saveCustomConcept,
+    fetchEngines, pickEngine, developConcept,
     setGenre, setDim, fetchTitles, pickTitle, pickScale, confirmScale,
     runArch, runBp, enterWorkbench, abandon, goto, editFrom, markDirtyOk,
   } = useOnboarding();
@@ -174,6 +186,65 @@ export default function OnboardingFlow() {
                             </div>
                           );
                         })}
+
+                        {/* 轻偏好(P0-B 偏好前移):三两个可跳过的小问题,概念生成前先喂给 AI;
+                            都不选也行——但选了就不是"流派平均值"了 */}
+                        {pickedGenreCard && (
+                          <div className="pref-quick mt-3">
+                            <div className="pref-row">
+                              <span className="pref-label">想要的味道<small>可不选</small></span>
+                              <div className="title-chips">
+                                {PREF_TONES.map((t) => (
+                                  <button key={t} type="button"
+                                    className={"title-chip" + (prefTone.includes(t) ? " on" : "")}
+                                    onClick={() => setPrefTone((p) =>
+                                      p.includes(t) ? p.filter((x) => x !== t) : [...p, t])}>
+                                    {t}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="pref-row">
+                              <span className="pref-label">想要的元素<small>可多选</small></span>
+                              <div className="title-chips">
+                                {PREF_ELEMENTS.map((t) => (
+                                  <button key={t} type="button"
+                                    className={"title-chip" + (prefElements.includes(t) ? " on" : "")}
+                                    onClick={() => setPrefElements((p) =>
+                                      p.includes(t) ? p.filter((x) => x !== t) : [...p, t])}>
+                                    {t}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="pref-row">
+                              <span className="pref-label">主角更像<small>可不选</small></span>
+                              <div className="title-chips">
+                                {PREF_PROTAGONISTS.map((t) => (
+                                  <button key={t} type="button"
+                                    className={"title-chip" + (prefProta === t ? " on" : "")}
+                                    onClick={() => setPrefProta((p) => (p === t ? "" : t))}>
+                                    {t}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="pref-row">
+                              <span className="pref-label">不想看到<small>可不选</small></span>
+                              <div className="title-chips">
+                                {PREF_AVOIDS.map((t) => (
+                                  <button key={t} type="button"
+                                    className={"title-chip" + (prefAvoid.includes(t) ? " on" : "")}
+                                    onClick={() => setPrefAvoid((p) =>
+                                      p.includes(t) ? p.filter((x) => x !== t) : [...p, t])}>
+                                    {t}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
                         <div className="actions mt-3">
                           <button className="primary" disabled={!pickedGenreCard}
                             onClick={pickGenreBrainstorm}>
@@ -236,7 +307,47 @@ export default function OnboardingFlow() {
                     )}
                     {sparkText && (
                       <>
-                        {ideas === null && (
+                        {/* 两段式·第一段(P0-A):方向路先挑便宜的引擎卡(FAST 档一句话内核),
+                            选 1-2 张再深化——试错成本降一个量级,强模型只跑选中的那一个 */}
+                        {genrePath && ideas === null && engineCards !== null && (
+                          <div className="mt-2 mb-2">
+                            {engineCards.length === 0 ? (
+                              <div className="muted">
+                                引擎卡生成失败。
+                                <button className="btn-sm" onClick={() => fetchEngines()}>重试</button>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="card-desc">
+                                  先挑对味的故事内核——都只是一句话种子,选中后再深化成完整概念
+                                  (选两张 = 混搭:A 的主角遇 B 的局面)。
+                                </div>
+                                <div className="engine-list mt-2">
+                                  {engineCards.map((card) => (
+                                    <button key={card.engine} type="button"
+                                      className={"engine-card" + (enginePicked.includes(card.engine) ? " on" : "")}
+                                      onClick={() => pickEngine(card.engine)}>
+                                      {card.angle && <span className="engine-angle">{card.angle}</span>}
+                                      <b>{card.engine}</b>
+                                      {card.hook && <span className="engine-hook">抓人点:{card.hook}</span>}
+                                    </button>
+                                  ))}
+                                </div>
+                                <div className="actions mt-2">
+                                  <button className="primary" disabled={!enginePicked.length || !!busy}
+                                    onClick={developConcept}>
+                                    {enginePicked.length > 1 ? "融合这两张,深化成概念 →" : "深化成完整概念 →"}
+                                  </button>
+                                  <button disabled={!!busy}
+                                    onClick={() => fetchEngines(engineCards.map((c) => c.engine))}>
+                                    都不对味,换一批
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
+                        {ideas === null && (genrePath ? engineCards === null : true) && (
                           <div className="muted mt-2 mb-2">
                             <span className="spin" /><ThinkingText phrases={THINK_CONCEPT} />
                           </div>

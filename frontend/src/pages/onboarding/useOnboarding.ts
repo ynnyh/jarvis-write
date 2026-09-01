@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   api, ChatTurn, Chip, Concept, conceptIsEmpty, Dimension,
-  EMPTY_CONCEPT, Project, RefineResult, Tendency,
+  EMPTY_CONCEPT, EngineCard, Project, RefineResult, Tendency,
 } from "../../api";
 import { useJob } from "../../ui/useJob";
 import { pollJob, errMsg } from "../../pollJob";
@@ -43,6 +43,13 @@ export function useOnboarding() {
   const [chatInput, setChatInput] = useState("");
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const sparkRef = useRef<HTMLTextAreaElement | null>(null);
+  // 方向卡屏·轻偏好(P0-B 偏好前移):全部可选、可跳过。零信号下模型只能给流派平均值
+  // (=最套路的写法),这就是"选了方向生成的还不对味"的根因;偏好前移一步,命中率先升。
+  // 基调/元素直接进 tendency(后端结构化注入,零新维度);主角类型/排斥拼进 spark 文本。
+  const [prefTone, setPrefTone] = useState<string[]>([]);
+  const [prefElements, setPrefElements] = useState<string[]>([]);
+  const [prefProta, setPrefProta] = useState("");
+  const [prefAvoid, setPrefAvoid] = useState<string[]>([]);
 
   // 概念屏
   const [ideas, setIdeas] = useState<Concept[] | null>(null);
@@ -51,6 +58,9 @@ export function useOnboarding() {
   const [customOpen, setCustomOpen] = useState(false);
   const [customConcept, setCustomConcept] = useState<Concept>({ ...EMPTY_CONCEPT });
   const brainstormedFor = useRef("");
+  // 两段式构思(P0-A):方向路先出便宜的引擎卡(FAST 档)收敛,选中 1-2 张才花强模型深化
+  const [engineCards, setEngineCards] = useState<EngineCard[] | null>(null);
+  const [enginePicked, setEnginePicked] = useState<string[]>([]); // 选中的引擎句,最多 2 张(混搭)
 
   // 题材屏
   const [inferBusy, setInferBusy] = useState(false);
@@ -91,6 +101,8 @@ export function useOnboarding() {
     concept.logline, concept.hook, concept.protagonist, concept.setting,
   ].filter((s) => s?.trim()).join("\n") || project?.topic || "";
   const sparkText = spark.trim() || project?.topic?.trim() || "";
+  // 方向路标记:概念屏据此分流(引擎卡两段式 vs 直接出概念)
+  const genrePath = isGenrePath(sparkText);
 
   // ---------- 建草稿 / 载入(含 localStorage 恢复) ----------
   // 只建一次草稿:StrictMode/重渲染下 effect 可能重入,无守卫会静默建出多个空项目
@@ -188,12 +200,21 @@ export function useOnboarding() {
 
   async function pickGenreBrainstorm() {
     if (!pickedGenreCard) return;
-    const text = `按「${pickedGenreCard.label}」的套路来`;
+    // P0-B 偏好前移:基调/元素走 tendency 结构化注入(后端渲染成【本次写作倾向】);
+    // 主角类型/排斥拼进 spark 文本(无对应倾向维度,拼文本最直接且零后端改动)
+    const t: Tendency = { ...tendency, genre: pickedGenreCard.label };
+    if (prefTone.length) t.tone = prefTone;
+    if (prefElements.length) t.elements = prefElements;
+    const extras: string[] = [];
+    if (prefProta) extras.push(`主角偏好:${prefProta}`);
+    if (prefAvoid.length) extras.push(`不要出现:${prefAvoid.join("、")}`);
+    const text = extras.length
+      ? `按「${pickedGenreCard.label}」的套路来。${extras.join(";")}`
+      : `按「${pickedGenreCard.label}」的套路来`;
     setSpark(text);
     try {
       await patch({
-        global_tendency: { ...tendency, genre: pickedGenreCard.label },
-        genre: pickedGenreCard.label, topic: text,
+        global_tendency: t, genre: pickedGenreCard.label, topic: text,
       });
     } catch { /* 同上 */ }
     await goto("concept");
@@ -220,6 +241,47 @@ export function useOnboarding() {
   }
 
   // ---------- 第 2 屏:概念方案 ----------
+  // 方向路判定:spark 是 pickGenreBrainstorm 拼出来的「按「XX」的套路来」格式。
+  // 该路走两段式(先便宜引擎卡收敛);用户自写想法的路保持直接出概念(已有明确想法,不需要收敛层)。
+  function isGenrePath(text: string): boolean {
+    return text.startsWith("按「") && text.includes("套路来");
+  }
+
+  // 两段式·第一段:FAST 档出一批故事引擎卡(带差异轴);换一批传上一批引擎句当 avoid,不趋同
+  async function fetchEngines(avoidEngines: string[] = []) {
+    setErr(""); setEngineCards(null); setEnginePicked([]);
+    setBusy("AI 正在快速出一批故事引擎(几十秒)…");
+    try {
+      const r = await runJob<{ engines: EngineCard[] }>(
+        () => api.enginesAsync(sparkText, tendency, 8, project?.dna ?? null, avoidEngines),
+        { kind: "inspire" },
+      );
+      if (r) setEngineCards(r.engines);
+    } catch (e) { setErr(errMsg(e)); setEngineCards([]); } finally { setBusy(""); }
+  }
+
+  // 引擎卡点选:再点取消;最多 2 张(第 3 张挤掉最早选的),两张 = 混搭(A 的主角遇 B 的局面)
+  function pickEngine(engine: string) {
+    setEnginePicked((prev) => {
+      if (prev.includes(engine)) return prev.filter((x) => x !== engine);
+      return [...prev, engine].slice(-2);
+    });
+  }
+
+  // 两段式·第二段:选中的引擎 → 强模型深化成单个六字段概念
+  async function developConcept() {
+    if (!enginePicked.length) return;
+    setErr(""); setIdeas(null);
+    setBusy("AI 正在把选中的引擎深化成完整概念(约 1 分钟)…");
+    try {
+      const r = await runJob<{ concept: Concept }>(
+        () => api.developConceptAsync(enginePicked, sparkText, tendency, project?.dna ?? null),
+        { kind: "inspire" },
+      );
+      if (r) { setIdeas([r.concept]); setComparison(""); setEngineCards(null); }
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
+  }
+
   async function brainstorm(feedback = "") {
     const base = sparkText;
     if (!base) return;
@@ -236,15 +298,17 @@ export function useOnboarding() {
     } catch (e) { setErr(errMsg(e)); setIdeas([]); }
   }
 
-  // 进概念屏自动生成一批(有缓存候选则不重复生成)
+  // 进概念屏自动生成(有缓存候选则不重复生成):方向路出引擎卡,想法路直接出概念
   useEffect(() => {
-    if (step !== "concept" || !project || ideas !== null) return;
+    if (step !== "concept" || !project) return;
+    if (ideas !== null || engineCards !== null) return;
     const key = sparkText;
     if (!key || brainstormedFor.current === key) return;
     brainstormedFor.current = key;
-    void brainstorm();
+    if (isGenrePath(key)) void fetchEngines();
+    else void brainstorm();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, project, ideas]);
+  }, [step, project, ideas, engineCards]);
 
   // 带反馈重新生成:有灵感文本 → 追加要求重出 4 个;对话捏出的概念 → refine 精修
   async function regenWithFeedback(f: string) {
@@ -468,6 +532,8 @@ export function useOnboarding() {
     // 各屏 state
     spark, entry, genreDim, pickedGenreCard, chatInput, busy,
     ideas, comparison, ideaSig, customOpen, customConcept,
+    prefTone, prefElements, prefProta, prefAvoid,
+    engineCards, enginePicked, genrePath,
     inferBusy, customGenre,
     titleIdeas, titleSig, titleBusy, titleInput,
     chapters, words, advOpen,
@@ -475,6 +541,7 @@ export function useOnboarding() {
     // 渲染需要的 setter
     setSpark, setEntry, setPickedGenreCard, setChatInput,
     setIdeaSig, setCustomOpen, setCustomConcept,
+    setPrefTone, setPrefElements, setPrefProta, setPrefAvoid,
     setGenreSuggests, setSuggestPage, setCustomGenre,
     setTitleSig, setTitleInput, setChapters, setWords, setAdvOpen, setDirty,
     // ref
@@ -482,6 +549,7 @@ export function useOnboarding() {
     // handler
     submitSpark, pickGenreBrainstorm, sendChat,
     brainstorm, regenWithFeedback, pickConcept, saveCustomConcept,
+    fetchEngines, pickEngine, developConcept,
     setGenre, setDim, fetchTitles, pickTitle, pickScale, confirmScale,
     runArch, runBp, enterWorkbench, abandon, goto, editFrom, markDirtyOk,
   };
