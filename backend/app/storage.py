@@ -17,6 +17,7 @@
 目录:<上传根>/drama/<project_id>/<card_id>-<n>.<ext>(项目资产);
     <上传根>/clips/<clip_id>/<段号>-<n>.<ext>(短片出片参考图);
     <上传根>/birthday/<wish_id>/<段号>-<n>.<ext>(生日祝福出片参考图,多为寿星真实照片);
+    <上传根>/series/<character_id>/ref-<n>.<ext>(角色系列短片的定妆参考图,全系列人物锚);
 上传根默认取 SQLite 库所在目录下的 uploads/(Docker 里就是数据卷 /srv/data/uploads,随卷一起备份)。
 """
 from __future__ import annotations
@@ -36,6 +37,8 @@ MAX_ASSETS_PER_SHOT = 2                # 每格分镜最多挂 2 张静帧(出�
 MAX_PROJECT_UPLOAD_BYTES = 80 * 1024 * 1024  # 单项目上传总量上限 80MB
 MAX_CLIP_UPLOAD_BYTES = 20 * 1024 * 1024     # 短片参考图上限 20MB(短片未必挂项目,单独限量)
 MAX_WISH_UPLOAD_BYTES = 20 * 1024 * 1024     # 祝福片参考图上限 20MB(同理按 wish 号单独限量)
+MAX_SERIES_UPLOAD_BYTES = 20 * 1024 * 1024   # 角色定妆参考图上限 20MB(按角色号单独限量)
+MAX_REFS_PER_CHARACTER = 3                   # 每个系列角色最多 3 张定妆参考图(正面/侧面/表情)
 MAX_RENDER_BYTES = 120 * 1024 * 1024        # 单个渲染草片上限 120MB(15s 768p 通常几 MB,放宽防意外)
 MAX_AUDIO_BYTES = 8 * 1024 * 1024           # 音色参考音频上限 8MB(5-10 秒 mp3/wav 远用不满)
 MAX_BGM_BYTES = 15 * 1024 * 1024            # 每集 BGM 上限 15MB(一首主题曲 mp3 通常 3-8MB)
@@ -62,6 +65,7 @@ _REL_RE = re.compile(
     r"|drama/\d+/bgm\d+\.(?:mp3|wav)"
     r"|clips/\d+/\d+-\d+\.(?:png|jpg|webp)"
     r"|birthday/\d+/\d+-\d+\.(?:png|jpg|webp)"
+    r"|series/\d+/ref-\d+\.(?:png|jpg|webp)"
     r"|render/r\d+\.mp4"
     r"|render/tts/[0-9a-f]{16}\.wav"
     r"|render/lf/r\d+\.png"
@@ -139,6 +143,11 @@ def wish_usage_bytes(wish_id: int) -> int:
     return _dir_usage(upload_root() / "birthday" / str(int(wish_id)))
 
 
+def series_usage_bytes(character_id: int) -> int:
+    """某系列角色已占用的定妆参考图空间(字节)。"""
+    return _dir_usage(upload_root() / "series" / str(int(character_id)))
+
+
 def save_character_ref(project_id: int, card_id: int, data: bytes, taken: int) -> str:
     """保存一张定妆照,返回相对路径(存进 DramaCharacterCard.ref_images)。
 
@@ -180,6 +189,18 @@ def save_wish_ref(wish_id: int, segment_index: int, data: bytes, taken: int) -> 
     return _save_image(
         "birthday", wish_id, str(int(segment_index)), data, taken,
         "参考图", MAX_WISH_UPLOAD_BYTES, wish_usage_bytes(wish_id),
+    )
+
+
+def save_series_ref(character_id: int, data: bytes, taken: int) -> str:
+    """保存系列角色的一张定妆参考图,返回相对路径(存进 SeriesCharacter.ref_images)。
+
+    固定主角的系列短片里,这张图是**全系列**的人物一致性锚点(每集出片都用它),
+    按角色号独占 series/ 目录;文件名 ref-<n>,用户输入不参与路径。
+    """
+    return _save_image(
+        "series", character_id, "ref", data, taken,
+        "定妆参考图", MAX_SERIES_UPLOAD_BYTES, series_usage_bytes(character_id),
     )
 
 
@@ -345,6 +366,11 @@ def delete_clip_dir(clip_id: int) -> int:
 def delete_wish_dir(wish_id: int) -> int:
     """删掉某祝福片的整个参考图目录,返回删掉的文件数(删祝福片时调用,理由同项目)。"""
     return _delete_owner_dir("birthday", wish_id)
+
+
+def delete_series_dir(character_id: int) -> int:
+    """删掉某系列角色的整个定妆参考图目录(删角色时调用,理由同项目)。"""
+    return _delete_owner_dir("series", character_id)
 
 
 def _delete_owner_dir(area: str, owner_id: int) -> int:

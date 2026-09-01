@@ -17,6 +17,7 @@ const ENTRIES = [
   { to: "/free", ico: "✨", label: "故事工坊" },
   { to: "/promo", ico: "🎬", label: "宣传片工坊" },
   { to: "/birthday", ico: "🎂", label: "生日祝福" },
+  { to: "/series", ico: "🐾", label: "系列短片" },
   { to: "/help", ico: "📖", label: "使用指南" },
   { to: "/settings", ico: "⚙︎", label: "设置" },
 ];

@@ -129,6 +129,41 @@ def upgrade() -> None:
     with op.batch_alter_table('birthday_wishes', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_birthday_wishes_user_id'), ['user_id'], unique=False)
 
+    op.create_table('series_characters',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('user_id', sa.Integer(), nullable=True),
+    sa.Column('name', sa.String(length=60), nullable=False),
+    sa.Column('look', sa.Text(), nullable=False),
+    sa.Column('direction', sa.String(length=40), nullable=False),
+    sa.Column('default_duration_s', sa.Integer(), nullable=False),
+    sa.Column('style_hints', sa.String(length=160), server_default='', nullable=False),
+    sa.Column('ref_images', sa.JSON(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='SET NULL'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    with op.batch_alter_table('series_characters', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_series_characters_user_id'), ['user_id'], unique=False)
+
+    op.create_table('series_episodes',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('user_id', sa.Integer(), nullable=True),
+    sa.Column('character_id', sa.Integer(), nullable=False),
+    sa.Column('plot', sa.Text(), nullable=False),
+    sa.Column('duration_s', sa.Integer(), nullable=False),
+    sa.Column('output', sa.JSON(), nullable=False),
+    sa.Column('status', sa.String(length=20), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['character_id'], ['series_characters.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    with op.batch_alter_table('series_episodes', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_series_episodes_user_id'), ['user_id'], unique=False)
+        batch_op.create_index(batch_op.f('ix_series_episodes_character_id'), ['character_id'], unique=False)
+
     op.create_table('projects',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('user_id', sa.Integer(), nullable=True),

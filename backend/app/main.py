@@ -53,6 +53,7 @@ from app.api.writing_cards import router as writing_cards_router
 from app.api.promo import router as promo_router
 from app.api.clips import router as clips_router
 from app.api.birthday import router as birthday_router
+from app.api.series import router as series_router
 from app.api.render import router as render_router
 from app.config import get_settings
 from app.db.base import Base
@@ -231,6 +232,7 @@ def create_app() -> FastAPI:
     app.include_router(promo_router)
     app.include_router(clips_router)
     app.include_router(birthday_router)
+    app.include_router(series_router)
     app.include_router(render_router)
     app.include_router(project_io_router)
     app.include_router(misc_router)

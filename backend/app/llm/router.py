@@ -47,6 +47,8 @@ class Task(str, Enum):
     PROMO_CHUNKS = "promo_chunks"       # 宣传片生成切段(视频提示词)
     CLIPS_BATCH = "clips_batch"         # 情绪短片批产(三本子一次出)
     BIRTHDAY_BATCH = "birthday_batch"   # 生日祝福批产(三本子一次出)
+    SERIES_LOOK = "series_look"         # 角色系列·AI 代写定妆描述
+    SERIES_PROMPT = "series_prompt"     # 角色系列·单集成片提示词(篇幅自由)
     # 书籍元信息类短任务。这几条原先绕开本路由、直接按「协议名」造适配器,
     # 于是永远取到该协议里**创建最早**的那套配置,用户在设置页标「默认」的那套被丢掉
     # (症状:换成官方 DeepSeek 也没用,请求照旧打到最早那个中转站)。
@@ -97,6 +99,9 @@ _TASK_TIER: dict[Task, Tier] = {
     Task.CLIPS_BATCH: Tier.QUALITY,
     # 生日祝福批产:寿星定制要才气与专属梗,同情绪短片上强档
     Task.BIRTHDAY_BATCH: Tier.QUALITY,
+    # 角色系列:定妆是全系列一致性锚求稳,单集提示词要细节密度与镜头感
+    Task.SERIES_LOOK: Tier.QUALITY,
+    Task.SERIES_PROMPT: Tier.QUALITY,
     # 书籍元信息:书名/简介/投稿包是门面活,一次性、字数少,上强档不心疼。
     # **必须显式列出**——`_TASK_TIER.get(task, Tier.FAST)` 缺省是快档,漏一条就是静默降档。
     Task.TITLE: Tier.QUALITY,
@@ -138,6 +143,9 @@ _TASK_TEMPERATURE: dict[Task, float] = {
     Task.PROMO_CHUNKS: 0.5,    # 运动叙事要连贯
     Task.CLIPS_BATCH: 0.85,   # 情绪短片要才气与钩子
     Task.BIRTHDAY_BATCH: 0.85,  # 生日祝福要专属梗与钩子,同样要发散
+    # 角色系列:定妆求稳(锚定全系列形象),单集提示词是结构化长输出也要克制
+    Task.SERIES_LOOK: 0.5,
+    Task.SERIES_PROMPT: 0.6,
 }
 
 
@@ -170,6 +178,10 @@ _TASK_MAX_TOKENS: dict[Task, int] = {
     Task.PROMO_CHUNKS: 6000,
     Task.CLIPS_BATCH: 8000,
     Task.BIRTHDAY_BATCH: 8000,
+    # 角色系列:定妆与单集提示词篇幅自由(允许上千字),推理模型思考再吃一截,
+    # 4000 会把长提示词砍在半句话上(与 DRAMA_ASSET 同一教训)
+    Task.SERIES_LOOK: 6000,
+    Task.SERIES_PROMPT: 8000,
 }
 
 
