@@ -95,9 +95,22 @@ cd backend && python -m pytest -q
 
 # 前端
 cd frontend && npx tsc --noEmit && npx eslint . && npx vitest run
+
+# e2e 冒烟(真浏览器,含 390px 窄屏;改了 UI/接口必跑)
+cd frontend && npm run e2e
 ```
 
 其中 `frontend/src/test/uiConventions.test.ts` 是版面公约门禁，`backend/tests/test_engine_conventions.py` 是引擎分层门禁，被拦住时只有两条出路：整改，或者证明判据本身写错了——别加豁免名单。
+
+## UI 功能的「完成定义」三查
+
+单测管逻辑，管不住「渲染出来长什么样、交互顺不顺」——概念页引擎卡排版、生成按钮无忙态这两个 bug 都是全绿之后用户肉眼发现的。所以凡是动了 UI 的改动，合入前三查是完成定义的一部分：
+
+1. **窄屏查**：浏览器切 390px 宽（或 `npm run e2e` 的 mobile 项目）过一遍改动页面——文字不溢出、卡片有边界、按钮点得到；
+2. **暗色查**：切暗色主题再看一眼——没有硬编码色号残留（走 CSS 令牌就自动跟随）；
+3. **状态查**：加载中/成功/失败三个态都见过——按钮有忙态、报错有人话提示、不会卡死在中间态。
+
+三查各半分钟，省的是用户截图来报 bug 的一晚上。
 
 ## 提交信息
 

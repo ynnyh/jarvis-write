@@ -10,10 +10,11 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": "http://127.0.0.1:8000",
-      "/settings": "http://127.0.0.1:8000",
-      "/docs": "http://127.0.0.1:8000",
-      "/openapi.json": "http://127.0.0.1:8000",
+      // e2e 冒烟用 VITE_API_TARGET 把 /api 指到临时后端(如 8765),默认本地 8000
+      "/api": process.env.VITE_API_TARGET || "http://127.0.0.1:8000",
+      "/settings": process.env.VITE_API_TARGET || "http://127.0.0.1:8000",
+      "/docs": process.env.VITE_API_TARGET || "http://127.0.0.1:8000",
+      "/openapi.json": process.env.VITE_API_TARGET || "http://127.0.0.1:8000",
     },
   },
   build: {
@@ -22,5 +23,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
+    // e2e(playwright)目录不进 vitest:那是真浏览器冒烟,不是单测
+    exclude: ["**/node_modules/**", "e2e/**"],
   },
 });
