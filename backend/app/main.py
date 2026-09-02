@@ -150,8 +150,12 @@ async def lifespan(app: FastAPI):
     # AI 味检测热更配置(管理端在线调过的权重/门槛)载进内存;失败不拦启动
     from app.api.admin import load_ai_flavor_config
     load_ai_flavor_config()
+    # 功能使用计数的周期落库(内存缓冲 → 30s 批量 upsert,停机时清空缓冲)
+    from app import usage
+    usage.start_flush_loop()
     logger.info("服务就绪。")
     yield
+    usage.stop_flush_loop()
 
 
 def create_app() -> FastAPI:

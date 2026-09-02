@@ -1,6 +1,6 @@
 // 后台管理页(仅管理员):用户列表 + 多邀请码管理 + AI 味检测调参
 import { useCallback, useEffect, useState } from "react";
-import { api, AdminUser, AiFlavorConfig, InviteCodeItem } from "../api";
+import { api, AdminUser, AiFlavorConfig, FeatureUsageStat, InviteCodeItem } from "../api";
 import { errMsg } from "../pollJob";
 import { CopyBtn } from "../ui/copy";
 
@@ -286,9 +286,69 @@ export default function AdminPage() {
 
       <FlavorConfigCard />
 
+      <UsageStatsCard />
+
       {msg && <div className="msg-ok page-flash">{msg}</div>}
       {err && <div className="msg-err page-flash">{err}</div>}
     </>
+  );
+}
+
+// 功能使用统计:各功能线的 使用人数/动作次数/最后使用时间。
+// 回答「哪个工坊真的有人在用」——功能取舍看数据,不看情怀。
+const FEATURE_CN: Record<string, string> = {
+  novel: "小说主线",
+  drama: "漫剧工坊",
+  promo: "宣传片工坊",
+  clips: "情绪短片工坊",
+  inspire: "灵感工坊",
+  birthday: "生日祝福工坊",
+  series: "系列短片工坊",
+};
+
+function UsageStatsCard() {
+  const [stats, setStats] = useState<FeatureUsageStat[] | null>(null);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    api.adminUsageStats()
+      .then((r) => setStats(r.usage))
+      .catch((e) => setErr(errMsg(e)));
+  }, []);
+
+  return (
+    <div className="card">
+      <div className="card-head"><h2>功能使用统计</h2></div>
+      <p className="card-desc">
+        动作级计数(建/改/删、生成),不含浏览与轮询;数据只存在本站数据库,不含任何用户内容。
+      </p>
+      {err && <div className="msg-err">{err}</div>}
+      {stats === null ? (
+        !err && <p className="muted">加载中…</p>
+      ) : stats.length === 0 ? (
+        <p className="muted">还没有使用记录。</p>
+      ) : (
+        <div className="tbl-wrap mt-2">
+          <table className="tbl">
+            <thead>
+              <tr><th>功能线</th><th>使用人数</th><th>动作次数</th><th>最后使用</th></tr>
+            </thead>
+            <tbody>
+              {stats.map((s) => (
+                <tr key={s.feature}>
+                  <td>{FEATURE_CN[s.feature] ?? s.feature}</td>
+                  <td>{s.users}</td>
+                  <td>{s.uses}</td>
+                  <td className="muted">
+                    {s.last_used_at ? new Date(s.last_used_at).toLocaleString() : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -745,6 +745,14 @@ export interface AnthemPackage {
 export interface AdminUser {
   id: number; username: string; is_admin: boolean; is_active: boolean;  created_at: string; project_count: number;
   total_prompt_tokens: number; total_completion_tokens: number; total_calls: number;
+}
+/** 功能使用统计(admin/usage):各功能线的 使用人数/动作次数/最后使用时间 */
+export interface FeatureUsageStat {
+  feature: string;
+  users: number;
+  uses: number;
+  last_used_at: string | null;
+}
 export interface InviteCodeItem {
   id: number; code: string; note: string | null;
   max_uses: number | null; used_count: number; is_active: boolean; created_at: string;
@@ -1218,6 +1226,8 @@ export const api = {
 
   // ---------- 后台管理(仅管理员可用) ----------
   adminListUsers: () => req<AdminUser[]>("GET", "/api/admin/users"),
+  adminUsageStats: () =>
+    req<{ usage: FeatureUsageStat[] }>("GET", "/api/admin/usage"),
   adminResetPassword: (id: number, password: string) =>
     req<{ ok: boolean }>("POST", `/api/admin/users/${id}/reset-password`, { password }),
   adminSetActive: (id: number, is_active: boolean) =>

@@ -22,7 +22,7 @@ from app.db.models.summary import ChapterSummary
 from app.db.models.chapter_state import ChapterState
 from app.db.models.chapter_issue import ChapterIssue
 from app.db.models.writing_card import WritingCard
-from app.db.models.usage import LlmUsage
+from app.db.models.usage import FeatureUsage, LlmUsage
 from app.db.models.user import User
 from app.db.models.app_setting import AppSetting
 from app.db.models.invite_code import InviteCode
@@ -65,6 +65,7 @@ __all__ = [
     "ChapterState",
     "ChapterIssue",
     "LlmUsage",
+    "FeatureUsage",
     "Job",
     "DramaStyleCard",
     "DramaCharacterCard",

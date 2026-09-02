@@ -2,6 +2,19 @@
 
 <!-- 每次发版在顶部补一条 "## 日期 主题" 段;后端 /api/version 取最新一条展示给用户。 -->
 
+## 2026-09-02 工坊整形 + e2e 冒烟门禁 + 功能使用统计 + 概念页排版终修
+
+**修复**:概念页引擎卡排版「修了还乱」的真正根因——全局 `button` 的 `white-space: nowrap` 让 `overflow-wrap` 完全失效、固定按钮高度让边框只有一行高,长句和抓人点整段画出卡片;`button.engine-card` 补进既有的卡片型按钮重置组(与 entry-card/idea-card 同待遇),390px 实测 0 溢出。
+
+**工程底座(用户无感)**:
+
+* **工坊整形**:四份逐字重复的图片上传/鉴权读取客户端(postImage/imageBlobUrl)收进 `api.ts` 一份(顺带补上 401 统一跳登录);四份参考图缩略图组件收进共享 `ui/RefThumb`(统一 blob 释放与外链加载失败兜底),净删百余行,下一个工坊的边际成本减半。
+* **e2e 冒烟门禁**:Playwright 真浏览器冒烟(登录 → 系列工坊建主角/建集/编辑档案/删集),桌面 1280 与 **390px 窄屏**双视口跑同一套流程——专治「单测全绿但页面是乱的」;CI 新增 `E2E · playwright smoke` job。本地 `cd frontend && npm run e2e`。
+* **功能使用统计**:新增 `feature_usage` 表(动作级计数,不含浏览/轮询、不含任何用户内容),`GET /api/admin/usage` + 后台管理页新增「功能使用统计」卡——哪个工坊真的有人在用,从此看数据。
+* **UI 完成定义三查**写进 CONTRIBUTING:窄屏查/暗色查/状态查,凡是动了 UI 的改动合入前各过一遍。
+
+门禁全绿:pytest 864(含新 usage 4 例)、schema 漂移、vitest 191、tsc、eslint、构建、e2e 5/5。
+
 ## 2026-09-01 概念页引擎卡修复 + 全站样式清理
 
 **修复**:概念页引擎卡 `button` 默认 `inline-block` 导致窄屏(手机)卡片无撑满、长句无换行兜底,文字溢出裁到下一张卡区域,视觉上像「乱成一团」;`useOnboarding` 只缓存 `ideas` 没缓存 `engineCards`,每次刷新概念屏都重新 fetchEngines()。

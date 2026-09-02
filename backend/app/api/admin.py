@@ -26,6 +26,7 @@ from app.auth import get_current_user, hash_password
 from app.config import get_settings
 from app.db.models import (
     AppSetting,
+    FeatureUsage,
     InviteCode,
     LlmUsage,
     Project,
@@ -434,3 +435,37 @@ async def put_ai_flavor_config(
         out.gate_score, weight_overrides() or "(无)",
     )
     return out
+
+
+@router.get("/usage")
+async def feature_usage_stats(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(get_current_admin),
+):
+    """功能使用统计:各功能线的 使用人数 / 动作次数 / 最后使用时间。
+
+    数据源是 app/usage.py 的动作级计数(非 GET 已鉴权请求,30s 批量落库),
+    给「哪个工坊值得继续投入」提供最小依据。只读,不含任何用户内容。
+    """
+    rows = (
+        db.query(
+            FeatureUsage.feature,
+            func.count(func.distinct(FeatureUsage.user_id)),
+            func.sum(FeatureUsage.uses),
+            func.max(FeatureUsage.last_used_at),
+        )
+        .group_by(FeatureUsage.feature)
+        .order_by(func.sum(FeatureUsage.uses).desc())
+        .all()
+    )
+    return {
+        "usage": [
+            {
+                "feature": feature,
+                "users": users,
+                "uses": int(total or 0),
+                "last_used_at": last,
+            }
+            for feature, users, total, last in rows
+        ]
+    }

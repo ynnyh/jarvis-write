@@ -164,6 +164,15 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_series_episodes_user_id'), ['user_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_series_episodes_character_id'), ['character_id'], unique=False)
 
+    op.create_table('feature_usage',
+    sa.Column('feature', sa.String(length=40), nullable=False),
+    sa.Column('user_id', sa.Integer(), nullable=False),
+    sa.Column('uses', sa.Integer(), nullable=False),
+    sa.Column('last_used_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('feature', 'user_id')
+    )
+
     op.create_table('projects',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('user_id', sa.Integer(), nullable=True),
