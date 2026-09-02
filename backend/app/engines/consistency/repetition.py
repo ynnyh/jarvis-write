@@ -48,12 +48,70 @@ def find_repeated_phrases(texts: list[str]) -> list[tuple[str, int]]:
 
 
 def avoid_block(texts: list[str]) -> str:
-    """渲染注入 Prompt 的"避免重复"块;无重复时返回空串。"""
+    """渲染注入 Prompt 的"避免重复"块;无重复时返回空串。
+
+    两级:句子级(硬,禁止整句照抄)在前,词组级(软,提醒换表达)在后。
+    句子级治"签名句复读":模型一旦把某句有画面感的短句当本书意象,就会逐字
+    照抄——短句不受段落去重保护(那套为护 refrain),必须在这层给模型一个
+    明确的"禁止整句复用"清单来压制。
+    """
+    repeated_sents = find_repeated_sentences(texts)
     repeated = find_repeated_phrases(texts)
-    if not repeated:
-        return ""
-    lines = [f"- “{g}”(近期已用 {c} 次)" for g, c in repeated]
-    return "【避免重复的表达】以下短语近期使用过于频繁,请换用不同表达:\n" + "\n".join(lines)
+    parts: list[str] = []
+    if repeated_sents:
+        lines = [f"- 「{s}」(近几章出现 {c} 次)" for s, c in repeated_sents]
+        parts.append(
+            "【禁止逐字复用的句子】以下句子在近几章被反复写成原句(模型复读),"
+            "本章一律不得整句照抄,必须换一种说法、换一个角度重新描写同一样东西:\n"
+            + "\n".join(lines)
+        )
+    if repeated:
+        lines = [f"- “{g}”(近期已用 {c} 次)" for g, c in repeated]
+        parts.append(
+            "【避免重复的表达】以下短语近期使用过于频繁,请换用不同表达:\n"
+            + "\n".join(lines)
+        )
+    return "\n\n".join(parts)
+
+
+# ---- 句子级跨章查重(治"同一句话反复复读") ----
+# 与上面的词组级 n-gram 互补:词组级抓"比喻/套话反复",这里整句原文抓
+# "签名句复读"。只做逐字(去空白/去引号后完全一致)判定,不做近似匹配,
+# 宁漏勿误伤有意营造的呼应/复沓。短句(对白、语气词、< _MIN_SENT_CHARS 的
+# 碎句)一律豁免。返回 [(句子, 跨章出现次数)],按次数降序。
+_QUOTE_CHARS = "「」『』“”‘’\"'《》"
+_MIN_SENT_REPEAT = 2   # 同一句在近几章累计出现 >= 2 次即算复读
+_MIN_SENT_CHARS = 8    # 归一化后不足此长度的碎句不判(对白/语气词)
+_MAX_SENTENCES = 6     # 句子级禁用清单最多几条
+
+
+def _norm_sentence(s: str) -> str:
+    """句子判重键:剥空白与成对引号,只留正文字符,吸收排版/转写差异。"""
+    return re.sub(r"[\s%s]+" % _QUOTE_CHARS, "", s)
+
+
+def _split_sentences(text: str) -> list[str]:
+    """把正文切成句/分句单元(丢标点,归一化后返回)。
+
+    按句末标点(。！？；)切句,再按逗号(，、,)切成更小的分句单元——
+    否则"他掬水洗脸,水流冲过他的手指,凉凉的,有点麻。"这种一长句里反复
+    出现的签名分句会被整句罩住查不出(用户看到的正是这类)。短碎句由
+    _MIN_SENT_CHARS 过滤,不至于误伤对白。
+    """
+    cleaned = re.sub(r"[\s%s]+" % _QUOTE_CHARS, "", text)
+    parts = re.split(r"[。！？!?；;，,、]+", cleaned)
+    return [p for p in parts if len(p) >= _MIN_SENT_CHARS]
+
+
+def find_repeated_sentences(texts: list[str]) -> list[tuple[str, int]]:
+    """跨章统计逐字重复的原句,返回 [(句子, 次数)],按次数降序。"""
+    counter: Counter[str] = Counter()
+    for t in texts:
+        for s in set(_split_sentences(t)):  # 单章内去重:只计'跨章'出现的次数
+            counter[s] += 1
+    hits = [(s, c) for s, c in counter.items() if c >= _MIN_SENT_REPEAT]
+    hits.sort(key=lambda x: (-x[1], -len(x[0])))
+    return hits[:_MAX_SENTENCES]
 
 
 # ---- 章内重复段落去重(治模型"复读"bug:整段逐字重复或近似重复) ----
