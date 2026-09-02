@@ -1,6 +1,6 @@
 // src/birthdayApi.ts — 生日祝福工坊 API 客户端(对齐 backend/app/api/birthday.py)。
 // 独立模块(同 clipsApi/promoApi 的理由);导出用鉴权 fetch(复用 api.ts 的 token)。
-import { ApiError, token } from "./api";
+import { ApiError, imageBlobUrl, postImage, token } from "./api";
 
 const LLM_TIMEOUT = 900_000;
 
@@ -132,32 +132,6 @@ export interface BirthdayWishInput {
   pack?: string;
   direction: string;
   style_hints?: string;
-}
-
-function authHeaders(): Record<string, string> {
-  const tk = token.get();
-  return tk ? { Authorization: `Bearer ${tk}` } : {};
-}
-
-/** 上传一张段参考图:multipart(不能手设 Content-Type,浏览器要自己带 boundary)。 */
-async function postImage<T>(path: string, file: File, note = ""): Promise<T> {
-  const fd = new FormData();
-  fd.append("file", file);
-  fd.append("note", note);
-  const res = await fetch(path, { method: "POST", headers: authHeaders(), body: fd });
-  if (!res.ok) {
-    let detail = `HTTP ${res.status}`;
-    try { const j = await res.json(); detail = j.detail ?? detail; } catch { /* ignore */ }
-    throw new ApiError(res.status, detail);
-  }
-  return (await res.json()) as T;
-}
-
-/** 读一张鉴权参考图 → 本地 blob URL(读取端点要 Authorization 头,<img src> 带不了)。 */
-async function imageBlobUrl(path: string): Promise<string> {
-  const res = await fetch(path, { headers: authHeaders() });
-  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
-  return URL.createObjectURL(await res.blob());
 }
 
 export const birthdayApi = {

@@ -15,7 +15,6 @@ import {
   DramaEpisode,
   DramaMeta,
   DramaProductionPack,
-  DramaRefImage,
   DramaSceneCard,
   DramaShot,
   DramaStyleCard,
@@ -24,6 +23,7 @@ import {
   dramaApi,
 } from "../../dramaApi";
 import { useJob } from "../../ui/useJob";
+import { RefThumb } from "../../ui/RefThumb";
 import { useProject } from "../../hooks/queries";
 import { downloadFile } from "../../api";
 import { toast } from "../../ui/Toaster";
@@ -117,37 +117,6 @@ function PasteBox({ paste, stale, rows = 5, storeKey = PASTE_PLATFORM_KEY, title
 /** 图片缩略图(角色定妆照 / 分镜静帧):读取端点要带 Authorization,<img src> 带不了头,
  *  所以取 blob 转本地 URL。owner 决定读哪条端点——两种资产的挂法/删法一模一样,
  *  只是挂在角色卡上还是挂在分镜格上,不值得复制一份组件。 */
-function RefThumb({ pid, owner, id, index, img, alt = "定妆照", onDelete }: {
-  pid: number; owner: "card" | "shot"; id: number; index: number;
-  img: DramaRefImage; alt?: string; onDelete: () => void;
-}) {
-  const [url, setUrl] = useState(img.kind === "url" ? img.src : "");
-  const [bad, setBad] = useState(false);
-
-  useEffect(() => {
-    if (img.kind === "url") { setUrl(img.src); return; }
-    let revoke = "";
-    let alive = true;
-    const read = owner === "card" ? dramaApi.refBlobUrl : dramaApi.shotAssetBlobUrl;
-    read(pid, id, index)
-      .then((u) => { if (alive) { revoke = u; setUrl(u); } else URL.revokeObjectURL(u); })
-      .catch(() => setBad(true));
-    return () => { alive = false; if (revoke) URL.revokeObjectURL(revoke); };
-  }, [pid, owner, id, index, img.kind, img.src]);
-
-  return (
-    <div className="ref-thumb">
-      {url && !bad
-        ? <img src={url} alt={img.note || alt} onError={() => setBad(true)} />
-        : <div className="ref-thumb-bad">{bad ? "图片读不到" : "加载中…"}</div>}
-      <div className="ref-thumb-foot">
-        <span className="muted">{img.kind === "url" ? "外链" : "已上传"}</span>
-        <button className="btn-sm" onClick={onDelete}>删除</button>
-      </div>
-    </div>
-  );
-}
-
 /** 选中这一集时,「单集流水线」还差哪一步(状态 → 该点哪个按钮的人话)。 */
 function nextEpisodeTodo(ep: DramaEpisode): string {
   const at = `第 ${ep.ep_index} 集`;
@@ -946,8 +915,10 @@ function CharCardRow({ pid, card, onSaved }: {
         {draft.ref_images.length > 0 && (
           <div className="ref-thumbs">
             {draft.ref_images.map((img, i) => (
-              <RefThumb key={`${img.src}-${i}`} pid={pid} owner="card" id={card.id} index={i}
-                img={img} onDelete={() => void removeRef(i)} />
+              <RefThumb key={`${img.src}-${i}`} image={img} alt="定妆照"
+                loadBlob={() => dramaApi.refBlobUrl(pid, card.id, i)}
+                footLeft={<span className="muted">{img.kind === "url" ? "外链" : "已上传"}</span>}
+                onDelete={() => void removeRef(i)} />
             ))}
           </div>
         )}
@@ -1958,8 +1929,10 @@ function PromptRow({ pid, shot, ratio, prevFrame, onSaved, onRegenerated }: {
         {(draft.assets?.length ?? 0) > 0 ? (
           <div className="ref-thumbs">
             {(draft.assets || []).map((img, i) => (
-              <RefThumb key={`${img.src}-${i}`} pid={pid} owner="shot" id={shot.id} index={i}
-                img={img} alt={`镜头 ${draft.seq} 的静帧`} onDelete={() => void removeStill(i)} />
+              <RefThumb key={`${img.src}-${i}`} image={img} alt={`镜头 ${draft.seq} 的静帧`}
+                loadBlob={() => dramaApi.shotAssetBlobUrl(pid, shot.id, i)}
+                footLeft={<span className="muted">{img.kind === "url" ? "外链" : "已上传"}</span>}
+                onDelete={() => void removeStill(i)} />
             ))}
           </div>
         ) : prevFrame ? (

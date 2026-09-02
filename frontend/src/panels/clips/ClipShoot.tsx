@@ -4,7 +4,7 @@
 // (消失的段忽略、新段无状态),后端只认整卡回传,不猜 merge 策略。
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ClipCard, ClipRefImage, ClipShootUnit, clipsApi } from "../../clipsApi";
+import { ClipCard, ClipShootUnit, clipsApi } from "../../clipsApi";
 import { toast } from "../../ui/Toaster";
 import { errMsg } from "../../pollJob";
 import { CopyBtn } from "../../ui/copy";
@@ -20,35 +20,7 @@ import {
   RenderTaskOut,
 } from "../../renderApi";
 import { chunkPromptText } from "./shared";
-
-/** 一张段参考图缩略图:上传的走鉴权端点转 blob,外链直接用 src。 */
-function RefThumb({ clipId, index, imgIndex, image, canEdit, onDelete }: {
-  clipId: number; index: number; imgIndex: number; image: ClipRefImage;
-  canEdit: boolean; onDelete: () => void;
-}) {
-  const [blob, setBlob] = useState<string | null>(null);
-  const [bad, setBad] = useState(false);
-  useEffect(() => {
-    if (image.kind !== "upload") { setBlob(null); setBad(false); return; }
-    let alive = true;
-    void clipsApi.refBlobUrl(clipId, index, imgIndex)
-      .then((u) => { if (alive) setBlob(u); })
-      .catch(() => { if (alive) setBad(true); });
-    return () => { alive = false; };
-  }, [clipId, index, imgIndex, image.kind, image.src]);
-  return (
-    <div className="ref-thumb">
-      {image.kind === "upload"
-        ? (blob ? <img src={blob} alt="参考图" /> : <div className="ref-thumb-bad">{bad ? "读取失败" : "加载…"}</div>)
-        : <img src={image.src} alt="参考图" />}
-      {canEdit && (
-        <div className="ref-thumb-foot">
-          <button className="btn-sm" onClick={onDelete}>✕ 删</button>
-        </div>
-      )}
-    </div>
-  );
-}
+import { RefThumb } from "../../ui/RefThumb";
 
 /** 一个段的「本站出片」块:提交引擎出片、预览草片、版本切换与采用。
  *
@@ -343,8 +315,9 @@ export default function ShootWorkbench({ clipId, card, onProgress }: {
                 {u.ref_images.length > 0 && (
                   <div className="ref-thumbs">
                     {u.ref_images.map((r, j) => (
-                      <RefThumb key={j} clipId={clipId} index={u.index} imgIndex={j} image={r}
-                        canEdit onDelete={() => void onRefDelete(u.index, j)} />
+                      <RefThumb key={j} image={r}
+                        loadBlob={() => clipsApi.refBlobUrl(clipId, u.index, j)}
+                        onDelete={() => void onRefDelete(u.index, j)} />
                     ))}
                   </div>
                 )}

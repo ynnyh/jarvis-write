@@ -6,41 +6,14 @@
 // 生成走异步 job(useJob 进任务中心,切走页面也可见);有集在生成中时 3s 轮询刷新。
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { SeriesCharacter, SeriesEpisode, SeriesRefImage, seriesApi } from "../../seriesApi";
+import { SeriesCharacter, SeriesEpisode, seriesApi } from "../../seriesApi";
 import { toast } from "../../ui/Toaster";
 import { errMsg } from "../../pollJob";
 import { CopyBtn } from "../../ui/copy";
 import { confirmDialog } from "../../ui/ConfirmDialog";
 import EmptyState from "../../ui/EmptyState";
 import { useJob } from "../../ui/useJob";
-
-/** 一张定妆参考图缩略图:上传的走鉴权端点转 blob,外链直接用 src(同 Birthday 的做法)。 */
-function RefThumb({ cid, imgIndex, image, onDelete }: {
-  cid: number; imgIndex: number; image: SeriesRefImage; onDelete: () => void;
-}) {
-  const [blob, setBlob] = useState<string | null>(null);
-  const [bad, setBad] = useState(false);
-  useEffect(() => {
-    if (image.kind !== "upload") { setBlob(null); setBad(false); return; }
-    let alive = true;
-    let revoke: string | null = null; // blob URL 要跟 ClipShoot 同款:卸载/重挂时释放,不留给 GC
-    void seriesApi.refBlobUrl(cid, imgIndex)
-      .then((u) => { if (alive) { revoke = u; setBlob(u); } else URL.revokeObjectURL(u); })
-      .catch(() => { if (alive) setBad(true); });
-    return () => { alive = false; if (revoke) URL.revokeObjectURL(revoke); };
-  }, [cid, imgIndex, image.kind, image.src]); // eslint-disable-line react-hooks/exhaustive-deps
-  return (
-    <div className="ref-thumb">
-      {image.kind === "upload"
-        ? (blob ? <img src={blob} alt="定妆参考图" /> : <div className="ref-thumb-bad">{bad ? "读取失败" : "加载…"}</div>)
-        : <img src={image.src} alt="定妆参考图" referrerPolicy="no-referrer" />}
-      <div className="ref-thumb-foot">
-        {image.note && <span className="ref-thumb-note">{image.note}</span>}
-        <button className="btn-sm" onClick={onDelete}>✕ 删</button>
-      </div>
-    </div>
-  );
-}
+import { RefThumb } from "../../ui/RefThumb";
 
 export default function SeriesWorkspace({ cid }: { cid: number }) {
   const nav = useNavigate();
@@ -297,7 +270,9 @@ export default function SeriesWorkspace({ cid }: { cid: number }) {
           <span className="fl">定妆参考图<span className="hint">文生图出的定妆照;出片时上传给图生视频锁人物形象</span></span>
           <div className="ref-thumbs">
             {(character.ref_images ?? []).map((img, i) => (
-              <RefThumb key={`${img.kind}-${img.src}`} cid={cid} imgIndex={i} image={img}
+              <RefThumb key={`${img.kind}-${img.src}`} image={img} alt="定妆参考图"
+                loadBlob={() => seriesApi.refBlobUrl(cid, i)}
+                footLeft={img.note ? <span className="ref-thumb-note">{img.note}</span> : undefined}
                 onDelete={() => void deleteRef(i)} />
             ))}
           </div>

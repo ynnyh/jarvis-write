@@ -118,6 +118,46 @@ export function createSseDecoder(): (chunk: string) => SseFrame[] {
   };
 }
 
+// ---------- 图片上传 / 鉴权读取(drama/clips/birthday/series 四个制片工坊共用) ----------
+
+function authHeaders(): Record<string, string> {
+  const tk = token.get();
+  return tk ? { Authorization: `Bearer ${tk}` } : {};
+}
+
+/** multipart 上传一张图(note 随表单走)。不能手设 Content-Type——浏览器要自己带 boundary。
+ *  401 与 req 同口径:清 token 并触发统一跳登录。 */
+export async function postImage<T>(path: string, file: File, note = ""): Promise<T> {
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("note", note);
+  const res = await fetch(BASE + path, { method: "POST", headers: authHeaders(), body: fd });
+  if (!res.ok) {
+    if (res.status === 401) {
+      token.clear();
+      onUnauthorized?.();
+    }
+    let detail = `HTTP ${res.status}`;
+    try { const j = await res.json(); detail = j.detail ?? detail; } catch { /* ignore */ }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as T;
+}
+
+/** 读一张鉴权图 → 本地 blob URL:读取端点要 Authorization 头,<img src> 带不了。
+ *  调用方负责 URL.revokeObjectURL 释放(共享 RefThumb 组件已带释放逻辑)。 */
+export async function imageBlobUrl(path: string): Promise<string> {
+  const res = await fetch(BASE + path, { headers: authHeaders() });
+  if (!res.ok) {
+    if (res.status === 401) {
+      token.clear();
+      onUnauthorized?.();
+    }
+    throw new ApiError(res.status, `HTTP ${res.status}`);
+  }
+  return URL.createObjectURL(await res.blob());
+}
+
 /** 发起一条 SSE 流,逐帧回调 onFrame。鉴权/401 与 req 对齐;非 2xx(流还没开始)抛 ApiError。
  *  GET/POST 都走这里:POST 用于对话流,GET 用于订阅任务的实时正文。 */
 async function sseStream(
@@ -703,10 +743,8 @@ export interface AnthemPackage {
   vibe: string;
 }
 export interface AdminUser {
-  id: number; username: string; is_admin: boolean; is_active: boolean;
-  created_at: string; project_count: number;
+  id: number; username: string; is_admin: boolean; is_active: boolean;  created_at: string; project_count: number;
   total_prompt_tokens: number; total_completion_tokens: number; total_calls: number;
-}
 export interface InviteCodeItem {
   id: number; code: string; note: string | null;
   max_uses: number | null; used_count: number; is_active: boolean; created_at: string;

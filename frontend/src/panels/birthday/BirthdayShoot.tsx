@@ -5,42 +5,14 @@
 // 段号与手卡 clip.chunks 对齐:手卡改完重算切段后,前端按 index 归并
 // (消失的段忽略、新段无状态),后端只认整卡回传,不猜 merge 策略。
 import { useCallback, useEffect, useRef, useState } from "react";
-import { WishCard, WishRefImage, WishShootUnit, birthdayApi } from "../../birthdayApi";
+import { WishCard, WishShootUnit, birthdayApi } from "../../birthdayApi";
 import { toast } from "../../ui/Toaster";
 import { errMsg } from "../../pollJob";
 import { CopyBtn } from "../../ui/copy";
 import { confirmDialog } from "../../ui/ConfirmDialog";
 import EmptyState from "../../ui/EmptyState";
 import { chunkPromptText } from "./shared";
-
-/** 一张段参考图缩略图:上传的走鉴权端点转 blob,外链直接用 src。 */
-function RefThumb({ wishId, index, imgIndex, image, canEdit, onDelete }: {
-  wishId: number; index: number; imgIndex: number; image: WishRefImage;
-  canEdit: boolean; onDelete: () => void;
-}) {
-  const [blob, setBlob] = useState<string | null>(null);
-  const [bad, setBad] = useState(false);
-  useEffect(() => {
-    if (image.kind !== "upload") { setBlob(null); setBad(false); return; }
-    let alive = true;
-    void birthdayApi.refBlobUrl(wishId, index, imgIndex)
-      .then((u) => { if (alive) setBlob(u); })
-      .catch(() => { if (alive) setBad(true); });
-    return () => { alive = false; };
-  }, [wishId, index, imgIndex, image.kind, image.src]);
-  return (
-    <div className="ref-thumb">
-      {image.kind === "upload"
-        ? (blob ? <img src={blob} alt="参考图" /> : <div className="ref-thumb-bad">{bad ? "读取失败" : "加载…"}</div>)
-        : <img src={image.src} alt="参考图" />}
-      {canEdit && (
-        <div className="ref-thumb-foot">
-          <button className="btn-sm" onClick={onDelete}>✕ 删</button>
-        </div>
-      )}
-    </div>
-  );
-}
+import { RefThumb } from "../../ui/RefThumb";
 
 export default function ShootWorkbench({ wishId, card, onProgress }: {
   wishId: number; card: WishCard;
@@ -197,8 +169,9 @@ export default function ShootWorkbench({ wishId, card, onProgress }: {
                 {u.ref_images.length > 0 && (
                   <div className="ref-thumbs">
                     {u.ref_images.map((r, j) => (
-                      <RefThumb key={j} wishId={wishId} index={u.index} imgIndex={j} image={r}
-                        canEdit onDelete={() => void onRefDelete(u.index, j)} />
+                      <RefThumb key={j} image={r}
+                        loadBlob={() => birthdayApi.refBlobUrl(wishId, u.index, j)}
+                        onDelete={() => void onRefDelete(u.index, j)} />
                     ))}
                   </div>
                 )}
