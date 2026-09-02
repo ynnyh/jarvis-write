@@ -256,7 +256,7 @@ button + button { margin-left: var(--sp-2); }
 button.chip, button.title-chip, button.genre-card, button.scale-card,
 button.ed-tab, button.idea-card, button.entry-card, button.tab,
 button.flow-step, button.wiz-step, button.ts-item, button.reader-toc-item,
-button.reader-tab, button.guide-mini, button.linkish {
+button.reader-tab, button.guide-mini, button.linkish, button.engine-card {
   height: auto;
   margin-left: 0;
   font-family: inherit;
@@ -265,7 +265,8 @@ button.reader-tab, button.guide-mini, button.linkish {
 button.tab, button.guide-mini, button.linkish { background: none; border: 0; border-radius: 0; padding: 0; }
 button.flow-step { width: 100%; border: 0; background: none; }
 button.reader-tab { border: 0; background: none; }
-button.entry-card, button.idea-card, button.genre-card, button.scale-card, button.ed-tab {
+button.entry-card, button.idea-card, button.genre-card, button.scale-card, button.ed-tab,
+button.engine-card {
   font-size: inherit;
   white-space: normal;
 }
