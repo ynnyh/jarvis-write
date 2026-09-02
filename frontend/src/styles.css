@@ -3494,8 +3494,7 @@ body:has(.write-zone.immersive) .pj-cols { grid-template-columns: minmax(0, 1fr)
 .series-profile-chips { margin-bottom: 8px; }
 /* 参考图操作行:和上图间距 */
 .series-ref-line { margin-top: 8px; }
-/* 成片提示词/定妆描述保留换行 */
-.pre-wrap { white-space: pre-wrap; }
+/* 保留换行走全站既有的 .pre-wrap(190 行),这里不重复定义 */
 /* 负面词行:和提示词间距 */
 .series-neg { margin-top: 6px; }
 

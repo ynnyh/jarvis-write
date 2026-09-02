@@ -23,10 +23,11 @@ function RefThumb({ cid, imgIndex, image, onDelete }: {
   useEffect(() => {
     if (image.kind !== "upload") { setBlob(null); setBad(false); return; }
     let alive = true;
+    let revoke: string | null = null; // blob URL 要跟 ClipShoot 同款:卸载/重挂时释放,不留给 GC
     void seriesApi.refBlobUrl(cid, imgIndex)
-      .then((u) => { if (alive) setBlob(u); })
+      .then((u) => { if (alive) { revoke = u; setBlob(u); } else URL.revokeObjectURL(u); })
       .catch(() => { if (alive) setBad(true); });
-    return () => { alive = false; if (blob) URL.revokeObjectURL(blob); };
+    return () => { alive = false; if (revoke) URL.revokeObjectURL(revoke); };
   }, [cid, imgIndex, image.kind, image.src]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="ref-thumb">
@@ -61,20 +62,23 @@ export default function SeriesWorkspace({ cid }: { cid: number }) {
   // ---- 编辑已生成输出(eid | null) ----
   const [editEid, setEditEid] = useState<number | null>(null);
   const [editOut, setEditOut] = useState({ title: "", prompt_cn: "", negative: "" });
+  // 本页正在等生成结果的集(job.run 要轮询到任务结束,期间按钮得读出「在忙」)
+  const [genBusy, setGenBusy] = useState<number | null>(null);
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (opts?: { resetDur?: boolean }) => {
     try {
       const r = await seriesApi.getCharacter(cid);
       setCharacter(r.character_row);
       // 展示按集序(创建顺序)正排——「系列」的心智是第 1 集、第 2 集…
       setEpisodes([...r.episodes].sort((a, b) => a.id - b.id));
-      setDuration(r.character_row.default_duration_s);
+      // 只在进工作台时预填默认时长;3s 轮询复用 reload,别把用户正输着的时长打回去
+      if (opts?.resetDur) setDuration(r.character_row.default_duration_s);
     } catch (e) { toast.err("加载失败", errMsg(e)); }
   }, [cid]);
 
   useEffect(() => {
     setLoaded(false); setDraft(null); setEditEid(null);
-    void reload().finally(() => setLoaded(true));
+    void reload({ resetDur: true }).finally(() => setLoaded(true));
     // tab 列表独立拉(切主角 tab 不用等详情)
     seriesApi.listCharacters()
       .then((r) => setChars(r.characters))
@@ -154,11 +158,12 @@ export default function SeriesWorkspace({ cid }: { cid: number }) {
   }
 
   async function generate(eid: number) {
+    setGenBusy(eid);
     try {
       await job.run(() => seriesApi.generateEpisode(eid), { kind: "series-gen" });
       await reload();
       toast.ok("提示词已生成", "可直接复制投喂图生视频");
-    } catch (e) { toast.err("生成失败", errMsg(e)); }
+    } catch (e) { toast.err("生成失败", errMsg(e)); } finally { setGenBusy(null); }
   }
 
   async function removeEpisode(eid: number) {
@@ -365,11 +370,13 @@ export default function SeriesWorkspace({ cid }: { cid: number }) {
                   <button className="btn-sm primary" onClick={() => void saveOutput(ep.id)}>保存输出</button>
                 </>
               )}
-              <button className="btn-sm primary" disabled={ep.status === "generating"}
+              <button className="btn-sm primary"
+                disabled={ep.status === "generating" || genBusy === ep.id}
                 onClick={() => void generate(ep.id)}>
-                {ep.status === "generating" ? "生成中…" : ep.status === "done" ? "重新生成" : "生成提示词"}
+                {ep.status === "generating" || genBusy === ep.id ? "生成中…" : ep.status === "done" ? "重新生成" : "生成提示词"}
               </button>
-              <button className="btn-sm" disabled={ep.status === "generating"}
+              <button className="btn-sm"
+                disabled={ep.status === "generating" || genBusy === ep.id}
                 onClick={() => void removeEpisode(ep.id)}>删除</button>
             </div>
 
