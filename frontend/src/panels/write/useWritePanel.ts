@@ -2,13 +2,13 @@
 // RQ 章节列表/正文共享缓存、act= 动作卡 URL、目录抽屉/沉浸/移动端壳与滑动切章、AI 窄栏开合与
 // ②档批注/③整章优化对照等本地态,并编排 5 个域 hook(useReader/useChapterVersions/
 // useConsistencySync/useChapterGeneration/useImmersive)。壳只负责布局渲染,状态与 handler 全在此。
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TouchEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  api, ChapterBrief, ChapterDetail,
-  Outline, PolishResult, RevisePair,
+  api, ChapterBrief, ChapterDetail, ChapterMark,
+  MarksReviseResult, Outline, PolishResult, RevisePair,
 } from "../../api";
 import { errMsg } from "../../pollJob";
 import { qk, useChapter, useChapters, useInvalidateProject } from "../../hooks/queries";
@@ -18,7 +18,6 @@ import { AppAction, registerActionHandler } from "../../ui/actions";
 import { toast } from "../../ui/Toaster";
 import { confirmDialog } from "../../ui/ConfirmDialog";
 import { DockMode, DockPrefill } from "./AiDock";
-import { Annotation } from "./paraEdit";
 import { deriveStage } from "./chapterStage";
 import { useImmersive } from "./useImmersive";
 import { useReader } from "./useReader";
@@ -90,10 +89,15 @@ export function useWritePanel({ pid, outlines }: UseWritePanelArgs) {
   const dockNonceRef = useRef(0);
   const [selectedPara, setSelectedPara] = useState<{ idx: number; text: string } | null>(null);
   const [polishCompare, setPolishCompare] = useState<{ original: string; result: PolishResult } | null>(null);
-  // ②档批注(docs/10 §4):正文里 🖍 攒下的多条待处理意见(段号+快照+一句话),父级持有;
-  // Prose 记入、AiDock 列出并成批发,「按批注改」job 完成后清空并出 reviseResult 验收卡。
-  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  // ②档批注(docs/10 §4,跨章持久版):正文里 🖍 攒下的「这里不行」标记,落库
+  // (chapter_marks 表),切章/刷新不丢——补齐内存版批注跨不了章的缺口。
+  // marks=全书 open 标记;本章视图 chapterMarks 派生;AiDock 列出/成批发。
+  // 「按批注改」发出时本章标记退场(与旧行为一致);全书批修的标记则在逐条
+  // 验收接受后销账(acceptMarkPair),拒绝/失效保持 open 可重跑。
+  const [marks, setMarks] = useState<ChapterMark[]>([]);
   const [reviseResult, setReviseResult] = useState<RevisePair[] | null>(null);
+  // 全书批修结果(跨章,按章分组):不为切章所清,逐章验收,全部关闭后清空
+  const [marksReviseResult, setMarksReviseResult] = useState<MarksReviseResult | null>(null);
   // Prose 手改的未保存脏标记(组件内状态,经回调上报):切章前据此弹「丢弃修改」确认
   const proseDirtyRef = useRef(false);
   // 阅读器(全屏遮罩,共用组件 Reader):抽到 useReader(reader 态/翻章派生/openReader)
@@ -143,6 +147,72 @@ export function useWritePanel({ pid, outlines }: UseWritePanelArgs) {
     }
   }
 
+  // ---- 跨章标记:拉取/记/删/销账(全书批修的验收联动) ----
+  const reloadMarks = useCallback(async () => {
+    try { setMarks(await api.marks(pid)); } catch { /* 标记拉不到不阻塞写作区 */ }
+  }, [pid]);
+  useEffect(() => { void reloadMarks(); }, [reloadMarks]);
+
+  // 本章视图(Prose 高亮/AiDock 列表都基于它)
+  const chapterMarks = useMemo(
+    () => marks.filter((m) => m.chapter_number === chapterNum),
+    [marks, chapterNum],
+  );
+
+  // 记一条标记(Prose 🖍 批注):落库;同段同快照服务端幂等改意见,本地对齐
+  async function createMark(idx: number, snapshot: string, note: string) {
+    if (chapterNum === null) return;
+    try {
+      const row = await api.addMark(pid, {
+        chapter_number: chapterNum, para_idx: idx, snapshot, note,
+      });
+      setMarks((prev) => [
+        ...prev.filter((m) => !(m.chapter_number === row.chapter_number && m.para_idx === row.para_idx)),
+        row,
+      ]);
+    } catch (e) {
+      toast.err("记批注失败", errMsg(e));
+    }
+  }
+
+  // 移除一条本章标记(AiDock 列表 ×):乐观移除,失败回拉
+  async function removeMarkAt(listIdx: number) {
+    const row = chapterMarks[listIdx];
+    if (!row) return;
+    setMarks((prev) => prev.filter((m) => m.id !== row.id));
+    try {
+      await api.removeMark(pid, row.id);
+    } catch {
+      void reloadMarks();
+    }
+  }
+
+  // 「按批注改」发出:本章标记整体退场(与旧行为一致——结果由验收卡逐条处理)
+  async function clearChapterMarks() {
+    const rows = chapterMarks;
+    setMarks((prev) => prev.filter((m) => !rows.some((r) => r.id === m.id)));
+    await Promise.allSettled(rows.map((r) => api.removeMark(pid, r.id)));
+  }
+
+  // 全书批修:单条验收接受 → 销账对应标记(服务端删;已不存在也照常清本地)
+  async function acceptMarkPair(markId: number) {
+    setMarks((prev) => prev.filter((m) => m.id !== markId));
+    try {
+      await api.removeMark(pid, markId);
+    } catch {
+      /* 已销账(他端处理过)即达成目的 */
+    }
+  }
+
+  // 全书批修:某章验收卡关闭 → 从结果里摘掉该章;全部摘完清空整个结果
+  function closeMarksChapter(n: number) {
+    setMarksReviseResult((prev) => {
+      if (!prev) return null;
+      const chapters = prev.chapters.filter((c) => c.chapter_number !== n);
+      return chapters.length ? { ...prev, chapters } : null;
+    });
+  }
+
   // 挂载时查有没有还在跑的任务(切走页面再回来的场景),有则接上轮询而不是装作没事。
   // 生成任务 → 阻塞横幅;同步任务 → 非阻塞轻量角标(二者独立,可同时重连)。
   useEffect(() => {
@@ -159,10 +229,12 @@ export function useWritePanel({ pid, outlines }: UseWritePanelArgs) {
 
   // 看板跳章/跨面板选章都收敛为改 URL ch;ch 变化时重置跟随旧章的视图态
   // (Prose 手改未保存有 proseDirtyRef + confirmDialog 把守,到这里一定是用户确认过的切换)
+  // 标记(marks)与全书批修结果(marksReviseResult)跨章持久,不在此清——
+  // 标记本就跨章攒,批修结果跨章逐章验收。
   useEffect(() => {
     setErr(""); setGenResult(null); closeVersions();
     setSelectedPara(null); setPolishCompare(null);
-    setAnnotations([]); setReviseResult(null);
+    setReviseResult(null);
   }, [chapterNum, closeVersions, setGenResult]);
 
   // 章节正文拉取失败透传到面板错误区;未写的章 404 属预期(空态大卡承担引导),不透传
@@ -292,12 +364,13 @@ export function useWritePanel({ pid, outlines }: UseWritePanelArgs) {
     isMobile, immersive, railOpen, setRailOpen, mapOpen, setMapOpen, onMainTouchStart, onMainTouchEnd,
     // 顶部错误 & 派生
     err, stage, nextChapterNum, genBlocked, genHint,
-    // 本地 UI 态:AI 窄栏 / 选段 / 对照 / 批注 / 脏标记
+    // 本地 UI 态:AI 窄栏 / 选段 / 对照 / 跨章标记 / 脏标记
     dockCollapsed, setDockCollapsed, dockPrefill,
     selectedPara, setSelectedPara,
     polishCompare, setPolishCompare,
-    annotations, setAnnotations,
-    reviseResult, setReviseResult,
+    marks, chapterMarks, marksReviseResult,
+    createMark, removeMarkAt, clearChapterMarks, acceptMarkPair, closeMarksChapter,
+    reviseResult, setReviseResult, setMarksReviseResult,
     proseDirtyRef,
     // 审核(放行已下沉到 ChapterStatusCard 的 GateResolve,不再从壳导出)
     approve,

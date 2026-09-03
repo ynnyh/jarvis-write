@@ -38,6 +38,8 @@ from app.api.editorial import router as editorial_router
 from app.api.inspire import router as inspire_router
 from app.api.media import router as media_router
 from app.api.misc import router as misc_router
+from app.api.marks import router as marks_router
+from app.api.motifs import router as motifs_router
 from app.api.project_io import router as project_io_router
 from app.api.outline import router as outline_router
 from app.api.overview import router as overview_router
@@ -223,6 +225,8 @@ def create_app() -> FastAPI:
     app.include_router(settings_router)
     app.include_router(chapters_router)
     app.include_router(consistency_router)
+    app.include_router(motifs_router)
+    app.include_router(marks_router)
     app.include_router(outline_router)
     app.include_router(overview_router)
     app.include_router(edit_directive_router)

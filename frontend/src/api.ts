@@ -509,6 +509,10 @@ export interface ForeshadowOut {
   expected_payoff_chapter: number | null; payoff_chapter: number | null;
   reinforcement_chapters: number[]; importance: string; is_due: boolean;
 }
+// 桥段台账(跨章重复描写追踪)+ 雷区清单(作者明令禁止的桥段)
+export interface BannedMotif { id: number; label: string; detail: string; }
+export interface LedgerMotif { label: string; detail: string; chapters: number[]; count: number; }
+export interface MotifsOut { banned: BannedMotif[]; ledger: LedgerMotif[]; }
 export interface CharacterFact {
   id: number; fact_type: string; content: string;
   valid_from: number; valid_until: number | null; importance: string;
@@ -561,6 +565,16 @@ export interface CraftResult {
 /** ②档多处批注改(revise-annotated-async job)返回的逐段旧/新对:ok=false 时 new 空、notes 载失败原因 */
 export interface RevisePair {
   para_idx: number; old: string; new: string; notes: string | null; ok: boolean;
+}
+// 跨章标记(作者在正文里随手记的「这里不行」,落库持久):para_idx + snapshot 判失效
+export interface ChapterMark {
+  id: number; chapter_number: number; para_idx: number; snapshot: string; note: string;
+}
+// 全书批修结果:逐章分组的待验收替换对(mark_id 用于验收接受后销账)
+export interface MarkRevisePair extends RevisePair { mark_id: number; }
+export interface MarksReviseResult {
+  total: number; stale: number;
+  chapters: { chapter_number: number; pairs: MarkRevisePair[] }[];
 }
 // 各协议是否已配置可用 key。键为 interface_format(openai-compatible / anthropic /
 // gemini / deepseek / openai…),随后端 _REGISTRY 动态扩展,故用 Record 不写死字段。
@@ -1143,6 +1157,30 @@ export const api = {
   // 伏笔手动操作:弃用/恢复/标记回收/改预期章
   patchForeshadow: (pid: number, fid: number, patch: { status?: string; expected_payoff_chapter?: number; payoff_chapter?: number; notes?: string }) =>
     req<{ id: number; status: string }>("PATCH", `/api/projects/${pid}/foreshadowings/${fid}`, patch),
+
+  // ---- 桥段台账 + 雷区清单(跨章重复描写治理) ----
+  motifs: (pid: number) =>
+    req<MotifsOut>("GET", `/api/projects/${pid}/motifs`),
+  addBannedMotif: (pid: number, label: string, detail = "") =>
+    req<BannedMotif>("POST", `/api/projects/${pid}/motifs/banned`, { label, detail }),
+  removeBannedMotif: (pid: number, mid: number) =>
+    req<{ ok: boolean }>("DELETE", `/api/projects/${pid}/motifs/banned/${mid}`),
+  promoteMotif: (pid: number, label: string) =>
+    req<BannedMotif>("POST", `/api/projects/${pid}/motifs/banned/promote`, { label }),
+  clearLedgerMotif: (pid: number, label: string) =>
+    req<{ removed: number }>("DELETE", `/api/projects/${pid}/motifs/ledger?label=${encodeURIComponent(label)}`),
+  scanMotifsAsync: (pid: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/motifs/scan-async`),
+
+  // ---- 跨章标记 + 全书批修(边读边攒「这里不行」,一句总描述统一驱动成批改) ----
+  marks: (pid: number) =>
+    req<ChapterMark[]>("GET", `/api/projects/${pid}/marks`),
+  addMark: (pid: number, payload: { chapter_number: number; para_idx: number; snapshot: string; note: string }) =>
+    req<ChapterMark>("POST", `/api/projects/${pid}/marks`, payload),
+  removeMark: (pid: number, mid: number) =>
+    req<{ ok: boolean }>("DELETE", `/api/projects/${pid}/marks/${mid}`),
+  marksReviseAsync: (pid: number, directive: string) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/marks/revise-async`, { directive }),
 
   polishChapter: (pid: number, n: number, tendency: Tendency) =>
     req<PolishResult>("POST", `/api/projects/${pid}/polish/chapter/${n}`, { tendency }, LLM_TIMEOUT),

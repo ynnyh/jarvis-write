@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Chapter, Entity, Project
 from app.engines.consistency.bible import BibleService
 from app.engines.consistency.foreshadow import ForeshadowScheduler
+from app.engines.consistency.motifs import apply_extraction, known_labels_block
 from app.llm.router import Task, get_adapter_for
 from app.prompts.consistency import EXTRACTION_PROMPT
 from app.schemas.canon import StoryCanon, coerce_canon
@@ -267,10 +268,13 @@ async def extract_and_apply(
     ) or "(暂无)"
     if len(_open) > _MAX_OPEN_FS:
         open_fs += f"\n- …(另有 {len(_open) - _MAX_OPEN_FS} 条未回收伏笔未列出)"
+    # 桥段台账已有标签(排除本章):供 LLM 同物同名,跨章聚合才数得准
+    known_motifs = known_labels_block(db, project_id, exclude_chapter=chapter_number)
     prompt = EXTRACTION_PROMPT.format(
         known_entities=known_entities,
         active_facts=active_facts,
         open_foreshadowings=open_fs,
+        known_motifs=known_motifs or "(暂无)",
         chapter_number=chapter_number,
         chapter_text=chapter_text[:12000],  # 防超长
     )
@@ -297,8 +301,15 @@ async def extract_and_apply(
     fs_stats = scheduler.apply_ops(
         chapter_number, extraction.get("foreshadow_ops") or []
     )
+    # 桥段台账(防跨章复读):与圣经同一事务落库,重写本章时随 purge 幂等重建
+    motif_stats = apply_extraction(
+        db, project_id, chapter_number, extraction.get("motifs") or []
+    )
     db.commit()
-    stats = {"bible": bible_stats, "foreshadow": fs_stats, "purged": purge_stats}
+    stats = {
+        "bible": bible_stats, "foreshadow": fs_stats,
+        "motifs": motif_stats, "purged": purge_stats,
+    }
 
     # 4. canon 建议(咨询式增值,不自动落库):核心圣经已原子提交,这里【之后】独立单跑。
     #    失败只回滚本段、记日志,绝不影响已落地的圣经/伏笔,也绝不拖垮章节生成

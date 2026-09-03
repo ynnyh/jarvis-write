@@ -189,6 +189,49 @@
 
 ---
 
+## 四·五、桥段台账 + 雷区清单（跨章重复描写治理）
+
+### `writing_motifs` — 描写母题（一张表两种行）
+
+治「连续章节写同一描写」：n-gram 查重只抓字面重复，抓不住「换措辞复用同一桥段」
+（铁锈玫瑰/扎胸膛/躺下等天亮）。章后抽取顺带把本章标志性描写母题沉淀成短标签
+（**只记标签不记原句**——原句进 prompt 会被逐字照抄），按标签跨章聚合；写新章前
+已复现 ≥2 次的母题注入草稿 prompt 禁止复用。作者也可把写烦的桥段登记为雷区，
+一次标注全书生效（注入 style_block，草稿/定稿/守卫/去味全链路规避）。
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | PK | |
+| project_id | FK | |
+| label | str(100) | 短标签（聚合键，归一化去空白后比对，≥2 字） |
+| detail | text | 一句话说明（注入 prompt 时帮模型对上号） |
+| chapter_number | int | 标签来自哪章；0=非章节来源（用户手动） |
+| source | enum | auto（章后抽取/全书扫描）/ user（用户手动） |
+| banned | bool | True=雷区行（(project,label) 唯一）；False=台账行（(project,chapter,label) 一行） |
+
+引擎与 API：`engines/consistency/motifs.py`（聚合/渲染/软报/扫描）、
+`api/motifs.py`（清单增删/升格/scan-async）。事后软报 source="repeat"
+（雷区命中 major、台账 ≥2 次再现 minor，一律 advisory 不阻断）。
+
+### `chapter_marks` — 跨章标记（作者随手记的「这里不行」，落库批注）
+
+治「批注是内存状态、切章/刷新即丢」：标记落库后可边读边攒、跨章不丢，
+再由「全书批修」一句总描述统一驱动逐标记锁情节改写（`engines/marks.py`、
+`api/marks.py`，job 只产出待验收替换对不落库，前端逐条 diff 验收接受后
+走 PUT content 写回并 DELETE 销账）。
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | PK | |
+| project_id | FK | |
+| chapter_number | int | 哪一章 |
+| para_idx | int | 段落下标（与前端 splitParas 同口径：\n 分段、trim、去空行） |
+| snapshot | text | 段落原文快照（正文变动后据此判失效，批修时跳过） |
+| note | text | 一句话意见 |
+| status | enum | open / fixed（验收接受后由前端 DELETE 落实销账） |
+
+---
+
 ## 五、倾向预设（你的标签系统，详见 04 文档）
 
 ### `tendency_presets` — 用户存的倾向模板

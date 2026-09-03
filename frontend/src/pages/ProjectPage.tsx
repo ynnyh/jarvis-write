@@ -51,6 +51,7 @@ const BOOK_TABS: { key: BookTab; label: string }[] = [
   { key: "characters", label: "人物" },
   { key: "bible", label: "故事圣经" },
   { key: "foreshadow", label: "伏笔" },
+  { key: "motifs", label: "桥段" },
   { key: "publish", label: "投稿" },
   { key: "drama", label: "漫剧" },
   { key: "clips", label: "投流" },
@@ -139,8 +140,8 @@ const GUIDES = {
     done: "定稿的章节会计入总字数,可随时在「全书」查看全书状态。",
   },
   overview: {
-    what: "全书仪表盘:章节地图、人物卡、伏笔时间线、故事圣经。",
-    ai: "数据由一致性引擎自动维护,发现伏笔悬空或章节失配会在这里亮出来。",
+    what: "全书仪表盘:章节地图、人物卡、伏笔时间线、故事圣经、桥段台账。",
+    ai: "数据由一致性引擎自动维护,发现伏笔悬空或章节失配会在这里亮出来;写烦的桥段在「桥段」页记为雷区,以后每章都不再写。",
     done: "随时可看,不阻塞任何步骤。",
   },
   publish: {
@@ -522,7 +523,8 @@ export default function ProjectPage() {
 
             {zone === "book" && (
               <>
-                {(bookTab === "overview" || bookTab === "characters" || bookTab === "bible" || bookTab === "foreshadow") && (
+                {(bookTab === "overview" || bookTab === "characters" || bookTab === "bible"
+                  || bookTab === "foreshadow" || bookTab === "motifs") && (
                   outlines.length
                     ? <BoardPanel pid={pid} outlines={outlines} tab={bookTab}
                         onGotoChapter={(n) => {

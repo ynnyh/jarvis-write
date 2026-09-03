@@ -40,6 +40,7 @@ from app.engines.consistency.checker import (
 from app.engines.consistency.extractor import extract_and_apply, parse_llm_json
 from app.engines.consistency.preflight import preflight_chapter
 from app.engines.consistency.repetition import avoid_block, dedup_paragraphs
+from app.engines.consistency.motifs import banned_block, ledger_avoid_block, persist_motif_issues
 from app.engines.pipeline.handoff import extract_handoff_contract, load_handoff_block
 from app.engines.timeline import persist_clock_issues
 from app.engines.devices import devices_reminder_block, persist_device_issues
@@ -388,6 +389,16 @@ async def apply_chapter_tail(
     except Exception as exc:  # noqa: BLE001 — 装置校验绝不阻塞主流程
         db.rollback()
         logger.warning("第 %d 章常驻装置校验失败(已跳过): %s", chapter_number, exc)
+
+    # ---- 桥段台账软报(advisory,不阻断):落 source=repeat 建议 ----
+    # 纯 contains 零 LLM:终稿里又出现雷区/已写滥母题时亮出来(雷区 major、
+    # 台账 minor),放在抽取之后——此刻本章母题已入库,台账聚合口径才完整。
+    # 与时钟/装置各自 try/except,一边挂了不影响另一边。
+    try:
+        persist_motif_issues(db, project.id, chapter, final)
+    except Exception as exc:  # noqa: BLE001 — 桥段软报绝不阻塞主流程
+        db.rollback()
+        logger.warning("第 %d 章桥段台账校验失败(已跳过): %s", chapter_number, exc)
     return extraction_stats
 
 
@@ -560,12 +571,22 @@ async def generate_chapter(
         .order_by(Chapter.chapter_number.desc())
         .limit(3)
     ]
-    avoid_repetition = avoid_block(recent_full)
+    # 跨章防复读两级:字面级(近几章高频 n-gram/逐句)+ 语义级(桥段台账:前文
+    # 已写滥 ≥2 次的母题,带章号与次数注入,治「换措辞复用同一桥段」)。
+    avoid_repetition = "\n\n".join(
+        b for b in (
+            avoid_block(recent_full),
+            ledger_avoid_block(db, project.id, chapter_number),
+        ) if b
+    )
 
     # 生成端疲劳词表(P5 治本项):最近几章体检出的高频 AI 腔 → 本章草稿的黑名单,
     # 生成时就别写,别全靠事后洗(InkOS 疲劳词表思路)。追加进 style_block,
     # 草稿/定稿/守卫压缩/去味重写全链路都吃得到;全书干净时只有静态黑名单。
     style_block += fatigue_block(recent_full)
+    # 雷区清单(作者明令禁止的桥段):同样追加进 style_block——草稿/定稿/守卫/
+    # 去味全链路可见,一次标注全书生效(补齐批注跨不了章的缺口)。无雷区 → 空串。
+    style_block += banned_block(db, project.id)
 
     # 重写场景:失配章(大纲已更新)→ 按新蓝图重新构思,不注入旧正文;
     # 常规重写 → 用户修改意见连同上一版正文(截断)注入草稿 prompt

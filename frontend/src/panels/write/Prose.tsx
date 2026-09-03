@@ -6,6 +6,8 @@
 //     交给父级中栏的 sync-ask 询问条(onSyncAsk,旧整章编辑的 pendingSync 机制上移至此)。
 //   🖍 批注(②档):只记一句意见(段号+原文快照),不马上改;攒够后在 AI 栏「按批注改」成批处理。
 //     已批注段在正文高亮(markedIdx),正文变动后快照对不上者标失效(staleIdx)。
+//   🚫 雷区(跨章标注):把这一段/选中文字代表的桥段登记进本书雷区清单——以后每章生成
+//     都会规避它(一次标注全书生效,补齐批注跨不了章的缺口);管理入口在「全书 → 桥段」。
 // 段落寻址=下标 + 原文快照守卫(spliceParagraph),正文被别处改动时报错不写回。
 // 任一时刻最多一个段落处于气泡/编辑态;手改未保存经 onDirtyChange 上报,父级切章前弹确认。
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -17,13 +19,14 @@ import { errMsg } from "../../pollJob";
 import { applyParaReplacement, applySelectionReplacement, appendParagraph, applyParaDeletion, Annotation } from "./paraEdit";
 import { buildEntityIndex, segmentParagraph, entitySummary, isEntitySeg } from "./entityLink";
 import EntityCard from "./EntityCard";
+import { toast } from "../../ui/Toaster";
 import { diffChars } from "./charDiff";
 import DiffText from "./DiffText";
 
 // 润色方向 chips 兜底(editorialActions 拉不到时用,与 Reader 内置一致)
 const DIRECTION_CHIPS = ["更生动", "更紧张", "更简洁", "去 AI 味"];
 
-type BubbleMode = "pick" | "polish" | "edit" | "annotate";
+type BubbleMode = "pick" | "polish" | "edit" | "annotate" | "banned";
 // polish 工作台内的子工具:润色(改文笔不改情节)/ 描写 / 扩写 / 脑暴(给点子不改正文)。
 // describe/expand 与润色共用 diff→接受→写回链路,brainstorm 只给点子不落库。
 type CraftTool = "polish" | CraftMode;
@@ -71,11 +74,14 @@ interface Props {
   annotations?: Annotation[];
   // 记下一条批注:段号 + 原文快照 + 一句话意见(父级 append 进 annotations)
   onAnnotate?: (idx: number, snapshot: string, note: string) => void;
+  // 记为雷区(跨章标注):把这段/选中文字代表的桥段登记进本书雷区清单(全书生效);
+  // 失败时抛错,气泡内展示。不传则不显示该入口。
+  onBanMotif?: (label: string, detail: string) => Promise<void>;
 }
 
 export default function Prose({
   pid, chapter, genBlocked, genHint, onSaved, onSyncAsk, onDirtyChange, onSelectChange,
-  annotations, onAnnotate,
+  annotations, onAnnotate, onBanMotif,
 }: Props) {
   // 当前选中段落(null=无选择);气泡模式:pick=两个动作入口 / polish=润色 / edit=手改
   const [selPara, setSelPara] = useState<number | null>(null);
@@ -97,6 +103,10 @@ export default function Prose({
   const [editText, setEditText] = useState("");
   // ②档:批注意见输入(annotate 模式)
   const [note, setNote] = useState("");
+  // 🚫 雷区(banned 模式):标签预填自段落/选区文字,说明可选;登记中 spinner 在按钮上
+  const [banLabel, setBanLabel] = useState("");
+  const [banDetail, setBanDetail] = useState("");
+  const [banning, setBanning] = useState(false);
   // 替换/保存存盘中(快;不含一致性同步)
   const [applying, setApplying] = useState(false);
   // 删除本段的二次确认(pick 气泡内联;删段无 diff 可验收,故需一次确认)
@@ -182,6 +192,7 @@ export default function Prose({
     setTool("polish"); setIdeas(null);
     setGhost(null); setGhosting(false); setGhostErr("");
     setEntityPop(null); cancelHideEntity(); setConfirmDel(false);
+    setBanLabel(""); setBanDetail("");
     onSelectChange?.(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chapter.chapter_number]);
@@ -234,7 +245,7 @@ export default function Prose({
     pendingFocusRef.current = true; // 键盘点选后焦点移入气泡「改这段」
     onSelectChange?.({ idx: i, text: paras[i] });
   }
-  // 从子模式(润色方向/批注/手改)返回时也把焦点收回气泡首个动作,键盘操作不断链
+  // 从子模式(润色方向/批注/雷区/手改)返回时也把焦点收回气泡首个动作,键盘操作不断链
   function backToPick() {
     pendingFocusRef.current = true;
     setMode("pick");
@@ -242,7 +253,30 @@ export default function Prose({
   function clearSelection() {
     setSelPara(null); setSelRange(null); setMode("pick"); setDirection(""); setPolished(null); setNote(""); setErr("");
     setTool("polish"); setIdeas(null); setConfirmDel(false);
+    setBanLabel(""); setBanDetail("");
     onSelectChange?.(null);
+  }
+
+  // 🚫 记为雷区:预填标签(取目标文字前 12 字,足够认出这个桥段),进 banned 模式
+  function openBan() {
+    const base = (targetText ?? "").trim();
+    setBanLabel(base ? base.slice(0, 12) : "");
+    setBanDetail("");
+    setErr("");
+    setMode("banned");
+  }
+
+  // 登记雷区:调父级(onBanMotif → POST banned);失败抛错在气泡内展示,成功 toast 后收起
+  async function confirmBan() {
+    if (!onBanMotif || banLabel.trim().length < 2 || banning) return;
+    setBanning(true); setErr("");
+    try {
+      await onBanMotif(banLabel.trim(), banDetail.trim());
+      toast.ok(`已登记雷区「${banLabel.trim()}」`, "以后各章生成都会规避这个桥段(全书 → 桥段 可管理)");
+      clearSelection();
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally { setBanning(false); }
   }
 
   // 拖选任意文字(限单段内):进 polish 模式对选区润色,接受时走 applySelectionReplacement 子串写回。
@@ -459,6 +493,13 @@ export default function Prose({
                   🖍 批注
                 </button>
               )}
+              {onBanMotif && (
+                <button className="btn-sm"
+                  title="这个桥段写烦了?记为全书雷区,以后每章都不再写它"
+                  onClick={openBan}>
+                  🚫 雷区
+                </button>
+              )}
               {paras.length > 1 && (
                 <button className="btn-sm"
                   title="删除这一段(误删可在「历史版本」里回退)"
@@ -647,6 +688,38 @@ export default function Prose({
                   记下批注
                 </button>
                 <button className="btn-sm" onClick={backToPick}>返回</button>
+              </div>
+            </>
+          )}
+
+          {mode === "banned" && onBanMotif && (
+            <>
+              <div className="rp-label">
+                {selRange ? "就选中文字" : `第 ${selPara + 1} 段`} · 记为雷区(跨章标注:以后每章都不再写这个桥段)
+              </div>
+              <input
+                type="text"
+                value={banLabel}
+                placeholder="桥段短标签(2 字以上),如:铁锈玫瑰 / 躺下等天亮"
+                autoFocus
+                maxLength={100}
+                onChange={(e) => setBanLabel(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") void confirmBan(); }}
+              />
+              <input
+                type="text"
+                value={banDetail}
+                placeholder="可选:一句话说明,如:自残式把铁片扎进胸口"
+                maxLength={500}
+                onChange={(e) => setBanDetail(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") void confirmBan(); }}
+              />
+              <div className="rp-actions">
+                <button className="primary btn-sm" disabled={banLabel.trim().length < 2 || banning}
+                  onClick={confirmBan}>
+                  {banning && <span className="spin spin-sm" />}登记雷区
+                </button>
+                <button className="btn-sm" disabled={banning} onClick={backToPick}>返回</button>
               </div>
             </>
           )}

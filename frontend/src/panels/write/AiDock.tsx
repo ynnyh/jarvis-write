@@ -8,17 +8,21 @@
 //   ②档 待处理批注:正文里 🖍 攒下的多条意见在此列出,「按批注改」→ revise-annotated-async
 //     成批定点润色(逐条 polish_fragment),结果交父级 AnnotatedReviseCard 逐段 diff 验收。
 //     正文变动后快照对不上的批注标「失效」,不参与成批(段号已错位,写回守卫也会拦)。
+//     批注已落库持久(跨章不丢,useWritePanel 持有全书 marks,这里只看本章)。
+//   全书批修:攒下的标记跨章生效——写一句总描述(如「所有铁锈玫瑰的描写全换掉」),
+//     marks-revise-async 逐标记锁情节改写,结果按章出验收卡(MarksReviseCards),
+//     逐条 diff 验收、接受即销账;失效标记自动跳过。
 // 桌面:展开=右侧 320px sticky 窄栏;收起=40px 细条(有新回复显示圆点)。
 // 移动:收起=底部固定输入条(有选中段带「第 N 段」chip);展开=全屏 sheet。
 // 对话 UI 复用全局 rd-*/arch-directive 样式族(与 Reader 段落对话/架构研讨同构)。
 import { useEffect, useRef, useState } from "react";
-import { api, ChapterDetail, PolishResult, RevisePair } from "../../api";
+import { api, ChapterDetail, ChapterMark, MarksReviseResult, PolishResult, RevisePair } from "../../api";
 import { splitParas } from "../../components/Reader";
 import { emitChapterSaved } from "../../desktop";
 import { useBreakpoint } from "../../hooks/useBreakpoint";
 import { errMsg } from "../../pollJob";
 import { useJob } from "../../ui/useJob";
-import { applyParaReplacement, Annotation } from "./paraEdit";
+import { applyParaReplacement } from "./paraEdit";
 
 export type DockMode = "chat" | "revise";
 
@@ -44,18 +48,20 @@ interface Props {
   onRegenerate: (revision: string) => void;
   // 意见清单 ③:整章优化完成,父级在正文区顶部渲染 PolishCompareCard
   onPolishResult: (original: string, result: PolishResult) => void;
-  // ②档:正文里攒下的待处理批注(父级持有;Prose 记入、这里成批发)
-  annotations: Annotation[];
-  // 移除一条批注(用户点 × 或点已失效项;idx=annotations 数组下标)
+  // ②档:全书待处理标记(落库持久,父级持有;这里展示本章的、并统计全书的)
+  marks: ChapterMark[];
+  // 移除一条本章标记(用户点 × 或点已失效项;idx=本章标记数组下标)
   onRemoveAnnotation: (listIdx: number) => void;
   // 「按批注改」job 完成:成批定点润色结果交父级渲染 AnnotatedReviseCard 逐段验收
   onReviseResult: (pairs: RevisePair[]) => void;
+  // 「全书批修」job 完成:跨章待验收替换对交父级按章渲染验收卡(MarksReviseCards)
+  onMarksReviseResult: (result: MarksReviseResult) => void;
 }
 
 export default function AiDock({
   pid, chapterNum, current, selectedPara, genBlocked, genHint,
   collapsed, onCollapsedChange, prefill, onSaved, onRegenerate, onPolishResult,
-  annotations, onRemoveAnnotation, onReviseResult,
+  marks, onRemoveAnnotation, onReviseResult, onMarksReviseResult,
 }: Props) {
   const { isMobile } = useBreakpoint();
   const { run: runJob } = useJob();
@@ -76,6 +82,9 @@ export default function AiDock({
   const [polishStage, setPolishStage] = useState("");
   // ② 按批注改进行中的阶段文案(异步 job)
   const [reviseStage, setReviseStage] = useState("");
+  // 全书批修:总描述输入 + 进行中的阶段文案(异步 job)
+  const [marksDirective, setMarksDirective] = useState("");
+  const [marksStage, setMarksStage] = useState("");
   // 收起期间来了新回复:细条/输入条上显示圆点
   const [hasNew, setHasNew] = useState(false);
   const collapsedRef = useRef(collapsed);
@@ -197,16 +206,16 @@ export default function AiDock({
     } finally { setPolishStage(""); }
   }
 
-  // ②档「按批注改」:把未失效批注成批发去 revise-annotated-async(逐条定点润色),
+  // ②档「按批注改」:把本章未失效标记成批发去 revise-annotated-async(逐条定点润色),
   // 结果 pairs 交父级 AnnotatedReviseCard 逐段验收(接受走 paraEdit 快照守卫写回)。
   async function runRevise() {
-    const fresh = annotations.filter((a) => !staleIdx.has(a.paraIdx));
+    const fresh = chapterMarks.filter((m) => !chapterStaleIdx.has(m.para_idx));
     if (!fresh.length || reviseStage) return;
     setReviseStage("排队中"); setErr("");
     try {
       const r = await runJob<{ pairs: RevisePair[] }>(
         () => api.reviseAnnotatedAsync(pid, chapterNum,
-          fresh.map((a) => ({ para_idx: a.paraIdx, original: a.snapshot, note: a.note }))),
+          fresh.map((m) => ({ para_idx: m.para_idx, original: m.snapshot, note: m.note }))),
         { kind: `revise-annotated-${pid}-${chapterNum}`, onStage: (s) => setReviseStage(s) });
       if (r) onReviseResult(r.pairs);
     } catch (e) {
@@ -214,13 +223,36 @@ export default function AiDock({
     } finally { setReviseStage(""); }
   }
 
-  // ②档:当前正文分段,用于判定批注是否失效(段号处文本与快照对不上=失效)
-  const paras = splitParas(current.final_content || current.draft_content);
-  const staleIdx = new Set<number>();
-  for (const a of annotations) {
-    if (paras[a.paraIdx] !== a.snapshot) staleIdx.add(a.paraIdx);
+  // 全书批修:一句总描述驱动全书 open 标记成批改写(跨章),结果按章出验收卡。
+  // 标记在验收接受后才销账;失效标记后端自动跳过并计入 stale。
+  async function runMarksRevise() {
+    if (marksDirective.trim().length < 2 || !bookMarkCount || marksStage) return;
+    setMarksStage("排队中"); setErr("");
+    try {
+      const r = await runJob<MarksReviseResult>(
+        () => api.marksReviseAsync(pid, marksDirective.trim()),
+        { kind: `marks-revise-${pid}`, onStage: (s) => setMarksStage(s) });
+      if (r) {
+        setMarksDirective("");
+        onMarksReviseResult(r);
+      }
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally { setMarksStage(""); }
   }
-  const freshCount = annotations.filter((a) => !staleIdx.has(a.paraIdx)).length;
+
+  // ②档:本章标记视图 + 失效判定(段号处文本与快照对不上=失效),与全书统计分开算。
+  const paras = splitParas(current.final_content || current.draft_content);
+  const chapterMarks = marks.filter((m) => m.chapter_number === chapterNum);
+  const chapterStaleIdx = new Set<number>();
+  for (const m of chapterMarks) {
+    if (paras[m.para_idx] !== m.snapshot) chapterStaleIdx.add(m.para_idx);
+  }
+  const freshCount = chapterMarks.filter((m) => !chapterStaleIdx.has(m.para_idx)).length;
+  // 全书统计:批修按钮的底气(N 章 M 处);本章标记是否失效不影响全书批修
+  // (失效条目后端会跳过并在结果里说明)。
+  const bookChapterCount = new Set(marks.map((m) => m.chapter_number)).size;
+  const bookMarkCount = marks.length;
 
   const levelHint = suggestedLevel === "polish"
     ? "AI 建议走③ 整章优化(它的判断:只改文字就够了)"
@@ -241,40 +273,67 @@ export default function AiDock({
         <button className="btn-sm" onClick={() => onCollapsedChange(true)}>收起</button>
       </div>
 
-      {annotations.length > 0 && (
+      {marks.length > 0 && (
         <div className="ai-dock-annos">
           <div className="rp-label">
-            待处理批注 {annotations.length} 条 · 攒够后一次成批改(②)
+            {chapterMarks.length > 0
+              ? <>待处理批注 本章{chapterMarks.length} 条 · 全书共 {bookChapterCount} 章 {bookMarkCount} 处</>
+              : <>本章暂无批注 · 全书还有 {bookChapterCount} 章 {bookMarkCount} 处标记</>}
           </div>
-          <ul className="anno-list">
-            {annotations.map((a, i) => {
-              const stale = staleIdx.has(a.paraIdx);
-              return (
-                <li key={i} className={"anno-item" + (stale ? " stale" : "")}>
-                  <span className="anno-seg">第 {a.paraIdx + 1} 段</span>
-                  <span className="anno-note">{a.note}</span>
-                  {stale && <span className="anno-stale-tag" title="正文已变动,原文对不上,不参与成批">失效</span>}
-                  <button className="anno-del" title="移除这条批注"
-                    onClick={() => onRemoveAnnotation(i)}>×</button>
-                </li>
-              );
-            })}
-          </ul>
+          {chapterMarks.length > 0 && (
+            <ul className="anno-list">
+              {chapterMarks.map((m, i) => {
+                const stale = chapterStaleIdx.has(m.para_idx);
+                return (
+                  <li key={m.id} className={"anno-item" + (stale ? " stale" : "")}>
+                    <span className="anno-seg">第 {m.para_idx + 1} 段</span>
+                    <span className="anno-note">{m.note}</span>
+                    {stale && <span className="anno-stale-tag" title="正文已变动,原文对不上,不参与成批">失效</span>}
+                    <button className="anno-del" title="移除这条批注"
+                      onClick={() => onRemoveAnnotation(i)}>×</button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
           <div className="rp-actions">
             <button className="primary btn-sm"
               disabled={!freshCount || !!reviseStage || genBlocked}
-              title={genBlocked ? genHint : "把未失效的批注一次性成批定点修改,逐段验收"}
+              title={genBlocked ? genHint : "把本章未失效的批注一次性成批定点修改,逐段验收"}
               onClick={runRevise}>
               {reviseStage && <span className="spin spin-sm" />}
               按批注改{freshCount ? `(${freshCount})` : ""}
             </button>
-            {annotations.length > freshCount && (
-              <span className="hint">失效 {annotations.length - freshCount} 条不参与</span>
+            {chapterMarks.length > freshCount && (
+              <span className="hint">失效 {chapterMarks.length - freshCount} 条不参与</span>
             )}
           </div>
           {reviseStage && (
             <div className="muted ai-dock-level">
               成批修改中({reviseStage}),可切到别处,进度看右上角任务
+            </div>
+          )}
+
+          {/* 全书批修:一句总描述统一指挥所有标记(跨章);验收卡按章出,接受即销账 */}
+          <div className="rp-label mt-2">全书批修(跨章):一句话说明要把这些标记处改成什么样</div>
+          <textarea
+            rows={2}
+            value={marksDirective}
+            placeholder="如:所有铁锈玫瑰的描写全部换成全新意象;扎胸膛的自残动作一律删掉"
+            onChange={(e) => setMarksDirective(e.target.value)}
+          />
+          <div className="rp-actions">
+            <button className="primary btn-sm"
+              disabled={marksDirective.trim().length < 2 || !bookMarkCount || !!marksStage}
+              title={`对全书 ${bookChapterCount} 章 ${bookMarkCount} 处标记做锁情节定点改写,逐条 diff 验收后写回`}
+              onClick={runMarksRevise}>
+              {marksStage && <span className="spin spin-sm" />}
+              全书批修({bookChapterCount} 章 {bookMarkCount} 处)
+            </button>
+          </div>
+          {marksStage && (
+            <div className="muted ai-dock-level">
+              全书批修中({marksStage}),可切到别处,进度看右上角任务
             </div>
           )}
         </div>
@@ -387,7 +446,7 @@ export default function AiDock({
       return (
         <button type="button" className="m-ai-bar" onClick={() => onCollapsedChange(false)}>
           <span className="grow m-ai-bar-label">💬 和 AI 说点什么…</span>
-          {annotations.length > 0 && <span className="chip">批注 {annotations.length}</span>}
+          {marks.length > 0 && <span className="chip">批注 {marks.length}</span>}
           {selectedPara && <span className="chip on">第 {selectedPara.idx + 1} 段</span>}
           {hasNew && <span className="ai-dot" />}
         </button>
@@ -405,7 +464,7 @@ export default function AiDock({
     return (
       <button type="button" className="ai-dock-mini" title="展开 AI 栏"
         onClick={() => onCollapsedChange(false)}>
-        💬{annotations.length > 0 && <span className="ai-dock-mini-badge">{annotations.length}</span>}
+        💬{marks.length > 0 && <span className="ai-dock-mini-badge">{marks.length}</span>}
         {hasNew && <span className="ai-dot" />}
       </button>
     );

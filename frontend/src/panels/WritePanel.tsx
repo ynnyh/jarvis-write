@@ -11,7 +11,7 @@
 // useChapterGeneration:沉浸/阅读器/版本对比/多章同步并发/生成连写队列),壳回归编排+布局;
 // 仍内联的是纯 UI:act= 校对/评分两张动作卡、GenResultCard、版本对比与全屏 Reader。
 // 移动端:m-topbar(←/章题/阅读)+ 左右滑切章 + act 卡全屏 sheet。
-import { Outline } from "../api";
+import { Outline, api } from "../api";
 import { qk } from "../hooks/queries";
 import Banner from "../ui/Banner";
 import Reader from "../components/Reader";
@@ -28,6 +28,7 @@ import ProofreadCard from "./write/ProofreadCard";
 import AiDock from "./write/AiDock";
 import PolishCompareCard from "./write/PolishCompareCard";
 import AnnotatedReviseCard from "./write/AnnotatedReviseCard";
+import MarksReviseCards from "./write/MarksReviseCards";
 import ChapterTitleEdit from "./write/ChapterTitleEdit";
 import WriteGuide from "./write/WriteGuide";
 import { estimateText } from "./write/genDuration";
@@ -49,12 +50,13 @@ export default function WritePanel({ pid, outlines }: Props) {
     isMobile, immersive, railOpen, setRailOpen, mapOpen, setMapOpen, onMainTouchStart, onMainTouchEnd,
     // 顶部错误 & 派生
     err, stage, nextChapterNum, genBlocked, genHint,
-    // 本地 UI 态:AI 窄栏 / 选段 / 对照 / 批注 / 脏标记
+    // 本地 UI 态:AI 窄栏 / 选段 / 对照 / 跨章标记 / 脏标记
     dockCollapsed, setDockCollapsed, dockPrefill,
     selectedPara, setSelectedPara,
     polishCompare, setPolishCompare,
-    annotations, setAnnotations,
-    reviseResult, setReviseResult,
+    marks, chapterMarks, marksReviseResult,
+    createMark, removeMarkAt, clearChapterMarks, acceptMarkPair, closeMarksChapter,
+    reviseResult, setReviseResult, setMarksReviseResult,
     proseDirtyRef,
     // 审核(放行已收进 ChapterStatusCard 内的 GateResolve,壳不再传 onRelease)
     approve,
@@ -216,6 +218,19 @@ export default function WritePanel({ pid, outlines }: Props) {
           </div>
         )}
 
+        {/* 全书批修的验收卡组(跨章,按章分组;单条接受即销账对应标记) */}
+        {marksReviseResult && (
+          <div ref={reviseRef}>
+            <MarksReviseCards
+              pid={pid}
+              result={marksReviseResult}
+              onSaved={(updated) => { setCurrent(updated); void reload(); }}
+              onPairAccepted={(markId) => { void acceptMarkPair(markId); }}
+              onChapterClose={closeMarksChapter}
+            />
+          </div>
+        )}
+
         {current ? (
           <>
             {/* 章首状态卡:三态人话(冲突拍板/过目通过/大纲已变)+ 「更多」过渡入口 */}
@@ -295,9 +310,11 @@ export default function WritePanel({ pid, outlines }: Props) {
                 onSyncAsk={(num) => setPendingSync(num)}
                 onDirtyChange={(dirty) => { proseDirtyRef.current = dirty; }}
                 onSelectChange={setSelectedPara}
-                annotations={annotations}
-                onAnnotate={(idx, snapshot, note) =>
-                  setAnnotations((prev) => [...prev, { paraIdx: idx, snapshot, note }])}
+                annotations={chapterMarks.map((m) => ({
+                  paraIdx: m.para_idx, snapshot: m.snapshot, note: m.note,
+                }))}
+                onAnnotate={(idx, snapshot, note) => { void createMark(idx, snapshot, note); }}
+                onBanMotif={(label, detail) => api.addBannedMotif(pid, label, detail).then(() => undefined)}
               />
             </div>
 
@@ -378,13 +395,16 @@ export default function WritePanel({ pid, outlines }: Props) {
             if (isMobile) setDockCollapsed(true); // 同上:让出正文区顶部的对照卡
             setPolishCompare({ original, result });
           }}
-          annotations={annotations}
-          onRemoveAnnotation={(i) =>
-            setAnnotations((prev) => prev.filter((_, idx) => idx !== i))}
+          marks={marks}
+          onRemoveAnnotation={removeMarkAt}
           onReviseResult={(pairs) => {
             if (isMobile) setDockCollapsed(true); // 让出正文区顶部的验收卡
             setReviseResult(pairs);
-            setAnnotations([]); // 已成批发出,批注退场;结果由验收卡逐条处理
+            void clearChapterMarks(); // 已成批发出,本章标记退场;结果由验收卡逐条处理
+          }}
+          onMarksReviseResult={(result) => {
+            if (isMobile) setDockCollapsed(true); // 让出正文区顶部的验收卡组
+            setMarksReviseResult(result);
           }}
         />
       )}

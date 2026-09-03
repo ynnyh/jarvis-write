@@ -17,13 +17,17 @@ interface Props {
   pairs: RevisePair[];
   // 单条接受写回成功:父级更新 qk.chapter 缓存并刷新章节列表(与 Prose/AiDock 同一回调)
   onSaved: (updated: ChapterDetail) => void;
+  // 单条接受成功后的联动(可选):全书批修用它销账对应标记;②档单章流不用
+  onPairAccepted?: (index: number) => void;
+  // 卡头标题(可选):全书批修传「全书批修」,默认②档「按批注改」
+  heading?: string;
   // 关闭本卡(全部处理完或用户主动收起):父级清空 reviseResult
   onClose: () => void;
-}
+};
 
 type Resolution = "accepted" | "rejected";
 
-export default function AnnotatedReviseCard({ pid, chapter, pairs, onSaved, onClose }: Props) {
+export default function AnnotatedReviseCard({ pid, chapter, pairs, onSaved, onPairAccepted, heading, onClose }: Props) {
   // 本地章节:每次接受用它作为写回基准,并以返回结果更新(见文件头注释)
   const [chap, setChap] = useState(chapter);
   const [resolved, setResolved] = useState<Record<number, Resolution>>({});
@@ -48,6 +52,7 @@ export default function AnnotatedReviseCard({ pid, chapter, pairs, onSaved, onCl
       }
       setChap(updated);
       onSaved(updated);
+      onPairAccepted?.(i);
       void emitChapterSaved(pid, chap.chapter_number);
       setResolved((r) => ({ ...r, [i]: "accepted" }));
     } catch (e) {
@@ -79,6 +84,7 @@ export default function AnnotatedReviseCard({ pid, chapter, pairs, onSaved, onCl
       if (Object.keys(done).length) {
         setChap(cur);
         onSaved(cur);
+        for (const i of Object.keys(done)) onPairAccepted?.(Number(i));
         void emitChapterSaved(pid, cur.chapter_number);
         setResolved((r) => ({ ...r, ...done }));
       }
@@ -91,7 +97,7 @@ export default function AnnotatedReviseCard({ pid, chapter, pairs, onSaved, onCl
   return (
     <div className="card">
       <div className="card-head">
-        <h3 className="grow">按批注改 · 第{chap.chapter_number}章({resolvedCount}/{pairs.length} 已处理)</h3>
+        <h3 className="grow">{heading ?? "按批注改"} · 第{chap.chapter_number}章({resolvedCount}/{pairs.length} 已处理)</h3>
         {pendingOk > 0 && (
           <button className="btn-sm primary" disabled={busy} onClick={acceptAll}>
             {applyingAll && <span className="spin spin-sm" />}全部接受剩余({pendingOk})

@@ -312,7 +312,7 @@ async def audit_report(project_id: int, db: Session = Depends(get_db)):
 
 
 def _book_job_busy(project_id: int) -> str:
-    """章节级任务互斥:生成/同步/放行/体检/补契约任一在跑,返回其阶段文案。"""
+    """章节级任务互斥:生成/同步/放行/体检/补契约/桥段扫描任一在跑,返回其阶段文案。"""
     busy = (
         list_running(f"chapter-{project_id}-")
         + list_running(f"re-extract-{project_id}-")
@@ -320,6 +320,7 @@ def _book_job_busy(project_id: int) -> str:
         + list_running(f"diag-{project_id}")
         + list_running(f"rulescan-{project_id}")
         + list_running(f"contract-backfill-{project_id}")
+        + list_running(f"motifscan-{project_id}")
     )
     return busy[0][1]["stage"] if busy else ""
 
