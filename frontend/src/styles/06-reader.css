@@ -1,0 +1,515 @@
+/* ==========================================================================
+   章节阅读器(阅读模式):窄屏全屏,宽屏居中浮层
+   ========================================================================== */
+.reader-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay-bg);
+  z-index: var(--z-reader);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.reader {
+  position: relative; /* 片段润色弹层(.reader-polish)的定位锚点 */
+  background: var(--surface);
+  color: var(--text);
+  width: 100%;
+  max-width: 820px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: var(--shadow-lg);
+  /* 阅读排版默认值,由 data-font / data-size 覆盖 */
+  --reader-font: var(--font-serif);
+  --reader-fs: 17px;
+}
+
+/* ---- 阅读器背景主题:在 reader 作用域内覆盖设计令牌,头部/tabs/导航/徽章随之联动 ---- */
+/* 注意:全局暗色([data-theme="dark"])下,未在这里声明的令牌会继承暗色值,
+   与浅色纸张底不协调——故 paper/kraft 要把用到的品牌/语义色整组钉成浅色版。 */
+.reader[data-theme="paper"] {
+  --surface: #fbfaf7;
+  --surface-2: #f1efe9;
+  --line: #e6e3da;
+  --line-strong: #d5d1c5;
+  --text: #2a2b2e;
+  --text-2: #60636a;
+  --text-3: #767a83;
+  --brand: #4b54e1;
+  --brand-hover: #3e46c6;
+  --brand-weak: #eef0fd;
+  --brand-line: #d9ddf9;
+  --brand-ring: rgba(75, 84, 225, 0.16);
+  --on-brand: #ffffff;
+  --on-brand-weak: rgba(255, 255, 255, 0.22);
+  --ok: #1a7f4b;   --ok-weak: #ecf7f1;   --ok-line: #c2e2d1;
+  --warn: #a85f0a; --warn-weak: #fdf5e8; --warn-line: #edd9b4;
+  --err: #c93333;  --err-weak: #fceeee;  --err-line: #f0c8c8;
+}
+.reader[data-theme="kraft"] {
+  --surface: #f3e8cf;
+  --surface-2: #e9dbbd;
+  --line: #dccba6;
+  --line-strong: #c9b78d;
+  --text: #3f3226;
+  --text-2: #6f5f4b;
+  --text-3: #8a7a66;
+  --brand: #4b54e1;
+  --brand-hover: #3e46c6;
+  --brand-weak: #eef0fd;
+  --brand-line: #d9ddf9;
+  --brand-ring: rgba(75, 84, 225, 0.16);
+  --on-brand: #ffffff;
+  --on-brand-weak: rgba(255, 255, 255, 0.22);
+  --ok: #1a7f4b;   --ok-weak: #ecf7f1;   --ok-line: #c2e2d1;
+  --warn: #a85f0a; --warn-weak: #fdf5e8; --warn-line: #edd9b4;
+  --err: #c93333;  --err-weak: #fceeee;  --err-line: #f0c8c8;
+  --shadow-sm: 0 1px 2px rgba(63, 50, 38, 0.08);
+  --shadow-md: 0 1px 2px rgba(63, 50, 38, 0.08), 0 4px 12px rgba(63, 50, 38, 0.10);
+  /* 极淡纸质纹理:顶部柔光 + 细密纤维条纹,纯 CSS 无图片 */
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(255, 252, 240, 0.5) 0%, rgba(255, 252, 240, 0) 60%),
+    repeating-linear-gradient(0deg, rgba(120, 92, 50, 0.02) 0 2px, rgba(255, 255, 255, 0) 2px 4px),
+    var(--surface);
+}
+.reader[data-theme="night"] {
+  --surface: #1b1d21;
+  --surface-2: #26292f;
+  --line: #31343b;
+  --line-strong: #40444d;
+  --text: #c8ccd3;
+  --text-2: #9aa0a9;
+  --text-3: #7d838d;
+  --brand: #8b93ff;
+  --brand-hover: #a0a6ff;
+  --brand-weak: #272b47;
+  --brand-line: #3d4372;
+  --brand-ring: rgba(139, 147, 255, 0.28);
+  --on-brand: #181a30;
+  --on-brand-weak: rgba(24, 26, 48, 0.28);
+  --ok: #55b98a;   --ok-weak: #1e2f27;   --ok-line: #2f4d3f;
+  --warn: #d99a4e; --warn-weak: #2d2517; --warn-line: #54452a;
+  --err: #e06c6c;  --err-weak: #352225;  --err-line: #553636;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+/* ---- 阅读器字体 ---- */
+.reader[data-font="song"] {
+  --reader-font: "Songti SC", "STSong", "SimSun", "Noto Serif CJK SC",
+    "Source Han Serif SC", serif;
+}
+.reader[data-font="hei"] {
+  --reader-font: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Noto Sans CJK SC", sans-serif;
+}
+.reader[data-font="kai"] {
+  --reader-font: "Kaiti SC", "STKaiti", "KaiTi", "Noto Serif CJK SC", cursive;
+}
+
+/* ---- 阅读器字号 ---- */
+.reader[data-size="sm"] { --reader-fs: 15px; }
+.reader[data-size="md"] { --reader-fs: 17px; }
+.reader[data-size="lg"] { --reader-fs: 19px; }
+.reader-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+/* 窄屏换行点:仅 ≤640px 媒体查询里显示(见文件底部) */
+.reader-head-br { display: none; }
+/* 同步询问/角标条:夹在头部与正文之间,非阻塞(不挡阅读/翻章) */
+.reader-sync-bar { padding: 10px 20px 0; flex-shrink: 0; }
+.reader-sync-bar .sync-badge { margin-bottom: 0; }
+@media (max-width: 640px) { .reader-sync-bar { padding: 8px 14px 0; } }
+.reader-title { flex: 1; margin: 0; min-width: 200px; font-size: var(--fs-lg); }
+.reader-tabs { display: flex; gap: 2px; background: var(--surface-2); border-radius: var(--r-full); padding: 2px; }
+.reader-tab {
+  padding: 4px 14px;
+  border-radius: var(--r-full);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  color: var(--text-2);
+  transition: background 0.12s, color 0.12s;
+}
+.reader-tab.on { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: var(--shadow-sm); }
+.reader-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 32px 24px 48px;
+  -webkit-overflow-scrolling: touch;
+}
+/* 正文:中文书籍排版 —— 首行缩进 2em、小间距、两端对齐、行高 1.9、行宽 ≤40em */
+.reader-content p {
+  max-width: 40em;
+  margin: 0 auto 0.32em;
+  font-family: var(--reader-font);
+  font-size: var(--reader-fs);
+  line-height: 1.9;
+  text-align: justify;
+  text-indent: 2em;
+}
+.reader-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.reader-nav button { margin-left: 0; }
+
+/* ---- 全书阅读:更宽版面 + 左侧章节目录(窄屏收为抽屉,见底部媒体查询) ---- */
+.reader-book { max-width: 1080px; }
+.reader-body { flex: 1; display: flex; min-height: 0; position: relative; }
+.reader-toc {
+  width: 216px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  padding: 10px;
+  -webkit-overflow-scrolling: touch;
+}
+.reader-toc-item {
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.reader-toc-item:not(.off):hover { background: var(--surface-2); color: var(--text); }
+.reader-toc-item.on { background: var(--brand-weak); color: var(--brand); font-weight: 600; }
+.reader-toc-item.on:hover { background: var(--brand-weak); color: var(--brand); }
+.reader-toc-item.off { opacity: 0.45; cursor: default; }
+/* 目录栏顶部:书名 + 简介(简介最多 3 行,悬浮 title 看全文) */
+.reader-toc-book {
+  padding: 4px 10px 10px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+.reader-toc-book-title { font-size: var(--fs-sm); font-weight: 600; color: var(--text); }
+.reader-toc-book-syn {
+  margin-top: 4px;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-3);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+/* 窄屏「目录」按钮:默认隐藏,≤640px 显示 */
+.reader-toc-btn { display: none; }
+/* 「阅读全书」入口:跟在项目标题后面 */
+.read-book-btn { margin-left: 14px; vertical-align: middle; }
+
+/* ---- 阅读器设置弹层:背景 / 字体 / 字号 ---- */
+.reader-settings { position: relative; }
+.reader-settings-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 5;
+  width: 248px;
+  max-width: calc(100vw - 24px);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-md);
+  padding: 12px 14px;
+}
+.rs-group + .rs-group { margin-top: 10px; }
+.reader-settings-pop .chip { padding: 4px 12px; font-size: var(--fs-xs); }
+/* 字体选项:chip 文字直接用对应字体预览 */
+.rs-font-song { font-family: "Songti SC", "STSong", "SimSun", "Noto Serif CJK SC", serif; }
+.rs-font-hei { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+.rs-font-kai { font-family: "Kaiti SC", "STKaiti", "KaiTi", cursive; }
+
+/* ---- 阅读中片段润色:段落点选 + 工具条 + 方向/对照弹层 ---- */
+/* 可点选段落(开启润色时):圆角给选中底色留白;选中 = 左侧品牌色竖条 + 品牌底色 */
+.reader-content p.pickable { cursor: pointer; border-radius: var(--r-sm); }
+.reader-content p.sel {
+  background: var(--brand-weak);
+  box-shadow: inset 3px 0 0 var(--brand);
+}
+/* 选中段落后的浮动工具条:吸在正文区底部居中,不依赖 hover(移动端可点按) */
+.para-tools {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: flex;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-full);
+  box-shadow: var(--shadow-md);
+  white-space: nowrap;
+}
+/* 润色弹层:盖在整个阅读器上(含头部),点击遮罩关闭 */
+.reader-polish {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: var(--overlay-bg-soft);
+}
+.reader-polish-panel {
+  width: 100%;
+  max-width: 720px;
+  max-height: 100%;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 16px 18px;
+}
+.rp-label { font-size: var(--fs-xs); color: var(--text-2); margin: 10px 0 6px; }
+.rp-label:first-child { margin-top: 0; }
+.rp-orig {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  background: var(--surface-2);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  line-height: 1.8;
+  /* 输入方向阶段只预览开头,长段落不撑高弹层 */
+  max-height: 120px;
+  overflow-y: auto;
+}
+.reader-polish-panel input { width: 100%; }
+.rp-chips { margin-top: 8px; }
+/* 工具行:润色/描写/扩写/脑暴,置于工作台顶部,底部细线与下方输入/结果区分隔 */
+.rp-tools {
+  margin: 0 0 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+/* 脑暴点子列表:紧凑项目符号,长列表内部滚动不撑高弹层 */
+.rp-ideas {
+  margin: 0;
+  padding-left: 20px;
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  color: var(--text-1);
+  max-height: 46vh;
+  overflow-y: auto;
+}
+.rp-ideas li { margin: 4px 0; }
+.rp-actions { display: flex; gap: 8px; margin-top: 14px; }
+.rp-actions button { margin-left: 0; }
+.rp-err { margin-top: 10px; }
+/* 对照视图:宽屏左右,窄屏(≤640px)上下(见底部媒体查询) */
+.rp-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.rp-col { min-width: 0; }
+.rp-text {
+  font-size: var(--fs-sm);
+  line-height: 1.8;
+  background: var(--surface-2);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  max-height: 46vh;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+.rp-new { background: var(--ok-weak); }
+
+/* 段落对话面板:选中段原文 + 对话流 + 输入框;改写建议命中时浮出采用块 */
+.reader-discuss-panel { display: flex; flex-direction: column; }
+.rd-orig {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  background: var(--surface-2);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  line-height: 1.8;
+  max-height: 96px;
+  overflow-y: auto;
+  margin-bottom: 10px;
+}
+.rd-log {
+  flex: 1 1 auto;
+  min-height: 160px;
+  max-height: 42vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 2px;
+}
+.rd-empty { font-size: var(--fs-sm); line-height: 1.8; padding: 8px 2px; }
+.rd-msg { display: flex; }
+.rd-user { justify-content: flex-end; }
+.rd-assistant { justify-content: flex-start; }
+.rd-bubble {
+  max-width: 86%;
+  font-size: var(--fs-sm);
+  line-height: 1.8;
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.rd-user .rd-bubble { background: var(--brand-weak); }
+.rd-assistant .rd-bubble { background: var(--surface-2); }
+.rd-suggestion {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.rd-input { margin-top: 12px; }
+.rd-input textarea { width: 100%; resize: vertical; }
+
+/* 架构研讨:对话流(复用 rd-*)+ AI 整理出的调整要求块 */
+.arch-discuss { display: flex; flex-direction: column; }
+.arch-discuss .rd-log { max-height: 46vh; border: 1px solid var(--line); border-radius: var(--r-md); }
+.arch-directive {
+  margin-top: 12px; padding: 12px;
+  background: var(--brand-weak); border: 1px solid var(--brand-line);
+  border-radius: var(--r-md);
+}
+.arch-directive textarea { width: 100%; resize: vertical; margin-top: 6px; }
+
+/* 创作偏好档案编辑卡:四字段竖排,标签在上 */
+.profile-field { margin-bottom: 12px; }
+.profile-field .fl { margin-bottom: 4px; }
+.profile-field textarea { width: 100%; resize: vertical; }
+
+/* ==========================================================================
+   响应式:≤900px 折叠布局;≤640px 触摸优化
+   ========================================================================== */
+@media (min-width: 901px) {
+  .reader-overlay { padding: 40px 24px; }
+  .reader { border-radius: var(--r-xl); }
+}
+
+@media (max-width: 900px) {
+  .wrap { padding: 14px 12px 64px; }
+
+  /* 分步导航:左栏 → 顶部横向滑动条 */
+  .workbench { flex-direction: column; gap: 12px; }
+  .flow-nav {
+    width: 100%;
+    position: static;
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding: 6px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .flow-step { flex-shrink: 0; padding: 8px 12px; white-space: nowrap; }
+  button.flow-step { width: auto; }
+  .flow-step .dot { position: static; margin-left: 2px; }
+
+  /* 双栏 → 单列 */
+  .split, .two-col { flex-direction: column; }
+  .two-col-side { width: 100%; }
+  .pane { max-height: 300px; }
+
+  /* 统计条横向滑动 */
+  .stat-strip { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .stat { flex-shrink: 0; }
+  .stat-topic { max-width: 220px; }
+
+  /* 项目卡片单列 */
+  .proj-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 640px) {
+  :root { --ctl-h: 44px; --ctl-h-sm: 36px; }
+
+  h1 { font-size: 18px; }
+  .card { padding: 16px; }
+  .card-compact { padding: 12px; }
+
+  /* iOS 输入框聚焦自动放大:字号 ≥16px 可避免 */
+  input[type="text"],
+  input[type="password"],
+  input[type="number"],
+  textarea,
+  select { font-size: 16px; }
+  /* 故事概念:窄屏单列,标签转行首左对齐,值另起一行平铺(不再双列窄条)*/
+  .concept-grid { grid-template-columns: 1fr; gap: 10px 0; }
+  .concept-field { flex-direction: column; gap: 2px; }
+  .cf-label { text-align: left; min-width: 0; }
+  /* card-head / 文本行头部:窄屏下标题(或状态句)独占一行,右侧按钮整体换到下一行。
+     根因:.grow{min-width:0} 让中文文本能收缩到 1 字宽,同行有按钮时被压成逐字竖排。
+     只作用于「文本型」元素(h2/h3/b/span.grow 与 card-head 裸标题);
+     b/span 加 :not(:empty) 排除空 spacer(如 OnboardingFlow 的 <span class="grow"/>
+     右推占位),div.grow 本就不匹配这些选择器,布局不受影响。 */
+  .card-head { gap: 8px 10px; }
+  .card-head button { flex-shrink: 0; }
+  .card-head > h2, .card-head > h3,
+  h2.grow, h3.grow, b.grow:not(:empty), span.grow:not(:empty) { flex-basis: 100%; }
+  /* 架构研讨对话:窄屏给更高的可视区 */
+  .arch-discuss .rd-log { max-height: 60vh; }
+  /* 宽表格:保持 table 布局(表头/内容列对齐),滚动交给 .tbl-wrap 容器 */
+  table.tbl { white-space: nowrap; }
+
+  /* 项目页标题行:窄屏进一步收紧,badge 与「阅读全书」可整体换行居左 */
+  .project-head { gap: 4px 8px; }
+  .project-head .badge { margin-left: 0; flex-shrink: 0; }
+  .project-head .read-book-btn { margin-left: 0; flex-shrink: 0; }
+
+  /* 阅读器头部:清晰两行布局(h2 用 display:contents 拆开,子元素参与 head 的 flex 排序)——
+     行1:目录 / 章节标题(省略号截断,不换行) / 关闭;行2:定稿·草稿 tab / 状态徽章 / 字数 / 设置 */
+  .reader-head { padding: 10px 14px; gap: 8px 10px; }
+  .reader-title { display: contents; }
+  .reader-toc-btn { order: 1; }
+  .reader-title-text {
+    order: 2;
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .reader-close { order: 3; flex-shrink: 0; }
+  .reader-head-br { display: block; flex-basis: 100%; height: 0; order: 4; }
+  .reader-tabs { order: 5; flex-shrink: 0; }
+  .reader-meta {
+    order: 6;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  .reader-meta .badge { margin-left: 0; }
+  .reader-settings { order: 7; flex-shrink: 0; margin-left: auto; }
+
+  .reader-content { padding: 24px 16px 40px; }
+  .reader-nav { padding: 10px 14px; }
+
+  /* 片段润色:窄屏对照视图改上下排列,工具条贴底 */
+  .rp-compare, .para-compare { grid-template-columns: 1fr; }
+  .rp-text { max-height: 32vh; }
+  .reader-polish { padding: 12px; }
+
+  /* 全书阅读:目录收成左侧抽屉,点头部「目录」按钮开合,不挤正文 */
+  .reader-toc-btn { display: inline-block; flex-shrink: 0; }
+  .reader-toc { display: none; }
+  .reader-toc.open {
+    display: block;
+    position: absolute;
+    top: 0; bottom: 0; left: 0;
+    width: min(260px, 82%);
+    background: var(--surface);
+    box-shadow: var(--shadow-lg);
+    z-index: 2;
+  }
+}
+

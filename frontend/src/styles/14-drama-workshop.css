@@ -1,0 +1,198 @@
+/* ===== 漫剧工坊 ===== */
+/* 集列表行:可点选,选中态高亮 */
+.ep-row { cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s; }
+.ep-row:hover { border-color: var(--brand); box-shadow: var(--shadow-sm); transform: translateY(-1px); }
+.ep-row.ep-on { border-color: var(--accent, var(--line-2)); box-shadow: 0 0 0 1px var(--accent, transparent) inset; }
+/* 单集动作条:按钮组不换行错乱 */
+.ep-actions { flex-wrap: wrap; gap: 8px; }
+/* 剧本行:说话人加粗 + 画面提示弱化 */
+.script-line { font-size: var(--fs-sm); line-height: 1.8; }
+.script-line b { color: var(--text); }
+.script-line .muted { margin-left: 8px; font-size: var(--fs-xs); }
+
+/* ===== 工作台外壳(漫剧 / 宣传片共用):管线步骤条 + 资产侧栏/主区双栏(≥901px),移动端单列 =====
+   两个工坊都是「一条线性管线 + 一批要随时回头看的锚资产」,所以外壳做成通用的 wb-*:
+   步骤条见 ui/StepBar.tsx,侧栏放锚资产(素材点/画风/角色/地标),主区放正在推进的那几步。
+   窄屏回落单列时是「侧栏在前、主区在后」:漫剧的侧栏正好是最前面两步,顺序天然对;
+   宣传片的侧栏是 ①素材点 + ③视觉锚(②研讨要宽度,只能在主区),单列时会读成 1→3→2→4…
+   ——步骤条常驻顶栏、点一下就跳到那一步,这点跳序换来的是「锚资产始终在手边」。 */
+/* 外壳:不做布局(步骤条与双栏竖着排就对了),留个类名是为了别再撞上老的
+   .workbench —— 那个是旧三栏工作台的横向 flex(`.flow-main` 还在 ProjectPage 用),
+   套上去会把步骤条和双栏排成并列三列。 */
+.wb-shell { min-width: 0; }
+.wb-steps {
+  overflow-x: auto; scrollbar-width: none;
+  position: sticky; top: 0; z-index: 5;
+  background: var(--bg, var(--surface)); padding: 6px 0;
+}
+.wb-steps::-webkit-scrollbar { display: none; }
+.wb-cols { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
+.wb-rail { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.wb-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+/* 桌面:侧栏 348px 常驻可滚动,主区自适应;窄屏自动回落单列(顺序天然正确:资产→切集→流水线→预告片) */
+@media (min-width: 901px) {
+  .wb-cols { grid-template-columns: 348px minmax(0, 1fr); }
+  .wb-rail {
+    position: sticky; top: 48px;
+    max-height: calc(100vh - 64px); overflow-y: auto;
+    padding-right: 4px;
+  }
+}
+/* 侧栏内的卡片收紧一点(信息密度高于主区) */
+.wb-rail .card { margin: 0; }
+.wb-rail textarea { font-size: var(--fs-sm); }
+/* 侧栏只有 348px:表单骨架在这里必须收成单列,两列会把 select 挤成 160px */
+.wb-rail .form-grid { grid-template-columns: 1fr; gap: var(--sp-3); max-width: none; }
+
+/* 侧栏卡片头排版:标题独占一行(副标题另起一行小字),按钮收成两枚一行的整齐网格,
+   不再和标题在同一行互相挤压换行 */
+.wb-rail .card > .card-head { row-gap: 8px; }
+.wb-rail .card > .card-head > h3 {
+  flex: 1 0 100%; min-width: 0; line-height: 1.35;
+}
+.wb-rail .card > .card-head > h3 .muted {
+  display: block; font-size: var(--fs-xs); font-weight: 400; margin-top: 2px;
+}
+.wb-rail .card > .card-head > button {
+  flex: 1 1 calc(50% - 5px); min-width: 0;
+  justify-content: center; padding: 6px 8px; font-size: var(--fs-sm);
+}
+.wb-rail .card > .card-head > button:only-child { flex-basis: 100%; }
+/* 侧栏里的 chips 缩一号,方向七个也能两行排下 */
+.wb-rail .chips { gap: 6px; }
+.wb-rail .chips .chip { padding: 4px 10px; font-size: var(--fs-xs); white-space: nowrap; }
+/* 角色卡等子卡头部:允许换行但收紧行距,锁名不折行 */
+.wb-rail .sub-summary .card-head { row-gap: 6px; }
+.wb-rail .sub-summary .card-head > b { white-space: nowrap; }
+
+/* 画风方向:推荐条目(竖排小卡,含理由)+ 真人写实警示 */
+.dir-rec {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  text-align: left; width: 100%; padding: 8px 12px; margin-bottom: 6px;
+  border: 1px solid var(--line); border-radius: var(--r-md, 8px);
+  background: var(--surface-2); font-size: var(--fs-sm);
+}
+.dir-rec.on { border-color: var(--accent, var(--line-2)); background: var(--surface); }
+.dir-rec b { color: var(--text); }
+.dir-rec .muted { font-size: var(--fs-xs); line-height: 1.5; }
+.warn-tip { color: var(--warn); font-size: var(--fs-xs); }
+.drama-compliance { border-top: 1px dashed var(--line); padding-top: 8px; margin-top: 10px; }
+.drama-compliance b { color: var(--warn); }
+
+/* ===== 宣传片工坊:研讨对话气泡 ===== */
+.promo-chat {
+  display: flex; flex-direction: column; gap: 10px;
+  max-height: 420px; overflow-y: auto; padding: 4px 2px;
+}
+.promo-bubble {
+  max-width: 88%; padding: 8px 12px; border-radius: 10px;
+  background: var(--surface-2); border: 1px solid var(--line);
+  font-size: var(--fs-sm); line-height: 1.7; white-space: pre-wrap;
+}
+.promo-bubble b { display: block; font-size: var(--fs-xs); color: var(--text-2); margin-bottom: 2px; }
+.promo-bubble.mine { align-self: flex-end; background: var(--brand-weak, var(--surface-2)); }
+
+/* 性别四档要读成「一个选择器」而不是四枚散按钮:靠拢排,别吃 card-head 的 10px 间距 */
+.gender-pick { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+
+/* ===== 一键粘贴框 + 定妆照缩略图 ===== */
+/* 粘贴版是只读的「拿去就能贴」文本,和下面可编辑的三轨要一眼分得开 */
+.paste-box textarea {
+  background: var(--surface-2); font-size: var(--fs-sm); line-height: 1.6;
+}
+.paste-box select { max-width: 100%; font-size: var(--fs-xs); }
+/* 定妆照:小图铺一行,窄栏自动换行 */
+.ref-thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+.ref-thumb {
+  width: 96px; border: 1px solid var(--line); border-radius: var(--r-md, 8px);
+  overflow: hidden; background: var(--surface-2);
+}
+.ref-thumb img { display: block; width: 100%; height: 120px; object-fit: cover; }
+.ref-thumb-bad {
+  display: flex; align-items: center; justify-content: center;
+  height: 120px; font-size: var(--fs-xs); color: var(--text-dim, var(--text));
+}
+.ref-thumb-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 4px; padding: 4px 6px; font-size: var(--fs-xs);
+}
+.ref-thumb-foot .btn-sm { padding: 2px 6px; font-size: var(--fs-xs); }
+.ref-thumb-note { color: var(--text-3); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 出片引擎的草片预览:竖屏视频限高居中,别让 9:16 的一条占满整个面板 */
+.render-preview {
+  display: block; max-width: min(100%, 280px); max-height: 380px;
+  margin: 6px 0; border: 1px solid var(--line); border-radius: var(--r-md, 8px);
+  background: var(--surface-2);
+}
+
+/* 逐格施工单的两个打勾栏:横排靠拢,别让「静帧/视频出好了」读成两条独立设置 */
+.shot-ticks {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px;
+  margin: 6px 0; font-size: var(--fs-sm);
+}
+.shot-ticks label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.shot-ticks .muted { font-size: var(--fs-xs); }
+
+/* ===== 漫剧引导层:引导卡 + 步骤条三态 + 「现在做这步」指针 ===== */
+/* 引导卡里的编号/项目清单:比正文缩一号,行距放开,长句好读 */
+.drama-guide .guide-body { gap: 6px; }
+.drama-guide-steps {
+  margin: 2px 0 6px; padding-left: 20px;
+  display: grid; gap: 4px;
+  font-size: var(--fs-sm); line-height: 1.7;
+}
+.drama-guide-steps b { color: var(--text); }
+.drama-guide code {
+  padding: 0 4px; border-radius: 4px;
+  background: var(--surface-2); font-size: var(--fs-xs);
+}
+/* 步骤条:✓ 已完成的弱化,▸ 当前步用品牌色高亮(.chip.on 已给底色,这里补描边强调) */
+.wb-steps .chip.done { color: var(--ok); border-color: var(--ok-line); background: var(--ok-weak); }
+.wb-steps .chip.done:hover { color: var(--ok); border-color: var(--ok); }
+.wb-steps .chip[aria-current="true"] { box-shadow: 0 0 0 1px var(--brand) inset; }
+/* 「现在做这步」指针行:整段是给人读的指令,不能缩成 hint 的小字;
+   不用 flex——句中的 <b>/文案片段会被切成独立 flex item,中间凭空多出间隙 */
+.wb-next {
+  margin: 0 0 10px;
+  color: var(--text-2); font-size: var(--fs-sm); line-height: 1.9;
+}
+.wb-next b { color: var(--brand); }
+.wb-next .btn-sm { margin-left: 8px; vertical-align: baseline; }
+/* 未选集时的占位卡:虚线框提示「先点一集」 */
+.drama-pick-hint { border-style: dashed; }
+
+/* ===== 情绪短片:候选分镜预览 / 重拍意见 / 手卡编辑态 ===== */
+/* 候选卡展开的分镜预览:与手卡同款表格,但整体缩进一级、上加细分界 */
+.clip-preview { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.clip-preview .tbl { font-size: var(--fs-xs); }
+/* 手卡编辑态:台词一行(角色窄列 + 正文宽列 + 删除) */
+.clip-edit-line { display: flex; gap: 8px; margin-bottom: 6px; align-items: center; }
+.clip-edit-line .clip-edit-who { flex: 0 0 96px; }
+.clip-edit-line input { flex: 1; }
+/* 分镜编辑的四小格(场景/景别/运镜/秒) */
+.clip-edit-grid {
+  display: grid; grid-template-columns: 2fr 1fr 1fr 72px;
+  gap: 8px; margin-bottom: 6px;
+}
+.clip-edit-grid + textarea,
+.clip-edit-grid ~ input,
+.clip-edit-grid ~ textarea { margin-bottom: 6px; }
+@media (max-width: 640px) { .clip-edit-grid { grid-template-columns: 1fr 1fr; } }
+/* 工作台里的生成参数折叠区(建后可调:时长/画风/导向) */
+.clip-params { margin-bottom: 12px; }
+
+/* ===== 生日祝福:手卡寿星资料卡的回忆点清单 ===== */
+/* 出片时贴在手卡旁逐条核对「这条回忆有没有被分镜落实」——定制片的施工基准 */
+.bday-mems { margin: 4px 0 0; padding-left: 18px; }
+.bday-mems li { margin: 2px 0; }
+
+/* ===== 系列短片工坊:工作台专属微调 ===== */
+/* 档案卡的 chips 行:描述和标签之间留点呼吸 */
+.series-profile-chips { margin-bottom: 8px; }
+/* 参考图操作行:和上图间距 */
+.series-ref-line { margin-top: 8px; }
+/* 保留换行走全站既有的 .pre-wrap(190 行),这里不重复定义 */
+/* 负面词行:和提示词间距 */
+.series-neg { margin-top: 6px; }
+

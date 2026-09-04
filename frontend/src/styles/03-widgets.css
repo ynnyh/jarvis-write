@@ -1,0 +1,130 @@
+/* ---------- AI 起名下拉(TitleSuggest) ---------- */
+.ts-wrap { position: relative; display: inline-flex; align-items: center; gap: var(--sp-2); }
+.ts-wrap .spin { margin-right: 4px; }
+.ts-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: var(--z-topbar);
+  min-width: 220px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-md);
+  padding: var(--sp-1);
+}
+.ts-item {
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.ts-item:hover { background: var(--brand-weak); color: var(--brand); }
+
+/* ---------- 徽章 / chips ---------- */
+.badge {
+  display: inline-block;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: 1.5;
+  padding: 1px 9px;
+  border-radius: var(--r-full);
+  background: var(--brand-weak);
+  color: var(--brand);
+  margin-left: 6px;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+.badge.ok { background: var(--ok-weak); color: var(--ok); }
+.badge.warn { background: var(--warn-weak); color: var(--warn); }
+.badge.err { background: var(--err-weak); color: var(--err); }
+/* 中性元数据徽章(时长/画风等「非状态」标签):让眼睛只跟着「状态」那颗彩色走 */
+.badge.mute { background: var(--surface-2); color: var(--text-2); }
+
+.chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.chip {
+  padding: 6px 14px;
+  border-radius: var(--r-full);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  border: 1px solid transparent;
+  user-select: none;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.chip:hover { border-color: var(--brand); color: var(--brand); }
+.chip.on { background: var(--brand-weak); border-color: var(--brand); color: var(--brand); font-weight: 500; }
+.chip.custom { border-style: dashed; border-color: var(--line-strong); }
+
+/* ---------- 加载 ---------- */
+.spin {
+  display: inline-block;
+  width: 14px; height: 14px;
+  border: 2px solid var(--brand-weak);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: sp 0.8s linear infinite;
+  vertical-align: -2px;
+  margin-right: 6px;
+}
+@keyframes sp { to { transform: rotate(360deg); } }
+
+/* 章节任务进行中:面板顶部进度条 + 章节行内阶段提示 */
+.gen-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: var(--brand-weak);
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-lg);
+  padding: 10px 14px;
+  margin-bottom: var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  box-shadow: var(--shadow-sm);
+}
+.gen-banner .spin { flex-shrink: 0; margin-right: 0; }
+.gen-banner-text { flex: 1; min-width: 0; line-height: 1.5; }
+.gen-stage { display: block; margin-top: 2px; color: var(--brand); font-size: var(--fs-xs); }
+.gen-stage .spin { width: 10px; height: 10px; margin-right: 4px; vertical-align: -1px; }
+
+/* 小尺寸 spinner(按钮内/角标内使用) */
+.spin-sm { width: 11px; height: 11px; border-width: 2px; margin-right: 4px; vertical-align: -1px; }
+
+/* 同步一致性引擎:非阻塞轻量角标(不抢视线,不挡操作) */
+.sync-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--warn-weak);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-full);
+  padding: 4px 12px;
+  margin-bottom: var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.sync-badge .spin { margin-right: 0; }
+
+/* 保存后「是否同步」询问条 */
+.sync-ask {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  background: var(--warn-weak);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-lg);
+  padding: 10px 14px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.sync-ask-text { flex: 1; min-width: 0; line-height: 1.6; }
+.sync-ask-text .hint { display: block; font-weight: normal; }
+.sync-ask-actions { display: inline-flex; gap: var(--sp-2); flex-shrink: 0; }
+@media (max-width: 640px) {
+  .sync-ask { flex-direction: column; align-items: stretch; }
+  .sync-ask-actions { justify-content: flex-end; }
+}
+

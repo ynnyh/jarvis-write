@@ -1,0 +1,180 @@
+/* ---------- 工作台外壳:左侧全局导航 + 右侧内容(2026-08 重构,旧顶栏退役) ----------
+   侧栏是纵向空间:一级入口一行一个带 active 态,底部常驻任务中心与用量——
+   顶栏横排放不下这些,三个工坊的入口此前只能埋在首页按钮堆里。 */
+/* 应用壳:左右两栏,**滚动只发生在右栏**——侧栏随视口钉死,内容再长也不跟着跑。
+   早先侧栏用 position: sticky(整页滚动 + 侧栏粘住),实测部分环境会失效;
+   改为「外壳锁死视口高度、.app-main 自身滚动」的应用壳标准做法,不再依赖 sticky。 */
+.app-shell { display: flex; height: 100vh; align-items: stretch; }
+.app-side {
+  width: 224px; flex-shrink: 0;
+  overflow-y: auto; /* 菜单本身超出一屏时(小竖窗)侧栏内部自己滚,底部固定件始终可达 */
+  display: flex; flex-direction: column; gap: var(--sp-4);
+  background: var(--surface); border-right: 1px solid var(--line);
+  padding: var(--sp-5) 12px;
+}
+/* 移动端 ☰ 抽屉形态(同一份 Sidebar):盖在内容上,点遮罩关闭 */
+.app-side-drawer {
+  position: fixed; inset: 0 auto 0 0; width: min(84vw, 300px);
+  z-index: 71; box-shadow: var(--shadow-lg);
+  animation: m-slide-in 0.18s ease-out;
+}
+/* 品牌名:必须是 block 而不是 column flex——`jarvis<span>·write</span>` 里的裸文本
+   在 flex 容器里会被包成独立的匿名 item,竖排后品牌名断成「jarvis / ·write」两行 */
+.side-brand {
+  display: block; padding: 0 10px;
+  font-weight: 700; font-size: var(--fs-lg); color: var(--text); letter-spacing: -0.01em;
+  text-decoration: none;
+}
+.side-brand:hover { text-decoration: none; }
+.side-brand span { color: var(--brand); }
+.side-brand small { display: block; margin-top: 2px; font-size: var(--fs-xs); font-weight: 400; color: var(--text-3); }
+.side-nav { display: flex; flex-direction: column; gap: 2px; }
+.side-link {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border-radius: var(--r-md); color: var(--text-2); font-size: var(--fs-md);
+  text-decoration: none; transition: background 0.12s, color 0.12s;
+}
+.side-link:hover { background: var(--surface-2); color: var(--text); text-decoration: none; }
+.side-link.on { background: var(--brand-weak); color: var(--brand); font-weight: 600; }
+.side-ico { width: 22px; text-align: center; flex-shrink: 0; }
+.side-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-tasks { padding: 0 10px; }
+.side-foot {
+  margin-top: auto; display: flex; flex-direction: column; align-items: flex-start;
+  gap: 6px; padding: var(--sp-3) 10px var(--sp-2); border-top: 1px solid var(--line);
+}
+.side-usage { color: var(--text-3); font-size: var(--fs-xs); }
+.side-user {
+  color: var(--text-2); font-size: var(--fs-sm);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.side-mini {
+  background: none; border: none; padding: 0; cursor: pointer; text-decoration: none;
+  color: var(--text-3); font-size: var(--fs-xs);
+}
+.side-mini:hover { color: var(--text); text-decoration: underline; }
+.app-main { flex: 1; min-width: 0; height: 100vh; overflow-y: auto; }
+/* 移动端精简顶条:☰ 唤出抽屉导航;桌面壳是横排,移动壳靠 767px 断点转竖排 */
+.m-shellbar {
+  position: sticky; top: 0; z-index: var(--z-topbar);
+  background: var(--topbar-bg); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+  height: 50px; display: flex; align-items: center; gap: 10px; padding: 0 var(--sp-3);
+}
+.m-shellbar-btn {
+  min-width: 44px; min-height: 44px; padding: 0 12px;
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--surface); color: var(--text-2); cursor: pointer; flex-shrink: 0;
+}
+
+/* ---------- 登录 / 注册页 ---------- */
+.auth-wrap {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-6);
+  background:
+    radial-gradient(70% 50% at 50% 0%, var(--auth-glow) 0%, var(--auth-glow-fade) 70%),
+    var(--bg);
+}
+.auth-card {
+  width: 100%;
+  max-width: 400px;
+  margin-bottom: 0;
+  padding: 36px 32px 26px;
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-md);
+}
+.auth-brand { font-size: var(--fs-2xl); margin: 0; letter-spacing: -0.02em; }
+.auth-brand span { color: var(--brand); }
+.auth-sub { color: var(--text-2); font-size: var(--fs-sm); margin-top: 6px; }
+.auth-tabs { margin: 22px 0 4px; }
+.auth-card form .btn-block { margin-top: 18px; }
+.auth-note {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.auth-foot {
+  font-size: var(--fs-xs);
+  margin-top: var(--sp-3);
+  text-align: center;
+}
+
+/* ---------- 锁屏页(应用锁) ----------
+   品牌化全屏:双层品牌光晕 + jW 字标 + 玻璃拟态卡片。
+   全部走主题令牌,明暗两套主题自动适配;交互复用全局表单/按钮样式。 */
+.lock-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-6);
+  background:
+    radial-gradient(52% 42% at 16% 10%, var(--lock-glow-a) 0%, transparent 72%),
+    radial-gradient(46% 40% at 86% 88%, var(--lock-glow-b) 0%, transparent 72%),
+    radial-gradient(70% 50% at 50% 0%, var(--auth-glow) 0%, var(--auth-glow-fade) 70%),
+    var(--bg);
+}
+.lock-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+.lock-mark {
+  width: 60px;
+  height: 60px;
+  border-radius: 18px;
+  /* 不用 grid:两个字母会被 grid 各占一行,W 换行溢出盒外;flex 强制同行 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-2) 100%);
+  color: var(--on-vivid);
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  box-shadow: 0 8px 24px var(--brand-ring);
+  margin-bottom: var(--sp-4);
+}
+.lock-mark span { font-weight: 500; opacity: 0.85; }
+.lock-brand { font-size: var(--fs-2xl); margin: 0; letter-spacing: -0.02em; }
+.lock-brand span { color: var(--brand); }
+.lock-tag { color: var(--text-2); font-size: var(--fs-sm); margin-top: 6px; }
+.lock-card {
+  width: 100%;
+  max-width: 380px;
+  margin: var(--sp-6) 0 0;
+  padding: 26px 28px 22px;
+  border-radius: var(--r-xl);
+  background: var(--lock-card-bg);
+  border-color: var(--lock-card-line);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: var(--shadow-lg);
+}
+.lock-card form { margin-top: var(--sp-4); }
+.lock-card form .btn-block { margin-top: 18px; }
+.lock-foot { margin-top: var(--sp-5); color: var(--text-3); font-size: var(--fs-xs); }
+
+/* ---------- 登录页 tabs / 通用 tabs ---------- */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: var(--sp-4); }
+.tab {
+  padding: 9px 18px;
+  cursor: pointer;
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.12s, border-color 0.12s;
+}
+.tab:hover { color: var(--text); }
+.tab.on { color: var(--brand); border-bottom-color: var(--brand); font-weight: 600; }
+

@@ -1,0 +1,368 @@
+/* ==========================================================================
+   「正文即界面」P1(docs/10):write 区从三栏工作台改为单列居中正文。
+   旧永久左栏(.write-rail)/参考抽屉(.ref-*)/阶段条(.stage-*)/FAB(.m-fab*)/
+   底部栏(.m-bottombar)样式已全部删除;目录改为覆盖式抽屉(.catalog-drawer)。
+   新增类只用 CSS 变量令牌,暗色主题由 [data-theme="dark"] 令牌覆写自动覆盖。
+   ========================================================================== */
+
+/* 单列正文:视觉重心居中,正文阅读宽度 ~760px(含卡片内边距取 800px) */
+.write-main { max-width: 800px; margin: 0 auto; width: 100%; }
+
+/* 首次进入的 3 步引导条(WriteGuide):一行三步 + 关闭,读 5 秒的事 */
+.write-guide {
+  display: flex; align-items: center; gap: var(--sp-4);
+  max-width: 800px; margin: 0 auto var(--sp-3); width: 100%;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--brand-weak);
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r-lg);
+}
+.write-guide-steps {
+  display: flex; flex: 1; gap: var(--sp-5); flex-wrap: wrap;
+}
+.write-guide-step { display: flex; flex-direction: column; gap: 2px; min-width: 180px; flex: 1; }
+.write-guide-step b { font-size: var(--fs-sm); color: var(--brand); }
+.write-guide-step span { font-size: var(--fs-xs); color: var(--text-2); line-height: 1.5; }
+@media (max-width: 640px) {
+  .write-guide { flex-direction: column; align-items: stretch; }
+  .write-guide-steps { flex-direction: column; gap: var(--sp-2); }
+  .write-guide-step { min-width: 0; }
+  .write-guide .btn-sm { align-self: flex-end; }
+}
+
+/* 主场正文:段落可点选(与 .reader-content p.pickable/.sel 同一视觉语言) */
+.prose p.pickable { cursor: pointer; border-radius: var(--r-sm); }
+.prose p.sel {
+  background: var(--brand-weak);
+  box-shadow: inset 3px 0 0 var(--brand);
+}
+/* 气泡/段内编辑框的锚点容器(相对定位,气泡贴选中段下沿) */
+.prose-wrap { position: relative; }
+/* 编辑态正文排版(P3):与阅读器同一套排版语言——行宽 38em(≈38 汉字)居中、
+   两端对齐;700px 宽卡里的正文不再是"一行 50 字"的横排长行,长时间盯屏不累 */
+.write-main .prose-wrap { max-width: 38em; margin-inline: auto; }
+.write-main .prose { text-align: justify; }
+.prose-bubble {
+  position: absolute;
+  left: 0; right: 0;
+  z-index: 3;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 10px 12px;
+}
+.prose-bubble-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.prose-bubble input { width: 100%; }
+/* 手改:盖在选中段原位的自适应高度编辑框(仅该段,不再是整章 textarea) */
+.prose-edit-area {
+  width: 100%;
+  min-height: 72px;
+  line-height: 1.9;
+  font-size: 15px;
+  font-family: var(--font-serif);
+}
+/* ---------- 章尾续写(ghost text):AI 顺着本章续一段,灰字预览,Tab 接受追加 ---------- */
+.prose-tail { margin-top: 18px; }
+/* 召唤按钮:虚线柔边、减淡文字,低调待在章尾,不与正文抢视线 */
+.prose-continue { color: var(--text-2); border-style: dashed; }
+.prose-ghost-wrap { margin-top: 4px; }
+/* 续出的灰字:与正文同字体/行高,颜色减淡 + 左侧虚线竖条,一眼可辨「这是草稿、未定」 */
+.prose-ghost {
+  font-family: var(--font-serif);
+  line-height: 1.9;
+  font-size: 15px;
+  white-space: pre-wrap;
+  color: var(--text-3);
+  padding-left: 12px;
+  border-left: 2px dashed var(--line-strong);
+}
+/* ---------- 正文实体链接(故事圣经人物,对标 Codex) ---------- */
+/* 命中处只加虚线下划线,不铺底色,保持正文清爽;cursor:help 暗示悬浮有信息 */
+.entity-link {
+  border-bottom: 1px dashed var(--brand);
+  cursor: help;
+}
+.entity-link.retired { border-bottom-color: var(--line-strong); opacity: 0.7; }
+/* hover 浮出的人物卡:贴高亮词下沿,复用气泡的表面/描边/阴影语言 */
+.entity-pop {
+  position: absolute;
+  z-index: 5;
+  max-width: 320px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 10px 12px;
+}
+.entity-card-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.entity-card-name { font-size: 15px; }
+.entity-card.retired .entity-card-name { text-decoration: line-through; }
+.entity-card-aliases { font-size: var(--fs-sm); margin-bottom: 4px; }
+.entity-card-profile { font-size: var(--fs-sm); line-height: 1.6; margin-bottom: 6px; }
+.entity-card-facts { margin: 0 0 4px; padding-left: 18px; font-size: var(--fs-sm); line-height: 1.6; }
+.entity-card-facts li { margin: 2px 0; }
+.entity-card-more, .entity-card-chapters { font-size: var(--fs-sm); }
+/* 原文/润色后两栏对照(字符基调沿用校对卡的 .diff-old/.diff-new;窄屏上下,见底部媒体查询) */
+.para-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.para-compare-col { min-width: 0; }
+
+/* 章首状态卡:三态人话(冲突拍板/过目通过/大纲已变)+ 「更多」过渡入口 */
+.chapter-status-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* 交稿单校对子行:比主结论行次一级(小字、窄间距),读作附注 */
+.chapter-status-sub { font-size: var(--fs-sm); gap: 8px; }
+.chapter-status-more { margin-bottom: var(--sp-4); font-size: var(--fs-sm); }
+.chapter-status-more summary { cursor: pointer; color: var(--text-2); }
+.chapter-status-links { display: flex; gap: 14px; flex-wrap: wrap; padding: 6px 0 2px; }
+.chapter-status-links .linkish { color: var(--brand); font-size: var(--fs-sm); }
+
+/* 章首蓝图卡:<details> 默认收起一行 */
+.blueprint-card summary { cursor: pointer; }
+
+/* 章节名称一键改名(章首,手动改 + 「让 AI 换个不夸张的」候选) */
+.title-edit { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; font-size: var(--fs-sm); }
+.title-edit-label { color: var(--text-2); }
+.title-edit-cur { font-weight: 600; }
+.title-edit-open {
+  flex-direction: column; align-items: stretch; gap: 8px;
+  padding: 10px 12px; border: 1px solid var(--line);
+  border-radius: var(--r-sm); background: var(--surface-2);
+}
+.title-edit-row { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.title-edit-input { flex: 1 1 200px; min-width: 0; }
+.title-edit-hint { flex: 1 1 auto; }
+.title-edit-err { margin: 0; }
+.title-edit-cands { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.title-cand {
+  height: var(--ctl-h-sm); padding: 0 12px; font-size: var(--fs-sm);
+  border-radius: 999px; border: 1px solid var(--brand-line);
+  background: var(--brand-weak); color: var(--brand); cursor: pointer;
+}
+.title-cand:hover:not(:disabled) { background: var(--brand); color: #fff; border-color: var(--brand); }
+
+/* 章尾下一章卡 */
+.next-chapter { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* 目录抽屉:复用 .m-overlay/.m-rail-drawer(左滑入),桌面端固定 320px + 阴影 */
+.catalog-drawer { box-shadow: var(--shadow-lg); }
+@media (min-width: 768px) {
+  .catalog-drawer { width: 320px; }
+}
+
+/* ---------- 故事地图覆盖层(Tier 3):可召唤的全书脉络纵览,居中大面板 ---------- */
+.story-map-overlay { z-index: 900; display: flex; align-items: flex-start; justify-content: center; }
+.story-map {
+  margin-top: 8vh;
+  width: min(760px, 92vw);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.story-map-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.story-map-filter {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: var(--fs-sm); color: var(--text-2);
+  cursor: pointer; white-space: nowrap;
+}
+.story-map-empty { padding: 28px 16px; text-align: center; }
+.story-map-list { overflow-y: auto; padding: 6px; }
+/* 每章一行整行可点(跳章):悬浮描边,当前章 .on 常亮;覆写 button 的定高/nowrap */
+.story-map-row {
+  display: block; width: 100%; height: auto;
+  text-align: left; white-space: normal;
+  background: transparent; border: 1px solid transparent;
+  border-radius: var(--r-md);
+  padding: 8px 10px; margin: 2px 0;
+}
+.story-map-row:hover:not(:disabled) { background: var(--surface-2); }
+.story-map-row.on { border-color: var(--brand); background: var(--surface-2); }
+.smr-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 3px; }
+.smr-num { font-weight: 600; color: var(--text-2); font-size: var(--fs-sm); }
+.smr-title { font-weight: 600; }
+.smr-summary { color: var(--text-2); font-size: var(--fs-sm); line-height: 1.6; }
+.smr-fore {
+  color: var(--brand); font-size: var(--fs-sm);
+  margin-top: 3px; padding-left: 8px;
+  border-left: 2px solid var(--brand);
+}
+@media (max-width: 767px) {
+  .story-map { margin-top: 0; width: 100vw; max-height: 100vh; height: 100%; border-radius: 0; border: none; }
+}
+
+/* ==========================================================================
+   「正文即界面」P2(docs/10 §4):AI 窄栏(AiDock)+ 整章优化对照卡。
+   对话 UI 复用全局 .rd-* 与 .arch-directive 样式族;这里只补布局壳,同样只用令牌。
+   ========================================================================== */
+
+/* 正文列 + AI 窄栏横向排布(移动端 AiDock 为 fixed 元素,flex 不影响) */
+.write-body { display: flex; gap: 18px; align-items: flex-start; }
+.write-body .write-main { flex: 1; min-width: 0; }
+
+/* 桌面展开:右侧 320px sticky 窄栏,对话流撑满剩余高度 */
+.ai-dock {
+  width: 320px; flex-shrink: 0;
+  position: sticky; top: 12px;
+  max-height: calc(100vh - 24px);
+  display: flex; flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 10px 12px;
+}
+.ai-dock-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.ai-dock-head .chips { margin-bottom: 0; }
+.ai-dock-ctx { margin-bottom: 6px; }
+.ai-dock .ai-dock-log, .ai-dock-sheet .ai-dock-log { flex: 1 1 auto; min-height: 140px; max-height: none; }
+/* 意见清单卡的档位提示/阶段文案行 */
+.ai-dock-level { margin-top: 6px; }
+
+/* 桌面收起:40px 细条(整高可点,居中 💬) */
+.ai-dock-mini {
+  width: 40px; flex-shrink: 0; align-self: stretch;
+  min-height: 160px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.ai-dock-mini:hover { border-color: var(--line-strong); color: var(--text); }
+/* 新回复圆点(细条/移动输入条共用) */
+.ai-dot {
+  display: inline-block; width: 8px; height: 8px; margin-left: 4px;
+  border-radius: 50%; background: var(--brand);
+  vertical-align: top;
+}
+
+/* 移动端收起:底部固定输入条(占位外观,点击展开全屏 sheet) */
+.m-ai-bar {
+  position: fixed; left: 8px; right: 8px;
+  bottom: calc(8px + constant(safe-area-inset-bottom));
+  bottom: calc(8px + env(safe-area-inset-bottom));
+  z-index: 60;
+  display: flex; align-items: center; gap: 8px;
+  min-height: 48px; padding: 8px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  color: var(--text-3);
+  cursor: text;
+}
+.m-ai-bar-label { text-align: left; }
+/* 移动端展开:sheet 内对话流纵向撑满 */
+.ai-dock-sheet { display: flex; flex-direction: column; }
+
+/* 沉浸模式:AI 窄栏与新手引导条一并退场,只留正文 */
+.write-zone.immersive .ai-dock,
+.write-zone.immersive .ai-dock-mini,
+.write-zone.immersive .m-ai-bar,
+.write-zone.immersive .write-guide { display: none; }
+
+/* ==========================================================================
+   「正文即界面」P3(docs/10 §4/§6):四档修改的「验收即 diff」+ ②档批注。
+   字符级 diff 沿用 .diff-old(删/删除线)/.diff-new(增/绿)基调;全部只用令牌,
+   暗色靠 :root 令牌覆盖自动生效,无硬编码色值。
+   ========================================================================== */
+
+/* 字符级 diff 行内容器(DiffText):①②段内卡、③④整章共用;自保留空白与换行 */
+.diff-inline { white-space: pre-wrap; word-break: break-word; }
+/* 段内 diff 卡(与 .rp-text 合用:盒子由 rp-text 给,这里只调行高便于看删除线) */
+.diff-card { line-height: 2; }
+
+/* 已批注段落标记(Reader Paragraphs 的 markedIdx/staleIdx → 段落上加类):
+   新鲜批注=细绿边(有意见待处理);失效=琥珀边+底(快照对不上,不参与成批) */
+.prose p.para-annotated { box-shadow: inset 2px 0 0 var(--ok); }
+.prose p.para-annotated-stale { box-shadow: inset 2px 0 0 var(--warn); background: var(--warn-weak); }
+/* 选中态优先:选中已批注段时仍显强选择条(两类同选择器更高特指度,压过上面单类) */
+.prose p.para-annotated.sel,
+.prose p.para-annotated-stale.sel { box-shadow: inset 3px 0 0 var(--brand); background: var(--brand-weak); }
+
+/* AI 窄栏 ②档待处理批注区 */
+.ai-dock-annos {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+.anno-list {
+  list-style: none; margin: 6px 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 30vh; overflow-y: auto;
+}
+.anno-item { display: flex; align-items: baseline; gap: 6px; font-size: var(--fs-sm); line-height: 1.5; }
+.anno-item.stale { opacity: .6; }
+.anno-item.stale .anno-note { text-decoration: line-through; }
+.anno-seg { flex-shrink: 0; font-size: var(--fs-xs); color: var(--text-3); }
+.anno-note { flex: 1; min-width: 0; color: var(--text); word-break: break-word; }
+.anno-stale-tag {
+  flex-shrink: 0; font-size: var(--fs-xs);
+  color: var(--warn); background: var(--warn-weak);
+  border-radius: var(--r-sm); padding: 0 4px;
+}
+.anno-del {
+  flex-shrink: 0; background: none; border: none; cursor: pointer;
+  color: var(--text-3); padding: 0 2px; line-height: 1;
+}
+.anno-del:hover { color: var(--err); }
+/* 桌面细条上的批注计数徽标 */
+.ai-dock-mini-badge {
+  display: inline-block; min-width: 16px; padding: 0 4px;
+  border-radius: var(--r-sm); text-align: center;
+  font-size: var(--fs-xs);
+  color: var(--brand); background: var(--brand-weak); border: 1px solid var(--brand);
+}
+
+/* ②档验收卡(AnnotatedReviseCard):每条批注一张子卡,逐条 diff 验收 */
+.revise-pairs { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.revise-pair {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  padding: 10px 12px;
+}
+.revise-pair.resolved { display: flex; align-items: center; gap: 8px; opacity: .75; }
+.revise-notes { margin-top: 6px; }
+
+/* ③④整章优化对照卡(PolishCompareCard)的逐段 diff 视图 */
+/* 整章优化「应用」冲突条:优化期间正文被手改过、后端返回 409 时浮出,显性提示不静默覆盖 */
+.polish-conflict {
+  border: 1px solid var(--warn-line);
+  background: var(--warn-weak);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--warn);
+}
+.polish-conflict .hint { color: var(--text-2); }
+
+.polish-diff {
+  max-height: 60vh; overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  padding: 10px 14px;
+}
+.pd-para { margin: 0 0 10px; line-height: 1.9; white-space: pre-wrap; word-break: break-word; }
+.pd-para:last-child { margin-bottom: 0; }
+.pd-same { color: var(--text-2); }                                  /* 未改动段:压暗作上下文 */
+.pd-changed { box-shadow: inset 2px 0 0 var(--brand); padding-left: 8px; } /* 段内有增删 */
+.pd-added { box-shadow: inset 2px 0 0 var(--ok); padding-left: 8px; }      /* 整段新增 */
+.pd-removed { box-shadow: inset 2px 0 0 var(--err); padding-left: 8px; }   /* 整段删除 */
+
+/* read 区:单章纯阅读页 */
+.read-zone { max-width: 760px; margin: 0 auto; }
+.read-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.read-bar + .card { margin-bottom: 10px; }
+.read-bar:last-child { margin-bottom: 0; margin-top: 4px; }
+
+

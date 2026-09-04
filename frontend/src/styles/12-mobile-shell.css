@@ -1,0 +1,171 @@
+/* ==========================================================================
+   移动端壳(交互重构 C 阶段)
+   断点 (max-width: 767px),与 hooks/useBreakpoint.ts 的 MOBILE_QUERY 对齐。
+   只新增 class 与媒体查询,不改桌面样式;safe-area 用 env(),constant() 兜底(老 iOS)。
+   新组件 class(m-*)始终定义,但元素只在窄屏渲染(useBreakpoint 判定)。
+   ========================================================================== */
+
+/* ---- 移动端 write 区顶栏:←返回 + 当前章标题(点开目录抽屉)+ 阅读入口 ---- */
+.m-topbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.m-topbar button + button { margin-left: 0; }
+.m-topbar-btn {
+  min-width: 44px; min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.m-topbar-title {
+  flex: 1; min-width: 0; min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  text-align: left;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  cursor: pointer;
+}
+
+/* ---- 全屏遮罩 / 目录抽屉(从左滑入)/ 底部升起的全屏 sheet ---- */
+.m-overlay { position: fixed; inset: 0; z-index: 70; background: var(--overlay-bg); }
+.m-rail-drawer {
+  position: absolute; top: 0; bottom: 0; left: 0;
+  width: min(88vw, 380px);
+  background: var(--bg);
+  overflow-y: auto;
+  padding: 8px 12px 20px;
+  padding-bottom: calc(20px + constant(safe-area-inset-bottom));
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  animation: m-slide-in 0.18s ease-out;
+}
+.m-sheet-overlay { position: fixed; inset: 0; z-index: 70; background: var(--overlay-bg); }
+.m-sheet {
+  position: absolute; left: 0; right: 0; top: 12px; bottom: 0;
+  background: var(--bg);
+  border-radius: var(--r-xl) var(--r-xl) 0 0;
+  overflow-y: auto;
+  padding: 4px 14px 20px;
+  padding-bottom: calc(20px + constant(safe-area-inset-bottom));
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  animation: m-rise 0.18s ease-out;
+}
+/* sheet/抽屉头部:标题 + 关闭,滚动时吸附 */
+.m-sheet-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 0 10px;
+  position: sticky; top: 0;
+  background: var(--bg);
+  z-index: 1;
+}
+.m-sheet-head h3 { margin: 0; }
+@keyframes m-slide-in { from { transform: translateX(-24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
+@keyframes m-rise { from { transform: translateY(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
+
+@media (max-width: 767px) {
+  /* 外壳转竖排:m-shellbar 在上,内容在下(桌面横排的侧栏此时不渲染)。
+     桌面壳「右栏自滚」的两条规则在移动端退回自然页面滚动,别造出双层滚动 */
+  .app-shell { flex-direction: column; height: auto; }
+  .app-main { height: auto; overflow-y: visible; }
+
+  /* write 区:单列正文;章级动作由章首状态卡 + 目录抽屉 + 章尾卡承接 */
+  /* 底部给 AI 输入条(.m-ai-bar)让位,不遮章尾卡 */
+  .write-main { padding-bottom: 76px; }
+
+  /* 项目 rail 退化为横向:一级区折行排布,二级页签横向滑动(与旧 chips 观感一致) */
+  .pj-cols { display: block; }
+  .pj-rail { position: static; flex-direction: row; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .pj-back { display: none; } /* write 区 m-topbar 已带「← 返回」 */
+  .pj-zone {
+    width: auto; padding: 6px 10px; gap: 6px;
+    border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow-sm);
+  }
+  .pj-zone.on { border-color: var(--brand); }
+  .pj-zone-sub { display: none; }
+  .pj-subs {
+    width: 100%; margin: 2px 0 4px; flex-direction: row; flex-wrap: nowrap;
+    overflow-x: auto; -webkit-overflow-scrolling: touch; padding: 0 0 2px;
+    border-left: none;
+  }
+  .pj-sub-tab {
+    flex-shrink: 0; padding: 6px 12px;
+    border: 1px solid var(--line); background: var(--surface); border-radius: var(--r-full);
+  }
+  .pj-sub-tab.on { border-color: var(--brand-line); }
+
+  /* setup/book 页签 chips:横向滚动(单列堆叠由既有 ≤900px 规则负责) */
+  .chips.board-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+  }
+  .chips.board-tabs .chip { flex-shrink: 0; }
+
+  /* read 区:翻章按钮触摸目标 ≥44px */
+  .read-bar { gap: 10px; }
+  .read-bar .btn-sm { min-height: 44px; padding: 0 16px; font-size: var(--fs-sm); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .m-rail-drawer, .m-sheet { animation: none; }
+}
+
+/* ================= 桌面端(D 阶段):命令面板 + 沉浸模式 ================= */
+/* 命令面板:层级高于确认弹层(dlg-overlay z900),只用现有令牌,暗色自动正确 */
+.cmdk-overlay { position: fixed; inset: 0; z-index: 950; background: var(--overlay-bg-soft); }
+.cmdk-panel {
+  position: fixed; top: 16vh; left: 50%; transform: translateX(-50%);
+  width: 560px; max-width: calc(100vw - 40px);
+  z-index: 951;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.cmdk-input {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding: 14px 16px;
+  font-size: var(--fs-md);
+  background: transparent;
+  color: var(--text);
+}
+.cmdk-input:focus { border-color: var(--line); box-shadow: none; }
+.cmdk-list { max-height: 46vh; overflow-y: auto; padding: 6px; }
+.cmdk-item {
+  display: flex; align-items: baseline; gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none; border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-md); font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+}
+.cmdk-item + .cmdk-item { margin-left: 0; }
+.cmdk-item.on { background: var(--brand-weak); }
+.cmdk-item.disabled { opacity: 0.45; cursor: default; }
+.cmdk-item-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmdk-item-sub { margin-left: auto; flex-shrink: 0; color: var(--text-3); font-size: var(--fs-xs); }
+.cmdk-hint { padding: 16px; color: var(--text-3); font-size: var(--fs-sm); }
+
+/* 沉浸模式(F11,Esc 退出):class 挂在 write-zone,只留中栏正文。
+   区导航/项目头/统计条在 write-zone 之外,用 :has 从外层隐藏;rail 隐藏时
+   网格同时收成单列,正文占满内容区。 */
+.write-zone.immersive .write-main { max-width: 860px; }
+body:has(.write-zone.immersive) .project-head,
+body:has(.write-zone.immersive) .stat-strip,
+body:has(.write-zone.immersive) .pj-rail,
+body:has(.write-zone.immersive) .next-bar,
+body:has(.write-zone.immersive) .step-guide { display: none; }
+body:has(.write-zone.immersive) .pj-cols { grid-template-columns: minmax(0, 1fr); }
+

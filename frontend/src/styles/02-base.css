@@ -1,0 +1,309 @@
+/* ---------- 基础 ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-md);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  transition: background 0.15s, color 0.15s;
+}
+
+h1 { font-size: var(--fs-xl); margin: 0 0 8px; letter-spacing: -0.01em; }
+h2 { font-size: var(--fs-lg); margin: 0 0 10px; }
+h3 { font-size: var(--fs-md); margin: 0 0 8px; }
+
+a { color: var(--brand); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+::selection { background: var(--brand-weak); }
+
+button:focus-visible,
+a:focus-visible,
+.chip:focus-visible,
+.tab:focus-visible,
+.flow-step:focus-visible,
+.reader-tab:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* ---------- 小工具类 ---------- */
+.grow { flex: 1; min-width: 0; }
+.mt-0 { margin-top: 0; }
+.mt-1 { margin-top: var(--sp-1); }
+.mt-2 { margin-top: var(--sp-2); }
+.mt-3 { margin-top: var(--sp-3); }
+.mt-4 { margin-top: var(--sp-4); }
+.mb-2 { margin-bottom: var(--sp-2); }
+/* 整段文本(解说稿/配音稿)要保留换行:别再逐处写 style={{whiteSpace:"pre-wrap"}} */
+.pre-wrap { white-space: pre-wrap; }
+.mb-3 { margin-bottom: var(--sp-3); }
+.muted { color: var(--text-2); font-size: var(--fs-sm); }
+.meta-line { color: var(--text-2); font-size: var(--fs-xs); margin-top: var(--sp-1); }
+.hint { font-weight: 400; color: var(--text-3); font-size: var(--fs-xs); }
+.linkish { cursor: pointer; }
+.linkish:hover { color: var(--brand); }
+
+/* 空态(全站统一):虚线框 + 居中弱化文字 */
+.empty-state {
+  background: var(--surface);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-lg);
+  padding: var(--sp-6);
+  text-align: center;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  line-height: 1.8;
+  margin-bottom: var(--sp-4);
+}
+
+/* 空态插画(EmptyState 里的场记板 + 星光):纯装饰,颜色走令牌,暗色自动跟随 */
+.empty-ico { width: 72px; height: 48px; display: block; margin: 0 auto var(--sp-3); opacity: 0.9; }
+
+/* 按钮/提示横排:统一间距 */
+.actions { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.actions button + button { margin-left: 0; }
+
+/* ---------- 按钮体系 ---------- */
+button {
+  height: var(--ctl-h);
+  padding: 0 14px;
+  border-radius: var(--ctl-r);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, box-shadow 0.12s;
+}
+button:hover:not(:disabled) { background: var(--surface-2); }
+button:active:not(:disabled) { transform: translateY(0.5px); }
+
+button.primary { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+button.primary:hover:not(:disabled) { background: var(--brand-hover); }
+
+button.danger { background: var(--surface); border-color: var(--err-line); color: var(--err); }
+button.danger:hover:not(:disabled) { background: var(--err-weak); border-color: var(--err); }
+
+button.btn-sm { height: var(--ctl-h-sm); padding: 0 10px; font-size: var(--fs-xs); border-radius: var(--r-md); }
+button.btn-lg { height: 46px; font-size: var(--fs-md); padding: 0 18px; }
+button.btn-block { width: 100%; }
+
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button + button { margin-left: var(--sp-2); }
+
+.linkbtn {
+  background: none; border: none; padding: 0; height: auto;
+  color: var(--brand); font-size: var(--fs-sm); cursor: pointer;
+}
+.linkbtn:hover:not(:disabled) { background: none; text-decoration: underline; }
+
+/* 可点元素统一用 <button>(键盘可达);以下类在作为 button 使用时,
+   重置全局 button 的高度/边距/对齐,恢复各自组件原有的视觉外观 */
+button.chip, button.title-chip, button.genre-card, button.scale-card,
+button.ed-tab, button.idea-card, button.entry-card, button.tab,
+button.flow-step, button.wiz-step, button.ts-item, button.reader-toc-item,
+button.reader-tab, button.guide-mini, button.linkish, button.engine-card {
+  height: auto;
+  margin-left: 0;
+  font-family: inherit;
+  text-align: left;
+}
+button.tab, button.guide-mini, button.linkish { background: none; border: 0; border-radius: 0; padding: 0; }
+button.flow-step { width: 100%; border: 0; background: none; }
+button.reader-tab { border: 0; background: none; }
+button.entry-card, button.idea-card, button.genre-card, button.scale-card, button.ed-tab,
+button.engine-card {
+  font-size: inherit;
+  white-space: normal;
+}
+button.reader-toc-item { width: 100%; border: 0; background: none; font-size: var(--fs-sm); white-space: normal; }
+button.ts-item, button.wiz-step { border: 0; background: none; }
+button.guide-mini { color: var(--text-2); font-size: var(--fs-sm); }
+
+/* ---------- 表单控件(全站统一高度/边框/聚焦环) ----------
+   选择器用 :where() 压到零优先级:组件级覆写(.cmdk-input 等类名)不需要
+   再跟基础样式比权重。排除清单只留非文本控件(checkbox/file 等);
+   没写 type 的裸 <input>(默认就是 text)也一并吃到统一样式——
+   之前这批框全是浏览器裸默认:矮、直角、深灰边,是全站最难看的输入框。 */
+input:where(:not([type="checkbox"]):not([type="radio"]):not([type="range"])
+  :not([type="color"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"])),
+textarea,
+select {
+  width: 100%;
+  height: var(--ctl-h);
+  border: 1px solid var(--line);
+  border-radius: var(--ctl-r);
+  background: var(--surface);
+  box-shadow: var(--ctl-inset);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--fs-md);
+  padding: 0 var(--sp-3);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+textarea { height: auto; padding: 10px var(--sp-3); line-height: 1.7; resize: vertical; }
+
+input:hover:not(:focus), textarea:hover:not(:focus), select:hover:not(:focus) {
+  border-color: var(--line-strong);
+}
+input:focus, textarea:focus, select:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 4px var(--brand-ring);
+}
+input::placeholder, textarea::placeholder { color: var(--text-3); }
+
+/* 浏览器自动填充的黄底会击穿圆角与主题,统一压成表面色 */
+input:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0 1000px var(--surface) inset;
+  -webkit-text-fill-color: var(--text);
+  caret-color: var(--text);
+}
+
+/* select 去掉原生箭头(Windows 下尤其笨重),换自绘细箭头,随主题换色 */
+select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='M4 6.5 8 10.5 12 6.5' fill='none' stroke='%23767a83' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 32px;
+}
+[data-theme="dark"] select {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='M4 6.5 8 10.5 12 6.5' fill='none' stroke='%23858a92' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+/* 字段标签(全站统一):表单字段、设置组、面板小标题共用 */
+.fl {
+  display: block;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-2);
+  margin: var(--sp-3) 0 6px;
+}
+
+.input-xs { max-width: 84px; }
+.input-md { max-width: 160px; flex: none; }
+.narrow { max-width: 300px; }
+
+/* 输入框 + 按钮横排(灵感输入、自定义倾向等) */
+.input-row { display: flex; gap: var(--sp-2); align-items: flex-start; }
+.input-row input { flex: 1; }
+.input-row input.input-md { flex: none; }
+.input-row button { flex-shrink: 0; margin-left: 0; }
+
+/* ---------- 表单区块(新建/编辑表单的统一骨架) ----------
+   踩过的坑:表单曾拿 .card-head 拼行——那是「标题 + 按钮」的一行 flex,
+   标签与控件被塞进同一行抢宽度,窗口一窄就把「时长」竖着拆成两行,
+   主按钮也混在字段中间。新建/编辑表单一律用这套骨架,别再拿 card-head 凑:
+     .form-grid  两列自适应(移动端单列),.field-full 独占一行
+     .field      标签在上、控件在下,标签永不与控件抢宽度
+     .form-actions 底部动作条,主按钮和字段之间有分界 */
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-4) var(--sp-5);
+  align-items: start;
+  /* 表单不跟着宽屏一起摊开:两列各约 370px,控件填满自己那格,
+     左右边缘对齐才像一张「设计过的表单」,而不是几个孤零零的控件 */
+  max-width: 760px;
+  margin-bottom: var(--sp-4);
+}
+.form-grid .field-full { grid-column: 1 / -1; }
+
+.field { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+.field > .fl { margin: 0; }                 /* 复用全站字段标签,去掉它自带的上边距 */
+.field > .fl .hint { margin-left: var(--sp-1); }  /* 标签后缀说明,不加粗 */
+.field-note { margin: 0; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.6; }
+
+.form-actions {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3);
+  padding-top: var(--sp-4); border-top: 1px solid var(--line);
+}
+.form-actions button + button { margin-left: 0; }  /* 用 gap,不叠全局 button+button 的外边距 */
+.form-actions-tip { color: var(--text-3); font-size: var(--fs-xs); line-height: 1.6; }
+
+@media (max-width: 640px) {
+  .form-grid { grid-template-columns: 1fr; gap: var(--sp-3); }
+}
+
+/* ---------- 卡片 / 版面 ---------- */
+.wrap { max-width: 1080px; margin: 0 auto; padding: var(--sp-6) var(--sp-5) 80px; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: var(--sp-5) 22px;
+  margin-bottom: var(--sp-4);
+  box-shadow: var(--shadow-sm);
+}
+.card-compact { padding: var(--sp-3) 14px; }
+.card-ok { background: var(--ok-weak); border-color: var(--ok-line); }
+.card-warn { background: var(--warn-weak); border-color: var(--warn-line); }
+.card-info { background: var(--brand-weak); border-color: var(--brand-line); }
+
+.card-desc { color: var(--text-2); font-size: var(--fs-sm); line-height: 1.7; margin: 0 0 10px; }
+
+.card-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.card-head h2, .card-head h3 { margin: 0; }
+.card-head button + button { margin-left: 0; }
+
+.page-head { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: 18px; }
+.page-head h1 { flex: 1; margin: 0; }
+
+/* ---------- 提示条 / 行内消息 ---------- */
+.notice {
+  margin-top: var(--sp-3);
+  padding: 10px 14px;
+  border-radius: var(--r-md);
+  border: 1px solid;
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+.notice-err { background: var(--err-weak); border-color: var(--err-line); color: var(--err); }
+.notice-warn { background: var(--warn-weak); border-color: var(--warn-line); color: var(--warn); }
+.notice-info { background: var(--brand-weak); border-color: var(--brand-line); color: var(--brand); }
+
+/* 表格里需要提请注意的一行(如:视频段超过站点单次时长上限,要分两次生成) */
+.tbl tr.row-warn > td { background: var(--warn-weak); }
+
+.msg-ok { color: var(--ok); font-size: var(--fs-sm); }
+.msg-err { color: var(--err); font-size: var(--fs-sm); white-space: pre-wrap; }
+
+/* 全局引导横幅(未配置模型时,顶栏下方常驻) */
+.llm-banner {
+  background: var(--warn-weak);
+  border-bottom: 1px solid var(--warn-line);
+  color: var(--warn);
+  font-size: var(--fs-sm);
+  padding: var(--sp-2) var(--sp-5);
+  text-align: center;
+}
+.llm-banner a { color: var(--warn); font-weight: 600; margin-left: var(--sp-1); }
+
+/* 更新提醒横幅(发现新版本时,顶栏下方常驻,品牌色区别于未配置模型的警告横幅) */
+.update-banner {
+  background: var(--brand-weak);
+  border-bottom: 1px solid var(--brand-line);
+  color: var(--brand);
+  font-size: var(--fs-sm);
+  padding: var(--sp-2) var(--sp-5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.update-log { display: flex; flex-direction: column; gap: 4px; white-space: normal; }
+

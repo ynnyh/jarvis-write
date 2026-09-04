@@ -1,0 +1,145 @@
+/* ==========================================================================
+   jarvis-write 前端样式
+   设计目标:低饱和、克制强调色、清晰层次、充足留白 —— 适合作家长时间使用
+
+   主题:令牌全部走 CSS 变量;[data-theme="dark"] 整组覆写即暗色模式
+   (切换逻辑见 src/theme.ts,首屏防闪烁脚本见 index.html)。
+   阅读器(Reader)有自己的局部主题,在 .reader 作用域内覆写令牌,互不影响。
+   ========================================================================== */
+
+/* ---------- 设计令牌 ---------- */
+:root {
+  /* 色板:表面 / 边框 / 文字三级 */
+  --bg: #f7f7f5;
+  --surface: #ffffff;
+  --surface-2: #f1f1ee;          /* hover 填充、次级表面 */
+  --line: #e4e4e0;
+  --line-strong: #d4d4cf;
+
+  --text: #26272b;
+  --text-2: #5c5f66;
+  --text-3: #767a83;             /* 弱化文字(hint/placeholder);≈WCAG AA 对比度 */
+
+  /* 品牌色(克制的靛蓝)及语义色 */
+  --brand: #4b54e1;
+  --brand-hover: #3e46c6;
+  --brand-weak: #eef0fd;
+  --brand-line: #d9ddf9;
+  --brand-ring: rgba(75, 84, 225, 0.16);
+  --brand-2: #7a4be1;            /* 封面渐变副色 */
+
+  /* 品牌底色上的前景:白字 / 半透明底(暗色下翻转为深色,保证对比度) */
+  --on-brand: #ffffff;
+  --on-brand-weak: rgba(255, 255, 255, 0.22);
+  /* 高饱和渐变(封面等)上的前景:两种主题都用纯白 */
+  --on-vivid: #ffffff;
+
+  --ok: #1a7f4b;   --ok-weak: #ecf7f1;   --ok-line: #c2e2d1;
+  --warn: #a85f0a; --warn-weak: #fdf5e8; --warn-line: #edd9b4;
+  --err: #c93333;  --err-weak: #fceeee;  --err-line: #f0c8c8;
+
+  /* 复合场景色:顶栏半透明底 / 遮罩 / 登录页辉光 */
+  --topbar-bg: rgba(255, 255, 255, 0.88);
+  --overlay-bg: rgba(24, 25, 28, 0.5);
+  --overlay-bg-soft: rgba(24, 25, 28, 0.4);
+  --auth-glow: #e9ebfb;
+  --auth-glow-fade: rgba(233, 235, 251, 0);
+
+  /* 锁屏页:双层品牌光晕 + 玻璃卡片(暗色整组覆写) */
+  --lock-glow-a: rgba(75, 84, 225, 0.13);
+  --lock-glow-b: rgba(122, 75, 225, 0.11);
+  --lock-card-bg: rgba(255, 255, 255, 0.75);
+  --lock-card-line: rgba(255, 255, 255, 0.7);
+
+  /* 字体栈:UI 用无衬线,阅读/正文用衬线 */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-serif: "Songti SC", "STSong", "Noto Serif CJK SC",
+    "Source Han Serif SC", Georgia, "Times New Roman", serif;
+
+  /* 字号阶梯 */
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-2xl: 26px;
+
+  /* 间距阶梯 */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* 圆角 */
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+  --r-full: 999px;
+
+  /* 阴影 */
+  --shadow-sm: 0 1px 2px rgba(31, 32, 36, 0.05);
+  --shadow-md: 0 1px 2px rgba(31, 32, 36, 0.05), 0 4px 12px rgba(31, 32, 36, 0.06);
+  --shadow-lg: 0 16px 40px rgba(31, 32, 36, 0.16);
+
+  /* 控件尺寸(移动端在媒体查询里调大);
+     --ctl-r 控件圆角、--ctl-inset 输入框内阴影(轻陷感),输入/按钮共用 */
+  --ctl-h: 40px;
+  --ctl-h-sm: 32px;
+  --ctl-r: 10px;
+  --ctl-inset: inset 0 1px 2px rgba(31, 32, 36, 0.04);
+
+  /* 层级 */
+  --z-topbar: 10;
+  --z-reader: 60;
+}
+
+/* ---------- 暗色主题:整组覆写令牌 ----------
+   低亮度暖灰 + 靛蓝提亮,不纯黑;语义色同步提亮保证在暗底上的对比度。 */
+[data-theme="dark"] {
+  --bg: #17181b;
+  --surface: #1f2025;
+  --surface-2: #28292f;
+  --line: #313237;
+  --line-strong: #434449;
+
+  --text: #d7d8dc;
+  --text-2: #a3a6ad;
+  --text-3: #858a92;
+
+  --brand: #8b93ff;
+  --brand-hover: #a0a6ff;
+  --brand-weak: #262a49;
+  --brand-line: #3d4372;
+  --brand-ring: rgba(139, 147, 255, 0.28);
+
+  /* 暗色品牌底是浅靛蓝,其上的前景翻转为深色才够对比度 */
+  --on-brand: #181a30;
+  --on-brand-weak: rgba(24, 26, 48, 0.28);
+
+  --ok: #55b98a;   --ok-weak: #1b2a23;   --ok-line: #2f4d3f;
+  --warn: #d99a4e; --warn-weak: #2d2517; --warn-line: #54452a;
+  --err: #e06c6c;  --err-weak: #311f22;  --err-line: #553636;
+
+  --topbar-bg: rgba(31, 32, 37, 0.86);
+  --overlay-bg: rgba(0, 0, 0, 0.6);
+  --overlay-bg-soft: rgba(0, 0, 0, 0.5);
+  --auth-glow: #23274d;
+  --auth-glow-fade: rgba(35, 39, 77, 0);
+
+  --lock-glow-a: rgba(139, 147, 255, 0.15);
+  --lock-glow-b: rgba(122, 75, 225, 0.17);
+  --lock-card-bg: rgba(31, 32, 37, 0.72);
+  --lock-card-line: rgba(255, 255, 255, 0.09);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.5);
+
+  --ctl-inset: inset 0 1px 2px rgba(0, 0, 0, 0.28);
+}
+

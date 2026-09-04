@@ -1,6 +1,6 @@
 // src/theme.ts — 全局外观:light / dark / auto(跟随系统)。
 //
-// 令牌在 styles.css 按 [data-theme="dark"] 整组覆写,这里只负责:
+// 令牌在 styles/01-tokens.css 按 [data-theme="dark"] 整组覆写,这里只负责:
 // 读偏好(localStorage)→ 解析 auto → 把结果写到 <html data-theme>。
 // 首屏防闪烁:index.html 有一段内联脚本在 React 挂载前做同一件事,
 // 两边的解析逻辑保持一致(改一边记得改另一边)。

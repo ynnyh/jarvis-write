@@ -1,0 +1,53 @@
+/* ---------- 项目工作台:左侧项目导航 rail + 右侧推进区(2026-08 重构) ----------
+   旧 .zone-nav 是横排大 tab,占掉内容区一整行还只放得下三个入口;进 rail 后
+   setup 子步与 book 页签作为二级项挂在对应区下面,内容区首屏直接见正文。 */
+.pj-cols {
+  display: grid; grid-template-columns: 216px minmax(0, 1fr);
+  gap: var(--sp-5); align-items: start;
+}
+.pj-rail {
+  position: sticky; top: var(--sp-4);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.pj-back {
+  display: flex; align-items: center; gap: 6px; margin-bottom: var(--sp-2);
+  background: none; border: none; padding: 6px 10px; border-radius: var(--r-md);
+  color: var(--text-3); font-size: var(--fs-sm); cursor: pointer;
+}
+.pj-back:hover { color: var(--text); background: var(--surface-2); }
+.pj-zone {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 10px; border: none; border-radius: var(--r-md);
+  background: none; color: var(--text-2); font-size: var(--fs-md);
+  text-align: left; cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.pj-zone:hover { background: var(--surface-2); color: var(--text); }
+.pj-zone.on { background: var(--brand); color: var(--on-brand); font-weight: 600; }
+/* 选中态不被全局 button:hover 灰底覆盖(否则白字落在灰底上看不清) */
+.pj-zone.on:hover { background: var(--brand); color: var(--on-brand); }
+.pj-zone .no {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--surface-2); color: var(--text-2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--fs-xs); font-weight: 700; flex-shrink: 0;
+}
+.pj-zone.on .no { background: var(--on-brand-weak); color: var(--on-brand); }
+.pj-zone .dot { margin-left: auto; width: 7px; height: 7px; border-radius: 50%; background: var(--err); flex-shrink: 0; }
+.pj-zone-label { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; flex: 1; }
+.pj-zone-sub { font-size: var(--fs-xs); opacity: 0.75; }
+/* 二级项(开书子步 / 全书页签):挂在对应区下面,左边一根竖线表示从属 */
+.pj-subs {
+  margin: var(--sp-2) 0 var(--sp-3) 18px;
+  display: flex; flex-direction: column; gap: 1px;
+  border-left: 1px solid var(--line); padding-left: 10px;
+}
+.pj-sub-tab {
+  display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+  border: none; border-radius: var(--r-sm); background: none;
+  color: var(--text-2); font-size: var(--fs-sm); text-align: left; cursor: pointer;
+}
+.pj-sub-tab:hover { background: var(--surface-2); color: var(--text); }
+.pj-sub-tab.on { background: var(--brand-weak); color: var(--brand); font-weight: 600; }
+.pj-sub-tab.on:hover { background: var(--brand-weak); color: var(--brand); }
+
