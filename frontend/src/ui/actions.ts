@@ -13,7 +13,7 @@ export type AppAction =
   | "versions" | "queue"
   | "prev-chapter" | "next-chapter" | "toggle-rail" | "toggle-map" | "immersive"
   // 全局(由 ProjectPage 注册)
-  | "command-palette" | "open-read-window"
+  | "command-palette" | "global-search" | "open-read-window"
   | "goto-setup" | "goto-write" | "goto-book" | "goto-settings" | "goto-help"
   | "theme-light" | "theme-dark" | "theme-auto"
   | "export-txt" | "export-epub";
@@ -22,7 +22,7 @@ const ALL_ACTIONS: AppAction[] = [
   "generate", "revise", "polish", "proofread", "review",
   "versions", "queue",
   "prev-chapter", "next-chapter", "toggle-rail", "toggle-map", "immersive",
-  "command-palette", "open-read-window",
+  "command-palette", "global-search", "open-read-window",
   "goto-setup", "goto-write", "goto-book", "goto-settings", "goto-help",
   "theme-light", "theme-dark", "theme-auto",
   "export-txt", "export-epub",

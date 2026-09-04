@@ -101,6 +101,15 @@ export default function CommandPalette({ pid, onClose }: Props) {
           },
         });
       });
+    // 章名/动作词都不中 → 引导去全书检索(dispatch 无 payload,对话框重输查询词)
+    if (out.length === 0) {
+      out.push({
+        key: "fts",
+        label: `全书搜索「${q.trim()}」`,
+        sub: "Ctrl+Shift+F",
+        run: () => dispatchAction("global-search"),
+      });
+    }
     return out;
   }, [q, outlines, byNum, nav, pid]);
 

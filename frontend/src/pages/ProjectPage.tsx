@@ -9,6 +9,7 @@ import { useBreakpoint } from "../hooks/useBreakpoint";
 import { useDesktopHotkeys } from "../hooks/useDesktopHotkeys";
 import { AppAction, dispatchAction, isAppAction, registerActionHandler } from "../ui/actions";
 import CommandPalette from "../ui/CommandPalette";
+import SearchDialog from "../ui/SearchDialog";
 import { setThemePref } from "../theme";
 import { isDesktop, onMenuAction, openReadWindow } from "../desktop";
 import { api, downloadFile } from "../api";
@@ -245,9 +246,11 @@ export default function ProjectPage() {
   // 快捷键与命令面板只服务桌面宽屏,isMobile 下一律不挂监听不渲染
   const { isMobile } = useBreakpoint();
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   // 全局动作 handler:对象每次渲染重建捕获最新 searchParams 等,经 ref 交给注册一次的稳定 wrapper
   const globalHandlers: Partial<Record<AppAction, () => void>> = {
     "command-palette": () => setPaletteOpen((v) => !v),
+    "global-search": () => setSearchOpen((v) => !v),
     "goto-setup": () => gotoZone("setup"),
     "goto-write": () => gotoZone("write"),
     "goto-book": () => gotoZone("book"),
@@ -577,6 +580,10 @@ export default function ProjectPage() {
       {/* Ctrl+K 命令面板(仅桌面宽屏;isMobile 下快捷键也不挂,永远进不来) */}
       {!isMobile && paletteOpen && (
         <CommandPalette pid={pid} onClose={() => setPaletteOpen(false)} />
+      )}
+      {/* Ctrl+Shift+F 全书检索(FTS5);同面板只挂桌面 */}
+      {!isMobile && searchOpen && (
+        <SearchDialog pid={pid} onClose={() => setSearchOpen(false)} />
       )}
     </>
   );

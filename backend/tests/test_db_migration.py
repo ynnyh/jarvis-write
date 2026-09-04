@@ -75,8 +75,13 @@ def test_fresh_db_upgrade_creates_all_model_tables(isolated_db):
     from app.db.base import Base
 
     expected = set(Base.metadata.tables.keys())
-    # alembic_version 是 Alembic 自己的版本表,不在业务模型里
-    migrated = set(inspect_tables(engine)) - {"alembic_version"}
+    # alembic_version 是 Alembic 自己的版本表,不在业务模型里;
+    # fts_* 是 0008 建的 FTS5 全文索引(虚表 + 每张 5 个影子表),同样刻意
+    # 不进 ORM——排除后仍要求其余业务表一张不差。
+    migrated = {
+        t for t in inspect_tables(engine)
+        if t != "alembic_version" and not t.startswith("fts_")
+    }
     assert migrated == expected, (
         f"基线迁移与模型不一致:缺 {sorted(expected - migrated)},多 {sorted(migrated - expected)}"
     )
@@ -111,6 +116,28 @@ def test_legacy_db_stamps_without_touching_data(isolated_db):
     conn.execute("CREATE TABLE promo_plans (id INTEGER PRIMARY KEY)")
     # 0004(审校档)要改 provider_configs,同法补最小同构表
     conn.execute("CREATE TABLE provider_configs (id INTEGER PRIMARY KEY)")
+    # 0008(全文检索)在 chapters/outlines/entities/facts/foreshadowings 上
+    # 建触发器并回填索引:真实老库这五张表都有(基线就存在),按最小同构补出
+    conn.execute(
+        "CREATE TABLE chapters (id INTEGER PRIMARY KEY, project_id INTEGER,"
+        " chapter_number INTEGER, draft_content TEXT DEFAULT '', final_content TEXT DEFAULT '')"
+    )
+    conn.execute(
+        "CREATE TABLE outlines (id INTEGER PRIMARY KEY, project_id INTEGER,"
+        " chapter_number INTEGER, title TEXT DEFAULT '', summary TEXT DEFAULT '', chapter_purpose TEXT DEFAULT '')"
+    )
+    conn.execute(
+        "CREATE TABLE entities (id INTEGER PRIMARY KEY, project_id INTEGER,"
+        " name TEXT DEFAULT '', aliases TEXT DEFAULT '[]', entity_type TEXT DEFAULT '')"
+    )
+    conn.execute(
+        "CREATE TABLE facts (id INTEGER PRIMARY KEY, project_id INTEGER,"
+        " content TEXT DEFAULT '', source_chapter INTEGER DEFAULT 0, entity_id INTEGER)"
+    )
+    conn.execute(
+        "CREATE TABLE foreshadowings (id INTEGER PRIMARY KEY, project_id INTEGER,"
+        " description TEXT DEFAULT '', notes TEXT DEFAULT '', chapter_planted INTEGER DEFAULT 0, status TEXT DEFAULT 'planted')"
+    )
     conn.commit()
     conn.close()
 

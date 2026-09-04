@@ -576,6 +576,22 @@ export interface MarksReviseResult {
   total: number; stale: number;
   chapters: { chapter_number: number; pairs: MarkRevisePair[] }[];
 }
+// 全书全文检索(后端 FTS5 trigram 倒排;≥3 字 MATCH,<3 字降级 LIKE)
+export type SearchKind = "chapter" | "outline" | "entity" | "fact" | "foreshadowing";
+export interface SearchHit {
+  kind: SearchKind; kind_cn: string; ref_id: number;
+  // 章节类命中=章号(正文/大纲/事实/伏笔),实体类为 null
+  chapter_number: number | null;
+  title: string | null;   // 大纲命中:章标题
+  name: string | null;    // 实体命中:名称
+  snippet: string;        // 就地裁剪的上下文摘要
+  hits: number;           // 该条内容里查询词出现次数
+}
+export interface SearchResponse {
+  q: string; total: number; elapsed_ms: number;
+  grouped: Partial<Record<SearchKind, SearchHit[]>>;
+}
+
 // 各协议是否已配置可用 key。键为 interface_format(openai-compatible / anthropic /
 // gemini / deepseek / openai…),随后端 _REGISTRY 动态扩展,故用 Record 不写死字段。
 export type ProviderState = Record<string, boolean>;
@@ -1181,6 +1197,10 @@ export const api = {
     req<{ ok: boolean }>("DELETE", `/api/projects/${pid}/marks/${mid}`),
   marksReviseAsync: (pid: number, directive: string) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/marks/revise-async`, { directive }),
+
+  // ---- 全书全文检索(FTS5 trigram 倒排,<3 字后端自动降级 LIKE) ----
+  search: (pid: number, q: string) =>
+    req<SearchResponse>("GET", `/api/projects/${pid}/search?q=${encodeURIComponent(q)}`),
 
   polishChapter: (pid: number, n: number, tendency: Tendency) =>
     req<PolishResult>("POST", `/api/projects/${pid}/polish/chapter/${n}`, { tendency }, LLM_TIMEOUT),
