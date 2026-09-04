@@ -400,3 +400,37 @@
 /* 只读态(生成任务进行中):整体降饱和提示,而不是报错 */
 .free-write-host.is-locked .cm-content { color: var(--text-2); background: var(--surface-2); }
 .free-write-host .cm-placeholder { color: var(--text-2); }
+
+/* ---------- 同文双轨(评价第 5 条):左定稿参照(只读) / 右新稿(CM6 可编辑) ---------- */
+/* 双栏各自滚动,窄屏叠成上下;左右底色差一档,「参照」与「在写」一眼可分 */
+.dual-track { margin-top: 8px; }
+.dual-track-panes {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+  align-items: stretch;
+}
+.dual-pane-title {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 6px 10px;
+  color: var(--text-2); font-size: var(--fs-xs); font-weight: 600;
+  border-bottom: 1px solid var(--line);
+}
+.dual-left {
+  border: 1px solid var(--line); border-radius: var(--r-lg);
+  background: var(--surface-2);
+  display: flex; flex-direction: column;
+  max-height: 68vh;
+}
+.dual-left-body { overflow-y: auto; padding: 10px 14px; }
+.dual-left-body p { margin: 0 0 0.9em; line-height: 1.9; }
+.dual-right {
+  border: 1px solid var(--line); border-radius: var(--r-lg);
+  overflow: hidden;
+  display: flex; flex-direction: column;
+  max-height: 68vh;
+}
+.dual-right .free-write-host { flex: 1; border: none; border-radius: 0; overflow-y: auto; }
+.dual-right .cm-content { min-height: 240px; }
+@media (max-width: 900px) {
+  .dual-track-panes { grid-template-columns: 1fr; }
+  .dual-left, .dual-right { max-height: 44vh; }
+}

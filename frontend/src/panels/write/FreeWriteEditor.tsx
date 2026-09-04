@@ -3,17 +3,13 @@
 // 段落点选气泡(Prose)仍是默认界面,本模式由内容头「自由改稿」按钮进入(懒加载,不占主包)。
 // 写回与段落手改同一条链路:PUT /chapters/{n}/content → onSaved → sync-ask 询问条;
 // 脏标记经 onDirtyChange 上报,父级切章/退出前弹「丢弃修改」确认(与 Prose 同语义)。
-// 为什么选 CM6 而不是 ProseMirror:正文是纯文本段落,没有富文本结构要建模;
-// CM6 在中文 IME、大文档性能与无头定制上更稳,搜索/撤销历史开箱即用。
+// 编辑器内核(换行/历史/搜索/任务锁)在 useChapterEditor,与双轨对照共用。
 import { useEffect, useRef, useState } from "react";
-import { Compartment, EditorState } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
 import { api, ChapterDetail } from "../../api";
 import { toast } from "../../ui/Toaster";
 import { errMsg } from "../../pollJob";
 import { confirmDialog } from "../../ui/ConfirmDialog";
+import { useChapterEditor } from "./useChapterEditor";
 
 interface Props {
   pid: number;
@@ -35,39 +31,30 @@ export default function FreeWriteEditor({
   pid, chapter, genBlocked, genHint, onSaved, onSyncAsk, onDirtyChange, onExit,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const viewRef = useRef<EditorView | null>(null);
-  // 可编辑性走 compartment:genBlocked 变化时原地重配置,不重建编辑器(保历史/光标)
-  const editableConf = useRef(new Compartment());
-  const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [chars, setChars] = useState(0);
-  // 已保存基准:脏判定 = 当前文档 !== 基准(切章由父级 key 重建组件,基准随 chapter 初始化)
-  const baseRef = useRef(chapter.final_content || chapter.draft_content || "");
-  const saveRef = useRef<() => void>(() => {});
-
-  function currentDoc(): string {
-    return viewRef.current?.state.doc.toString() ?? baseRef.current;
-  }
+  const ed = useChapterEditor(hostRef, {
+    initialDoc: chapter.final_content || chapter.draft_content || "",
+    genBlocked,
+    onDirtyChange,
+  });
 
   async function save() {
-    const content = currentDoc();
+    const content = ed.getDoc();
     if (!content.trim()) { toast.err("保存失败", "正文不能是空的"); return; }
     setSaving(true);
     try {
       const updated = await api.editChapterContent(pid, chapter.chapter_number, content);
-      baseRef.current = content;
-      setDirty(false);
-      onDirtyChange?.(false);
+      ed.markSaved(content);
       onSaved(updated);
       onSyncAsk(chapter.chapter_number);
       toast.ok("本章已保存", "段落结构(空行分段)保持你编辑后的样子");
     } catch (e) { toast.err("保存失败", errMsg(e)); } finally { setSaving(false); }
   }
-  // Ctrl+S 键位在编辑器建好后不可换闭包,借 ref 每次渲染后指向最新 save
-  useEffect(() => { saveRef.current = save; });
+  // Ctrl+S 键位在编辑器建好后不可换闭包,经 hook 的 ref 每次渲染后指向最新 save
+  useEffect(() => { ed.setSaveHandler(save); });
 
   async function exit() {
-    if (dirty && !await confirmDialog({
+    if (ed.dirty && !await confirmDialog({
       title: "有还没保存的修改",
       body: "退出自由改稿会丢掉没保存的改动。",
       confirmText: "丢弃修改", danger: true,
@@ -76,59 +63,15 @@ export default function FreeWriteEditor({
     onExit();
   }
 
-  // 建编辑器(组件按 chapter.chapter_number 加 key,切章即重建,doc 对齐当前章)
-  useEffect(() => {
-    if (!hostRef.current) return;
-    const doc = chapter.final_content || chapter.draft_content || "";
-    const view = new EditorView({
-      parent: hostRef.current,
-      state: EditorState.create({
-        doc,
-        extensions: [
-          history(),
-          EditorView.lineWrapping,
-          highlightSelectionMatches(),
-          search({ top: true }),
-          keymap.of([
-            { key: "Mod-s", preventDefault: true, run: () => { saveRef.current(); return true; } },
-            ...defaultKeymap, ...historyKeymap, ...searchKeymap,
-          ]),
-          editableConf.current.of(EditorView.editable.of(!genBlocked)),
-          EditorView.updateListener.of((u) => {
-            if (!u.docChanged) return;
-            const text = u.state.doc.toString();
-            setChars(text.replace(/\s/g, "").length);
-            const isDirty = text !== baseRef.current;
-            setDirty(isDirty);
-            onDirtyChange?.(isDirty);
-          }),
-          // 段落约定与全站一致:空行分段;编辑器不给自动缩进/Tab 制表(小说用不上)
-        ],
-      }),
-    });
-    view.focus();
-    viewRef.current = view;
-    setChars(doc.replace(/\s/g, "").length);
-    return () => { view.destroy(); viewRef.current = null; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chapter.chapter_number]);
-
-  // 生成/重写任务跑起来时切只读;结束后恢复可写(不重建,历史与光标保留)
-  useEffect(() => {
-    viewRef.current?.dispatch({
-      effects: editableConf.current.reconfigure(EditorView.editable.of(!genBlocked)),
-    });
-  }, [genBlocked]);
-
   return (
     <div className="free-write">
       <div className="free-write-head">
         <b>✍️ 自由改稿</b>
-        <span className="muted">{chars} 字{dirty ? " · 未保存" : ""}</span>
+        <span className="muted">{ed.chars} 字{ed.dirty ? " · 未保存" : ""}</span>
         <span className="grow" />
         <button className="btn-sm" onClick={() => void exit()}
-          title={dirty ? "有未保存修改,退出前会再确认" : "回到段落点选界面"}>返回界面模式</button>
-        <button className="primary btn-sm" disabled={saving || !dirty || genBlocked}
+          title={ed.dirty ? "有未保存修改,退出前会再确认" : "回到段落点选界面"}>返回界面模式</button>
+        <button className="primary btn-sm" disabled={saving || !ed.dirty || genBlocked}
           title={genBlocked ? genHint : "保存整章(Ctrl+S)"}
           onClick={() => void save()}>
           {saving ? "保存中…" : "保存本章"}

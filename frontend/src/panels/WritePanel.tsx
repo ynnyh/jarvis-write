@@ -39,6 +39,7 @@ import { useScrollOnAppear } from "./write/useScrollOnAppear";
 
 // 自由改稿(CodeMirror 6)懒加载:只有点「自由改稿」才拉编辑器 chunk,不占主包
 const FreeWriteEditor = lazy(() => import("./write/FreeWriteEditor"));
+const DualTrackEditor = lazy(() => import("./write/DualTrackEditor"));
 
 interface Props {
   pid: number; outlines: Outline[];
@@ -90,9 +91,9 @@ export default function WritePanel({ pid, outlines }: Props) {
   // 验收单条接受时据此销账对应标记(拒绝保留,可重跑)。
   const [reviseMarkIds, setReviseMarkIds] = useState<number[]>([]);
 
-  // 自由改稿模式(CodeMirror 6 整章编辑):进入后中栏正文区整体替换;切章保持模式,
-  // 编辑器按章号 key 重建加载新章内容
-  const [freeWrite, setFreeWrite] = useState(false);
+  // 编辑器模式:prose=段落点选(默认) / free=自由改稿(CM6 整章) / dual=同文双轨(左定稿参照+右新稿)。
+  // 切章保持模式,编辑器按章号 key 重建加载新章内容。
+  const [editorMode, setEditorMode] = useState<"prose" | "free" | "dual">("prose");
 
   // 动作卡(act= 进 URL,可刷新/分享):桌面在中栏内联,移动端换全屏 sheet 容器(组件同一份)
   const actCards = (
@@ -304,11 +305,17 @@ export default function WritePanel({ pid, outlines }: Props) {
                     <span className="content-head-meta">正文 · {current.word_count}字</span>
                     {currentBrief?.is_stale && <span className="badge err">大纲已变</span>}
                   </div>
-                  {!freeWrite && (
-                    <button className="btn-sm" disabled={genBlocked}
-                      title={genBlocked ? genHint
-                        : "整章手写/大改的编辑器(搜索/撤销/字数);平时点段落改就够了"}
-                      onClick={() => setFreeWrite(true)}>✍️ 自由改稿</button>
+                  {editorMode === "prose" && (
+                    <>
+                      <button className="btn-sm" disabled={genBlocked}
+                        title={genBlocked ? genHint
+                          : "左定稿参照、右栏写新稿,逐段差异实时统计"}
+                        onClick={() => setEditorMode("dual")}>⇔ 双轨对照</button>
+                      <button className="btn-sm" disabled={genBlocked}
+                        title={genBlocked ? genHint
+                          : "整章手写/大改的编辑器(搜索/撤销/字数);平时点段落改就够了"}
+                        onClick={() => setEditorMode("free")}>✍️ 自由改稿</button>
+                    </>
                   )}
                 </div>
               {currentOutline && (
@@ -333,8 +340,8 @@ export default function WritePanel({ pid, outlines }: Props) {
                   </span>
                 </div>
               )}
-              {/* 正文即界面:段落点选 → 气泡(改这段/手改);自由改稿 = CM6 整章编辑器(懒加载) */}
-              {freeWrite ? (
+              {/* 正文即界面:段落点选 → 气泡(改这段/手改);自由改稿/同文双轨 = CM6 编辑器(懒加载) */}
+              {editorMode === "free" ? (
                 <Suspense fallback={<div className="muted"><span className="spin spin-sm" /> 加载编辑器…</div>}>
                   <FreeWriteEditor
                     key={current.chapter_number}
@@ -345,7 +352,21 @@ export default function WritePanel({ pid, outlines }: Props) {
                     onSaved={(updated) => { setCurrent(updated); void reload(); }}
                     onSyncAsk={(num) => askSync(num)}
                     onDirtyChange={(dirty) => { proseDirtyRef.current = dirty; }}
-                    onExit={() => setFreeWrite(false)}
+                    onExit={() => setEditorMode("prose")}
+                  />
+                </Suspense>
+              ) : editorMode === "dual" ? (
+                <Suspense fallback={<div className="muted"><span className="spin spin-sm" /> 加载编辑器…</div>}>
+                  <DualTrackEditor
+                    key={current.chapter_number}
+                    pid={pid}
+                    chapter={current}
+                    genBlocked={genBlocked}
+                    genHint={genHint}
+                    onSaved={(updated) => { setCurrent(updated); void reload(); }}
+                    onSyncAsk={(num) => askSync(num)}
+                    onDirtyChange={(dirty) => { proseDirtyRef.current = dirty; }}
+                    onExit={() => setEditorMode("prose")}
                   />
                 </Suspense>
               ) : (
