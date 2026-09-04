@@ -22,6 +22,7 @@ frontend/tsconfig.tsbuildinfo
 
 # e2e 冒烟产物(登录态/报告/截图),不入库
 frontend/e2e/.auth/
+frontend/e2e/.shots/
 frontend/test-results/
 frontend/playwright-report/
 
