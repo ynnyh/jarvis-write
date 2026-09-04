@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from fastapi import Depends, File, Form, HTTPException, Response, UploadFile
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app import storage
@@ -63,9 +64,19 @@ async def list_characters(project_id: int, db: Session = Depends(get_db)):
     }
 
 
+class CharacterGenIn(BaseModel):
+    """「选角色生成」名单;缺省(None)= 全自动按戏份取前 12。"""
+    entity_ids: list[int] = Field(default_factory=list, max_length=20)
+
+
 @router.post("/characters/generate")
-async def generate_characters(project_id: int, db: Session = Depends(get_db)):
+async def generate_characters(
+    project_id: int, body: CharacterGenIn | None = None, db: Session = Depends(get_db)
+):
+    """生成资产卡。body 可省略(全自动按戏份取前 12);给 entity_ids 时只出勾选的
+    角色(「选角色生成」,上限 20)。"""
     get_project_or_404(db, project_id)
+    entity_ids = list(body.entity_ids) if body and body.entity_ids else None
     kind = f"drama-chars-{project_id}"
     if (existing := _existing_job("drama-", kind)):
         return existing
@@ -75,7 +86,7 @@ async def generate_characters(project_id: int, db: Session = Depends(get_db)):
 
         with SessionLocal() as session:
             proj = session.get(Project, project_id)
-            return await generate_assets(session, proj, progress)
+            return await generate_assets(session, proj, progress, entity_ids=entity_ids)
 
     return {"job_id": spawn_job(kind, work)}
 

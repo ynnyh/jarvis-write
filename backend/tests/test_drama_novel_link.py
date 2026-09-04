@@ -230,3 +230,127 @@ def test_generate_without_entities_still_errors():
     with pytest.raises(DramaAssetError):
         __import__("asyncio").run(generate_character_cards(db, p))
     db.close()
+
+
+# ---------- 二期:无蓝图兜底 / 每集重点 / 选角色 ----------
+
+def _add_approved_chapter(db, project_id, n: int, text: str, open_threads=None):
+    """approved 章 + (可选)带 open_threads 的章末契约。"""
+    from app.db.models import Chapter, ChapterState
+    from app.engines.editorial import content_hash
+
+    ch = Chapter(project_id=project_id, outline_id=n, chapter_number=n,
+                 final_content=text, word_count=len(text), status="approved")
+    db.add(ch)
+    db.flush()
+    if open_threads is not None:
+        db.add(ChapterState(
+            chapter_id=ch.id,
+            contract=json.dumps({"open_threads": open_threads}, ensure_ascii=False),
+            content_hash=content_hash(text), extract_status="ok",
+        ))
+    db.commit()
+    return ch
+
+
+def test_plan_without_outline_falls_back_to_text_and_threads():
+    """没铺蓝图的书:approved 章走「正文开头」兜底,契约 open_threads 进素材。"""
+    import asyncio
+    from app.engines.drama.planner import plan_episodes
+
+    db, p, _ = _make_db(dna=DNA)
+    _add_approved_chapter(db, p.id, 1, "御书房里,皇帝把密诏压在了镇纸下。", open_threads=["密诏下落未明"])
+    _add_approved_chapter(db, p.id, 2, "东宫灯火未熄,太子彻夜未眠。")
+
+    adapter = _Adapter(json.dumps({"episodes": [
+        {"title": "密诏失踪", "source_chapters": [1, 2],
+         "hook": "镇纸下的密诏不见了", "recap": "两宫角力", "cliffhanger": "太子召见密使"},
+    ]}, ensure_ascii=False))
+    with patch("app.engines.drama.planner.get_adapter_for", return_value=adapter):
+        eps = asyncio.run(plan_episodes(db, p, 1, 2, "dialogue", 90))
+    assert len(eps) == 1 and eps[0]["source_chapters"] == [1, 2]
+    prompt = adapter.prompts[0]
+    assert "无蓝图,取正文开头" in prompt
+    assert "御书房里" in prompt and "东宫灯火" in prompt
+    assert "未决线索" in prompt and "密诏下落未明" in prompt
+    db.close()
+
+
+def test_plan_material_missing_still_errors():
+    """既无蓝图也无 approved 正文(有正文但未定稿不算)→ 明确报错。"""
+    import asyncio
+    from app.db.models import Chapter
+    from app.engines.drama.planner import DramaPlanError, plan_episodes
+
+    db, p, _ = _make_db()
+    db.add(Chapter(project_id=p.id, outline_id=1, chapter_number=1,
+                   final_content="草稿正文", word_count=4, status="draft"))
+    db.commit()
+    with pytest.raises(DramaPlanError):
+        asyncio.run(plan_episodes(db, p, 1, 1, "dialogue", 90))
+    db.close()
+
+
+def test_focus_block_injected_into_script_prompt():
+    import asyncio
+    from app.db.models import DramaEpisode
+    from app.engines.drama.script import write_episode_script
+
+    db, p, _ = _make_db()
+    _add_approved_chapter(db, p.id, 1, "他在城门口勒住马,回头看了一眼。")
+    ep = DramaEpisode(
+        project_id=p.id, ep_index=1, title="入城", source_chapter=1,
+        source_chapters=[1], hook="h", recap="r", cliffhanger="c",
+        focus="重点拍那场对峙", mode="dialogue", duration_target_s=90,
+    )
+    db.add(ep)
+    db.commit()
+
+    reply = json.dumps({"synopsis": "s", "lines": [
+        {"speaker": "旁白", "text": "城门开处", "action": "他勒马回望"},
+    ]}, ensure_ascii=False)
+    adapter = _Adapter(reply)
+    with patch("app.engines.drama.script.get_adapter_for", return_value=adapter):
+        result = asyncio.run(write_episode_script(db, p, ep))
+    assert result["status"] == "scripted"
+    assert "【本集重点(作者指定,最高优先级遵循)】重点拍那场对峙" in adapter.prompts[0]
+
+    # 没写重点的集:注入块整体消失(要求第 0 条的说明文字恒在,不作为判据)
+    ep.focus = ""
+    db.commit()
+    adapter2 = _Adapter(reply)
+    with patch("app.engines.drama.script.get_adapter_for", return_value=adapter2):
+        asyncio.run(write_episode_script(db, p, ep))
+    assert "作者指定,最高优先级遵循" not in adapter2.prompts[0]
+    db.close()
+
+
+def test_generate_character_cards_with_entity_ids():
+    """选角色生成:只出勾选的;上限 20;名单里没有的 id 明确报错。"""
+    from app.engines.drama.characters import DramaAssetError, generate_character_cards
+
+    db, p, _ = _make_db()
+    a = _entity(db, p.id, "主角甲", {"身份": "主角"})
+    b = _entity(db, p.id, "配角乙", {"身份": "配角"})
+    _entity(db, p.id, "路人丙")
+
+    reply = json.dumps({"cards": [
+        {"name": "配角乙", "gender": "female", "appearance_cn": "x", "appearance_en": "x",
+         "outfit_cn": "x", "voice_desc": "x"},
+    ]}, ensure_ascii=False)
+    adapter = _Adapter(reply)
+    with patch("app.engines.drama.characters.get_adapter_for", return_value=adapter):
+        result = __import__("asyncio").run(
+            generate_character_cards(db, p, entity_ids=[b.id])
+        )
+    assert result["characters_total"] == 3 and result["characters_shown"] == 1
+    assert "配角乙" in adapter.prompts[0]
+    assert "主角甲" not in adapter.prompts[0] and "路人丙" not in adapter.prompts[0]
+
+    # 名单里全是圣经里不存在的 id → 明确报错
+    with patch("app.engines.drama.characters.get_adapter_for", return_value=adapter):
+        with pytest.raises(DramaAssetError):
+            __import__("asyncio").run(
+                generate_character_cards(db, p, entity_ids=[99999])
+            )
+    db.close()

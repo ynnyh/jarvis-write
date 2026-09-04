@@ -1,9 +1,13 @@
 # app/engines/drama/planner.py
 # -*- coding: utf-8 -*-
-"""集数规划:把章节蓝图素材切成漫剧的「集」(钩子/梗概/卡点)。
+"""集数规划:把章节素材切成漫剧的「集」(钩子/梗概/卡点)。
 
-改编输入用结构化事件(蓝图 summary + beats + 悬念),不喂全文——
+改编输入优先用结构化事件(蓝图 summary + beats + 悬念),不喂全文——
 Toonflow 的事件图谱思路,咱们的故事圣经/蓝图就是现成图谱,防长文本信息丢失。
+**无蓝图兜底**:approved 章节但没铺蓝图时,用每章正文开头拼素材——
+外导入书、懒得铺蓝图的书也能走漫剧线。
+两种来源都会追加章末契约的未决线索(open_threads):它是「下一章该接什么」
+的权威记录,是钩子/卡点最准的原料。
 
 重规划语义:只替换任一源章号落在本次范围内的旧集(其它集保留),
 之后全表按源章号重排序号。想全部重来,选覆盖全部章节的范围即可。
@@ -15,11 +19,13 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.db.models import DramaEpisode, DramaShot, Project
+from app.db.models import Chapter, ChapterState, DramaEpisode, DramaShot, Project
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.drama.common import (
     MODE_DESC,
+    approved_chapter_numbers,
     book_block,
+    chapter_final_text,
     coerce_int,
     clip,
     concept_block,
@@ -32,6 +38,10 @@ from app.prompts.drama import EPISODE_PLAN_PROMPT
 
 # 单次规划上限:防一次切出几百集
 _MAX_EPISODES = 40
+# 无蓝图兜底时,每章正文喂开头多少字(情节开局足够,控窗)
+_FALLBACK_HEAD_CHARS = 300
+# 每章最多带几条章末未决线索(钩子/卡点原料,多了变流水账)
+_THREADS_PER_CHAPTER = 2
 
 
 class DramaPlanError(ValueError):
@@ -55,6 +65,73 @@ def _banned_block(db: Session, project_id: int) -> str:
     )
 
 
+def _chapter_threads(db: Session, project_id: int, n: int) -> list[str]:
+    """第 n 章章末契约的未决线索(open_threads,最新优先取前 N);无契约 → 空表。"""
+    from app.engines.pipeline.handoff import _fresh_contract
+
+    ch = (
+        db.query(Chapter)
+        .filter(Chapter.project_id == project_id, Chapter.chapter_number == n)
+        .first()
+    )
+    if ch is None:
+        return []
+    state = db.query(ChapterState).filter(ChapterState.chapter_id == ch.id).first()
+    contract = _fresh_contract(state, ch) if state is not None else None
+    if not contract:
+        return []
+    return [
+        str(t).strip()
+        for t in (contract.get("open_threads") or [])
+        if str(t or "").strip()
+    ][:_THREADS_PER_CHAPTER]
+
+
+def _chapter_material(
+    db: Session, project_id: int, from_ch: int, to_ch: int
+) -> tuple[str, int]:
+    """章节素材块:有蓝图用蓝图,没蓝图用正文开头兜底;都追加未决线索。
+
+    两类素材可以混存(铺了前几卷蓝图的书,后面未铺的章走正文兜底)。
+    返回 (素材块, 有素材的章数)。
+    """
+    outlined = {o.chapter_number: o for o in outline_rows(db, project_id, from_ch, to_ch)}
+    approved = [
+        n for n in approved_chapter_numbers(db, project_id) if from_ch <= n <= to_ch
+    ]
+    nums = sorted(set(outlined) | set(approved))
+
+    lines: list[str] = []
+    for n in nums:
+        o = outlined.get(n)
+        parts: list[str] = []
+        if o is not None:
+            parts.append(f"第{n}章《{o.title or ''}》:{(o.summary or '').strip()[:200]}")
+            if o.beats:
+                beats = " / ".join(str(b) for b in o.beats if str(b or "").strip())
+                if beats:
+                    parts.append(f"  节拍:{beats[:300]}")
+            extra = []
+            if o.suspense_level:
+                extra.append(f"悬念:{o.suspense_level}")
+            if o.foreshadowing:
+                extra.append(f"伏笔:{clip(o.foreshadowing, 100)}")
+            if extra:
+                parts.append("  " + ";".join(extra))
+        else:
+            body = chapter_final_text(db, project_id, n)
+            if not body:
+                continue  # 无蓝图也无正文:跳过
+            parts.append(f"第{n}章(无蓝图,取正文开头):{body[:_FALLBACK_HEAD_CHARS]}")
+        threads = _chapter_threads(db, project_id, n)
+        if threads:
+            parts.append("  未决线索:" + " / ".join(threads))
+        lines.append("\n".join(parts))
+    if not lines:
+        return "", 0
+    return "【章节素材(按章号顺序)】\n" + "\n".join(lines), len(lines)
+
+
 async def plan_episodes(
     db: Session,
     project: Project,
@@ -64,28 +141,14 @@ async def plan_episodes(
     duration_s: int,
     progress=lambda s: None,
 ) -> list[dict]:
-    outlines = outline_rows(db, project.id, from_ch, to_ch)
-    if not outlines:
-        raise DramaPlanError(f"第 {from_ch}-{to_ch} 章没有蓝图,无法规划。")
+    chapters_block, material_count = _chapter_material(db, project.id, from_ch, to_ch)
+    if not material_count:
+        raise DramaPlanError(
+            f"第 {from_ch}-{to_ch} 章既没有蓝图也没有定稿正文,无法规划。"
+            "先在写作区铺蓝图/生成正文,或改选其它章节范围。"
+        )
 
-    lines = []
-    for o in outlines:
-        head = f"第{o.chapter_number}章《{o.title or ''}》:{(o.summary or '').strip()[:200]}"
-        lines.append(head)
-        if o.beats:
-            beats = " / ".join(str(b) for b in o.beats if str(b or "").strip())
-            if beats:
-                lines.append(f"  节拍:{beats[:300]}")
-        extra = []
-        if o.suspense_level:
-            extra.append(f"悬念:{o.suspense_level}")
-        if o.foreshadowing:
-            extra.append(f"伏笔:{clip(o.foreshadowing, 100)}")
-        if extra:
-            lines.append("  " + ";".join(extra))
-    chapters_block = "【章节素材(按章号顺序)】\n" + "\n".join(lines)
-
-    progress(f"AI 正在把 {len(outlines)} 章切成漫剧集(钩子/卡点)…")
+    progress(f"AI 正在把 {material_count} 章切成漫剧集(钩子/卡点)…")
     adapter = get_adapter_for(Task.DRAMA_PLAN, timeout=300)
     prompt = EPISODE_PLAN_PROMPT.format(
         duration_target_s=duration_s,

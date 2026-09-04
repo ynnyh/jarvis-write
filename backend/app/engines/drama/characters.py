@@ -44,6 +44,8 @@ from app.prompts.drama import CHARACTER_PROMPT, REF_SHEET_PROMPT, SCENE_PROMPT
 # 单次批量上限:防提示词与输出失控(超出的角色按事实条数排序取前 N,并在
 # 返回值里明示总数——此前是静默截断,圣经里第 13 个之后的角色无任何入口)
 _MAX_CHARACTERS = 12
+# 显式挑选时放宽到的上限(用户点名要的角色是明确意图,但输出规模仍要封顶)
+_MAX_SELECTED = 20
 _MAX_SCENES = 10
 _MAX_REF_SHEETS = 8  # 定妆照提示词单次批量上限(每条比视觉卡更长)
 # 判性别时扫多少条事实:比 digest 宽得多——digest 有限长,
@@ -158,12 +160,15 @@ def _resolve_gender(
 
 
 async def generate_character_cards(
-    db: Session, project: Project, progress=lambda s: None
+    db: Session, project: Project, progress=lambda s: None,
+    entity_ids: list[int] | None = None,
 ) -> dict:
     """从故事圣经批量生成/更新角色卡(locked 跳过),返回 {cards, skipped_locked, ...}。
 
-    超过 _MAX_CHARACTERS 时**不再静默截断**:按事实条数(≈出场戏份)排序取前 N,
-    返回值带 characters_total/characters_shown,前端据此提示「还有 N 个角色未生成」。
+    entity_ids=None(默认):全自动——按事实条数(≈戏份)排序取前 _MAX_CHARACTERS 个,
+    超出不再静默截断,返回值带 characters_total/characters_shown。
+    entity_ids 给定(前端「选角色生成」):只出勾选的这些,上限放宽到 _MAX_SELECTED
+    ——用户点名是明确意图,但输出规模仍要封顶。
     """
     entities = (
         db.query(Entity)
@@ -178,16 +183,28 @@ async def generate_character_cards(
         raise DramaAssetError(
             "故事圣经里还没有角色——先在写作区定稿几章让引擎抽取角色,再来生成角色卡。"
         )
-    # 按事实条数(≈戏份)降序排:有限的名额给主要角色,配角不会挤掉主角
-    fact_counts = dict(
-        db.query(Fact.entity_id, func.count(Fact.id))
-        .filter(Fact.entity_id.in_([e.id for e in entities]))
-        .group_by(Fact.entity_id)
-        .all()
-    )
-    entities.sort(key=lambda e: (-int(fact_counts.get(e.id, 0)), e.id))
     characters_total = len(entities)
-    entities = entities[:_MAX_CHARACTERS]
+    if entity_ids:
+        wanted = {int(i) for i in entity_ids if i}
+        entities = [e for e in entities if e.id in wanted]
+        if not entities:
+            raise DramaAssetError("所选角色在故事圣经里不存在,刷新后重新勾选。")
+        if len(entities) > _MAX_SELECTED:
+            raise DramaAssetError(
+                f"一次最多生成 {_MAX_SELECTED} 张角色卡,当前勾选 {len(entities)} 个——分两批来。"
+            )
+        characters_shown = len(entities)
+    else:
+        # 按事实条数(≈戏份)降序排:有限的名额给主要角色,配角不会挤掉主角
+        fact_counts = dict(
+            db.query(Fact.entity_id, func.count(Fact.id))
+            .filter(Fact.entity_id.in_([e.id for e in entities]))
+            .group_by(Fact.entity_id)
+            .all()
+        )
+        entities.sort(key=lambda e: (-int(fact_counts.get(e.id, 0)), e.id))
+        entities = entities[:_MAX_CHARACTERS]
+        characters_shown = len(entities)
 
     # 既有卡索引:entity_id 优先,名字兜底。要在拼提示词之前建好——
     # 卡上已拍板的性别得当硬约束下发,否则重跑一次又被模型改回去
@@ -255,7 +272,7 @@ async def generate_character_cards(
         "cards": cards_out,
         "skipped_locked": skipped_locked,
         "characters_total": characters_total,
-        "characters_shown": len(entities),
+        "characters_shown": characters_shown,
     }
 
 
@@ -410,9 +427,15 @@ async def generate_scene_cards(
     return {"scenes": out}
 
 
-async def generate_assets(db: Session, project: Project, progress=lambda s: None) -> dict:
-    """角色卡 + 场景卡一次跑完(对应前端「生成资产卡」按钮的 job)。"""
-    chars = await generate_character_cards(db, project, progress)
+async def generate_assets(
+    db: Session, project: Project, progress=lambda s: None,
+    entity_ids: list[int] | None = None,
+) -> dict:
+    """角色卡 + 场景卡一次跑完(对应前端「生成资产卡」按钮的 job)。
+
+    entity_ids:前端「选角色生成」勾的名单(None=全自动按戏份取前 12)。
+    """
+    chars = await generate_character_cards(db, project, progress, entity_ids=entity_ids)
     scenes = await generate_scene_cards(db, project, progress)
     return {
         "cards": chars["cards"],

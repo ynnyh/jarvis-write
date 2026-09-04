@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from fastapi import Depends, File, HTTPException, Response, UploadFile
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app import storage
@@ -105,6 +106,24 @@ async def get_episode(project_id: int, episode_id: int, db: Session = Depends(ge
         # 施工进度(静帧/视频各做完几格):一集几十格,进度得能一眼看见
         "progress": shot_progress(shots),
     }
+
+
+class EpisodeFocusIn(BaseModel):
+    focus: str = Field(default="", max_length=200, description="本集重点(作者改编意图,可空)")
+
+
+@router.patch("/episodes/{episode_id}")
+async def patch_episode(
+    project_id: int, episode_id: int, body: EpisodeFocusIn, db: Session = Depends(get_db)
+):
+    """改集的可编辑字段:当前只有 focus(本集重点)。
+
+    focus 随集落库,重写剧本时会作为高优先级指令注入——改编意图的落点。
+    """
+    ep = _get_episode(db, project_id, episode_id)
+    ep.focus = body.focus.strip()
+    db.commit()
+    return {"episode": episode_dict(ep)}
 
 
 @router.get("/episodes/{episode_id}/clips")

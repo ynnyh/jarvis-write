@@ -205,7 +205,7 @@ EPISODE_SCRIPT_PROMPT = """\
 【开场钩子】{hook}
 【本集梗概】{recap}
 【结尾卡点】{cliffhanger}
-{prev_block}{characters_block}
+{prev_block}{focus_block}{characters_block}
 【源章节正文({source_label},已节选)】
 {chapter_text}
 严格按 JSON 输出(不要 markdown 围栏,不要任何解释),结构如下:
@@ -221,6 +221,8 @@ EPISODE_SCRIPT_PROMPT = """\
 }}
 
 要求:
+0. 上面给了【本集重点(作者指定)】时,它是最高优先级的再创作指令:
+   情节取舍、台词落点、情绪重音都要围着它转——但不得偏离源正文的既定走向。
 1. 对白演绎模式:10-20 条 lines,以角色对白驱动,旁白只做必要衔接(每集至多 3 条);
    口播解说模式:以旁白讲故事为主(8-14 条),穿插 2-5 条角色对白做「名场面」。
 2. 台词口语化、短句化,一句不超过 25 字,符合竖屏短剧节奏;书面描写腔一律改掉。

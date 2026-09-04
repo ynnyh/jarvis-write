@@ -111,6 +111,7 @@ export interface DramaEpisode {
   hook: string;
   recap: string;
   cliffhanger: string;
+  focus: string; // 本集重点(作者改编意图,可空;写剧本时高优先级注入)
   mode: "dialogue" | "narration";
   duration_target_s: number;
   script: { mode?: string; synopsis?: string; lines?: DramaScriptLine[] };
@@ -283,8 +284,10 @@ export const dramaApi = {
   getCharacters: (pid: number) =>
     req<{ cards: DramaCharacterCard[]; scenes: DramaSceneCard[] }>(
       "GET", `/api/projects/${pid}/drama/characters`),
-  generateCharacters: (pid: number) =>
-    req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/characters/generate`, undefined, LLM_TIMEOUT),
+  // entityIds 给定 = 「选角色生成」只出勾选的;缺省 = 全自动按戏份取前 12
+  generateCharacters: (pid: number, entityIds?: number[]) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/characters/generate`,
+      entityIds?.length ? { entity_ids: entityIds } : undefined, LLM_TIMEOUT),
   patchCharacter: (pid: number, cid: number, body: Partial<DramaCharacterCard>) =>
     req<{ card: DramaCharacterCard }>("PATCH", `/api/projects/${pid}/drama/characters/${cid}`, body),
   // 只重出这一张角色卡:卡上拍板的性别当硬约束(治「女角色被写成男的」)
@@ -319,6 +322,9 @@ export const dramaApi = {
     req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/episodes/plan`, body, LLM_TIMEOUT),
   deleteEpisode: (pid: number, eid: number) =>
     req<{ ok: boolean }>("DELETE", `/api/projects/${pid}/drama/episodes/${eid}`),
+  // 改集的可编辑字段(当前只有 focus 本集重点);重写剧本时它会高优先级注入
+  patchEpisode: (pid: number, eid: number, patch: { focus: string }) =>
+    req<{ episode: DramaEpisode }>("PATCH", `/api/projects/${pid}/drama/episodes/${eid}`, patch),
   getEpisode: (pid: number, eid: number) =>
     req<{ episode: DramaEpisode; shots: DramaShot[]; progress?: DramaShotProgress }>(
       "GET", `/api/projects/${pid}/drama/episodes/${eid}`),

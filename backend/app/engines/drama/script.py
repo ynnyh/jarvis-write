@@ -65,6 +65,14 @@ def _prev_block(db: Session, project_id: int, ep_index: int) -> str:
     return ""
 
 
+def _focus_block(episode: DramaEpisode) -> str:
+    """本集重点(作者改编意图):给了就是最高优先级的再创作指令。"""
+    focus = (getattr(episode, "focus", "") or "").strip()
+    if not focus:
+        return ""
+    return f"【本集重点(作者指定,最高优先级遵循)】{focus[:200]}\n"
+
+
 async def write_episode_script(
     db: Session, project: Project, episode: DramaEpisode, progress=lambda s: None
 ) -> dict:
@@ -100,6 +108,7 @@ async def write_episode_script(
         recap=episode.recap,
         cliffhanger=episode.cliffhanger or "(规划未给,自行设计卡点结尾)",
         prev_block=_prev_block(db, project.id, episode.ep_index),
+        focus_block=_focus_block(episode),
         characters_block=_characters_block(db, project.id),
         source_label=used_label,
         chapter_text=body,

@@ -314,6 +314,8 @@ def episode_dict(ep: DramaEpisode) -> dict:
         "hook": ep.hook,
         "recap": ep.recap,
         "cliffhanger": ep.cliffhanger,
+        # 本集重点(作者改编意图,可空;写剧本时高优先级注入)
+        "focus": getattr(ep, "focus", "") or "",
         "mode": ep.mode,
         "duration_target_s": ep.duration_target_s,
         "script": ep.script or {},

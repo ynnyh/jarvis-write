@@ -144,6 +144,9 @@ class DramaEpisode(Base, TimestampMixin):
     recap: Mapped[str] = mapped_column(Text, default="")
     # 结尾悬念:卡点钩子,逼观众点下一集
     cliffhanger: Mapped[str] = mapped_column(Text, default="")
+    # 本集重点(作者指定的改编意图,如「重点拍那场对峙」;可空):
+    # 写剧本时作为高优先级指令注入,重写剧本不会丢——改编意图从此有落点
+    focus: Mapped[str] = mapped_column(Text, default="")
     # dialogue(角色对白演绎,主流漫剧)/ narration(口播解说,画面配图)
     mode: Mapped[str] = mapped_column(String(20), default="dialogue")
     duration_target_s: Mapped[int] = mapped_column(Integer, default=90)

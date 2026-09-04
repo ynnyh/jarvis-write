@@ -25,7 +25,7 @@ import {
 import { useJob } from "../../ui/useJob";
 import { RefThumb } from "../../ui/RefThumb";
 import { useProject } from "../../hooks/queries";
-import { downloadFile } from "../../api";
+import { CharacterCard, api, downloadFile } from "../../api";
 import { toast } from "../../ui/Toaster";
 import { errMsg } from "../../pollJob";
 import EmptyState from "../../ui/EmptyState";
@@ -570,15 +570,21 @@ function AssetsSection({ pid, cards, scenes, onChanged }: {
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState("");
   const [err, setErr] = useState("");
+  // 「选角色生成」:从故事圣经勾人(按出场章数排序,默认勾前 12),勾谁出谁——
+  // 治「圣经里第 13 个之后的角色永远没卡」;不勾走上面按钮全自动按戏份取前 12
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [bibleChars, setBibleChars] = useState<CharacterCard[]>([]);
+  const [picked, setPicked] = useState<Set<number>>(new Set());
 
-  async function generate() {
+  async function generate(entityIds?: number[]) {
     setBusy(true); setErr(""); setStage("");
     try {
       const r = await run<{
         cards: DramaCharacterCard[]; skipped_locked: number; scenes: DramaSceneCard[];
         characters_total?: number | null; characters_shown?: number | null;
       }>(
-        () => dramaApi.generateCharacters(pid),
+        () => dramaApi.generateCharacters(pid, entityIds),
         { kind: `drama-chars-${pid}`, onStage: setStage },
       );
       if (r) {
@@ -586,12 +592,37 @@ function AssetsSection({ pid, cards, scenes, onChanged }: {
         onChanged(fresh.cards, fresh.scenes);
         const lockedNote = r.skipped_locked ? `,${r.skipped_locked} 张锁定卡未动` : "";
         const truncNote =
-          r.characters_total && r.characters_shown && r.characters_total > r.characters_shown
+          !entityIds?.length && r.characters_total && r.characters_shown
+          && r.characters_total > r.characters_shown
             ? `;圣经共 ${r.characters_total} 个角色,已按戏份取前 ${r.characters_shown} 个`
             : "";
         toast.ok("资产卡已生成", `角色 ${r.cards.length} 张${lockedNote}${truncNote}`);
       }
     } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); setStage(""); }
+  }
+
+  // 展开/收起选角色面板:展开时拉一次故事圣经人物卡(按出场章数降序,默认勾前 12)
+  async function togglePicker() {
+    if (pickerOpen) { setPickerOpen(false); return; }
+    setPickerOpen(true); setPickerLoading(true);
+    try {
+      const r = await api.characters(pid);
+      const sorted = [...r.characters]
+        .filter((c) => c.entity_type === "character" && !c.retired)
+        .sort((a, b) =>
+          (b.appearance_chapters?.length ?? 0) - (a.appearance_chapters?.length ?? 0) || a.id - b.id);
+      setBibleChars(sorted);
+      setPicked(new Set(sorted.slice(0, 12).map((c) => c.id)));
+    } catch (e) { setErr(errMsg(e)); } finally { setPickerLoading(false); }
+  }
+
+  function togglePick(id: number) {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else if (next.size < 20) next.add(id);
+      return next;
+    });
   }
 
   async function castVoices() {
@@ -641,7 +672,10 @@ function AssetsSection({ pid, cards, scenes, onChanged }: {
         <button disabled={busy || cards.length === 0} onClick={refPrompts}
           title="先出一张角色参考图,后面每格拿它当参考图,才真锁得住脸">出定妆照</button>
         <button disabled={busy || cards.length === 0} onClick={castVoices}>声线选型</button>
-        <button className="primary" disabled={busy} onClick={generate}>
+        <button disabled={busy} onClick={togglePicker}>
+          {pickerOpen ? "收起选角色" : "从圣经选角色"}
+        </button>
+        <button className="primary" disabled={busy} onClick={() => generate()}>
           {cards.length ? "重新生成" : "AI 生成资产卡"}
         </button>
       </div>
@@ -655,6 +689,33 @@ function AssetsSection({ pid, cards, scenes, onChanged }: {
       </p>
       {busy && <Banner stage={stage} text="AI 正在设计角色视觉卡…" />}
       {err && <div className="msg-err">{err}</div>}
+      {pickerOpen && (
+        <div className="sub-summary mb-2">
+          <div className="card-head mb-2">
+            <b>从故事圣经选角色(已选 {picked.size}/20)</b>
+            <span className="muted">按出场章数排序;不选就用「AI 生成资产卡」全自动按戏份取前 12</span>
+          </div>
+          {pickerLoading && <p className="muted">正在读故事圣经…</p>}
+          <div className="chips">
+            {bibleChars.map((c) => (
+              <label key={c.id} className={"chip" + (picked.has(c.id) ? " on" : "")}>
+                <input type="checkbox" checked={picked.has(c.id)}
+                  onChange={() => togglePick(c.id)} />
+                {" "}{c.name}
+                {c.appearance_chapters?.length ? (
+                  <span className="muted">({c.appearance_chapters.length}章)</span>
+                ) : null}
+              </label>
+            ))}
+          </div>
+          <div className="rp-actions mt-2">
+            <button className="primary btn-sm" disabled={busy || picked.size === 0}
+              onClick={() => generate(bibleChars.filter((c) => picked.has(c.id)).map((c) => c.id))}>
+              {busy && <span className="spin spin-sm" />}按所选生成({picked.size})
+            </button>
+          </div>
+        </div>
+      )}
       {cards.map((c) => <CharCardRow key={c.id} pid={pid} card={c} onSaved={(nc) => {
         onChanged(cards.map((x) => (x.id === nc.id ? nc : x)), scenes);
       }} />)}
@@ -1121,6 +1182,9 @@ function EpisodeDetail({ pid, eid, hasStyle, ratio, renderMode, onEpisodesChange
   const [busy, setBusy] = useState(""); // script | board | prompts | pack | ""
   const [stage, setStage] = useState("");
   const [err, setErr] = useState("");
+  // 本集重点(作者改编意图)草稿:随集加载初始化,失焦且改动才落库——
+  // 写/重写剧本时会作为高优先级指令注入,重写不丢
+  const [focusDraft, setFocusDraft] = useState("");
   // 拆分镜的如实交代(被截断 / 总时长短于目标),留在页面上直到下次重拆
   const [boardNotice, setBoardNotice] = useState("");
   // 末帧接力候选:seq → 上一格末帧(整集一次拉齐;出片后重拉,下一格就有候选了)
@@ -1146,6 +1210,21 @@ function EpisodeDetail({ pid, eid, hasStyle, ratio, renderMode, onEpisodesChange
   }, [pid, eid]);
 
   useEffect(() => { void reload(); }, [reload]);
+
+  // 切集/换集时把「本集重点」草稿对齐到当前集
+  useEffect(() => { setFocusDraft(episode?.focus ?? ""); }, [episode?.id, episode?.focus]);
+
+  // 本集重点失焦保存:有实质变化才 PATCH;成功把返回的集写回本地(输入框不闪)
+  async function saveFocus() {
+    if (!episode) return;
+    const v = focusDraft.trim();
+    if (v === (episode.focus || "")) return;
+    try {
+      const r = await dramaApi.patchEpisode(pid, episode.id, { focus: v });
+      setEpisode(r.episode);
+      toast.ok("本集重点已保存", "写/重写剧本时会优先遵循");
+    } catch (e) { setErr(errMsg(e)); }
+  }
 
   // 出片进度上报:shots 变了(挂图/打勾/出片回写)就把「视频 N/M」递给顶部步骤条
   useEffect(() => {
@@ -1210,6 +1289,15 @@ function EpisodeDetail({ pid, eid, hasStyle, ratio, renderMode, onEpisodesChange
         <button className="btn-sm" onClick={onDeselect}>收起</button>
       </div>
       {err && <div className="msg-err">{err}</div>}
+
+      {/* 本集重点(改编意图):失焦保存;写/重写剧本时高优先级注入 */}
+      <div className="field mb-2">
+        <label className="fl" htmlFor="ep-focus">本集重点(可选,写剧本时优先遵循)</label>
+        <input id="ep-focus" type="text" maxLength={200} value={focusDraft}
+          placeholder="如:重点拍那场对峙;雨夜追逐要占半集"
+          onChange={(e) => setFocusDraft(e.target.value)}
+          onBlur={() => { void saveFocus(); }} />
+      </div>
 
       <div className="card-head mb-2 ep-actions">
         <button className="primary" disabled={!!busy}
