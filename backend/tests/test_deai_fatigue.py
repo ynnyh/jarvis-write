@@ -108,13 +108,15 @@ def test_generate_chapter_injects_fatigue_into_draft_prompt():
     """第 2 章生成:上一章病灶 → 草稿/定稿 prompt 带疲劳词表(生成端设防)。"""
     db, project = _make_db()
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_maintenance as cm_mod
 
     # 草稿/定稿正文给干净的 → 自愈短路,不多耗 LLM 调用;末尾备忘更新要一次
     adapter = MockAdapter(["草稿正文。", "定稿正文。", "备忘。", "摘要。", "契约。"])
     with (
         patch.object(ch_mod, "get_adapter_for", return_value=adapter),
+        patch.object(cm_mod, "get_adapter_for", return_value=adapter),
         patch.object(ch_mod, "check_chapter", new=_fake_check),
-        patch.object(ch_mod, "extract_and_apply", new=_fake_extract),
+        patch.object(cm_mod, "extract_and_apply", new=_fake_extract),
         patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
         patch.object(ch_mod, "review_chapter", new=_fake_review),
     ):

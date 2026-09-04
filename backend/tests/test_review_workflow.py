@@ -280,12 +280,15 @@ class _ScriptedPreflight:
 def _run_generate(db, project, n, preflight_fn):
     """mock LLM 跑一遍 generate_chapter;preflight 由参数注入(脚本化)。"""
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_maintenance as cm_mod
+    from app.engines.pipeline import rewrite_session as rs_mod
 
     adapter = _PipelineAdapter()
     with (
         patch.object(ch_mod, "get_adapter_for", return_value=adapter),
+        patch.object(cm_mod, "get_adapter_for", return_value=adapter),
+        patch.object(cm_mod, "extract_and_apply", new=_fake_extract),
         patch.object(ch_mod, "check_chapter", new=_fake_check_clean),
-        patch.object(ch_mod, "extract_and_apply", new=_fake_extract),
         patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
         patch.object(ch_mod, "review_chapter", new=_fake_review_high),
         patch.object(ch_mod, "preflight_chapter", new=preflight_fn),
@@ -504,12 +507,15 @@ def _set_ch2(status: str, pid: int, with_issue: bool = False) -> int:
 def _chapter_patches(check_fn=_fake_check_clean, preflight_fn=None, extract_fn=_fake_extract):
     """generate_chapter 的 LLM 依赖统一 mock(patch 定义模块,走 API 同样生效)。"""
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_maintenance as cm_mod
+    from app.engines.pipeline import rewrite_session as rs_mod
 
     adapter = _PipelineAdapter()
     return adapter, (
         patch.object(ch_mod, "get_adapter_for", return_value=adapter),
+        patch.object(cm_mod, "get_adapter_for", return_value=adapter),
+        patch.object(cm_mod, "extract_and_apply", new=_fake_extract),
         patch.object(ch_mod, "check_chapter", new=check_fn),
-        patch.object(ch_mod, "extract_and_apply", new=extract_fn),
         patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
         patch.object(ch_mod, "review_chapter", new=_fake_review_high),
         patch.object(
@@ -624,15 +630,18 @@ def test_apply_revision_endpoint(client):
         return []
 
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_maintenance as cm_mod
+    from app.engines.pipeline import rewrite_session as rs_mod
     patches = (
         patch.object(ch_mod, "get_adapter_for", return_value=adapter),
+        patch.object(cm_mod, "get_adapter_for", return_value=adapter),
+        patch.object(cm_mod, "extract_and_apply", new=_fake_extract),
         patch.object(ch_mod, "check_chapter", new=_blocking_check),
-        patch.object(ch_mod, "extract_and_apply", new=_fake_extract),
         patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
         patch.object(ch_mod, "review_chapter", new=_fake_review_high),
         patch.object(ch_mod, "preflight_chapter", new=_ScriptedPreflight([])),
     )
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
         r = client.post(
             f"/api/projects/{pid}/chapters/2/issues/{issue_id}/apply-revision",
             headers=headers,
@@ -701,7 +710,7 @@ def test_queue_strict_pauses_when_prev_not_approved(client):
     assert r.json()["queue_require_approved"] is True
 
     _adapter, patches = _chapter_patches()
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
         r = client.post(
             f"/api/projects/{pid}/chapters/generate-queue",
             headers=headers, json={"chapter_numbers": [2]},
@@ -733,7 +742,7 @@ def test_queue_strict_passes_when_prev_approved(client):
     assert r.status_code == 200
 
     _adapter, patches = _chapter_patches()
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
         r = client.post(
             f"/api/projects/{pid}/chapters/generate-queue",
             headers=headers, json={"chapter_numbers": [2]},
@@ -750,7 +759,7 @@ def test_queue_lenient_ignores_prev_pending_review(client):
     headers, pid = _seed_book("queue_lenient_user", client, ch1_status="pending_review")
 
     _adapter, patches = _chapter_patches()
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
         r = client.post(
             f"/api/projects/{pid}/chapters/generate-queue",
             headers=headers, json={"chapter_numbers": [2]},
@@ -770,7 +779,7 @@ def test_generate_response_carries_preflight(client):
                    conflicting_fact=PREFLIGHT_WARNING["conflicting_fact"])
     pf = _ScriptedPreflight([warning])
     _adapter, patches = _chapter_patches(preflight_fn=pf)
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
         r = client.post(
             f"/api/projects/{pid}/chapters/2/generate", headers=headers, json={}
         )

@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session
 
 from app.db.models import (
     Chapter,
-    ChapterSummary,
     ChapterVersion,
     Outline,
     Project,
@@ -37,13 +36,11 @@ from app.engines.consistency.checker import (
     persist_issues,
     triage_issues,
 )
-from app.engines.consistency.extractor import extract_and_apply, parse_llm_json
 from app.engines.consistency.preflight import preflight_chapter
 from app.engines.consistency.repetition import avoid_block, dedup_paragraphs
-from app.engines.consistency.motifs import banned_block, ledger_avoid_block, persist_motif_issues
-from app.engines.pipeline.handoff import extract_handoff_contract, load_handoff_block
-from app.engines.timeline import persist_clock_issues
-from app.engines.devices import devices_reminder_block, persist_device_issues
+from app.engines.consistency.motifs import banned_block, ledger_avoid_block
+from app.engines.pipeline.handoff import load_handoff_block
+from app.engines.devices import devices_reminder_block
 from app.engines.polish import ai_flavor_report
 from app.engines.polish.polisher import (
     _flavor_hits_block,
@@ -68,24 +65,40 @@ from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import _PROFILE_KEY, render_style_block
 from app.engines.tendency.cards import render_cards_block
 from app.prompts.style_capsules import pairwise_examples_block, render_voice_block
-from app.llm.base import LLMMessage, complete_text_with_budget
 from app.llm.router import Task, get_adapter_for
 from app.prompts.chapter import (
     CHAPTER_DRAFT_PROMPT,
     CHAPTER_FINALIZE_PROMPT,
-    REVISE_CHAT_SYSTEM_PROMPT,
-    REVISE_DISTILL_PROMPT,
-    ROLLING_SUMMARY_PROMPT,
-    STYLE_MEMO_UPDATE_PROMPT,
 )
 from app.engines.pipeline.word_guard import GuardResult, word_count_guard
 from app.schemas.tendency import Tendency
 
 logger = logging.getLogger("jarvis-write.chapter")
 
-_RECENT_TAIL_CHARS = 900   # 每章取结尾多少字作直接上文
-_RECENT_WINDOW = 2         # 直接注入最近几章的结尾
 _REVISION_EXCERPT_CHARS = 1500  # 重写时上一版正文注入草稿 prompt 的截断长度
+
+# 兼容性再导出:章后维护/共享上下文/重写研讨已拆到子模块,老调用方
+# (api/chapters/*、diagnosis、outline_discuss 等)仍从这里导入,不动。
+from app.engines.pipeline.chapter_context import (  # noqa: E402,F401
+    _RECENT_TAIL_CHARS,
+    _RECENT_WINDOW,
+    _recent_tail,
+    _rolling_summary,
+)
+from app.engines.pipeline.chapter_maintenance import (  # noqa: E402,F401
+    apply_chapter_tail,
+    rebuild_summaries_after,
+    update_style_memo,
+)
+from app.engines.pipeline.rewrite_session import (  # noqa: E402,F401
+    _MAX_REVISE_CHAT_TURNS,
+    _MAX_REVISE_MSG_LEN,
+    _distill_revision,
+    _format_revise_transcript,
+    _revise_complete,
+    discuss_revision,
+    discuss_revision_stream,
+)
 
 
 def _strip_meta(text: str) -> str:
@@ -137,20 +150,6 @@ def _next_chapter_brief(nxt: Outline | None) -> str:
     )
 
 
-def _recent_tail(db: Session, project_id: int, current: int) -> str:
-    """取最近 _RECENT_WINDOW 章定稿的结尾拼接。"""
-    parts: list[str] = []
-    for n in range(max(1, current - _RECENT_WINDOW), current):
-        ch = (
-            db.query(Chapter)
-            .filter(Chapter.project_id == project_id, Chapter.chapter_number == n)
-            .first()
-        )
-        if ch and ch.final_content:
-            parts.append(f"(第{n}章结尾)…{ch.final_content[-_RECENT_TAIL_CHARS:]}")
-    return "\n\n".join(parts) or "(本章是第一章,无上文)"
-
-
 def _revision_block(
     revision: str | None, previous_text: str, *, outline_changed: bool = False
 ) -> str:
@@ -184,222 +183,6 @@ def _revision_block(
         "【上一版正文(反面参照,仅供对照问题,不可照抄)】\n"
         f"{excerpt}"
     )
-
-
-def _rolling_summary(db: Session, project_id: int, current: int) -> str:
-    row = (
-        db.query(ChapterSummary)
-        .filter(
-            ChapterSummary.project_id == project_id,
-            ChapterSummary.chapter_number < current,
-        )
-        .order_by(ChapterSummary.chapter_number.desc())
-        .first()
-    )
-    return row.rolling_summary if row else "(无,本章为开篇)"
-
-
-async def update_style_memo(
-    db: Session,
-    project: Project,
-    chapter_number: int,
-    chapter_text: str,
-    flavor_notes: str = "",
-) -> str | None:
-    """写完一章后增量更新文风备忘(快模型档,失败不阻塞主流程)。
-
-    与滚动摘要互补:摘要记"发生了什么",备忘记"这本书怎么写"(调性/人物声音/意象)。
-    随书累积,注入后续章草稿,防长篇后段人物声音漂移、调性变淡。返回更新后的备忘。
-    flavor_notes:本章 AI 味体检的高频类别(memo_notes_block 渲染,病灶回流 P5),
-    沉淀进备忘「要避开的」小节;干净章节传空串,整块省略。
-    """
-    prev = (project.style_memo or "").strip() or "(尚无,这是第一次积累)"
-    try:
-        memo = await get_adapter_for(Task.SUMMARY).ask(
-            STYLE_MEMO_UPDATE_PROMPT.format(
-                previous_memo=prev,
-                chapter_number=chapter_number,
-                chapter_text=chapter_text[:8000],
-                flavor_notes=flavor_notes,
-            )
-        )
-    except Exception:  # noqa: BLE001 — 备忘更新失败不影响正文与主流程
-        logger.warning("文风备忘更新失败(第 %d 章),跳过", chapter_number, exc_info=True)
-        return None
-    memo = (memo or "").strip()
-    if not memo:
-        return None
-    project.style_memo = memo
-    db.flush()
-    db.commit()
-    return memo
-
-
-async def rebuild_summaries_after(
-    db: Session, project: Project, changed_chapter: int, progress=None
-) -> list[int]:
-    """重建第 changed_chapter 章之后的滚动摘要链。
-
-    重写/手改某章正文后,后续章的滚动摘要都基于旧文,必须顺序重算
-    (快模型档,每章一次调用)。返回重建的章号列表。
-    """
-    laters = (
-        db.query(Chapter)
-        .filter(
-            Chapter.project_id == project.id,
-            Chapter.chapter_number > changed_chapter,
-            Chapter.final_content != "",
-        )
-        .order_by(Chapter.chapter_number)
-        .all()
-    )
-    # 只有当后续章已存在摘要时才需要重建
-    later_nums = [c.chapter_number for c in laters]
-    if not later_nums:
-        return []
-
-    rebuilt: list[int] = []
-    for ch in laters:
-        if progress:
-            try:
-                progress(f"重建第 {ch.chapter_number} 章前情摘要")
-            except Exception:  # noqa: BLE001
-                pass
-        prev = _rolling_summary(db, project.id, ch.chapter_number)
-        outline = get_outline(db, project.id, ch.chapter_number)
-        title = outline.title if outline else ""
-        text = ch.final_content
-        # 读完即提交,释放读快照:LLM 调用期间用量记账会在别的连接提交,让旧快照过期,
-        # 之后 UPDATE 升级写锁会撞 SQLITE_BUSY(WAL 下该错误不走 busy_timeout,直接失败)。
-        db.commit()
-        new_summary = await get_adapter_for(Task.SUMMARY).ask(
-            ROLLING_SUMMARY_PROMPT.format(
-                previous_summary=prev,
-                chapter_number=ch.chapter_number,
-                chapter_title=title,
-                chapter_text=text,
-            )
-        )
-        row = (
-            db.query(ChapterSummary)
-            .filter(
-                ChapterSummary.project_id == project.id,
-                ChapterSummary.chapter_number == ch.chapter_number,
-            )
-            .first()
-        )
-        if row is None:
-            row = ChapterSummary(
-                project_id=project.id, chapter_number=ch.chapter_number
-            )
-            db.add(row)
-        row.rolling_summary = new_summary.strip()
-        db.flush()
-        # 每章提交一次:别拿着写事务跨下一轮 LLM 调用(阻塞并发写,快照也会过期)
-        db.commit()
-        rebuilt.append(ch.chapter_number)
-
-    logger.info("摘要链重建完成: %s", rebuilt)
-    return rebuilt
-
-
-async def apply_chapter_tail(
-    db: Session,
-    project: Project,
-    chapter: Chapter,
-    chapter_number: int,
-    final: str,
-    outline_title: str,
-    report=None,
-) -> dict:
-    """门禁通过后的章后链路:抽取写圣经 → 滚动摘要 → 章末交接契约。
-
-    generate_chapter 干净路径与 quarantined 放行端点(gate-release)共用。
-    滚动摘要按「本章之前」的链尾现算(与生成时口径一致);契约提取放在摘要
-    之后:摘要链是下游章生成的硬依赖,契约失败(只落 failed 行)绝不能拖累它。
-    返回抽取统计。
-    """
-
-    def _report(stage: str) -> None:
-        if report:
-            try:
-                report(stage)
-            except Exception:  # noqa: BLE001 — 进度上报绝不影响主流程
-                pass
-
-    # ---- 章后抽取:状态变化写回圣经/伏笔表(闭环) ----
-    # extract_and_apply 自管事务纪律(入口丢掉遗留读快照、LLM 前后各提交),
-    # 故这里无需再手工 commit。
-    _report("5/6 抽取状态写入故事圣经")
-    logger.info("第 %d 章:抽取状态变化...", chapter_number)
-    extraction_stats = await extract_and_apply(db, project.id, chapter_number, final)
-
-    # ---- 滚动摘要更新 ----
-    _report("6/6 更新前情摘要")
-    logger.info("第 %d 章:更新前情摘要...", chapter_number)
-    rolling = _rolling_summary(db, project.id, chapter_number)
-    new_summary = await get_adapter_for(Task.SUMMARY).ask(
-        ROLLING_SUMMARY_PROMPT.format(
-            previous_summary=rolling,
-            chapter_number=chapter_number,
-            chapter_title=outline_title,
-            chapter_text=final,
-        )
-    )
-    srow = (
-        db.query(ChapterSummary)
-        .filter(
-            ChapterSummary.project_id == project.id,
-            ChapterSummary.chapter_number == chapter_number,
-        )
-        .first()
-    )
-    if srow is None:
-        srow = ChapterSummary(project_id=project.id, chapter_number=chapter_number)
-        db.add(srow)
-    srow.rolling_summary = new_summary.strip()
-    db.flush()
-    db.commit()
-
-    # ---- 章末交接契约提取:章末瞬态(时间/地点/人物即时状态)落 chapter_states ----
-    # 供下一章草稿注入(见 load_handoff_block)与下章门禁对照(见 checker)。
-    # 失败只落 failed 行留痕,不阻塞主流程(docs/08 §4 可降级)。
-    _report("提取章末交接契约")
-    await extract_handoff_contract(
-        db, chapter, chapter_number, final, get_adapter_for(Task.HANDOFF_EXTRACT)
-    )
-
-    # ---- 确定性故事时钟校验(advisory,不阻断):落 source=clock 建议 ----
-    # 放在契约抽取【之后】——此刻本章 story_day 已入库,book_timeline 能看到本章这条,
-    # 才能算牵涉本章的倒计时口径/天数倒流。纯算术、无 LLM;自吞异常 + rollback,
-    # 绝不拖垮章后主链路(对齐 canon 建议的隔离范式)。门禁阻断路径另由 timeline_block
-    # 把权威天数轴喂给 LLM 完成,这里是事后精确补网。
-    try:
-        persist_clock_issues(db, project.id, chapter, final)
-    except Exception as exc:  # noqa: BLE001 — 时钟校验绝不阻塞主流程
-        db.rollback()
-        logger.warning("第 %d 章故事时钟校验失败(已跳过): %s", chapter_number, exc)
-
-    # ---- 常驻装置断档校验(advisory,不阻断):落 source=devices 建议 ----
-    # 同样放在契约抽取之后(此刻本章 devices_present 已入库)。与生成端催场块
-    # (devices_reminder_block)配对成闭环:催过了本章仍没让装置出场,才在这里软报。
-    # 与时钟校验各自 try/except,一边挂了不影响另一边。
-    try:
-        persist_device_issues(db, project.id, chapter, final)
-    except Exception as exc:  # noqa: BLE001 — 装置校验绝不阻塞主流程
-        db.rollback()
-        logger.warning("第 %d 章常驻装置校验失败(已跳过): %s", chapter_number, exc)
-
-    # ---- 桥段台账软报(advisory,不阻断):落 source=repeat 建议 ----
-    # 纯 contains 零 LLM:终稿里又出现雷区/已写滥母题时亮出来(雷区 major、
-    # 台账 minor),放在抽取之后——此刻本章母题已入库,台账聚合口径才完整。
-    # 与时钟/装置各自 try/except,一边挂了不影响另一边。
-    try:
-        persist_motif_issues(db, project.id, chapter, final)
-    except Exception as exc:  # noqa: BLE001 — 桥段软报绝不阻塞主流程
-        db.rollback()
-        logger.warning("第 %d 章桥段台账校验失败(已跳过): %s", chapter_number, exc)
-    return extraction_stats
 
 
 # prose 维未达标时的定向重写要求:「AI 腔/套话」靠同一模型自由发挥修不掉
@@ -1003,139 +786,3 @@ async def generate_chapter(
     return chapter, gate_issues, extraction_stats, guard_result, review_result, preflight_issues
 
 
-# =============== 重写研讨(对话式:聊清不满意 → 蒸馏成重写要求)===============
-# 与架构研讨(discuss_architecture)同构的「续聊 + 独立蒸馏」两段式,只是上下文
-# 从整本书架构换成单章蓝图+正文。蒸馏出的 directive 回填进重写文本框,作为
-# generate_chapter 的 revision 参数走既有 _revision_block 注入草稿,管线零改动。
-_MAX_REVISE_CHAT_TURNS = 40
-_MAX_REVISE_MSG_LEN = 2000
-_MAX_REVISE_CHAPTER_CHARS = 3000  # 当前正文注入 system 时截断,防 token 膨胀
-
-
-async def _revise_complete(adapter, messages: list[LLMMessage]) -> str:
-    """多轮 complete 的薄封装:空正文放大预算重试 + 用量记账。
-
-    别在这里自己写"空串就翻倍"的循环:complete() 遇空正文是抛 EmptyContentError,
-    统一交给 complete_text_with_budget 处理(见 llm/base.py)。
-    """
-    return await complete_text_with_budget(adapter, messages)
-
-
-def _format_revise_transcript(turns: list[dict], latest_reply: str) -> str:
-    lines = [
-        f"{'作者' if m['role'] == 'user' else '编辑'}:{(m['content'] or '').strip()}"
-        for m in turns
-    ]
-    lines.append(f"编辑:{latest_reply}")
-    return "\n".join(lines)
-
-
-async def discuss_revision(
-    messages: list[dict],
-    *,
-    blueprint_block: str,
-    chapter_block: str,
-) -> dict:
-    """就某一章的重写与作者多轮研讨:聊清"到底哪里不满意",蒸馏出重写要求。
-
-    - messages:对话历史 [{role, content}, ...],最后一条应为作者(user)发言。
-    - blueprint_block/chapter_block:本章蓝图与当前正文节选,供编辑理解上下文。
-
-    返回 {reply, directive};directive 为蒸馏出的修改意见(可为空串),前端回填进
-    重写文本框,确认后作为 revision 参数去重写本章。
-    """
-    turns = [
-        m for m in messages
-        if m.get("role") in ("user", "assistant") and (m.get("content") or "").strip()
-    ][-_MAX_REVISE_CHAT_TURNS:]
-    if not turns:
-        raise ValueError("请先说点什么")
-    if turns[-1]["role"] != "user":
-        raise ValueError("最后一条应为你的发言")
-
-    adapter = get_adapter_for(Task.DRAFT)
-
-    # ① 续聊:system(带蓝图+正文上下文)+ 对话历史
-    system = REVISE_CHAT_SYSTEM_PROMPT.format(
-        blueprint_block=blueprint_block,
-        chapter_block=chapter_block[:_MAX_REVISE_CHAPTER_CHARS] or "(本章还没有正文)",
-    )
-    chat_messages = [LLMMessage(role="system", content=system)] + [
-        LLMMessage(role=m["role"], content=(m["content"] or "").strip()[:_MAX_REVISE_MSG_LEN])
-        for m in turns
-    ]
-    reply = (await _revise_complete(adapter, chat_messages)).strip()
-    if not reply:
-        raise ValueError("模型没有回应,请重试")
-
-    # ② 蒸馏:把含最新回复的完整对话提炼成「修改意见 + 档位建议」(独立调用,不污染对话)
-    directive, level = await _distill_revision(adapter, turns, reply)
-    return {"reply": reply, "directive": directive, "suggested_level": level}
-
-
-async def _distill_revision(adapter, turns: list[dict], reply: str) -> tuple[str, str | None]:
-    """把含最新回复的完整对话蒸馏成「修改意见 directive + 档位建议 level」。
-
-    独立 ask 调用(不污染对话);蒸馏出"尚无明确意见"时约定回空/短横线,归一化成空串。
-    失败不抛(蒸馏不该阻塞对话本身),返回 ("", None) 让前端中性呈现两个档位选项。
-    同步 discuss_revision 与流式 discuss_revision_stream 共用这一份,行为一致。
-    """
-    transcript = _format_revise_transcript(turns, reply)
-    try:
-        raw = (await adapter.ask(REVISE_DISTILL_PROMPT.format(transcript=transcript))).strip()
-        if raw and raw != "-":
-            parsed = parse_llm_json(raw)
-            if isinstance(parsed.get("directive"), str):
-                # JSON 契约:directive 正文 + level 档位建议(polish=锁情节优化 / regenerate=重生成)
-                lv = parsed.get("level")
-                return parsed["directive"].strip(), (lv if lv in ("polish", "regenerate") else None)
-            # 模型没按 JSON 输出:整段当意见,不给档位建议
-            return raw, None
-    except Exception:  # noqa: BLE001 — 蒸馏失败不阻塞对话
-        logger.warning("重写研讨蒸馏失败,directive 置空", exc_info=True)
-    return "", None
-
-
-async def discuss_revision_stream(
-    messages: list[dict],
-    *,
-    blueprint_block: str,
-    chapter_block: str,
-):
-    """流式版 discuss_revision(SSE 打字机):逐字产出 reply,收尾给 directive + 档位建议。
-
-    产出 (kind, payload):
-      ("token", str)  reply 的增量文字
-      ("done", {"reply": str, "directive": str, "suggested_level": str | None})
-    校验/system 构造同 discuss_revision(同步孪生);reply 流式吐完后再做一次(非流式)蒸馏。
-    流式路径不重试空回复、不记账(与 openai_compatible._complete_via_stream 的取舍一致)。
-    """
-    turns = [
-        m for m in messages
-        if m.get("role") in ("user", "assistant") and (m.get("content") or "").strip()
-    ][-_MAX_REVISE_CHAT_TURNS:]
-    if not turns:
-        raise ValueError("请先说点什么")
-    if turns[-1]["role"] != "user":
-        raise ValueError("最后一条应为你的发言")
-
-    adapter = get_adapter_for(Task.DRAFT)
-    system = REVISE_CHAT_SYSTEM_PROMPT.format(
-        blueprint_block=blueprint_block,
-        chapter_block=chapter_block[:_MAX_REVISE_CHAPTER_CHARS] or "(本章还没有正文)",
-    )
-    chat_messages = [LLMMessage(role="system", content=system)] + [
-        LLMMessage(role=m["role"], content=(m["content"] or "").strip()[:_MAX_REVISE_MSG_LEN])
-        for m in turns
-    ]
-    chunks: list[str] = []
-    async for delta in adapter.stream(chat_messages):
-        if not delta:
-            continue
-        chunks.append(delta)
-        yield ("token", delta)
-    reply = "".join(chunks).strip()
-    if not reply:
-        raise ValueError("模型没有回应,请重试")
-    directive, level = await _distill_revision(adapter, turns, reply)
-    yield ("done", {"reply": reply, "directive": directive, "suggested_level": level})

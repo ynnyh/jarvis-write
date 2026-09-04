@@ -195,12 +195,14 @@ def test_revise_discuss_stream_tokens_then_directive(client):
     _seed_chapter(p["id"])
 
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_maintenance as cm_mod
+    from app.engines.pipeline import rewrite_session as rs_mod
 
     adapter = _StreamAdapter(
         chunks=["你说节奏拖,", "是开头铺垫太长?"],
         distilled='{"directive": "1. 开头砍一半", "level": "polish"}',
     )
-    with patch.object(ch_mod, "get_adapter_for", return_value=adapter):
+    with patch.object(rs_mod, "get_adapter_for", return_value=adapter):
         r = client.post(
             f"/api/projects/{p['id']}/chapters/1/revise-discuss-stream",
             headers=headers,

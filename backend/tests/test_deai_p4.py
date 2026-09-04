@@ -178,6 +178,8 @@ def _run_generate(final_text: str, heal_output: str | None):
     """跑第 2 章生成:定稿正文按 final_text 给;heal_output 非空时模拟去味重写输出。"""
     db, project = _make_db()
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_maintenance as cm_mod
+    from app.engines.pipeline import rewrite_session as rs_mod
 
     replies = ["草稿正文。", final_text]
     if heal_output is not None:
@@ -190,9 +192,10 @@ def _run_generate(final_text: str, heal_output: str | None):
 
     with (
         patch.object(ch_mod, "get_adapter_for", return_value=adapter),
+        patch.object(cm_mod, "get_adapter_for", return_value=adapter),
+        patch.object(cm_mod, "extract_and_apply", new=_fake_extract),
         patch.object(polish_mod, "get_adapter_for", return_value=adapter),
         patch.object(ch_mod, "check_chapter", new=_fake_check),
-        patch.object(ch_mod, "extract_and_apply", new=_fake_extract),
         patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
         patch.object(ch_mod, "review_chapter", new=_fake_review),
     ):

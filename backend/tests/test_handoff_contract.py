@@ -322,11 +322,14 @@ class _PipelineAdapter:
 
 def _gen(db, project, n, adapter):
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_maintenance as cm_mod
+    from app.engines.pipeline import rewrite_session as rs_mod
 
     with (
         patch.object(ch_mod, "get_adapter_for", return_value=adapter),
+        patch.object(cm_mod, "get_adapter_for", return_value=adapter),
+        patch.object(cm_mod, "extract_and_apply", new=_fake_extract),
         patch.object(ch_mod, "check_chapter", new=_fake_check),
-        patch.object(ch_mod, "extract_and_apply", new=_fake_extract),
         patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
         patch.object(ch_mod, "review_chapter", new=_fake_review),
         patch.object(ch_mod, "preflight_chapter", new=_fake_preflight),

@@ -90,12 +90,14 @@ def test_revise_discuss_returns_reply_and_directive(client):
     _seed_chapter(p["id"])
 
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_maintenance as cm_mod
+    from app.engines.pipeline import rewrite_session as rs_mod
 
     adapter = _ChatAdapter(
         reply="你说节奏拖,是开头铺垫太长,还是中间对话太水?",
         distilled="1. 开头铺垫砍掉一半,直接进冲突\n2. 删掉中段重复的内心戏",
     )
-    with patch.object(ch_mod, "get_adapter_for", return_value=adapter):
+    with patch.object(rs_mod, "get_adapter_for", return_value=adapter):
         r = client.post(
             f"/api/projects/{p['id']}/chapters/1/revise-discuss",
             headers=headers,
@@ -113,9 +115,11 @@ def test_revise_discuss_empty_directive_when_dash(client):
     _seed_chapter(p["id"])
 
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_maintenance as cm_mod
+    from app.engines.pipeline import rewrite_session as rs_mod
 
     adapter = _ChatAdapter(reply="你具体是指哪里不满意呢?", distilled="-")
-    with patch.object(ch_mod, "get_adapter_for", return_value=adapter):
+    with patch.object(rs_mod, "get_adapter_for", return_value=adapter):
         r = client.post(
             f"/api/projects/{p['id']}/chapters/1/revise-discuss",
             headers=headers,
@@ -132,12 +136,14 @@ def test_revise_discuss_parses_json_level(client):
     _seed_chapter(p["id"])
 
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_maintenance as cm_mod
+    from app.engines.pipeline import rewrite_session as rs_mod
 
     adapter = _ChatAdapter(
         reply="那就只动文笔,情节保持。",
         distilled='{"directive": "1. 去掉 AI 腔\\n2. 对话口语化", "level": "polish"}',
     )
-    with patch.object(ch_mod, "get_adapter_for", return_value=adapter):
+    with patch.object(rs_mod, "get_adapter_for", return_value=adapter):
         r = client.post(
             f"/api/projects/{p['id']}/chapters/1/revise-discuss",
             headers=headers,
@@ -156,9 +162,11 @@ def test_revise_discuss_plain_text_no_level(client):
     _seed_chapter(p["id"])
 
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_maintenance as cm_mod
+    from app.engines.pipeline import rewrite_session as rs_mod
 
     adapter = _ChatAdapter(reply="情节要动,建议重跑。", distilled="1. 重写结尾,留个钩子")
-    with patch.object(ch_mod, "get_adapter_for", return_value=adapter):
+    with patch.object(rs_mod, "get_adapter_for", return_value=adapter):
         r = client.post(
             f"/api/projects/{p['id']}/chapters/1/revise-discuss",
             headers=headers,
@@ -177,9 +185,11 @@ def test_revise_discuss_distill_failure_keeps_reply(client):
     _seed_chapter(p["id"])
 
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_maintenance as cm_mod
+    from app.engines.pipeline import rewrite_session as rs_mod
 
     adapter = _ChatAdapter(reply="我们先聚焦开头怎么样?", distilled=RuntimeError("蒸馏炸了"))
-    with patch.object(ch_mod, "get_adapter_for", return_value=adapter):
+    with patch.object(rs_mod, "get_adapter_for", return_value=adapter):
         r = client.post(
             f"/api/projects/{p['id']}/chapters/1/revise-discuss",
             headers=headers,
