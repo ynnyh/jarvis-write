@@ -366,3 +366,37 @@
 .read-bar:last-child { margin-bottom: 0; margin-top: 4px; }
 
 
+
+/* ---------- 自由改稿(CodeMirror 6):整章手写/大改,与段落点选界面并行 ---------- */
+/* 颜色全走令牌,暗色自动跟随;小说不是代码:无行号、无高亮,只留换行/历史/搜索 */
+.free-write { margin-top: 8px; }
+.free-write-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.free-write-host { border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; }
+.free-write-host .cm-editor { background: var(--surface); }
+.free-write-host .cm-editor.cm-focused { outline: none; border-color: var(--line-strong); }
+.free-write-host .cm-scroller { font-family: inherit; }
+.free-write-host .cm-content {
+  font-family: inherit; color: var(--text); caret-color: var(--text);
+  font-size: 16px; line-height: 1.9; padding: 16px 18px; min-height: 320px;
+}
+.free-write-host .cm-line { padding: 0 2px; }
+.free-write-host .cm-cursor { border-left-color: var(--text); }
+.free-write-host .cm-gutters { display: none; }
+.free-write-host .cm-selectionBackground { background: var(--surface-2) !important; }
+.free-write-host .cm-focused .cm-selectionBackground { background: var(--surface-2) !important; }
+.free-write-host .cm-selectionMatch { background: color-mix(in srgb, var(--ok) 18%, transparent); }
+/* 搜索面板(Ctrl+F):跟主题走,不再用 CM 默认的白底黑字 */
+.free-write-host .cm-panels { background: var(--surface-2); color: var(--text); border-color: var(--line); }
+.free-write-host .cm-panels input,
+.free-write-host .cm-panels button,
+.free-write-host .cm-panels select {
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  font-family: inherit; padding: 2px 6px;
+}
+.free-write-host .cm-panel label { color: var(--text-2); }
+.free-write-host .cm-searchMatch { background: color-mix(in srgb, var(--warn) 30%, transparent); }
+.free-write-host .cm-searchMatch-selected { background: color-mix(in srgb, var(--warn) 55%, transparent); }
+/* 只读态(生成任务进行中):整体降饱和提示,而不是报错 */
+.free-write-host.is-locked .cm-content { color: var(--text-2); background: var(--surface-2); }
+.free-write-host .cm-placeholder { color: var(--text-2); }

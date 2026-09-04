@@ -11,7 +11,7 @@
 // useChapterGeneration:沉浸/阅读器/版本对比/多章同步并发/生成连写队列),壳回归编排+布局;
 // 仍内联的是纯 UI:act= 校对/评分两张动作卡、GenResultCard、版本对比与全屏 Reader。
 // 移动端:m-topbar(←/章题/阅读)+ 左右滑切章 + act 卡全屏 sheet。
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Outline, api } from "../api";
 import { qk } from "../hooks/queries";
 import { toast } from "../ui/Toaster";
@@ -36,6 +36,9 @@ import WriteGuide from "./write/WriteGuide";
 import { estimateText } from "./write/genDuration";
 import { useWritePanel, ACT_TITLE } from "./write/useWritePanel";
 import { useScrollOnAppear } from "./write/useScrollOnAppear";
+
+// 自由改稿(CodeMirror 6)懒加载:只有点「自由改稿」才拉编辑器 chunk,不占主包
+const FreeWriteEditor = lazy(() => import("./write/FreeWriteEditor"));
 
 interface Props {
   pid: number; outlines: Outline[];
@@ -86,6 +89,10 @@ export default function WritePanel({ pid, outlines }: Props) {
   // 「按批注改」发出的批注 markId,与 reviseResult 的 pairs 同序(pairs[i] ↔ markIds[i]):
   // 验收单条接受时据此销账对应标记(拒绝保留,可重跑)。
   const [reviseMarkIds, setReviseMarkIds] = useState<number[]>([]);
+
+  // 自由改稿模式(CodeMirror 6 整章编辑):进入后中栏正文区整体替换;切章保持模式,
+  // 编辑器按章号 key 重建加载新章内容
+  const [freeWrite, setFreeWrite] = useState(false);
 
   // 动作卡(act= 进 URL,可刷新/分享):桌面在中栏内联,移动端换全屏 sheet 容器(组件同一份)
   const actCards = (
@@ -290,14 +297,20 @@ export default function WritePanel({ pid, outlines }: Props) {
               </details>
             )}
 
-            <div className="card">
-              <div className="content-head mb-2">
-                <div className="content-head-title">
-                  <h2>第{current.chapter_number}章</h2>
-                  <span className="content-head-meta">正文 · {current.word_count}字</span>
-                  {currentBrief?.is_stale && <span className="badge err">大纲已变</span>}
+              <div className="card">
+                <div className="content-head mb-2">
+                  <div className="content-head-title">
+                    <h2>第{current.chapter_number}章</h2>
+                    <span className="content-head-meta">正文 · {current.word_count}字</span>
+                    {currentBrief?.is_stale && <span className="badge err">大纲已变</span>}
+                  </div>
+                  {!freeWrite && (
+                    <button className="btn-sm" disabled={genBlocked}
+                      title={genBlocked ? genHint
+                        : "整章手写/大改的编辑器(搜索/撤销/字数);平时点段落改就够了"}
+                      onClick={() => setFreeWrite(true)}>✍️ 自由改稿</button>
+                  )}
                 </div>
-              </div>
               {currentOutline && (
                 <ChapterTitleEdit
                   pid={pid}
@@ -320,22 +333,38 @@ export default function WritePanel({ pid, outlines }: Props) {
                   </span>
                 </div>
               )}
-              {/* 正文即界面:段落点选 → 气泡(改这段/手改);整章 textarea 编辑态已删除 */}
-              <Prose
-                pid={pid}
-                chapter={current}
-                genBlocked={genBlocked}
-                genHint={genHint}
-                onSaved={(updated) => { setCurrent(updated); void reload(); }}
-                onSyncAsk={(num) => askSync(num)}
-                onDirtyChange={(dirty) => { proseDirtyRef.current = dirty; }}
-                onSelectChange={setSelectedPara}
-                annotations={chapterMarks.map((m) => ({
-                  paraIdx: m.para_idx, snapshot: m.snapshot, note: m.note,
-                }))}
-                onAnnotate={(idx, snapshot, note) => { void createMark(idx, snapshot, note); }}
-                onBanMotif={(label, detail) => api.addBannedMotif(pid, label, detail).then(() => undefined)}
-              />
+              {/* 正文即界面:段落点选 → 气泡(改这段/手改);自由改稿 = CM6 整章编辑器(懒加载) */}
+              {freeWrite ? (
+                <Suspense fallback={<div className="muted"><span className="spin spin-sm" /> 加载编辑器…</div>}>
+                  <FreeWriteEditor
+                    key={current.chapter_number}
+                    pid={pid}
+                    chapter={current}
+                    genBlocked={genBlocked}
+                    genHint={genHint}
+                    onSaved={(updated) => { setCurrent(updated); void reload(); }}
+                    onSyncAsk={(num) => askSync(num)}
+                    onDirtyChange={(dirty) => { proseDirtyRef.current = dirty; }}
+                    onExit={() => setFreeWrite(false)}
+                  />
+                </Suspense>
+              ) : (
+                <Prose
+                  pid={pid}
+                  chapter={current}
+                  genBlocked={genBlocked}
+                  genHint={genHint}
+                  onSaved={(updated) => { setCurrent(updated); void reload(); }}
+                  onSyncAsk={(num) => askSync(num)}
+                  onDirtyChange={(dirty) => { proseDirtyRef.current = dirty; }}
+                  onSelectChange={setSelectedPara}
+                  annotations={chapterMarks.map((m) => ({
+                    paraIdx: m.para_idx, snapshot: m.snapshot, note: m.note,
+                  }))}
+                  onAnnotate={(idx, snapshot, note) => { void createMark(idx, snapshot, note); }}
+                  onBanMotif={(label, detail) => api.addBannedMotif(pid, label, detail).then(() => undefined)}
+                />
+              )}
             </div>
 
             {/* 章尾下一章卡:唯一常驻的「推进」入口 */}
