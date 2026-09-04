@@ -61,3 +61,6 @@ coverage/
 backend/e2e_jarvis_write.db
 backend/e2e_jarvis_write.db-shm
 backend/e2e_jarvis_write.db-wal
+
+# 评测运行时输出(范例在 backend/app/evals/examples/)
+backend/evals_out/

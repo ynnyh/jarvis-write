@@ -1,0 +1,781 @@
+{
+  "schema": 1,
+  "label": "baseline",
+  "fixture": "po_feng_ji",
+  "fixture_title": "破封纪",
+  "started_at": "2026-09-04T10:39:40+00:00",
+  "seconds": 0.2,
+  "git_commit": "64f369d",
+  "models": {
+    "quality": {
+      "model": "mock-eval",
+      "host": "fixture",
+      "has_key": true
+    },
+    "fast": {
+      "model": "mock-eval",
+      "host": "fixture",
+      "has_key": true
+    },
+    "review": {
+      "model": "mock-eval",
+      "host": "fixture",
+      "has_key": true
+    }
+  },
+  "project_id": 1,
+  "project_settings": {
+    "review_pass_threshold": 7,
+    "target_words": 2500
+  },
+  "prompt_fingerprint": "afb2ba8db3ec",
+  "prompt_manifest": {
+    "birthday.BIRTHDAY_CLICHE_BLACKLIST": "5e12e66b5cd1",
+    "birthday.BIRTHDAY_CONTEXT": "0bbb65f4d5bc",
+    "birthday.BIRTHDAY_EXPAND_PROMPT": "77bf412d20a5",
+    "birthday.BIRTHDAY_GROUNDING_RULE": "efafc2094d54",
+    "birthday.BIRTHDAY_PROMPT_DETAILS": "314996033bb5",
+    "birthday.BIRTHDAY_STRUCTURE_RULES": "7a5762606ae0",
+    "birthday.BIRTHDAY_TAKES_PROMPT": "b5a918ba4a84",
+    "cascade.BATCH_RETITLE_PROMPT": "f109fac127db",
+    "cascade.CHANGE_CLASSIFY_PROMPT": "ac6e73779b15",
+    "cascade.CHAPTER_RETITLE_PROMPT": "9c5d798144a0",
+    "cascade.EDIT_DIRECTIVE_PROMPT": "39f9e3ee4ec6",
+    "cascade.IMPACT_ANALYSIS_PROMPT": "4e12c9ff8d4f",
+    "cascade.OUTLINE_DISCUSS_DISTILL_PROMPT": "d40ab264ad6f",
+    "cascade.OUTLINE_DISCUSS_SYSTEM_PROMPT": "fb819d597466",
+    "cascade.OUTLINE_REGENERATE_PROMPT": "b581c3dc03c7",
+    "chapter.CHAPTER_DRAFT_PROMPT": "245244ac4ec1",
+    "chapter.CHAPTER_FINALIZE_PROMPT": "899ebe2f78ec",
+    "chapter.COMPRESS_REWRITE_PROMPT": "7ab00cc1077d",
+    "chapter.CONTINUE_TAIL_PROMPT": "5a05e05ec808",
+    "chapter.REVISE_CHAT_SYSTEM_PROMPT": "d34e3ca7edf8",
+    "chapter.REVISE_DISTILL_PROMPT": "ef4451345fec",
+    "chapter.ROLLING_SUMMARY_PROMPT": "45ef7c6a30e8",
+    "chapter.SPLIT_POINT_PROMPT": "14f6e484be68",
+    "chapter.STYLE_MEMO_UPDATE_PROMPT": "f865d1c61f16",
+    "clips.CLIPS_CLICHE_BLACKLIST": "0932688af6f8",
+    "clips.CLIPS_EXPAND_PROMPT": "7eef1181e32a",
+    "clips.CLIPS_FREE_CONTEXT": "4d88c26d0c63",
+    "clips.CLIPS_GENERIC_CONTEXT": "44a5c3aac3b0",
+    "clips.CLIPS_GROUNDING_RULE": "fb8d25a53ece",
+    "clips.CLIPS_NOVEL_CONTEXT": "42cf6652fdb7",
+    "clips.CLIPS_PLAY_CONTEXT": "8a05470a9dc6",
+    "clips.CLIPS_PROMPT_DETAILS": "944e5250034d",
+    "clips.CLIPS_STRUCTURE_RULES": "11081988e553",
+    "clips.CLIPS_TAKES_PROMPT": "a3b1320717e6",
+    "consistency.CONSISTENCY_CHECK_PROMPT": "40cec9ed6509",
+    "consistency.EXTRACTION_PROMPT": "c44243b58008",
+    "consistency.GATE_REPAIR_PROMPT": "322f0e3e6757",
+    "consistency.HANDOFF_CONTRACT_PROMPT": "7566cf8dd0ac",
+    "consistency.MOTIF_SCAN_PROMPT": "a848ef370a54",
+    "consistency.PREFLIGHT_CHECK_PROMPT": "5e0dafface91",
+    "consistency.RULE_SCAN_PROMPT": "02f165fe6b71",
+    "dna_capsules.DNA_CAPSULES": "4501eff21ad9",
+    "dna_capsules.GENRE_PAIRWISE": "cbff4b325e03",
+    "drama.CHARACTER_PROMPT": "c6f1b29ead15",
+    "drama.DIRECTION_RECOMMEND_PROMPT": "09d1853954ee",
+    "drama.EPISODE_PLAN_PROMPT": "e91f99cd3a77",
+    "drama.EPISODE_SCRIPT_PROMPT": "86163d06d35d",
+    "drama.PRODUCTION_PACK_PROMPT": "83e4a9ef1851",
+    "drama.REF_SHEET_PROMPT": "f58033763b37",
+    "drama.SCENE_PROMPT": "472f837c3db1",
+    "drama.SHOT_PROMPT_PROMPT": "9bdaeedc99fb",
+    "drama.STORYBOARD_PROMPT": "2953f159f5d2",
+    "drama.STYLE_PROMPT": "f37fe07bd19e",
+    "drama.TRAILER_PROMPT": "f3724105e507",
+    "drama.VOICE_CAST_PROMPT": "3bc24a774069",
+    "editorial.PROOFREAD_PROMPT": "dfb8095b4e31",
+    "editorial.REVIEW_PROMPT": "e343cc112d8a",
+    "film_prompt.CLIP_FRAMINGS": "5a9429497a76",
+    "film_prompt.PROMO_FRAMING": "5e8888f96b64",
+    "film_prompt.SEGMENTED_FILM_PROMPT_TEMPLATE": "48e95c0af68d",
+    "film_prompt.VALID_SEGMENT_S": "4fa3cfa5ce27",
+    "inspire.CHAT_DISTILL_PROMPT": "7c7ab7405c3e",
+    "inspire.CHAT_SYSTEM_PROMPT": "6bc2ccd20190",
+    "inspire.DEVELOP_PROMPT": "aedb813832fa",
+    "inspire.ENGINES_PROMPT": "f1745df72041",
+    "inspire.INSPIRE_PROMPT": "6b0044a0929e",
+    "inspire.MIRROR_DISTILL_PROMPT": "5ad0730ea181",
+    "inspire.REFINE_PROMPT": "4bfb2c424aa0",
+    "media.ANTHEM_PROMPT": "9ad95632d653",
+    "media.COVER_PROMPT": "6195f8b69745",
+    "polish.CRAFT_MODES": "9840a6c17bfe",
+    "polish.DEAI_REWRITE_PROMPT": "b075b07cc901",
+    "polish.DISCUSS_CHAPTER_SYSTEM_PROMPT": "88f3b291eec8",
+    "polish.DISCUSS_SYSTEM_PROMPT": "80d2e3804402",
+    "polish.FACT_LOCK_PROMPT": "af059f1f58d4",
+    "polish.FACT_VERIFY_PROMPT": "996bac8433b4",
+    "polish.FRAGMENT_CRAFT_PROMPT": "c58ac9246faa",
+    "polish.FRAGMENT_POLISH_PROMPT": "684f22ccefaf",
+    "polish.POLISH_PROMPT": "70ff86393ef2",
+    "profile.PROFILE_ABSORB_PROMPT": "0646986c897f",
+    "profile.PROFILE_EXTRACT_PROMPT": "f70701c69166",
+    "promo.PROMO_BRIEF_PROMPT": "e18c772405d4",
+    "promo.PROMO_CHAT_SYSTEM": "e8791c587bdb",
+    "promo.PROMO_CHUNKS_PROMPT": "e00be29b8216",
+    "promo.PROMO_LANDMARK_PROMPT": "22bc516ddd3c",
+    "promo.PROMO_PACK_PROMPT": "2a6a9edfcbdc",
+    "promo.PROMO_SCRIPT_PROMPT": "649b48f5f395",
+    "promo.PROMO_SHOT_PROMPT_PROMPT": "240bc331100f",
+    "promo.PROMO_STORYBOARD_PROMPT": "5df804af5ebc",
+    "promo.PROMO_STYLE_PROMPT": "745f9498771a",
+    "refresh.BEATS_BACKFILL_PROMPT": "bbc3da9d940d",
+    "rolling.MACRO_PLAN_PROMPT": "f8bc835e957b",
+    "rolling.ROLLING_CONTEXT_BLOCK": "fe38678486f8",
+    "series.SERIES_EPISODE_PROMPT": "4fcf2558e463",
+    "series.SERIES_LOOK_PROMPT": "9b103dba905d",
+    "snowflake.ARCH_CHAT_SYSTEM_PROMPT": "26d9a69ef43d",
+    "snowflake.ARCH_DISTILL_PROMPT": "ae4f5642be41",
+    "snowflake.CHAPTER_BLUEPRINT_PROMPT": "48acfa2c40f7",
+    "snowflake.CHARACTER_DYNAMICS_PROMPT": "6a826354b1a5",
+    "snowflake.CHUNKED_BLUEPRINT_PROMPT": "bd43cc8ff4b6",
+    "snowflake.CORE_SEED_PROMPT": "ca411fbce2e5",
+    "snowflake.PLOT_ARCHITECTURE_PROMPT": "d7426e8c32be",
+    "snowflake.WORLD_BUILDING_PROMPT": "966b7225a01f",
+    "style_capsules.CAPSULES": "d3941ffe1aac",
+    "style_capsules.PAIRWISE": "f22770a04e1b",
+    "submission.SUBMISSION_PROMPT": "fd4fe8e9df92",
+    "templates/editorial/proofread.txt": "dfb8095b4e31",
+    "templates/editorial/review.txt": "e343cc112d8a",
+    "templates/profile/absorb.txt": "0646986c897f",
+    "templates/profile/extract.txt": "f70701c69166",
+    "templates/refresh/beats_backfill.txt": "bbc3da9d940d",
+    "templates/rolling/context_block.txt": "fe38678486f8",
+    "templates/rolling/macro_plan.txt": "f8bc835e957b",
+    "templates/submission/submission.txt": "fd4fe8e9df92"
+  },
+  "chapters": [
+    {
+      "n": 1,
+      "title": "碎月初五",
+      "ok": true,
+      "seconds": 10.2,
+      "status": "finalized",
+      "quarantined": false,
+      "chars": 2641,
+      "target_ratio": 1.06,
+      "paragraphs": 7,
+      "dialogue_ratio": 0.023,
+      "within_repeats": 1,
+      "flavor": {
+        "score": 8.0,
+        "categories": {},
+        "burstiness": 0.384,
+        "burstiness_flag": true,
+        "metronome_groups": 8,
+        "tail_summary_count": 0,
+        "para_uniform": false,
+        "de_ratio": 0.0294,
+        "novelty_4gram": 0.51,
+        "long_repeats": 0
+      },
+      "review": {
+        "scores": {
+          "plot": 7,
+          "prose": 7,
+          "pacing": 7,
+          "character": 7,
+          "continuity": 8
+        },
+        "passed": true,
+        "revision_rounds": 1,
+        "repair_rounds": 0,
+        "comment": "第 1 章主审短评:节奏稳,描写克制;"
+      },
+      "gate": {
+        "blocker": 0,
+        "major": 0,
+        "minor": 0
+      },
+      "preflight_warnings": 1,
+      "guard_action": "none",
+      "extraction": {
+        "entities": {
+          "count": 5,
+          "new": 2
+        },
+        "facts": {
+          "count": 7,
+          "new": 2
+        }
+      }
+    },
+    {
+      "n": 2,
+      "title": "崖下七日",
+      "ok": true,
+      "seconds": 10.4,
+      "status": "finalized",
+      "quarantined": false,
+      "chars": 2548,
+      "target_ratio": 1.02,
+      "paragraphs": 3,
+      "dialogue_ratio": 0.0,
+      "within_repeats": 0,
+      "flavor": {
+        "score": 8.0,
+        "categories": {},
+        "burstiness": 0.306,
+        "burstiness_flag": true,
+        "metronome_groups": 5,
+        "tail_summary_count": 0,
+        "para_uniform": false,
+        "de_ratio": 0.0288,
+        "novelty_4gram": 0.535,
+        "long_repeats": 0
+      },
+      "review": {
+        "scores": {
+          "plot": 8,
+          "prose": 7,
+          "pacing": 6,
+          "character": 7,
+          "continuity": 7
+        },
+        "passed": true,
+        "revision_rounds": 1,
+        "repair_rounds": 0,
+        "comment": "第 2 章主审短评:节奏稳,描写克制;"
+      },
+      "gate": {
+        "blocker": 0,
+        "major": 0,
+        "minor": 1
+      },
+      "preflight_warnings": 0,
+      "guard_action": "none",
+      "extraction": {
+        "entities": {
+          "count": 6,
+          "new": 1
+        },
+        "facts": {
+          "count": 8,
+          "new": 2
+        }
+      }
+    },
+    {
+      "n": 3,
+      "title": "上交与验看",
+      "ok": true,
+      "seconds": 10.6,
+      "status": "finalized",
+      "quarantined": false,
+      "chars": 2450,
+      "target_ratio": 0.98,
+      "paragraphs": 2,
+      "dialogue_ratio": 0.005,
+      "within_repeats": 0,
+      "flavor": {
+        "score": 8.0,
+        "categories": {},
+        "burstiness": 0.278,
+        "burstiness_flag": true,
+        "metronome_groups": 5,
+        "tail_summary_count": 0,
+        "para_uniform": false,
+        "de_ratio": 0.0287,
+        "novelty_4gram": 0.539,
+        "long_repeats": 0
+      },
+      "review": {
+        "scores": {
+          "plot": 6,
+          "prose": 7,
+          "pacing": 7,
+          "character": 7,
+          "continuity": 8
+        },
+        "passed": true,
+        "revision_rounds": 1,
+        "repair_rounds": 0,
+        "comment": "第 3 章主审短评:节奏稳,描写克制;"
+      },
+      "gate": {
+        "blocker": 0,
+        "major": 0,
+        "minor": 0
+      },
+      "preflight_warnings": 0,
+      "guard_action": "none",
+      "extraction": {
+        "entities": {
+          "count": 7,
+          "new": 2
+        },
+        "facts": {
+          "count": 9,
+          "new": 2
+        }
+      }
+    },
+    {
+      "n": 4,
+      "title": "裂纹复发",
+      "ok": true,
+      "seconds": 10.8,
+      "status": "quarantined",
+      "quarantined": true,
+      "chars": 2486,
+      "target_ratio": 0.99,
+      "paragraphs": 3,
+      "dialogue_ratio": 0.001,
+      "within_repeats": 0,
+      "flavor": {
+        "score": 8.0,
+        "categories": {},
+        "burstiness": 0.323,
+        "burstiness_flag": true,
+        "metronome_groups": 6,
+        "tail_summary_count": 0,
+        "para_uniform": false,
+        "de_ratio": 0.0293,
+        "novelty_4gram": 0.518,
+        "long_repeats": 0
+      },
+      "review": {
+        "scores": {
+          "plot": 7,
+          "prose": 7,
+          "pacing": 6,
+          "character": 7,
+          "continuity": 7
+        },
+        "passed": false,
+        "revision_rounds": 1,
+        "repair_rounds": 0,
+        "comment": "第 4 章主审短评:节奏稳,描写克制;"
+      },
+      "gate": {
+        "blocker": 1,
+        "major": 1,
+        "minor": 2
+      },
+      "preflight_warnings": 0,
+      "guard_action": "rewrite",
+      "extraction": {
+        "entities": {
+          "count": 4,
+          "new": 1
+        },
+        "facts": {
+          "count": 10,
+          "new": 2
+        }
+      }
+    },
+    {
+      "n": 5,
+      "title": "内门告示",
+      "ok": true,
+      "seconds": 11.0,
+      "status": "finalized",
+      "quarantined": false,
+      "chars": 2486,
+      "target_ratio": 0.99,
+      "paragraphs": 2,
+      "dialogue_ratio": 0.015,
+      "within_repeats": 0,
+      "flavor": {
+        "score": 8.0,
+        "categories": {},
+        "burstiness": 0.202,
+        "burstiness_flag": true,
+        "metronome_groups": 6,
+        "tail_summary_count": 0,
+        "para_uniform": false,
+        "de_ratio": 0.0293,
+        "novelty_4gram": 0.523,
+        "long_repeats": 0
+      },
+      "review": {
+        "scores": {
+          "plot": 8,
+          "prose": 7,
+          "pacing": 7,
+          "character": 7,
+          "continuity": 8
+        },
+        "passed": true,
+        "revision_rounds": 1,
+        "repair_rounds": 0,
+        "comment": "第 5 章主审短评:节奏稳,描写克制;"
+      },
+      "gate": {
+        "blocker": 0,
+        "major": 0,
+        "minor": 0
+      },
+      "preflight_warnings": 0,
+      "guard_action": "none",
+      "extraction": {
+        "entities": {
+          "count": 5,
+          "new": 2
+        },
+        "facts": {
+          "count": 6,
+          "new": 2
+        }
+      }
+    },
+    {
+      "n": 6,
+      "title": "玉佩惊变",
+      "ok": true,
+      "seconds": 11.2,
+      "status": "finalized",
+      "quarantined": false,
+      "chars": 2546,
+      "target_ratio": 1.02,
+      "paragraphs": 2,
+      "dialogue_ratio": 0.005,
+      "within_repeats": 0,
+      "flavor": {
+        "score": 8.0,
+        "categories": {},
+        "burstiness": 0.308,
+        "burstiness_flag": true,
+        "metronome_groups": 6,
+        "tail_summary_count": 0,
+        "para_uniform": false,
+        "de_ratio": 0.0285,
+        "novelty_4gram": 0.494,
+        "long_repeats": 0
+      },
+      "review": {
+        "scores": {
+          "plot": 6,
+          "prose": 7,
+          "pacing": 6,
+          "character": 7,
+          "continuity": 7
+        },
+        "passed": true,
+        "revision_rounds": 1,
+        "repair_rounds": 0,
+        "comment": "第 6 章主审短评:节奏稳,描写克制;"
+      },
+      "gate": {
+        "blocker": 0,
+        "major": 0,
+        "minor": 1
+      },
+      "preflight_warnings": 0,
+      "guard_action": "none",
+      "extraction": {
+        "entities": {
+          "count": 6,
+          "new": 1
+        },
+        "facts": {
+          "count": 7,
+          "new": 2
+        }
+      }
+    },
+    {
+      "n": 7,
+      "title": "旧怨浮面",
+      "ok": true,
+      "seconds": 11.4,
+      "status": "finalized",
+      "quarantined": false,
+      "chars": 2524,
+      "target_ratio": 1.01,
+      "paragraphs": 6,
+      "dialogue_ratio": 0.007,
+      "within_repeats": 1,
+      "flavor": {
+        "score": 8.0,
+        "categories": {},
+        "burstiness": 0.304,
+        "burstiness_flag": true,
+        "metronome_groups": 9,
+        "tail_summary_count": 0,
+        "para_uniform": false,
+        "de_ratio": 0.0309,
+        "novelty_4gram": 0.537,
+        "long_repeats": 0
+      },
+      "review": {
+        "scores": {
+          "plot": 7,
+          "prose": 7,
+          "pacing": 7,
+          "character": 7,
+          "continuity": 8
+        },
+        "passed": false,
+        "revision_rounds": 1,
+        "repair_rounds": 0,
+        "comment": "第 7 章主审短评:节奏稳,描写克制;"
+      },
+      "gate": {
+        "blocker": 0,
+        "major": 1,
+        "minor": 0
+      },
+      "preflight_warnings": 0,
+      "guard_action": "none",
+      "extraction": {
+        "entities": {
+          "count": 7,
+          "new": 2
+        },
+        "facts": {
+          "count": 8,
+          "new": 2
+        }
+      }
+    },
+    {
+      "n": 8,
+      "title": "当夜选拔",
+      "ok": true,
+      "seconds": 11.6,
+      "status": "finalized",
+      "quarantined": false,
+      "chars": 2488,
+      "target_ratio": 1.0,
+      "paragraphs": 3,
+      "dialogue_ratio": 0.0,
+      "within_repeats": 0,
+      "flavor": {
+        "score": 8.0,
+        "categories": {},
+        "burstiness": 0.308,
+        "burstiness_flag": true,
+        "metronome_groups": 6,
+        "tail_summary_count": 0,
+        "para_uniform": false,
+        "de_ratio": 0.0298,
+        "novelty_4gram": 0.551,
+        "long_repeats": 0
+      },
+      "review": {
+        "scores": {
+          "plot": 8,
+          "prose": 7,
+          "pacing": 6,
+          "character": 7,
+          "continuity": 7
+        },
+        "passed": true,
+        "revision_rounds": 1,
+        "repair_rounds": 0,
+        "comment": "第 8 章主审短评:节奏稳,描写克制;"
+      },
+      "gate": {
+        "blocker": 0,
+        "major": 0,
+        "minor": 1
+      },
+      "preflight_warnings": 1,
+      "guard_action": "none",
+      "extraction": {
+        "entities": {
+          "count": 4,
+          "new": 1
+        },
+        "facts": {
+          "count": 9,
+          "new": 2
+        }
+      }
+    },
+    {
+      "n": 9,
+      "title": "师姐真相",
+      "ok": true,
+      "seconds": 11.8,
+      "status": "finalized",
+      "quarantined": false,
+      "chars": 2517,
+      "target_ratio": 1.01,
+      "paragraphs": 3,
+      "dialogue_ratio": 0.005,
+      "within_repeats": 0,
+      "flavor": {
+        "score": 8.0,
+        "categories": {},
+        "burstiness": 0.258,
+        "burstiness_flag": true,
+        "metronome_groups": 7,
+        "tail_summary_count": 0,
+        "para_uniform": false,
+        "de_ratio": 0.0288,
+        "novelty_4gram": 0.505,
+        "long_repeats": 0
+      },
+      "review": {
+        "scores": {
+          "plot": 6,
+          "prose": 7,
+          "pacing": 7,
+          "character": 7,
+          "continuity": 8
+        },
+        "passed": true,
+        "revision_rounds": 0,
+        "repair_rounds": 0,
+        "comment": "第 9 章主审短评:节奏稳,描写克制;"
+      },
+      "gate": {
+        "blocker": 0,
+        "major": 0,
+        "minor": 0
+      },
+      "preflight_warnings": 0,
+      "guard_action": "none",
+      "extraction": {
+        "entities": {
+          "count": 5,
+          "new": 2
+        },
+        "facts": {
+          "count": 10,
+          "new": 2
+        }
+      }
+    },
+    {
+      "n": 10,
+      "title": "第二枚之约",
+      "ok": true,
+      "seconds": 12.0,
+      "status": "finalized",
+      "quarantined": false,
+      "chars": 2662,
+      "target_ratio": 1.06,
+      "paragraphs": 2,
+      "dialogue_ratio": 0.005,
+      "within_repeats": 0,
+      "flavor": {
+        "score": 8.0,
+        "categories": {},
+        "burstiness": 0.237,
+        "burstiness_flag": true,
+        "metronome_groups": 5,
+        "tail_summary_count": 0,
+        "para_uniform": false,
+        "de_ratio": 0.0265,
+        "novelty_4gram": 0.498,
+        "long_repeats": 0
+      },
+      "review": {
+        "scores": {
+          "plot": 7,
+          "prose": 7,
+          "pacing": 6,
+          "character": 7,
+          "continuity": 7
+        },
+        "passed": true,
+        "revision_rounds": 0,
+        "repair_rounds": 0,
+        "comment": "第 10 章主审短评:节奏稳,描写克制;"
+      },
+      "gate": {
+        "blocker": 0,
+        "major": 0,
+        "minor": 1
+      },
+      "preflight_warnings": 0,
+      "guard_action": "none",
+      "extraction": {
+        "entities": {
+          "count": 6,
+          "new": 1
+        },
+        "facts": {
+          "count": 6,
+          "new": 2
+        }
+      }
+    }
+  ],
+  "cross": {
+    "chapters": 10,
+    "repeated_sentences": 1,
+    "repeated_sentences_top": [
+      {
+        "text": "他想起师姐递给他木牌时的表情",
+        "count": 2
+      }
+    ],
+    "repeated_phrases": 12,
+    "repeated_phrases_top": [
+      {
+        "text": "寒字七十",
+        "count": 112
+      },
+      {
+        "text": "寒字七十二",
+        "count": 111
+      },
+      {
+        "text": "玉佩寒字七十",
+        "count": 110
+      },
+      {
+        "text": "佩寒字七十二",
+        "count": 110
+      },
+      {
+        "text": "外门演武场边",
+        "count": 70
+      },
+      {
+        "text": "门演武场边缘",
+        "count": 70
+      },
+      {
+        "text": "旁的石阶",
+        "count": 70
+      },
+      {
+        "text": "外的廊下",
+        "count": 70
+      }
+    ]
+  },
+  "bible": {
+    "entities": 4,
+    "facts": 10,
+    "foreshadowings": 0
+  },
+  "usage": {
+    "calls": 30,
+    "prompt_tokens": 37125,
+    "completion_tokens": 27900
+  },
+  "aggregate": {
+    "chapters_total": 10,
+    "chapters_ok": 10,
+    "quarantined": 1,
+    "pass_rate": 0.8,
+    "mean_scores": {
+      "plot": 7,
+      "prose": 7,
+      "pacing": 6.5,
+      "character": 7,
+      "continuity": 7.5
+    },
+    "mean_flavor": 8.0,
+    "mean_target_ratio": 1.01,
+    "mean_revision_rounds": 0.8,
+    "total_blockers": 1,
+    "total_major": 2,
+    "total_minor": 6,
+    "preflight_warnings": 2,
+    "within_repeats_total": 2,
+    "repeated_sentences_cross": 1,
+    "repeated_phrases_cross": 12,
+    "facts_extracted": 10,
+    "tokens_per_chapter": 6502,
+    "seconds_per_chapter": 11.1
+  }
+}
