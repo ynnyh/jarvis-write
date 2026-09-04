@@ -13,12 +13,21 @@ type RunningJob = { job_id: string; kind: string; stage: string };
 export function useConsistencySync(pid: number) {
   // 进行中的同步任务角标:key=章号,value=当前阶段文案(非阻塞)
   const [syncJobs, setSyncJobs] = useState<Map<number, string>>(new Map());
-  // 保存正文后待用户确认是否同步的章号(null=无待确认)
-  const [pendingSync, setPendingSync] = useState<number | null>(null);
+  // 保存正文后待用户确认是否同步的章号列表(多章并存:手改一章、批修另几章,
+  // 各自独立询问;切到对应章才显示该章的询问条,跳过/同步只消化自己那条)
+  const [pendingSyncList, setPendingSyncList] = useState<number[]>([]);
   // 按章号存中止器,允许多章并发各自独立中止;卸载时全部中止。
   const syncAbortRefs = useRef<Map<number, AbortController>>(new Map());
   useEffect(() => () => {
     syncAbortRefs.current.forEach((c) => c.abort());
+  }, []);
+
+  // 记一条「待询问同步」(去重);dismissSync 只消化自己那条。
+  const askSync = useCallback((num: number) => {
+    setPendingSyncList((l) => (l.includes(num) ? l : [...l, num]));
+  }, []);
+  const dismissSync = useCallback((num: number) => {
+    setPendingSyncList((l) => l.filter((x) => x !== num));
   }, []);
 
   // 同步角标按章号读写(函数式更新,避免并发覆盖);清除时同时移除中止器。
@@ -33,7 +42,7 @@ export function useConsistencySync(pid: number) {
   // 同步一致性引擎(重抽取 + 重建下游摘要 + 向量库)。非阻塞:仅显示轻量角标,
   // 用户可继续阅读/编辑其他章节。保存后确认、回退版本共用。
   const triggerSync = useCallback(async (num: number) => {
-    setPendingSync(null);
+    dismissSync(num);
     if (syncAbortRefs.current.has(num)) return; // 该章已在同步,不重复起(与后端去重一致)
     const ctrl = new AbortController();
     syncAbortRefs.current.set(num, ctrl);
@@ -55,7 +64,7 @@ export function useConsistencySync(pid: number) {
         }
       }
     } finally { if (!ctrl.signal.aborted) clearSync(num); }
-  }, [pid, setSyncStage, clearSync]);
+  }, [pid, setSyncStage, clearSync, dismissSync]);
 
   // 挂载重连:接上遗留的多章并发同步任务(切走再回来的场景),已在跟踪的不重复接。
   const reconnectSync = useCallback((jobs: RunningJob[]) => {
@@ -73,5 +82,5 @@ export function useConsistencySync(pid: number) {
     });
   }, [pid, setSyncStage, clearSync]);
 
-  return { syncJobs, pendingSync, setPendingSync, triggerSync, reconnectSync };
+  return { syncJobs, pendingSync: pendingSyncList, askSync, dismissSync, triggerSync, reconnectSync };
 }

@@ -19,8 +19,25 @@ interface Props {
 }
 
 export default function MarksReviseCards({ pid, result, onSaved, onPairAccepted, onChapterClose }: Props) {
+  // 批次汇总:待验收/跳过失败一眼可见——否则「点之前不知道几处会被跳过」,
+  // 失效条目混在验收卡里没有先见度。
+  const totalPairs = result.chapters.reduce((n, c) => n + c.pairs.length, 0);
+  const okCount = result.chapters.reduce(
+    (n, c) => n + c.pairs.filter((p) => p.ok).length, 0);
+  const failCount = totalPairs - okCount;
+
   return (
     <>
+      <div className="card">
+        <div className="card-head">
+          <h3 className="grow">全书批修 · 共处理 {totalPairs} 处</h3>
+        </div>
+        <div className="hint mt-1">
+          待验收 {okCount} · 跳过/失败 {failCount}
+          {result.stale > 0 && <>(其中因正文变动跳过 {result.stale})</>}。
+          接受即写回(自动留版本快照)并销账标记;拒绝的标记保留,可重跑或在 AI 栏删除。
+        </div>
+      </div>
       {result.chapters.map((group) => (
         <MarksReviseChapterCard
           key={group.chapter_number}

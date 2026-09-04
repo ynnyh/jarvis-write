@@ -92,11 +92,12 @@ export function useWritePanel({ pid, outlines }: UseWritePanelArgs) {
   // ②档批注(docs/10 §4,跨章持久版):正文里 🖍 攒下的「这里不行」标记,落库
   // (chapter_marks 表),切章/刷新不丢——补齐内存版批注跨不了章的缺口。
   // marks=全书 open 标记;本章视图 chapterMarks 派生;AiDock 列出/成批发。
-  // 「按批注改」发出时本章标记退场(与旧行为一致);全书批修的标记则在逐条
-  // 验收接受后销账(acceptMarkPair),拒绝/失效保持 open 可重跑。
+  // 两条改写流(按批注改/全书批修)统一「接受才销账,拒绝保留」——
+  // 销账走 acceptMarkPair,由验收卡的单条接受回调触发。
   const [marks, setMarks] = useState<ChapterMark[]>([]);
   const [reviseResult, setReviseResult] = useState<RevisePair[] | null>(null);
-  // 全书批修结果(跨章,按章分组):不为切章所清,逐章验收,全部关闭后清空
+  // 全书批修结果(跨章,按章分组):不为切章所清,逐章验收,全部关闭后清空;
+  // 经 sessionStorage 暂存,切区/刷新回来可恢复(见 openMarksResult)。
   const [marksReviseResult, setMarksReviseResult] = useState<MarksReviseResult | null>(null);
   // Prose 手改的未保存脏标记(组件内状态,经回调上报):切章前据此弹「丢弃修改」确认
   const proseDirtyRef = useRef(false);
@@ -107,8 +108,10 @@ export function useWritePanel({ pid, outlines }: UseWritePanelArgs) {
   // reload 沿用旧调用点:失效 RQ 缓存 → 章节列表与父级顶栏统计一并重拉(消除陈旧)。
   const reload = invalidateProject;
   // 一致性同步(保存/回退后重抽取+重建下游摘要+向量库):抽到 useConsistencySync。
-  // triggerSync 供回退版本联动(注入下方 useChapterVersions);reconnectSync 供挂载重连遗留同步。
-  const { syncJobs, pendingSync, setPendingSync, triggerSync, reconnectSync } = useConsistencySync(pid);
+  // askSync 供手改/批修写回后记「待询问」章(可多章并存,切到对应章才显示询问条);
+  // reconnectSync 供挂载重连遗留同步。
+  const { syncJobs, pendingSync, askSync, dismissSync, triggerSync, reconnectSync } =
+    useConsistencySync(pid);
   // 正文版本对比(打开历史/选版/回退):抽到 useChapterVersions。回退联动写回+刷新+同步,
   // 故注入 setCurrent/reload/triggerSync;openVersions 供生成完成后自动弹对比(见 trackGenerate)。
   const {
@@ -187,31 +190,43 @@ export function useWritePanel({ pid, outlines }: UseWritePanelArgs) {
     }
   }
 
-  // 「按批注改」发出:本章标记整体退场(与旧行为一致——结果由验收卡逐条处理)
-  async function clearChapterMarks() {
-    const rows = chapterMarks;
-    setMarks((prev) => prev.filter((m) => !rows.some((r) => r.id === m.id)));
-    await Promise.allSettled(rows.map((r) => api.removeMark(pid, r.id)));
-  }
-
-  // 全书批修:单条验收接受 → 销账对应标记(服务端删;已不存在也照常清本地)
+  // 标记销账:验收接受一条替换对后删除对应标记(两条流共用:按批注改/全书批修
+  // 均为「接受才销账,拒绝保留」)。乐观移除;已不存在(他端处理过)也算达成目的。
   async function acceptMarkPair(markId: number) {
     setMarks((prev) => prev.filter((m) => m.id !== markId));
     try {
       await api.removeMark(pid, markId);
     } catch {
-      /* 已销账(他端处理过)即达成目的 */
+      /* 已销账即达成目的 */
     }
   }
 
-  // 全书批修:某章验收卡关闭 → 从结果里摘掉该章;全部摘完清空整个结果
+  // 全书批修结果跨「切区/刷新」可回收:sessionStorage 按项目暂存,挂载时恢复。
+  // 任务在后台跑完而用户切走了写作区时,回来不用重跑(重跑=再烧一遍 LLM)。
+  const marksResultKey = `jarvis-marks-revise-${pid}`;
+  function openMarksResult(result: MarksReviseResult) {
+    setMarksReviseResult(result);
+    try { sessionStorage.setItem(marksResultKey, JSON.stringify(result)); } catch { /* 超限即放弃暂存 */ }
+  }
   function closeMarksChapter(n: number) {
     setMarksReviseResult((prev) => {
       if (!prev) return null;
       const chapters = prev.chapters.filter((c) => c.chapter_number !== n);
-      return chapters.length ? { ...prev, chapters } : null;
+      const next: MarksReviseResult | null = chapters.length ? { ...prev, chapters } : null;
+      try {
+        if (next) sessionStorage.setItem(marksResultKey, JSON.stringify(next));
+        else sessionStorage.removeItem(marksResultKey);
+      } catch { /* 忽略 */ }
+      return next;
     });
   }
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(marksResultKey);
+      if (raw) setMarksReviseResult(JSON.parse(raw) as MarksReviseResult);
+    } catch { /* 损坏即忽略 */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pid]);
 
   // 挂载时查有没有还在跑的任务(切走页面再回来的场景),有则接上轮询而不是装作没事。
   // 生成任务 → 阻塞横幅;同步任务 → 非阻塞轻量角标(二者独立,可同时重连)。
@@ -369,13 +384,13 @@ export function useWritePanel({ pid, outlines }: UseWritePanelArgs) {
     selectedPara, setSelectedPara,
     polishCompare, setPolishCompare,
     marks, chapterMarks, marksReviseResult,
-    createMark, removeMarkAt, clearChapterMarks, acceptMarkPair, closeMarksChapter,
-    reviseResult, setReviseResult, setMarksReviseResult,
+    createMark, removeMarkAt, acceptMarkPair, closeMarksChapter, openMarksResult,
+    reviseResult, setReviseResult,
     proseDirtyRef,
     // 审核(放行已下沉到 ChapterStatusCard 的 GateResolve,不再从壳导出)
     approve,
     // useConsistencySync
-    syncJobs, pendingSync, setPendingSync, triggerSync,
+    syncJobs, pendingSync, askSync, dismissSync, triggerSync,
     // useChapterVersions
     versionsFor, versions, compareVer, closeVersions, openVersions, selectVersion, restoreVersion,
     // useChapterGeneration

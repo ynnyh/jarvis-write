@@ -11,8 +11,10 @@
 // useChapterGeneration:沉浸/阅读器/版本对比/多章同步并发/生成连写队列),壳回归编排+布局;
 // 仍内联的是纯 UI:act= 校对/评分两张动作卡、GenResultCard、版本对比与全屏 Reader。
 // 移动端:m-topbar(←/章题/阅读)+ 左右滑切章 + act 卡全屏 sheet。
+import { useState } from "react";
 import { Outline, api } from "../api";
 import { qk } from "../hooks/queries";
+import { toast } from "../ui/Toaster";
 import Banner from "../ui/Banner";
 import Reader from "../components/Reader";
 import GenResultCard from "./chapters/GenResultCard";
@@ -55,13 +57,13 @@ export default function WritePanel({ pid, outlines }: Props) {
     selectedPara, setSelectedPara,
     polishCompare, setPolishCompare,
     marks, chapterMarks, marksReviseResult,
-    createMark, removeMarkAt, clearChapterMarks, acceptMarkPair, closeMarksChapter,
-    reviseResult, setReviseResult, setMarksReviseResult,
+    createMark, removeMarkAt, acceptMarkPair, closeMarksChapter, openMarksResult,
+    reviseResult, setReviseResult,
     proseDirtyRef,
     // 审核(放行已收进 ChapterStatusCard 内的 GateResolve,壳不再传 onRelease)
     approve,
     // useConsistencySync
-    syncJobs, pendingSync, setPendingSync, triggerSync,
+    syncJobs, pendingSync, askSync, dismissSync, triggerSync,
     // useChapterVersions
     versionsFor, versions, compareVer, closeVersions, openVersions, selectVersion, restoreVersion,
     // useChapterGeneration
@@ -80,6 +82,10 @@ export default function WritePanel({ pid, outlines }: Props) {
   const genResultRef = useScrollOnAppear(genResult);
   const polishRef = useScrollOnAppear(polishCompare && current);
   const reviseRef = useScrollOnAppear(reviseResult && current);
+  const marksReviseRef = useScrollOnAppear(!!marksReviseResult);
+  // 「按批注改」发出的批注 markId,与 reviseResult 的 pairs 同序(pairs[i] ↔ markIds[i]):
+  // 验收单条接受时据此销账对应标记(拒绝保留,可重跑)。
+  const [reviseMarkIds, setReviseMarkIds] = useState<number[]>([]);
 
   // 动作卡(act= 进 URL,可刷新/分享):桌面在中栏内联,移动端换全屏 sheet 容器(组件同一份)
   const actCards = (
@@ -205,7 +211,8 @@ export default function WritePanel({ pid, outlines }: Props) {
           </div>
         )}
 
-        {/* AI 栏②按批注改的验收卡(逐条 diff,接受/拒绝走 paraEdit 快照守卫写回) */}
+        {/* AI 栏②按批注改的验收卡(逐条 diff,接受/拒绝走 paraEdit 快照守卫写回):
+            与全书批修同语义——接受才销账对应标记,拒绝保留可重跑 */}
         {reviseResult && current && (
           <div ref={reviseRef}>
             <AnnotatedReviseCard
@@ -213,18 +220,31 @@ export default function WritePanel({ pid, outlines }: Props) {
               chapter={current}
               pairs={reviseResult}
               onSaved={(updated) => { setCurrent(updated); void reload(); }}
+              onPairAccepted={(i) => {
+                const markId = reviseMarkIds[i];
+                if (markId) void acceptMarkPair(markId);
+              }}
               onClose={() => setReviseResult(null)}
             />
           </div>
         )}
 
-        {/* 全书批修的验收卡组(跨章,按章分组;单条接受即销账对应标记) */}
+        {/* 全书批修的验收卡组(跨章,按章分组;单条接受即销账对应标记,写回的章记入待同步询问) */}
         {marksReviseResult && (
-          <div ref={reviseRef}>
+          <div ref={marksReviseRef}>
             <MarksReviseCards
               pid={pid}
               result={marksReviseResult}
-              onSaved={(updated) => { setCurrent(updated); void reload(); }}
+              onSaved={(updated) => {
+                setCurrent(updated);
+                void reload();
+                // 批修可能整段删改描写(会触碰设定/事实层),写回的章记入待同步询问:
+                // 当前章立即显示询问条,其余章切过去时显示(可跳过)
+                askSync(updated.chapter_number);
+                if (updated.chapter_number !== current?.chapter_number) {
+                  toast.ok(`第 ${updated.chapter_number} 章批修已写回`, "切到该章会询问是否同步一致性引擎");
+                }
+              }}
               onPairAccepted={(markId) => { void acceptMarkPair(markId); }}
               onChapterClose={closeMarksChapter}
             />
@@ -286,7 +306,7 @@ export default function WritePanel({ pid, outlines }: Props) {
                   onRenamed={() => { void reload(); }}
                 />
               )}
-              {pendingSync === current.chapter_number && (
+              {pendingSync.includes(current.chapter_number) && (
                 <div className="sync-ask mb-2">
                   <span className="sync-ask-text">
                     第 {current.chapter_number} 章已保存,要同步一致性引擎吗?
@@ -296,7 +316,7 @@ export default function WritePanel({ pid, outlines }: Props) {
                     <button className="primary btn-sm" disabled={syncJobs.has(current.chapter_number)}
                       onClick={() => triggerSync(current.chapter_number)}>立即同步</button>
                     <button className="btn-sm"
-                      onClick={() => setPendingSync(null)}>跳过</button>
+                      onClick={() => dismissSync(current.chapter_number)}>跳过</button>
                   </span>
                 </div>
               )}
@@ -307,7 +327,7 @@ export default function WritePanel({ pid, outlines }: Props) {
                 genBlocked={genBlocked}
                 genHint={genHint}
                 onSaved={(updated) => { setCurrent(updated); void reload(); }}
-                onSyncAsk={(num) => setPendingSync(num)}
+                onSyncAsk={(num) => askSync(num)}
                 onDirtyChange={(dirty) => { proseDirtyRef.current = dirty; }}
                 onSelectChange={setSelectedPara}
                 annotations={chapterMarks.map((m) => ({
@@ -397,14 +417,14 @@ export default function WritePanel({ pid, outlines }: Props) {
           }}
           marks={marks}
           onRemoveAnnotation={removeMarkAt}
-          onReviseResult={(pairs) => {
+          onReviseResult={(pairs, markIds) => {
             if (isMobile) setDockCollapsed(true); // 让出正文区顶部的验收卡
             setReviseResult(pairs);
-            void clearChapterMarks(); // 已成批发出,本章标记退场;结果由验收卡逐条处理
+            setReviseMarkIds(markIds); // 接受才销账(与全书批修同语义);拒绝保留可重跑
           }}
           onMarksReviseResult={(result) => {
             if (isMobile) setDockCollapsed(true); // 让出正文区顶部的验收卡组
-            setMarksReviseResult(result);
+            openMarksResult(result);
           }}
         />
       )}

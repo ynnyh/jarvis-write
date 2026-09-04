@@ -52,8 +52,9 @@ interface Props {
   marks: ChapterMark[];
   // 移除一条本章标记(用户点 × 或点已失效项;idx=本章标记数组下标)
   onRemoveAnnotation: (listIdx: number) => void;
-  // 「按批注改」job 完成:成批定点润色结果交父级渲染 AnnotatedReviseCard 逐段验收
-  onReviseResult: (pairs: RevisePair[]) => void;
+  // 「按批注改」job 完成:成批定点润色结果交父级渲染 AnnotatedReviseCard 逐段验收;
+  // markIds 与 pairs 同序(pairs[i] ↔ markIds[i]),供父级在接受时销账对应标记
+  onReviseResult: (pairs: RevisePair[], markIds: number[]) => void;
   // 「全书批修」job 完成:跨章待验收替换对交父级按章渲染验收卡(MarksReviseCards)
   onMarksReviseResult: (result: MarksReviseResult) => void;
 }
@@ -207,7 +208,8 @@ export default function AiDock({
   }
 
   // ②档「按批注改」:把本章未失效标记成批发去 revise-annotated-async(逐条定点润色),
-  // 结果 pairs 交父级 AnnotatedReviseCard 逐段验收(接受走 paraEdit 快照守卫写回)。
+  // 结果 pairs 连同对应 markId 交父级 AnnotatedReviseCard 逐段验收——接受才销账,
+  // 拒绝保留标记(与全书批修同语义,可重跑)。
   async function runRevise() {
     const fresh = chapterMarks.filter((m) => !chapterStaleIdx.has(m.para_idx));
     if (!fresh.length || reviseStage) return;
@@ -217,7 +219,7 @@ export default function AiDock({
         () => api.reviseAnnotatedAsync(pid, chapterNum,
           fresh.map((m) => ({ para_idx: m.para_idx, original: m.snapshot, note: m.note }))),
         { kind: `revise-annotated-${pid}-${chapterNum}`, onStage: (s) => setReviseStage(s) });
-      if (r) onReviseResult(r.pairs);
+      if (r) onReviseResult(r.pairs, fresh.map((m) => m.id));
     } catch (e) {
       setErr(errMsg(e));
     } finally { setReviseStage(""); }
@@ -285,9 +287,9 @@ export default function AiDock({
               {chapterMarks.map((m, i) => {
                 const stale = chapterStaleIdx.has(m.para_idx);
                 return (
-                  <li key={m.id} className={"anno-item" + (stale ? " stale" : "")}>
-                    <span className="anno-seg">第 {m.para_idx + 1} 段</span>
-                    <span className="anno-note">{m.note}</span>
+                <li key={m.id} className={"anno-item" + (stale ? " stale" : "")}>
+                  <span className="anno-seg">第 {m.para_idx + 1} 段</span>
+                  <span className="anno-note">{m.note || "未写意见 · 全书批修时按总描述统一改"}</span>
                     {stale && <span className="anno-stale-tag" title="正文已变动,原文对不上,不参与成批">失效</span>}
                     <button className="anno-del" title="移除这条批注"
                       onClick={() => onRemoveAnnotation(i)}>×</button>
@@ -333,7 +335,7 @@ export default function AiDock({
           </div>
           {marksStage && (
             <div className="muted ai-dock-level">
-              全书批修中({marksStage}),可切到别处,进度看右上角任务
+              全书批修中({marksStage});完成后请留在写作区验收——结果已暂存,切走再回来也在,不必重跑
             </div>
           )}
         </div>

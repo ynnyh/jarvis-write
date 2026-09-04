@@ -488,7 +488,7 @@ export default function Prose({
               </button>
               {onAnnotate && (
                 <button className="btn-sm"
-                  title="记下一条意见,攒够后在 AI 栏「按批注改」一次性成批修改"
+                  title="记下这条的问题(意见可留空);标记跨章保留,攒够后可按批注改或全书批修"
                   onClick={() => { setNote(""); setMode("annotate"); }}>
                   🖍 批注
                 </button>
@@ -667,23 +667,23 @@ export default function Prose({
           {mode === "annotate" && onAnnotate && (
             <>
               <div className="rp-label">
-                批注第 {selPara + 1} 段(只记意见,不马上改;攒够后在 AI 栏「按批注改」)
+                批注第 {selPara + 1} 段(意见可留空;标记跨章保留,攒着一起改)
               </div>
               <input
                 type="text"
                 value={note}
-                placeholder="如:这里节奏太快 / 人物反应不合理"
+                placeholder="可选:要怎么改,如「这里节奏太快」;留空则全书批修时按总描述统一处理"
                 autoFocus
                 onChange={(e) => setNote(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && note.trim()) {
+                  if (e.key === "Enter") {
                     onAnnotate(selPara, selText, note.trim());
                     clearSelection();
                   }
                 }}
               />
               <div className="rp-actions">
-                <button className="primary btn-sm" disabled={!note.trim()}
+                <button className="primary btn-sm"
                   onClick={() => { onAnnotate(selPara, selText, note.trim()); clearSelection(); }}>
                   记下批注
                 </button>
