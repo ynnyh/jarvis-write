@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -19,6 +20,7 @@ from app.db.models import (
     Fact,
     Outline,
     Project,
+    Relationship,
 )
 from app.engines.consistency.extractor import parse_llm_json, salvage_json_objects
 from app.engines.drama.common import (
@@ -39,13 +41,19 @@ from app.engines.drama.gender import (
 from app.llm.router import Task, get_adapter_for
 from app.prompts.drama import CHARACTER_PROMPT, REF_SHEET_PROMPT, SCENE_PROMPT
 
-# 单次批量上限:防提示词与输出失控(超出的角色下轮再生成)
+# 单次批量上限:防提示词与输出失控(超出的角色按事实条数排序取前 N,并在
+# 返回值里明示总数——此前是静默截断,圣经里第 13 个之后的角色无任何入口)
 _MAX_CHARACTERS = 12
 _MAX_SCENES = 10
 _MAX_REF_SHEETS = 8  # 定妆照提示词单次批量上限(每条比视觉卡更长)
-# 判性别时扫多少条事实:比 digest 宽得多——digest 只有 300 字,
+# 判性别时扫多少条事实:比 digest 宽得多——digest 有限长,
 # 性别线索(「她」「夫人」)经常正好被截掉,于是模型只能靠猜,一猜就把女角写成男的
 _GENDER_FACT_LIMIT = 40
+# 角色档案摘要的素材窗口:外貌线索散落在事实与关系里,300 字窗口经常把
+# 「月白襦裙」「左脸刀疤」截掉,视觉卡只能瞎补——放宽为结构化三段、600 字封顶
+_DIGEST_FACT_LIMIT = 8
+_DIGEST_REL_LIMIT = 2
+_DIGEST_CHARS = 600
 
 
 class DramaAssetError(ValueError):
@@ -53,19 +61,63 @@ class DramaAssetError(ValueError):
 
 
 def _entity_digest(db: Session, entity: Entity) -> str:
-    """角色档案摘要:base_profile 平铺 + 最近 4 条重要事实。"""
+    """角色档案摘要:base_profile 平铺 + 最近事实 + 现行关系边。
+
+    结构化三段(profile/事实/关系)而非纯平铺——外貌、服饰、与他人关系是
+    视觉卡与声线的直接依据,聚合时各自保住窗口,不再被 300 字一刀切截掉。
+    """
     profile = entity.base_profile if isinstance(entity.base_profile, dict) else {}
     parts = [f"{k}:{v}" for k, v in profile.items() if str(v or "").strip()]
     facts = (
         db.query(Fact.content)
         .filter(Fact.entity_id == entity.id)
         .order_by(Fact.valid_from.desc(), Fact.id.desc())
-        .limit(4)
+        .limit(_DIGEST_FACT_LIMIT)
         .all()
     )
     parts.extend(str(c) for (c,) in facts if c)
-    digest = ";".join(parts)
-    return clip(digest, 300)
+    parts.extend(_current_relations(db, entity))
+    digest = ";".join(p for p in parts if p)
+    return clip(digest, _DIGEST_CHARS)
+
+
+def _current_relations(db: Session, entity: Entity) -> list[str]:
+    """该角色现行的关系边(未失效的最近 N 条),渲染成「与某人:关系」。
+
+    关系是角色辨识度与对手戏设计的重要线索(「反目成仇的兄长」直接影响
+    外貌沧桑感与声线),此前完全不进 digest。
+    """
+    rels = (
+        db.query(Relationship)
+        .filter(
+            (
+                (Relationship.from_entity_id == entity.id)
+                | (Relationship.to_entity_id == entity.id)
+            ),
+            Relationship.valid_until.is_(None),
+        )
+        .order_by(Relationship.id.desc())
+        .limit(_DIGEST_REL_LIMIT)
+        .all()
+    )
+    if not rels:
+        return []
+    other_ids = [
+        r.to_entity_id if r.from_entity_id == entity.id else r.from_entity_id
+        for r in rels
+    ]
+    names = {
+        e.id: e.name
+        for e in db.query(Entity).filter(Entity.id.in_(other_ids)).all()
+    }
+    out: list[str] = []
+    for r in rels:
+        other = names.get(
+            r.to_entity_id if r.from_entity_id == entity.id else r.from_entity_id
+        )
+        if other and str(r.relation or "").strip():
+            out.append(f"与{other}:{str(r.relation).strip()}")
+    return out
 
 
 def _gender_evidence(db: Session, entity: Entity) -> list[str]:
@@ -108,7 +160,11 @@ def _resolve_gender(
 async def generate_character_cards(
     db: Session, project: Project, progress=lambda s: None
 ) -> dict:
-    """从故事圣经批量生成/更新角色卡(locked 跳过),返回 {cards, skipped_locked}。"""
+    """从故事圣经批量生成/更新角色卡(locked 跳过),返回 {cards, skipped_locked, ...}。
+
+    超过 _MAX_CHARACTERS 时**不再静默截断**:按事实条数(≈出场戏份)排序取前 N,
+    返回值带 characters_total/characters_shown,前端据此提示「还有 N 个角色未生成」。
+    """
     entities = (
         db.query(Entity)
         .filter(
@@ -116,14 +172,22 @@ async def generate_character_cards(
             Entity.entity_type == "character",
             Entity.retired.is_(False),
         )
-        .order_by(Entity.id)
-        .limit(_MAX_CHARACTERS)
         .all()
     )
     if not entities:
         raise DramaAssetError(
             "故事圣经里还没有角色——先在写作区定稿几章让引擎抽取角色,再来生成角色卡。"
         )
+    # 按事实条数(≈戏份)降序排:有限的名额给主要角色,配角不会挤掉主角
+    fact_counts = dict(
+        db.query(Fact.entity_id, func.count(Fact.id))
+        .filter(Fact.entity_id.in_([e.id for e in entities]))
+        .group_by(Fact.entity_id)
+        .all()
+    )
+    entities.sort(key=lambda e: (-int(fact_counts.get(e.id, 0)), e.id))
+    characters_total = len(entities)
+    entities = entities[:_MAX_CHARACTERS]
 
     # 既有卡索引:entity_id 优先,名字兜底。要在拼提示词之前建好——
     # 卡上已拍板的性别得当硬约束下发,否则重跑一次又被模型改回去
@@ -187,7 +251,12 @@ async def generate_character_cards(
         cards_out.append(character_card_dict(target, style))
 
     db.commit()
-    return {"cards": cards_out, "skipped_locked": skipped_locked}
+    return {
+        "cards": cards_out,
+        "skipped_locked": skipped_locked,
+        "characters_total": characters_total,
+        "characters_shown": len(entities),
+    }
 
 
 def _one_card_item(raw: str) -> dict | None:
@@ -345,7 +414,13 @@ async def generate_assets(db: Session, project: Project, progress=lambda s: None
     """角色卡 + 场景卡一次跑完(对应前端「生成资产卡」按钮的 job)。"""
     chars = await generate_character_cards(db, project, progress)
     scenes = await generate_scene_cards(db, project, progress)
-    return {"cards": chars["cards"], "skipped_locked": chars["skipped_locked"], **scenes}
+    return {
+        "cards": chars["cards"],
+        "skipped_locked": chars["skipped_locked"],
+        "characters_total": chars.get("characters_total"),
+        "characters_shown": chars.get("characters_shown"),
+        **scenes,
+    }
 
 
 # =============== 定妆照提示词(人物一致性:先出参考图) ===============

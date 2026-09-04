@@ -19,6 +19,7 @@ from app.db.models import DramaEpisode, DramaShot, Project
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.drama.common import (
     MODE_DESC,
+    book_block,
     coerce_int,
     clip,
     concept_block,
@@ -35,6 +36,23 @@ _MAX_EPISODES = 40
 
 class DramaPlanError(ValueError):
     """规划的业务性错误(信息直接上屏)。"""
+
+
+def _banned_block(db: Session, project_id: int) -> str:
+    """作者雷区块(桥段台账的 banned 行)——切集的钩子/卡点是再创作自由度最大的
+    环节,最容易把作者写烦的桥段换个说法又写回来。只约束**新设计**的部分:
+    源正文里已有的内容不在此列(那是剧本忠实改编的对象,正文修完自然干净)。"""
+    from app.engines.consistency.motifs import banned_rows
+
+    rows = banned_rows(db, project_id)
+    if not rows:
+        return ""
+    lines = [f"  - {r.label}" + (f":{r.detail}" if r.detail else "") for r in rows]
+    return (
+        "【作者雷区(再创作硬约束:设计钩子/卡点/集标题时不得使用以下桥段或意象,"
+        "换措辞也算;源正文里已有的内容不在此列,按正文忠实改编)】\n"
+        + "\n".join(lines) + "\n"
+    )
 
 
 async def plan_episodes(
@@ -74,7 +92,10 @@ async def plan_episodes(
         mode_desc=MODE_DESC.get(mode, MODE_DESC["dialogue"]),
         title=project.title,
         genre=project.genre.strip() or "不限",
-        concept_block=concept_block(project),
+        # 书级资产(本书基因/创作偏好)与作者雷区并入 concept_block 收口:零模板改动
+        concept_block=(
+            concept_block(project) + book_block(project) + _banned_block(db, project.id)
+        ),
         chapters_block=chapters_block,
     )
     raw = await adapter.ask(prompt)

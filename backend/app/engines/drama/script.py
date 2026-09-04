@@ -23,8 +23,9 @@ from app.llm.router import Task, get_adapter_for
 from app.prompts.drama import EPISODE_SCRIPT_PROMPT
 
 # 源章节正文注入上限(字符):剧本只需要主体情节,超长正文截断防提示词爆炸。
-# 数章并一集时这是「总预算」,按章平分(见 common.chapters_final_text)
-_MAX_CHAPTER_CHARS = 6000
+# 数章并一集时这是「总预算」,按章平分;超预算的章保头尾去中段(见
+# common.chapters_final_text——章尾是卡点素材的来源,不能砍)
+_MAX_CHAPTER_CHARS = 9000
 _MAX_LINES = 40
 
 

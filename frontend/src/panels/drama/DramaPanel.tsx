@@ -574,7 +574,10 @@ function AssetsSection({ pid, cards, scenes, onChanged }: {
   async function generate() {
     setBusy(true); setErr(""); setStage("");
     try {
-      const r = await run<{ cards: DramaCharacterCard[]; skipped_locked: number; scenes: DramaSceneCard[] }>(
+      const r = await run<{
+        cards: DramaCharacterCard[]; skipped_locked: number; scenes: DramaSceneCard[];
+        characters_total?: number | null; characters_shown?: number | null;
+      }>(
         () => dramaApi.generateCharacters(pid),
         { kind: `drama-chars-${pid}`, onStage: setStage },
       );
@@ -582,7 +585,11 @@ function AssetsSection({ pid, cards, scenes, onChanged }: {
         const fresh = await dramaApi.getCharacters(pid);
         onChanged(fresh.cards, fresh.scenes);
         const lockedNote = r.skipped_locked ? `,${r.skipped_locked} 张锁定卡未动` : "";
-        toast.ok("资产卡已生成", `角色 ${r.cards.length} 张${lockedNote}`);
+        const truncNote =
+          r.characters_total && r.characters_shown && r.characters_total > r.characters_shown
+            ? `;圣经共 ${r.characters_total} 个角色,已按戏份取前 ${r.characters_shown} 个`
+            : "";
+        toast.ok("资产卡已生成", `角色 ${r.cards.length} 张${lockedNote}${truncNote}`);
       }
     } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); setStage(""); }
   }
@@ -1035,6 +1042,7 @@ function PlanSection({ pid, approved, episodes, onChanged, selectedId, onSelect 
       <p className="card-desc">
         选已定稿的章节范围,按短剧节奏切成一集集(默认一集约 90 秒):每集独立小冲突 + 开场钩子 +
         结尾卡点。重新规划会替换所选范围内的旧集,范围外不动。
+        素材来源:章节蓝图(概要/节拍/悬念) + 本书基因 + 作者雷区(设计钩子卡点时回避)。
       </p>
       <div className="form-grid">
         <div className="field">
@@ -1233,7 +1241,7 @@ function EpisodeDetail({ pid, eid, hasStyle, ratio, renderMode, onEpisodesChange
       </div>
       {/* 现在该点哪个 / 为什么点不动:按状态只说一句 */}
       {!busy && <p className="hint wb-next">{episode ? nextEpisodeTodo(episode) : ""}
-        {!hasScript && <> 剧本取的是<b>{sourceLabel}</b>的正文,那几章没定稿就会报错。</>}
+        {!hasScript && <> 剧本忠实改编<b>{sourceLabel}</b>的定稿正文(超长的章保头尾、中段节选),那几章没定稿就会报错。</>}
         {shots.length > 0 && !hasStyle && <> ⚠ 还没定美术风格卡,「出提示词」会被拦下——先回 ① 定画风。</>}
       </p>}
       {busy && <Banner stage={stage} text="AI 正在处理…" />}

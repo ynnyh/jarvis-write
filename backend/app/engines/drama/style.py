@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.db.models import DramaStyleCard, Project
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.drama.common import (
+    book_block,
     clip,
     concept_block,
     style_card_dict,
@@ -48,7 +49,8 @@ async def generate_style_card(
         title=project.title,
         genre=project.genre.strip() or "不限",
         topic=project.topic.strip() or "(未定)",
-        concept_block=concept_block(project),
+        # 书级资产(本书基因/创作偏好)并入 concept_block 收口:画风贴书味,不贴"网文平均"
+        concept_block=concept_block(project) + book_block(project),
         style_memo_block=style_memo_block(project),
         direction_directive=direction_directive(direction),
     )
@@ -85,7 +87,7 @@ async def recommend_directions(
         title=project.title,
         genre=project.genre.strip() or "不限",
         topic=project.topic.strip() or "(未定)",
-        concept_block=concept_block(project),
+        concept_block=concept_block(project) + book_block(project),
         style_memo_block=style_memo_block(project),
         directions_block=directions_block,
     )
