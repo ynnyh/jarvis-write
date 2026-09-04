@@ -102,6 +102,38 @@ cd frontend && npm run e2e
 
 其中 `frontend/src/test/uiConventions.test.ts` 是版面公约门禁，`backend/tests/test_engine_conventions.py` 是引擎分层门禁，被拦住时只有两条出路：整改，或者证明判据本身写错了——别加豁免名单。
 
+## Prompt 改动守则（评测门禁）
+
+`app/prompts/` 下的模板与判据直接决定生成质量，改前改后必须过一遍评测底座，不能只凭手感：
+
+```bash
+cd backend
+
+# 1. 动手前先留底：跑一次 baseline 并记下 JSON 路径
+python -m app.evals run --fixture po_feng_ji --label before
+
+# 2. 改 prompt 模板（prompt_registry 会自动算内容指纹，不用手写版本号）
+
+# 3. 改完再跑一次
+python -m app.evals run --fixture po_feng_ji --label after
+
+# 4. 出对比表
+python -m app.evals compare <before.json> <after.json>
+```
+
+判定标准（以 `app/evals/report.py` 的自动判定为准）：
+
+- **主审四维**（情节/文笔/节奏/人物）与连贯分不低于 baseline；
+- **门禁 blocker/major 不高于 baseline**；
+- **AI 味指数、章内复读、跨章重复不高于 baseline**；
+- 三类指标有升有降时，宁可再调一轮，不要靠“整体感觉还行”合入。
+
+注意事项：
+
+- 评测会在独立 SQLite 库里新建 `[评测]` 前缀项目，**不会碰你自己的书库**；但如果传了 `--db` 指向真库，非前缀项目存在时会拒绝执行。
+- 评测跑真模型会耗 token：先用 `--chapters 2` 冒烟确认链路通，再跑全 10 章；单次对比只看趋势，下结论前同一配置至少跑两次看方差。
+- 夹具与报告范例见 `app/evals/fixtures/po_feng_ji.json` 与 `app/evals/examples/`。
+
 ## UI 功能的「完成定义」三查
 
 单测管逻辑，管不住「渲染出来长什么样、交互顺不顺」——概念页引擎卡排版、生成按钮无忙态这两个 bug 都是全绿之后用户肉眼发现的。所以凡是动了 UI 的改动，合入前三查是完成定义的一部分：
