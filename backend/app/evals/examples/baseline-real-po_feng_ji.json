@@ -1,0 +1,863 @@
+{
+  "schema": 1,
+  "label": "baseline-real",
+  "fixture": "po_feng_ji",
+  "fixture_title": "破封纪",
+  "started_at": "2026-09-04T11:40:47+00:00",
+  "seconds": 2153.8,
+  "git_commit": "8a7b935",
+  "models": {
+    "quality": {
+      "format": "openai",
+      "model": "deepseek-v4-pro",
+      "host": "token.memoh.net",
+      "source": "eval-plan",
+      "has_key": true
+    },
+    "fast": {
+      "format": "openai",
+      "model": "deepseek-v4-pro",
+      "host": "token.memoh.net",
+      "source": "eval-plan",
+      "has_key": true
+    },
+    "review": {
+      "format": "openai",
+      "model": "deepseek-v4-pro",
+      "host": "token.memoh.net",
+      "source": "eval-plan",
+      "has_key": true
+    }
+  },
+  "project_id": 1,
+  "project_settings": {
+    "review_pass_threshold": 7,
+    "review_auto_revise": true,
+    "review_max_revisions": 3,
+    "target_words": 2500
+  },
+  "prompt_fingerprint": "afb2ba8db3ec",
+  "prompt_manifest": {
+    "birthday.BIRTHDAY_CLICHE_BLACKLIST": "5e12e66b5cd1",
+    "birthday.BIRTHDAY_CONTEXT": "0bbb65f4d5bc",
+    "birthday.BIRTHDAY_EXPAND_PROMPT": "77bf412d20a5",
+    "birthday.BIRTHDAY_GROUNDING_RULE": "efafc2094d54",
+    "birthday.BIRTHDAY_PROMPT_DETAILS": "314996033bb5",
+    "birthday.BIRTHDAY_STRUCTURE_RULES": "7a5762606ae0",
+    "birthday.BIRTHDAY_TAKES_PROMPT": "b5a918ba4a84",
+    "cascade.BATCH_RETITLE_PROMPT": "f109fac127db",
+    "cascade.CHANGE_CLASSIFY_PROMPT": "ac6e73779b15",
+    "cascade.CHAPTER_RETITLE_PROMPT": "9c5d798144a0",
+    "cascade.EDIT_DIRECTIVE_PROMPT": "39f9e3ee4ec6",
+    "cascade.IMPACT_ANALYSIS_PROMPT": "4e12c9ff8d4f",
+    "cascade.OUTLINE_DISCUSS_DISTILL_PROMPT": "d40ab264ad6f",
+    "cascade.OUTLINE_DISCUSS_SYSTEM_PROMPT": "fb819d597466",
+    "cascade.OUTLINE_REGENERATE_PROMPT": "b581c3dc03c7",
+    "chapter.CHAPTER_DRAFT_PROMPT": "245244ac4ec1",
+    "chapter.CHAPTER_FINALIZE_PROMPT": "899ebe2f78ec",
+    "chapter.COMPRESS_REWRITE_PROMPT": "7ab00cc1077d",
+    "chapter.CONTINUE_TAIL_PROMPT": "5a05e05ec808",
+    "chapter.REVISE_CHAT_SYSTEM_PROMPT": "d34e3ca7edf8",
+    "chapter.REVISE_DISTILL_PROMPT": "ef4451345fec",
+    "chapter.ROLLING_SUMMARY_PROMPT": "45ef7c6a30e8",
+    "chapter.SPLIT_POINT_PROMPT": "14f6e484be68",
+    "chapter.STYLE_MEMO_UPDATE_PROMPT": "f865d1c61f16",
+    "clips.CLIPS_CLICHE_BLACKLIST": "0932688af6f8",
+    "clips.CLIPS_EXPAND_PROMPT": "7eef1181e32a",
+    "clips.CLIPS_FREE_CONTEXT": "4d88c26d0c63",
+    "clips.CLIPS_GENERIC_CONTEXT": "44a5c3aac3b0",
+    "clips.CLIPS_GROUNDING_RULE": "fb8d25a53ece",
+    "clips.CLIPS_NOVEL_CONTEXT": "42cf6652fdb7",
+    "clips.CLIPS_PLAY_CONTEXT": "8a05470a9dc6",
+    "clips.CLIPS_PROMPT_DETAILS": "944e5250034d",
+    "clips.CLIPS_STRUCTURE_RULES": "11081988e553",
+    "clips.CLIPS_TAKES_PROMPT": "a3b1320717e6",
+    "consistency.CONSISTENCY_CHECK_PROMPT": "40cec9ed6509",
+    "consistency.EXTRACTION_PROMPT": "c44243b58008",
+    "consistency.GATE_REPAIR_PROMPT": "322f0e3e6757",
+    "consistency.HANDOFF_CONTRACT_PROMPT": "7566cf8dd0ac",
+    "consistency.MOTIF_SCAN_PROMPT": "a848ef370a54",
+    "consistency.PREFLIGHT_CHECK_PROMPT": "5e0dafface91",
+    "consistency.RULE_SCAN_PROMPT": "02f165fe6b71",
+    "dna_capsules.DNA_CAPSULES": "4501eff21ad9",
+    "dna_capsules.GENRE_PAIRWISE": "cbff4b325e03",
+    "drama.CHARACTER_PROMPT": "c6f1b29ead15",
+    "drama.DIRECTION_RECOMMEND_PROMPT": "09d1853954ee",
+    "drama.EPISODE_PLAN_PROMPT": "e91f99cd3a77",
+    "drama.EPISODE_SCRIPT_PROMPT": "86163d06d35d",
+    "drama.PRODUCTION_PACK_PROMPT": "83e4a9ef1851",
+    "drama.REF_SHEET_PROMPT": "f58033763b37",
+    "drama.SCENE_PROMPT": "472f837c3db1",
+    "drama.SHOT_PROMPT_PROMPT": "9bdaeedc99fb",
+    "drama.STORYBOARD_PROMPT": "2953f159f5d2",
+    "drama.STYLE_PROMPT": "f37fe07bd19e",
+    "drama.TRAILER_PROMPT": "f3724105e507",
+    "drama.VOICE_CAST_PROMPT": "3bc24a774069",
+    "editorial.PROOFREAD_PROMPT": "dfb8095b4e31",
+    "editorial.REVIEW_PROMPT": "e343cc112d8a",
+    "film_prompt.CLIP_FRAMINGS": "5a9429497a76",
+    "film_prompt.PROMO_FRAMING": "5e8888f96b64",
+    "film_prompt.SEGMENTED_FILM_PROMPT_TEMPLATE": "48e95c0af68d",
+    "film_prompt.VALID_SEGMENT_S": "4fa3cfa5ce27",
+    "inspire.CHAT_DISTILL_PROMPT": "7c7ab7405c3e",
+    "inspire.CHAT_SYSTEM_PROMPT": "6bc2ccd20190",
+    "inspire.DEVELOP_PROMPT": "aedb813832fa",
+    "inspire.ENGINES_PROMPT": "f1745df72041",
+    "inspire.INSPIRE_PROMPT": "6b0044a0929e",
+    "inspire.MIRROR_DISTILL_PROMPT": "5ad0730ea181",
+    "inspire.REFINE_PROMPT": "4bfb2c424aa0",
+    "media.ANTHEM_PROMPT": "9ad95632d653",
+    "media.COVER_PROMPT": "6195f8b69745",
+    "polish.CRAFT_MODES": "9840a6c17bfe",
+    "polish.DEAI_REWRITE_PROMPT": "b075b07cc901",
+    "polish.DISCUSS_CHAPTER_SYSTEM_PROMPT": "88f3b291eec8",
+    "polish.DISCUSS_SYSTEM_PROMPT": "80d2e3804402",
+    "polish.FACT_LOCK_PROMPT": "af059f1f58d4",
+    "polish.FACT_VERIFY_PROMPT": "996bac8433b4",
+    "polish.FRAGMENT_CRAFT_PROMPT": "c58ac9246faa",
+    "polish.FRAGMENT_POLISH_PROMPT": "684f22ccefaf",
+    "polish.POLISH_PROMPT": "70ff86393ef2",
+    "profile.PROFILE_ABSORB_PROMPT": "0646986c897f",
+    "profile.PROFILE_EXTRACT_PROMPT": "f70701c69166",
+    "promo.PROMO_BRIEF_PROMPT": "e18c772405d4",
+    "promo.PROMO_CHAT_SYSTEM": "e8791c587bdb",
+    "promo.PROMO_CHUNKS_PROMPT": "e00be29b8216",
+    "promo.PROMO_LANDMARK_PROMPT": "22bc516ddd3c",
+    "promo.PROMO_PACK_PROMPT": "2a6a9edfcbdc",
+    "promo.PROMO_SCRIPT_PROMPT": "649b48f5f395",
+    "promo.PROMO_SHOT_PROMPT_PROMPT": "240bc331100f",
+    "promo.PROMO_STORYBOARD_PROMPT": "5df804af5ebc",
+    "promo.PROMO_STYLE_PROMPT": "745f9498771a",
+    "refresh.BEATS_BACKFILL_PROMPT": "bbc3da9d940d",
+    "rolling.MACRO_PLAN_PROMPT": "f8bc835e957b",
+    "rolling.ROLLING_CONTEXT_BLOCK": "fe38678486f8",
+    "series.SERIES_EPISODE_PROMPT": "4fcf2558e463",
+    "series.SERIES_LOOK_PROMPT": "9b103dba905d",
+    "snowflake.ARCH_CHAT_SYSTEM_PROMPT": "26d9a69ef43d",
+    "snowflake.ARCH_DISTILL_PROMPT": "ae4f5642be41",
+    "snowflake.CHAPTER_BLUEPRINT_PROMPT": "48acfa2c40f7",
+    "snowflake.CHARACTER_DYNAMICS_PROMPT": "6a826354b1a5",
+    "snowflake.CHUNKED_BLUEPRINT_PROMPT": "bd43cc8ff4b6",
+    "snowflake.CORE_SEED_PROMPT": "ca411fbce2e5",
+    "snowflake.PLOT_ARCHITECTURE_PROMPT": "d7426e8c32be",
+    "snowflake.WORLD_BUILDING_PROMPT": "966b7225a01f",
+    "style_capsules.CAPSULES": "d3941ffe1aac",
+    "style_capsules.PAIRWISE": "f22770a04e1b",
+    "submission.SUBMISSION_PROMPT": "fd4fe8e9df92",
+    "templates/editorial/proofread.txt": "dfb8095b4e31",
+    "templates/editorial/review.txt": "e343cc112d8a",
+    "templates/profile/absorb.txt": "0646986c897f",
+    "templates/profile/extract.txt": "f70701c69166",
+    "templates/refresh/beats_backfill.txt": "bbc3da9d940d",
+    "templates/rolling/context_block.txt": "fe38678486f8",
+    "templates/rolling/macro_plan.txt": "f8bc835e957b",
+    "templates/submission/submission.txt": "fd4fe8e9df92"
+  },
+  "chapters": [
+    {
+      "n": 1,
+      "title": "碎月初五",
+      "ok": true,
+      "seconds": 107.4,
+      "status": "pending_review",
+      "quarantined": false,
+      "chars": 1901,
+      "target_ratio": 0.76,
+      "paragraphs": 31,
+      "dialogue_ratio": 0.145,
+      "within_repeats": 0,
+      "flavor": {
+        "score": 3.0,
+        "categories": {},
+        "burstiness": 0.672,
+        "burstiness_flag": false,
+        "metronome_groups": 3,
+        "tail_summary_count": 0,
+        "para_uniform": false,
+        "de_ratio": 0.0127,
+        "novelty_4gram": 0.987,
+        "long_repeats": 0
+      },
+      "review": {
+        "scores": {
+          "plot": 8,
+          "prose": 9,
+          "pacing": 8,
+          "character": 8,
+          "continuity": 9
+        },
+        "passed": true,
+        "revision_rounds": 0,
+        "repair_rounds": 0,
+        "comment": "本章完成度很高，失聪设定不是噱头而是贯穿性的感官视角，与丹田镇封形成双重困境。文笔克制，情绪全靠动作和物象外化，断魂崖的钩子收得利落。"
+      },
+      "gate": {
+        "blocker": 0,
+        "major": 0,
+        "minor": 0
+      },
+      "preflight_warnings": 0,
+      "guard_action": "none",
+      "extraction": {
+        "bible": {
+          "entities": 7,
+          "facts": 6,
+          "closed": 0,
+          "knowledge": 0,
+          "relationships": 0
+        },
+        "foreshadow": {
+          "planted": 3,
+          "reinforced": 0,
+          "paid_off": 0,
+          "skipped": 0
+        },
+        "motifs": 3,
+        "canon_suggestions": 2
+      }
+    },
+    {
+      "n": 2,
+      "title": "崖下七日",
+      "ok": true,
+      "seconds": 266.9,
+      "status": "pending_review",
+      "quarantined": false,
+      "chars": 3496,
+      "target_ratio": 1.4,
+      "paragraphs": 61,
+      "dialogue_ratio": 0.0,
+      "within_repeats": 0,
+      "flavor": {
+        "score": 5.0,
+        "categories": {},
+        "burstiness": 0.493,
+        "burstiness_flag": false,
+        "metronome_groups": 17,
+        "tail_summary_count": 0,
+        "para_uniform": false,
+        "de_ratio": 0.0158,
+        "novelty_4gram": 0.99,
+        "long_repeats": 0
+      },
+      "review": {
+        "scores": {
+          "plot": 8,
+          "prose": 8,
+          "pacing": 7,
+          "character": 7,
+          "continuity": 7
+        },
+        "passed": true,
+        "revision_rounds": 1,
+        "repair_rounds": 0,
+        "comment": "本章完成度高，失聪转化为生存策略的设定执行得漂亮，寒玉的发现与身体异动埋钩自然。文笔扎实，画面感强，读者能感受到崖底的冷与险。主要提升空间在于人物内心层次和搜索段落的节奏微调。"
+      },
+      "gate": {
+        "blocker": 0,
+        "major": 1,
+        "minor": 5
+      },
+      "preflight_warnings": 1,
+      "guard_action": "none",
+      "extraction": {
+        "bible": {
+          "entities": 2,
+          "facts": 5,
+          "closed": 0,
+          "knowledge": 0,
+          "relationships": 0
+        },
+        "foreshadow": {
+          "planted": 2,
+          "reinforced": 2,
+          "paid_off": 0,
+          "skipped": 0
+        },
+        "motifs": 3,
+        "canon_suggestions": 1
+      }
+    },
+    {
+      "n": 3,
+      "title": "上交与验看",
+      "ok": true,
+      "seconds": 163.7,
+      "status": "pending_review",
+      "quarantined": false,
+      "chars": 2622,
+      "target_ratio": 1.05,
+      "paragraphs": 61,
+      "dialogue_ratio": 0.07,
+      "within_repeats": 0,
+      "flavor": {
+        "score": 5.0,
+        "categories": {},
+        "burstiness": 0.694,
+        "burstiness_flag": false,
+        "metronome_groups": 6,
+        "tail_summary_count": 0,
+        "para_uniform": false,
+        "de_ratio": 0.0183,
+        "novelty_4gram": 0.99,
+        "long_repeats": 0
+      },
+      "review": {
+        "scores": {
+          "plot": 7,
+          "prose": 8,
+          "pacing": 7,
+          "character": 8,
+          "continuity": 7
+        },
+        "passed": true,
+        "revision_rounds": 0,
+        "repair_rounds": 0,
+        "comment": "本章完成度较高，归途的冻寒质感与殿内验玉的静默张力都写得到位，苏幼白“问得慢”的异常感成功埋下钩子。主要问题在于情节仍处蓄势阶段，丹田异动只露端倪，读者会期待下一章有更实质的推进。"
+      },
+      "gate": {
+        "blocker": 0,
+        "major": 1,
+        "minor": 4
+      },
+      "preflight_warnings": 1,
+      "guard_action": "none",
+      "extraction": {
+        "bible": {
+          "entities": 1,
+          "facts": 6,
+          "closed": 5,
+          "knowledge": 1,
+          "relationships": 0
+        },
+        "foreshadow": {
+          "planted": 2,
+          "reinforced": 2,
+          "paid_off": 0,
+          "skipped": 0
+        },
+        "motifs": 3,
+        "canon_suggestions": 2
+      }
+    },
+    {
+      "n": 4,
+      "title": "裂纹复发",
+      "ok": true,
+      "seconds": 161.0,
+      "status": "pending_review",
+      "quarantined": false,
+      "chars": 2521,
+      "target_ratio": 1.01,
+      "paragraphs": 35,
+      "dialogue_ratio": 0.024,
+      "within_repeats": 0,
+      "flavor": {
+        "score": 5.0,
+        "categories": {},
+        "burstiness": 0.58,
+        "burstiness_flag": false,
+        "metronome_groups": 6,
+        "tail_summary_count": 0,
+        "para_uniform": false,
+        "de_ratio": 0.0248,
+        "novelty_4gram": 0.995,
+        "long_repeats": 0
+      },
+      "review": {
+        "scores": {
+          "plot": 8,
+          "prose": 9,
+          "pacing": 8,
+          "character": 8,
+          "continuity": 7
+        },
+        "passed": true,
+        "revision_rounds": 0,
+        "repair_rounds": 0,
+        "comment": "本章完成度很高，以一场夜修意外将封印指令从传闻变为亲历，右耳听到『封』字的设计极具记忆点。文笔克制而精准，感官细节撑起全部张力，章末钩子自然有力。"
+      },
+      "gate": {
+        "blocker": 0,
+        "major": 1,
+        "minor": 3
+      },
+      "preflight_warnings": 1,
+      "guard_action": "none",
+      "extraction": {
+        "bible": {
+          "entities": 0,
+          "facts": 5,
+          "closed": 2,
+          "knowledge": 2,
+          "relationships": 0
+        },
+        "foreshadow": {
+          "planted": 2,
+          "reinforced": 2,
+          "paid_off": 0,
+          "skipped": 0
+        },
+        "motifs": 3
+      }
+    },
+    {
+      "n": 5,
+      "title": "内门告示",
+      "ok": true,
+      "seconds": 148.1,
+      "status": "pending_review",
+      "quarantined": false,
+      "chars": 2388,
+      "target_ratio": 0.96,
+      "paragraphs": 55,
+      "dialogue_ratio": 0.08,
+      "within_repeats": 0,
+      "flavor": {
+        "score": 3.0,
+        "categories": {},
+        "burstiness": 0.69,
+        "burstiness_flag": false,
+        "metronome_groups": 3,
+        "tail_summary_count": 0,
+        "para_uniform": false,
+        "de_ratio": 0.0213,
+        "novelty_4gram": 0.989,
+        "long_repeats": 0
+      },
+      "review": {
+        "scores": {
+          "plot": 8,
+          "prose": 8,
+          "pacing": 7,
+          "character": 8,
+          "continuity": 7
+        },
+        "passed": true,
+        "revision_rounds": 0,
+        "repair_rounds": 0,
+        "comment": "本章完成度高，递牌一场戏的仪式感和信息密度都到位，木牌与玉佩的号码落差构成有效的章末钩子。文笔冷峻克制，感官细节扎实，人物互动不靠台词硬推，留白得当。"
+      },
+      "gate": {
+        "blocker": 0,
+        "major": 1,
+        "minor": 3
+      },
+      "preflight_warnings": 0,
+      "guard_action": "none",
+      "extraction": {
+        "bible": {
+          "entities": 2,
+          "facts": 4,
+          "closed": 0,
+          "knowledge": 0,
+          "relationships": 0
+        },
+        "foreshadow": {
+          "planted": 1,
+          "reinforced": 1,
+          "paid_off": 0,
+          "skipped": 1
+        },
+        "motifs": 3,
+        "canon_suggestions": 1
+      }
+    },
+    {
+      "n": 6,
+      "title": "玉佩惊变",
+      "ok": true,
+      "seconds": 161.6,
+      "status": "pending_review",
+      "quarantined": false,
+      "chars": 2641,
+      "target_ratio": 1.06,
+      "paragraphs": 47,
+      "dialogue_ratio": 0.074,
+      "within_repeats": 0,
+      "flavor": {
+        "score": 3.0,
+        "categories": {},
+        "burstiness": 0.645,
+        "burstiness_flag": false,
+        "metronome_groups": 3,
+        "tail_summary_count": 0,
+        "para_uniform": false,
+        "de_ratio": 0.022,
+        "novelty_4gram": 0.983,
+        "long_repeats": 0
+      },
+      "review": {
+        "scores": {
+          "plot": 8,
+          "prose": 8,
+          "pacing": 8,
+          "character": 7,
+          "continuity": 8
+        },
+        "passed": true,
+        "revision_rounds": 0,
+        "repair_rounds": 0,
+        "comment": "本章完成度高，器物来历的揭示有分量，氛围与情绪拿捏到位。苏幼白的反应是最大亮点，但她在极度失态后迅速转为冷静交代信息，情绪过渡略陡。整体达到付费追更水准。"
+      },
+      "gate": {
+        "blocker": 0,
+        "major": 0,
+        "minor": 3
+      },
+      "preflight_warnings": 2,
+      "guard_action": "none",
+      "extraction": {
+        "bible": {
+          "entities": 1,
+          "facts": 4,
+          "closed": 1,
+          "knowledge": 0,
+          "relationships": 0
+        },
+        "foreshadow": {
+          "planted": 2,
+          "reinforced": 1,
+          "paid_off": 1,
+          "skipped": 0
+        },
+        "motifs": 2,
+        "canon_suggestions": 1
+      }
+    },
+    {
+      "n": 7,
+      "title": "旧怨浮面",
+      "ok": true,
+      "seconds": 256.6,
+      "status": "pending_review",
+      "quarantined": false,
+      "chars": 2061,
+      "target_ratio": 0.82,
+      "paragraphs": 31,
+      "dialogue_ratio": 0.074,
+      "within_repeats": 0,
+      "flavor": {
+        "score": 2.0,
+        "categories": {},
+        "burstiness": 0.53,
+        "burstiness_flag": false,
+        "metronome_groups": 2,
+        "tail_summary_count": 0,
+        "para_uniform": false,
+        "de_ratio": 0.0164,
+        "novelty_4gram": 0.978,
+        "long_repeats": 0
+      },
+      "review": {
+        "scores": {
+          "plot": 8,
+          "prose": 8,
+          "pacing": 7,
+          "character": 7,
+          "continuity": 7
+        },
+        "passed": true,
+        "revision_rounds": 1,
+        "repair_rounds": 0,
+        "comment": "本章完成度高，旧档揭示与玉佩呼应形成有效情感冲击，文笔克制有质感。主要可优化处在于中段查档细节略密，以及个别意象重复出现削弱了新鲜感。"
+      },
+      "gate": {
+        "blocker": 0,
+        "major": 1,
+        "minor": 3
+      },
+      "preflight_warnings": 3,
+      "guard_action": "none",
+      "extraction": {
+        "bible": {
+          "entities": 2,
+          "facts": 4,
+          "closed": 0,
+          "knowledge": 2,
+          "relationships": 0
+        },
+        "foreshadow": {
+          "planted": 2,
+          "reinforced": 2,
+          "paid_off": 1,
+          "skipped": 0
+        },
+        "motifs": 3,
+        "canon_suggestions": 2
+      }
+    },
+    {
+      "n": 8,
+      "title": "当夜选拔",
+      "ok": true,
+      "seconds": 435.6,
+      "status": "pending_review",
+      "quarantined": false,
+      "chars": 3331,
+      "target_ratio": 1.33,
+      "paragraphs": 43,
+      "dialogue_ratio": 0.062,
+      "within_repeats": 0,
+      "flavor": {
+        "score": 5.0,
+        "categories": {},
+        "burstiness": 0.597,
+        "burstiness_flag": false,
+        "metronome_groups": 7,
+        "tail_summary_count": 0,
+        "para_uniform": false,
+        "de_ratio": 0.0133,
+        "novelty_4gram": 0.977,
+        "long_repeats": 0
+      },
+      "review": {
+        "scores": {
+          "plot": 8,
+          "prose": 8,
+          "pacing": 7,
+          "character": 7,
+          "continuity": 8
+        },
+        "passed": true,
+        "revision_rounds": 2,
+        "repair_rounds": 1,
+        "comment": "本章完成度高，代价显形与实力展示双线并进，画面冷冽克制，'立而不倒'的收束有记忆点。主要问题是赵师兄突袭的动机铺垫略薄，以及陆辰对苏幼白所给珠子的反应过于被动，削弱了主角的主动性。"
+      },
+      "gate": {
+        "blocker": 0,
+        "major": 0,
+        "minor": 7
+      },
+      "preflight_warnings": 3,
+      "guard_action": "none",
+      "extraction": {
+        "bible": {
+          "entities": 3,
+          "facts": 7,
+          "closed": 1,
+          "knowledge": 0,
+          "relationships": 0
+        },
+        "foreshadow": {
+          "planted": 3,
+          "reinforced": 2,
+          "paid_off": 0,
+          "skipped": 0
+        },
+        "motifs": 3,
+        "canon_suggestions": 1
+      }
+    },
+    {
+      "n": 9,
+      "title": "师姐真相",
+      "ok": true,
+      "seconds": 286.2,
+      "status": "pending_review",
+      "quarantined": false,
+      "chars": 2233,
+      "target_ratio": 0.89,
+      "paragraphs": 46,
+      "dialogue_ratio": 0.137,
+      "within_repeats": 0,
+      "flavor": {
+        "score": 5.0,
+        "categories": {},
+        "burstiness": 0.683,
+        "burstiness_flag": false,
+        "metronome_groups": 8,
+        "tail_summary_count": 0,
+        "para_uniform": false,
+        "de_ratio": 0.0141,
+        "novelty_4gram": 0.992,
+        "long_repeats": 0
+      },
+      "review": {
+        "scores": {
+          "plot": 8,
+          "prose": 8,
+          "pacing": 7,
+          "character": 8,
+          "continuity": 8
+        },
+        "passed": true,
+        "revision_rounds": 1,
+        "repair_rounds": 0,
+        "comment": "本章完成度高，身份揭晓一场戏写得克制而有张力，情绪靠动作与物象外化，不靠直陈。玉佩显字一段是核心，但操作过程略长，可再压缩以增强冲击力。"
+      },
+      "gate": {
+        "blocker": 0,
+        "major": 0,
+        "minor": 3
+      },
+      "preflight_warnings": 0,
+      "guard_action": "none",
+      "extraction": {
+        "bible": {
+          "entities": 4,
+          "facts": 8,
+          "closed": 3,
+          "knowledge": 0,
+          "relationships": 4
+        },
+        "foreshadow": {
+          "planted": 3,
+          "reinforced": 0,
+          "paid_off": 5,
+          "skipped": 0
+        },
+        "motifs": 3,
+        "canon_suggestions": 2
+      }
+    },
+    {
+      "n": 10,
+      "title": "第二枚之约",
+      "ok": true,
+      "seconds": 166.4,
+      "status": "pending_review",
+      "quarantined": false,
+      "chars": 2505,
+      "target_ratio": 1.0,
+      "paragraphs": 43,
+      "dialogue_ratio": 0.164,
+      "within_repeats": 0,
+      "flavor": {
+        "score": 5.0,
+        "categories": {},
+        "burstiness": 0.655,
+        "burstiness_flag": false,
+        "metronome_groups": 5,
+        "tail_summary_count": 0,
+        "para_uniform": false,
+        "de_ratio": 0.0138,
+        "novelty_4gram": 0.991,
+        "long_repeats": 0
+      },
+      "review": {
+        "scores": {
+          "plot": 7,
+          "prose": 8,
+          "pacing": 7,
+          "character": 7,
+          "continuity": 8
+        },
+        "passed": true,
+        "revision_rounds": 0,
+        "repair_rounds": 0,
+        "comment": "本章以雪夜留客殿为底，用玉佩异动和残图线索把试炼位、母亲遗玉、北岭旧宗三线拧成一股，续作钩子埋得自然。文笔是最大亮点，克制而有质感；情节推进有效但偏静态，缺少一个让读者当场心跳加速的兑现点。"
+      },
+      "gate": {
+        "blocker": 0,
+        "major": 0,
+        "minor": 3
+      },
+      "preflight_warnings": 2,
+      "guard_action": "none",
+      "extraction": {
+        "bible": {
+          "entities": 5,
+          "facts": 6,
+          "closed": 0,
+          "knowledge": 2,
+          "relationships": 0
+        },
+        "foreshadow": {
+          "planted": 5,
+          "reinforced": 0,
+          "paid_off": 0,
+          "skipped": 2
+        },
+        "motifs": 3,
+        "canon_suggestions": 1
+      }
+    }
+  ],
+  "cross": {
+    "chapters": 10,
+    "repeated_sentences": 2,
+    "repeated_sentences_top": [
+      {
+        "text": "木牌正面的外字被血水浸得发黑",
+        "count": 2
+      },
+      {
+        "text": "左耳里什么也没有",
+        "count": 2
+      }
+    ],
+    "repeated_phrases": 12,
+    "repeated_phrases_top": [
+      {
+        "text": "字七十二",
+        "count": 10
+      },
+      {
+        "text": "什么东西",
+        "count": 10
+      },
+      {
+        "text": "像被什么",
+        "count": 9
+      },
+      {
+        "text": "寒字七十二",
+        "count": 8
+      },
+      {
+        "text": "外门弟子",
+        "count": 8
+      },
+      {
+        "text": "什么时候",
+        "count": 7
+      },
+      {
+        "text": "一下一下",
+        "count": 6
+      },
+      {
+        "text": "苏幼白没",
+        "count": 6
+      }
+    ]
+  },
+  "bible": {
+    "entities": 27,
+    "facts": 55,
+    "foreshadowings": 25
+  },
+  "usage": {
+    "calls": 120,
+    "prompt_tokens": 527433,
+    "completion_tokens": 128068
+  },
+  "aggregate": {
+    "chapters_total": 10,
+    "chapters_ok": 10,
+    "quarantined": 0,
+    "pass_rate": 1.0,
+    "mean_scores": {
+      "plot": 7.8,
+      "prose": 8.2,
+      "pacing": 7.3,
+      "character": 7.5,
+      "continuity": 7.6
+    },
+    "mean_flavor": 4.1,
+    "mean_target_ratio": 1.03,
+    "mean_revision_rounds": 0.5,
+    "total_blockers": 0,
+    "total_major": 5,
+    "total_minor": 34,
+    "preflight_warnings": 13,
+    "within_repeats_total": 0,
+    "repeated_sentences_cross": 2,
+    "repeated_phrases_cross": 12,
+    "facts_extracted": 55,
+    "tokens_per_chapter": 65550,
+    "seconds_per_chapter": 215.3
+  },
+  "chapters_text_path": "baseline-real-po_feng_ji-20260904-201641.chapters.md"
+}
