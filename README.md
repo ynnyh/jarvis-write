@@ -139,6 +139,19 @@
 
 ### 方式二：Docker（自部署多用户服务）
 
+**拉现成镜像（推荐，amd64/arm64 都有）**——每次发 `v*` 标签自动构建推送：
+
+```bash
+docker run -d --name jarvis-write -p 8000:8000 \
+  -e APP_MODE=server -e APP_ENV=prod \
+  -e INVITE_CODE=你的邀请码 -e JWT_SECRET=随机长串 \
+  -e ADMIN_USERNAME=admin -e ADMIN_PASSWORD=强密码 \
+  -v jarvis_write_data:/srv/data \
+  ghcr.io/ynnyh/jarvis-write:latest
+```
+
+**源码构建**：
+
 ```bash
 git clone https://github.com/ynnyh/jarvis-write.git
 cd jarvis-write
