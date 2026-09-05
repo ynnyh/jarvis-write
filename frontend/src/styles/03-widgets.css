@@ -303,12 +303,14 @@
 }
 .gacha-hand .engine-card { margin: 0; }
 
-/* ---- 抽卡舞台(模态):深色暗场 + 居中卡阵,游戏卡选的仪式感 ---- */
+/* ---- 抽卡舞台(模态):皮肤化——官网纸墨(默认)/暗夜黑金/牛皮暖纸 ----
+   舞台颜色全部走 --gs-* 皮肤变量,由 .gacha-modal[data-skin] 各组覆写;
+   组件与规则只消费变量,加皮肤 = 加一组变量。 */
 .gacha-overlay {
   position: fixed;
   inset: 0;
   z-index: 200;
-  background: rgba(20, 20, 17, 0.78);
+  background: var(--gs-overlay, rgba(30, 30, 27, 0.45));
   backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
@@ -318,16 +320,55 @@
 }
 @keyframes gacha-overlay-in { from { opacity: 0; } }
 .gacha-modal {
+  --gs-overlay: rgba(30, 30, 27, 0.45);
+  --gs-bg: #f7f6f1;
+  --gs-fg: #2b2a26;
+  --gs-muted: #6e6c62;
+  --gs-line: rgba(43, 42, 38, 0.14);
+  --gs-card: #fdfcf8;
+  --gs-card-line: #e0ded4;
+  --gs-accent: #b08d4f;
+  --gs-accent-strong: #8a6a33;
+  --gs-on-accent: #fffdf8;
+  --gs-chip-on-bg: rgba(176, 141, 79, 0.18);
   width: min(960px, 100%);
   max-height: 88vh;
   overflow: auto;
-  background: #24292e;
-  color: #ece9e0;
-  border: 1px solid rgba(212, 171, 95, 0.35);
+  background: var(--gs-bg);
+  color: var(--gs-fg);
+  border: 1px solid color-mix(in srgb, var(--gs-accent) 38%, transparent);
   border-radius: 16px;
   padding: 20px 24px 24px;
-  box-shadow: 0 40px 100px -30px rgba(0, 0, 0, 0.8);
+  box-shadow: 0 40px 100px -30px rgba(0, 0, 0, 0.5);
   animation: gacha-modal-in 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* 暗夜黑金:原深色舞台成为可选皮肤 */
+.gacha-modal[data-skin="night"] {
+  --gs-overlay: rgba(20, 20, 17, 0.78);
+  --gs-bg: #24292e;
+  --gs-fg: #ece9e0;
+  --gs-muted: #a89d8b;
+  --gs-line: rgba(236, 233, 224, 0.18);
+  --gs-card: #2c3136;
+  --gs-card-line: rgba(236, 233, 224, 0.18);
+  --gs-accent: #d4ab5f;
+  --gs-accent-strong: #ecd9ae;
+  --gs-on-accent: #24292e;
+  --gs-chip-on-bg: rgba(212, 171, 95, 0.22);
+}
+/* 牛皮暖纸 */
+.gacha-modal[data-skin="kraft"] {
+  --gs-overlay: rgba(58, 48, 32, 0.5);
+  --gs-bg: #f5efdf;
+  --gs-fg: #4a4234;
+  --gs-muted: #8a7d63;
+  --gs-line: rgba(74, 66, 52, 0.18);
+  --gs-card: #fffdf4;
+  --gs-card-line: #e3d7ba;
+  --gs-accent: #a9743a;
+  --gs-accent-strong: #7c5a2b;
+  --gs-on-accent: #fffdf8;
+  --gs-chip-on-bg: rgba(169, 116, 58, 0.18);
 }
 @keyframes gacha-modal-in {
   from { opacity: 0; transform: translateY(14px) scale(0.985); }
@@ -344,32 +385,51 @@
   font-weight: 700;
   margin-right: auto;
 }
+.gacha-skins {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.gacha-skin-dot {
+  background: none;
+  border: 1px solid var(--gs-line);
+  border-radius: 999px;
+  color: var(--gs-muted);
+  padding: 3px 10px;
+  font-size: var(--fs-xs, 12px);
+  cursor: pointer;
+}
+.gacha-skin-dot.on {
+  border-color: var(--gs-accent);
+  color: var(--gs-accent-strong);
+  background: var(--gs-chip-on-bg);
+}
 .gacha-close {
   background: none;
   border: none;
-  color: #a89d8b;
+  color: var(--gs-muted);
   font-size: 22px;
   line-height: 1;
   cursor: pointer;
   padding: 2px 8px;
 }
-.gacha-close:hover { color: #fff; }
+.gacha-close:hover { color: var(--gs-fg); }
 .seg {
   display: inline-flex;
-  border: 1px solid rgba(236, 233, 224, 0.25);
+  border: 1px solid var(--gs-line);
   border-radius: 999px;
   overflow: hidden;
 }
 .seg button {
   background: none;
   border: none;
-  color: rgba(236, 233, 224, 0.65);
+  color: var(--gs-muted);
   padding: 5px 14px;
   font-size: var(--fs-xs, 12px);
   cursor: pointer;
 }
-.seg button.on { background: rgba(212, 171, 95, 0.22); color: #ecd9ae; }
-.gacha-stage-hint { color: #a89d8b; font-size: var(--fs-xs, 12px); }
+.seg button.on { background: var(--gs-chip-on-bg); color: var(--gs-accent-strong); }
+.gacha-stage-hint { color: var(--gs-muted); font-size: var(--fs-xs, 12px); }
 .gacha-modal-foot {
   display: flex;
   align-items: center;
@@ -378,9 +438,9 @@
   flex-wrap: wrap;
   margin-top: 16px;
   padding-top: 14px;
-  border-top: 1px solid rgba(236, 233, 224, 0.14);
+  border-top: 1px solid var(--gs-line);
 }
-/* 舞台上的卡片:更大、深底、旧金描边 */
+/* 舞台上的卡片:更大、皮肤底、旧金描边 */
 .gacha-modal { overflow-x: hidden; }
 .gacha-modal .gacha-hand {
   margin: 14px 0 4px;
@@ -390,23 +450,22 @@
   .gacha-modal .gacha-hand { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 .gacha-modal .gacha-hand .gacha-card,
-.gacha-modal .gacha-hand .gacha-card:hover:not(:disabled),
 .gacha-modal .gacha-hand .gacha-card:hover:not(:disabled) {
   min-height: 150px;
   height: auto;
-  background: linear-gradient(160deg, rgba(212, 171, 95, 0.12), transparent 45%), #2c3136;
-  border-color: rgba(236, 233, 224, 0.18);
-  color: #ece9e0;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--gs-accent) 12%, transparent), transparent 45%), var(--gs-card);
+  border-color: var(--gs-card-line);
+  color: var(--gs-fg);
 }
 .gacha-modal .gacha-card-inner { height: 100%; }
 .gacha-modal .gacha-card-inner b { font-size: var(--fs-lg, 16px); }
-.gacha-modal .gacha-card-inner .gacha-card-desc { color: #b3aa98; }
+.gacha-modal .gacha-card-inner .gacha-card-desc { color: var(--gs-muted); }
 .gacha-modal .gacha-hand .gacha-card.staged {
-  background: linear-gradient(160deg, rgba(212, 171, 95, 0.2), transparent 45%), #2c3136;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--gs-accent) 20%, transparent), transparent 45%), var(--gs-card);
 }
 .gacha-modal .gacha-card.staged {
-  border-color: var(--gold, #d4ab5f);
-  box-shadow: 0 0 0 2px var(--gold, #d4ab5f), 0 18px 44px -20px rgba(212, 171, 95, 0.75);
+  border-color: var(--gs-accent);
+  box-shadow: 0 0 0 2px var(--gs-accent), 0 18px 44px -20px color-mix(in srgb, var(--gs-accent) 75%, transparent);
   transform: translateY(-4px);
 }
 .gacha-modal .gacha-dir-card {
@@ -415,61 +474,85 @@
   align-items: flex-start;
   min-height: 110px;
   white-space: normal;
-  background: #2c3136;
-  border-color: rgba(236, 233, 224, 0.18);
-  color: #ece9e0;
+  background: var(--gs-card);
+  border-color: var(--gs-card-line);
+  color: var(--gs-fg);
 }
 .gacha-modal .gacha-dir-card span {
   white-space: normal;
   word-break: break-all;
+  color: var(--gs-muted);
 }
-.gacha-modal .gacha-dir-card span { color: #a89d8b; }
 .gacha-modal .gacha-hand .gacha-dir-card + .gacha-dir-card { margin-left: 0; }
-.gacha-dir-card:hover {
-  border-color: var(--gold, #d4ab5f);
-  box-shadow: 0 10px 26px -16px rgba(212, 171, 95, 0.6);
+.gacha-modal .gacha-dir-card:hover {
+  border-color: var(--gs-accent);
+  box-shadow: 0 10px 26px -16px color-mix(in srgb, var(--gs-accent) 60%, transparent);
 }
 .gacha-modal .btn-sm {
   background: none;
-  border: 1px solid rgba(236, 233, 224, 0.25);
-  color: rgba(236, 233, 224, 0.8);
+  border: 1px solid var(--gs-line);
+  color: var(--gs-fg);
 }
-.gacha-modal .btn-sm:hover { border-color: var(--gold, #d4ab5f); color: #ecd9ae; }
+.gacha-modal .btn-sm:hover { border-color: var(--gs-accent); color: var(--gs-accent-strong); }
 .gacha-modal .btn-sm.primary {
-  background: var(--gold, #d4ab5f);
-  border-color: var(--gold, #d4ab5f);
-  color: #24292e;
+  background: var(--gs-accent);
+  border-color: var(--gs-accent);
+  color: var(--gs-on-accent);
 }
 .gacha-modal .btn-sm.primary:disabled {
-  background: rgba(212, 171, 95, 0.25);
+  background: color-mix(in srgb, var(--gs-accent) 25%, transparent);
   border-color: transparent;
-  color: rgba(236, 233, 224, 0.5);
+  color: var(--gs-muted);
 }
-.gacha-modal .linkbtn { color: #c9b183; }
+.gacha-modal .linkbtn { color: var(--gs-accent-strong); }
 .gacha-list-group { margin-bottom: 16px; }
 .gacha-list-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
 .gacha-list-head b { font-family: var(--font-serif, "Noto Serif SC", serif); }
-.gacha-list-head .muted { color: #a89d8b; font-size: var(--fs-xs, 12px); }
+.gacha-list-head .muted { color: var(--gs-muted); font-size: var(--fs-xs, 12px); }
 .gacha-list-custom {
   display: flex;
   gap: 8px;
   margin-top: 6px;
   padding-top: 12px;
-  border-top: 1px dashed rgba(236, 233, 224, 0.18);
+  border-top: 1px dashed var(--gs-line);
 }
 .gacha-list-custom input {
   flex: 1;
-  background: rgba(236, 233, 224, 0.08);
-  border: 1px solid rgba(236, 233, 224, 0.2);
-  color: #ece9e0;
+  background: color-mix(in srgb, var(--gs-fg) 6%, transparent);
+  border: 1px solid var(--gs-line);
+  color: var(--gs-fg);
   border-radius: 8px;
   padding: 8px 12px;
 }
-.gacha-list-custom input::placeholder { color: rgba(236, 233, 224, 0.4); }
+.gacha-list-custom input::placeholder { color: var(--gs-muted); }
+.gacha-modal .chip {
+  border-color: var(--gs-card-line);
+  color: var(--gs-fg);
+}
+.gacha-modal .chip.on {
+  border-color: var(--gs-accent);
+  background: var(--gs-chip-on-bg);
+  color: var(--gs-accent-strong);
+}
+.gacha-modal .chip.custom { color: var(--gs-muted); }
+.gacha-wild { color: var(--gs-accent); border-color: currentColor; }
 /* 已选满两张时,未选中的卡置灰不可点 */
 .gacha-hand .engine-card:disabled,
 .gacha-modal .gacha-card:disabled {
   opacity: 0.35;
   cursor: not-allowed;
   transform: none;
+}
+
+/* 无障碍:偏好减少动效时,抽卡翻牌/入场动画直接呈现终态 */
+@media (prefers-reduced-motion: reduce) {
+  .gacha-card,
+  .gacha-dir-card,
+  .flip-in {
+    animation: none;
+  }
+  .gacha-overlay,
+  .gacha-modal {
+    animation: none;
+  }
 }

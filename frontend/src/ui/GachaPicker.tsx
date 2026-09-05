@@ -19,14 +19,31 @@ export interface GachaGroup {
 // 动画/交互参数集中一处(质感流基准)
 export const GACHA_ANIM = { flipMs: 520, staggerMs: 120, handSize: 4 };
 const MODE_KEY = "gacha_mode";
+const SKIN_KEY = "gacha_skin";
 
 type Mode = "gacha" | "list";
+/** 舞台皮肤:paper=官网纸墨(默认) / night=暗夜黑金 / kraft=牛皮暖纸 */
+export type GachaSkin = "paper" | "night" | "kraft";
+const SKINS: { key: GachaSkin; label: string }[] = [
+  { key: "paper", label: "纸墨" },
+  { key: "night", label: "暗夜" },
+  { key: "kraft", label: "牛皮" },
+];
 
 function loadMode(): Mode {
   try {
     return localStorage.getItem(MODE_KEY) === "list" ? "list" : "gacha";
   } catch {
     return "gacha";
+  }
+}
+
+function loadSkin(): GachaSkin {
+  try {
+    const v = localStorage.getItem(SKIN_KEY);
+    return SKINS.some((s) => s.key === v) ? (v as GachaSkin) : "paper";
+  } catch {
+    return "paper";
   }
 }
 
@@ -47,6 +64,7 @@ export default function GachaPicker({ groups, cards, value, onChange }: {
 }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<Mode>(loadMode);
+  const [skin, setSkin] = useState<GachaSkin>(loadSkin);
   // 舞台内状态:group=null → 大方向步;group=组 key → 抽卡步
   const [group, setGroup] = useState<string | null>(null);
   const [hand, setHand] = useState<GachaCard[]>([]);
@@ -65,6 +83,12 @@ export default function GachaPicker({ groups, cards, value, onChange }: {
       localStorage.setItem(MODE_KEY, mode);
     } catch { /* 忽略 */ }
   }, [mode]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SKIN_KEY, skin);
+    } catch { /* 忽略 */ }
+  }, [skin]);
 
   function openStage() {
     setOpen(true);
@@ -118,7 +142,7 @@ export default function GachaPicker({ groups, cards, value, onChange }: {
   // ---------- 舞台(模态) ----------
   return (
     <div className="gacha-overlay" onClick={() => setOpen(false)}>
-      <div className="gacha-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="gacha-modal" data-skin={skin} onClick={(e) => e.stopPropagation()}>
         <div className="gacha-modal-head">
           <div className="seg">
             <button type="button" className={mode === "gacha" ? "on" : ""}
@@ -129,6 +153,17 @@ export default function GachaPicker({ groups, cards, value, onChange }: {
           <span className="gacha-modal-title">
             {mode === "gacha" ? (group ? `「${groupLabel}」` : "选个气质大方向") : "全部玩法"}
           </span>
+          <div className="gacha-skins" role="group" aria-label="舞台皮肤">
+            {SKINS.map((sk) => (
+              <button key={sk.key} type="button"
+                className={"gacha-skin-dot" + (skin === sk.key ? " on" : "")}
+                title={`皮肤:${sk.label}`}
+                aria-pressed={skin === sk.key}
+                onClick={() => setSkin(sk.key)}>
+                {sk.label}
+              </button>
+            ))}
+          </div>
           <button type="button" className="gacha-close" aria-label="关闭"
             onClick={() => setOpen(false)}>×</button>
         </div>
