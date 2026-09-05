@@ -69,3 +69,4 @@ backend/evals_out/
 # 桌面版冻结冒烟产物(本地验证用,不入库)
 backend/dist_smoke/
 backend/build_smoke/
+frontend/dist-app/

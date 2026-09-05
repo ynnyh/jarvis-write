@@ -1,15 +1,21 @@
 // 登录 / 注册页(阶段 8:多用户)。注册需邀请码。
+// 安卓壳(Capacitor)里前端资源在本地,登录前需要先填一次服务器地址(存 localStorage,
+// api.ts 的 apiBase 会把所有请求指过去);浏览器/桌面同源模式不显示该字段。
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { api, token, Me } from "../api";
+import { Capacitor } from "@capacitor/core";
+import { api, getServerBase, setServerBase, token, Me } from "../api";
 
 interface Props { onAuthed: (me: Me) => void; }
+
+const IS_NATIVE = Capacitor.isNativePlatform();
 
 export default function LoginPage({ onAuthed }: Props) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [invite, setInvite] = useState("");
+  const [server, setServer] = useState(getServerBase());
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -17,6 +23,15 @@ export default function LoginPage({ onAuthed }: Props) {
     e.preventDefault();
     setErr(""); setBusy(true);
     try {
+      if (IS_NATIVE) {
+        const addr = server.trim().replace(/\/+$/, "");
+        if (!/^https?:\/\/.+/.test(addr)) {
+          setErr("请先填服务器地址(如 https://your-server.com:8080)——App 需要 连到你的 jarvis-write 服务。");
+          setBusy(false);
+          return;
+        }
+        setServerBase(addr);
+      }
       const r = mode === "login"
         ? await api.login(username.trim(), password)
         : await api.register(username.trim(), password, invite.trim());
@@ -41,6 +56,14 @@ export default function LoginPage({ onAuthed }: Props) {
         </div>
 
         <form onSubmit={submit}>
+          {IS_NATIVE && (
+            <>
+              <label className="fl">服务器地址</label>
+              <input type="url" inputMode="url" value={server}
+                onChange={(e) => setServer(e.target.value)}
+                placeholder="如 https://your-server.com:8080" />
+            </>
+          )}
           <label className="fl">用户名</label>
           <input type="text" value={username} autoComplete="username"
             onChange={(e) => setUsername(e.target.value)} placeholder="2-50 个字符" />

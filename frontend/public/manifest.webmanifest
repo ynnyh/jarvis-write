@@ -1,0 +1,25 @@
+{
+  "name": "jarvis-write · AI 长篇小说工作台",
+  "short_name": "jarvis-write",
+  "description": "可控、改得动、不崩的 AI 长篇小说创作系统——时序故事圣经、伏笔调度、大纲级联、去 AI 味门禁。",
+  "start_url": "/app/",
+  "scope": "/app/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f2f1ec",
+  "theme_color": "#33454e",
+  "icons": [
+    {
+      "src": "/app/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/app/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

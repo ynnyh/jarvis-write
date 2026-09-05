@@ -1,6 +1,6 @@
 // src/birthdayApi.ts — 生日祝福工坊 API 客户端(对齐 backend/app/api/birthday.py)。
 // 独立模块(同 clipsApi/promoApi 的理由);导出用鉴权 fetch(复用 api.ts 的 token)。
-import { ApiError, imageBlobUrl, postImage, token } from "./api";
+import { apiBase, ApiError, imageBlobUrl, postImage, token } from "./api";
 
 const LLM_TIMEOUT = 900_000;
 
@@ -160,7 +160,7 @@ export const birthdayApi = {
   remove: (id: number) => req<{ ok: boolean }>("DELETE", `/api/birthday/${id}`),
   export: (id: number, format: "md" | "srt" | "json") => {
     const tk = token.get();
-    return fetch(`/api/birthday/${id}/export?format=${format}`, {
+    return fetch(apiBase() + `/api/birthday/${id}/export?format=${format}`, {
       headers: tk ? { Authorization: `Bearer ${tk}` } : {},
     }).then(async (res) => {
       if (!res.ok) {

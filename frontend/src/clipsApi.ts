@@ -1,6 +1,6 @@
 // src/clipsApi.ts — 情绪短片工坊 API 客户端(对齐 backend/app/api/clips.py)。
 // 独立模块(同 dramaApi/promoApi 的理由);导出用鉴权 fetch(复用 api.ts 的 token)。
-import { ApiError, imageBlobUrl, postImage, token } from "./api";
+import { ApiError, apiBase, imageBlobUrl, postImage, token } from "./api";
 
 const LLM_TIMEOUT = 900_000;
 
@@ -12,7 +12,7 @@ async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 
     if (body !== undefined) headers["Content-Type"] = "application/json";
     const tk = token.get();
     if (tk) headers["Authorization"] = `Bearer ${tk}`;
-    const res = await fetch(path, {
+    const res = await fetch(apiBase() + path, {
       method, headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: ctrl.signal,
@@ -151,7 +151,7 @@ export const clipsApi = {
   remove: (id: number) => req<{ ok: boolean }>("DELETE", `/api/clips/${id}`),
   export: (id: number, format: "md" | "srt" | "json") => {
     const tk = token.get();
-    return fetch(`/api/clips/${id}/export?format=${format}`, {
+    return fetch(apiBase() + `/api/clips/${id}/export?format=${format}`, {
       headers: tk ? { Authorization: `Bearer ${tk}` } : {},
     }).then(async (res) => {
       if (!res.ok) {

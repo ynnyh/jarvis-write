@@ -1,5 +1,28 @@
 // src/api.ts — 后端 API 客户端(对齐 backend/app/api/*)
-const BASE = "";
+// 服务器地址:默认空 = 同源(桌面单机 / Docker 同宿主 / 官网体验站)。
+// 安卓壳(Capacitor)里前端资源在本地,需要用户在登录页填一次自己的服务器地址,
+// 存 localStorage 后所有请求(apiBase)与导出链接都指过去。
+const SERVER_KEY = "jarvis_server";
+
+export function apiBase(): string {
+  try {
+    return (localStorage.getItem(SERVER_KEY) || "").trim().replace(/\/+$/, "");
+  } catch {
+    return "";
+  }
+}
+
+export function setServerBase(url: string): void {
+  try {
+    const v = url.trim().replace(/\/+$/, "");
+    if (v) localStorage.setItem(SERVER_KEY, v);
+    else localStorage.removeItem(SERVER_KEY);
+  } catch { /* 忽略 */ }
+}
+
+export function getServerBase(): string {
+  return apiBase();
+}
 const TOKEN_KEY = "jarvis_token";
 
 export const token = {
@@ -47,7 +70,7 @@ async function reqForm<T>(path: string, form: FormData, timeoutMs = 120000): Pro
     if (tk) headers["Authorization"] = `Bearer ${tk}`;
     let res: Response;
     try {
-      res = await fetch(BASE + path, { method: "POST", headers, body: form, signal: ctrl.signal });
+      res = await fetch(apiBase() + path, { method: "POST", headers, body: form, signal: ctrl.signal });
     } catch {
       throw netError(ctrl.signal.aborted, timeoutMs);
     }
@@ -79,7 +102,7 @@ async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 
     if (tk) headers["Authorization"] = `Bearer ${tk}`;
     let res: Response;
     try {
-      res = await fetch(BASE + path, {
+      res = await fetch(apiBase() + path, {
         method,
         headers,
         body: body ? JSON.stringify(body) : undefined,
@@ -163,7 +186,7 @@ export async function postImage<T>(path: string, file: File, note = ""): Promise
   const fd = new FormData();
   fd.append("file", file);
   fd.append("note", note);
-  const res = await fetch(BASE + path, { method: "POST", headers: authHeaders(), body: fd });
+  const res = await fetch(apiBase() + path, { method: "POST", headers: authHeaders(), body: fd });
   if (!res.ok) {
     if (res.status === 401) {
       token.clear();
@@ -179,7 +202,7 @@ export async function postImage<T>(path: string, file: File, note = ""): Promise
 /** 读一张鉴权图 → 本地 blob URL:读取端点要 Authorization 头,<img src> 带不了。
  *  调用方负责 URL.revokeObjectURL 释放(共享 RefThumb 组件已带释放逻辑)。 */
 export async function imageBlobUrl(path: string): Promise<string> {
-  const res = await fetch(BASE + path, { headers: authHeaders() });
+  const res = await fetch(apiBase() + path, { headers: authHeaders() });
   if (!res.ok) {
     if (res.status === 401) {
       token.clear();
@@ -201,7 +224,7 @@ async function sseStream(
   const headers: Record<string, string> = { ...(init.headers as Record<string, string> | undefined) };
   const tk = token.get();
   if (tk) headers["Authorization"] = `Bearer ${tk}`;
-  const res = await fetch(BASE + path, { ...init, headers, signal });
+  const res = await fetch(apiBase() + path, { ...init, headers, signal });
   if (!res.ok || !res.body) {
     if (res.status === 401) {
       token.clear();
@@ -272,7 +295,7 @@ export async function downloadFile(path: string, fallbackName: string): Promise<
   const headers: Record<string, string> = {};
   const tk = token.get();
   if (tk) headers["Authorization"] = `Bearer ${tk}`;
-  const res = await fetch(BASE + path, { headers });
+  const res = await fetch(apiBase() + path, { headers });
   if (!res.ok) {
     if (res.status === 401) {
       token.clear();

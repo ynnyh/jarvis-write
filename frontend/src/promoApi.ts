@@ -1,7 +1,7 @@
 // src/promoApi.ts — 宣传片工坊 API 客户端(对齐 backend/app/api/promo.py)。
 // 独立模块(与 dramaApi 同理由:api.ts 并行开发占用);SSE 研讨流复用 api.ts 的导出
 // (token/createSseDecoder/ApiError),api.ts 稳定后可并入。
-import { ApiError, createSseDecoder, token } from "./api";
+import { ApiError, apiBase, createSseDecoder, token } from "./api";
 
 const LLM_TIMEOUT = 900_000;
 
@@ -218,7 +218,7 @@ export const promoApi = {
 
   export: (id: number, format: "md" | "csv" | "srt" | "json") => {
     const tk = token.get();
-    return fetch(`/api/promos/${id}/export?format=${format}`, {
+    return fetch(apiBase() + `/api/promos/${id}/export?format=${format}`, {
       headers: tk ? { Authorization: `Bearer ${tk}` } : {},
     }).then(async (res) => {
       if (!res.ok) {

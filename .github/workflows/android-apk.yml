@@ -1,0 +1,73 @@
+# 安卓 App 构建:Capacitor 壳(远程客户端——壳内是前端产物,运行时连用户自己的
+# jarvis-write 服务,登录页填服务器地址)。触发:推 v* 标签(与桌面版同 tag 同 Release)
+# 或手动。无 keystore secrets 时产出 debug 签名 APK(可直接安装);后续要上正式
+# 签名/应用商店,再补 keystore secrets 与 assembleRelease。
+name: Android APK
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    working-directory: frontend
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: 安装前端依赖
+        run: npm ci --no-fund --no-audit
+
+      - name: 构建前端(壳内产物,相对路径)
+        run: npm run build:app
+
+      - name: 同步到安卓工程
+        run: npx cap sync android
+
+      - name: 构建 Debug APK(可直接安装)
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: 重命名产物
+        run: |
+          mkdir -p ../apk-out
+          cp android/app/build/outputs/apk/debug/app-debug.apk \
+             ../apk-out/jarvis-write_${{ github.ref_name }}_android-debug.apk
+
+      - name: 上传构建产物( always,供手动下载体验)
+        uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-write-android-apk
+          path: apk-out/*.apk
+          if-no-files-found: error
+
+      - name: 追加到同名 Release(仅标签触发)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd ..
+          gh release upload "${{ github.ref_name }}" apk-out/*.apk --clobber

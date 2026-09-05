@@ -12,7 +12,7 @@ import CommandPalette from "../ui/CommandPalette";
 import SearchDialog from "../ui/SearchDialog";
 import { setThemePref } from "../theme";
 import { isDesktop, onMenuAction, openReadWindow } from "../desktop";
-import { api, downloadFile } from "../api";
+import { api, apiBase, downloadFile } from "../api";
 import { toast } from "../ui/Toaster";
 import { errMsg } from "../pollJob";
 import InspirePanel from "../panels/InspirePanel";
@@ -472,10 +472,10 @@ export default function ProjectPage() {
               {doneCount > 0 && (
                 <div className="stat">导出
                   <b className="stat-links">
-                    <a href={`/api/projects/${pid}/export/txt`}
+                    <a href={`${apiBase()}/api/projects/${pid}/export/txt`}
                       onClick={(e) => { e.preventDefault(); exportBook("export/txt", "txt"); }}>txt</a>
                     {" · "}
-                    <a href={`/api/projects/${pid}/export/epub`}
+                    <a href={`${apiBase()}/api/projects/${pid}/export/epub`}
                       onClick={(e) => { e.preventDefault(); exportBook("export/epub", "epub"); }}>epub</a>
                   </b>
                 </div>

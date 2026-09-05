@@ -2,7 +2,7 @@
 // 轻量档:文+图 → 视频,生成外包给 autodl.art 托管的 ComfyUI 工作流;
 // 这里只管「配置读写 / 提交出片 / 版本历史 / 采用某版 / 读草片」。
 // 独立成模块的理由与 dramaApi 相同:api.ts 被主线占用,避免同文件编辑冲突。
-import { ApiError, token } from "./api";
+import { apiBase, ApiError, token } from "./api";
 import type { DramaShot } from "./dramaApi";
 
 async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 30000): Promise<T> {
@@ -13,7 +13,7 @@ async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 
     if (body) headers["Content-Type"] = "application/json";
     const tk = token.get();
     if (tk) headers["Authorization"] = `Bearer ${tk}`;
-    const res = await fetch(path, {
+    const res = await fetch(apiBase() + path, {
       method, headers,
       body: body ? JSON.stringify(body) : undefined,
       signal: ctrl.signal,
@@ -113,7 +113,7 @@ export const renderApi = {
 
   /** 读草片视频 → 本地 blob URL(<video src> 带不了 Authorization 头,同图片缩略图的思路)。 */
   async taskBlobUrl(taskId: number): Promise<string> {
-    const res = await fetch(`/api/render/tasks/${taskId}/file`, { headers: authHeaders() });
+    const res = await fetch(apiBase() + `/api/render/tasks/${taskId}/file`, { headers: authHeaders() });
     if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
     return URL.createObjectURL(await res.blob());
   },
@@ -128,7 +128,7 @@ export const renderApi = {
       "POST", `/api/projects/${pid}/drama/shots/${sid}/adopt-prev-frame`, {}),
   /** 末帧缩略图(<img> 带不了 Authorization 头,取 blob 转本地 URL)。 */
   async lastFrameBlobUrl(taskId: number): Promise<string> {
-    const res = await fetch(`/api/render/tasks/${taskId}/last-frame`, { headers: authHeaders() });
+    const res = await fetch(apiBase() + `/api/render/tasks/${taskId}/last-frame`, { headers: authHeaders() });
     if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
     return URL.createObjectURL(await res.blob());
   },
@@ -138,7 +138,7 @@ export const renderApi = {
     postImage<{ bgm: string }>(
       `/api/projects/${pid}/drama/episodes/${eid}/bgm`, file),
   async episodeBgmBlobUrl(pid: number, eid: number): Promise<string> {
-    const res = await fetch(`/api/projects/${pid}/drama/episodes/${eid}/bgm`, { headers: authHeaders() });
+    const res = await fetch(apiBase() + `/api/projects/${pid}/drama/episodes/${eid}/bgm`, { headers: authHeaders() });
     if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
     return URL.createObjectURL(await res.blob());
   },

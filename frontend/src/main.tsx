@@ -63,3 +63,13 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     </QueryClientProvider>
   </React.StrictMode>
 );
+
+// PWA:生产构建注册最小 Service Worker(仅满足「安装到主屏幕」条件,不做缓存——
+// 壳资源带 hash 且有版本提醒机制,贸然缓存会造成发版后旧壳错配;见 public/sw.js)。
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/app/sw.js").catch(() => {
+      /* 注册失败不影响使用:SW 只服务于安装能力 */
+    });
+  });
+}

@@ -10,9 +10,12 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "build:app": "vite build --base=./ --outDir dist-app"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.1",
+    "@capacitor/core": "^8.5.1",
     "@codemirror/commands": "^6.11.0",
     "@codemirror/search": "^6.7.2",
     "@codemirror/state": "^6.7.4",
@@ -26,6 +29,7 @@
     "react-router-dom": "^6.28.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.1",
     "@eslint/js": "^9.39.5",
     "@playwright/test": "^1.62.1",
     "@testing-library/jest-dom": "^7.0.0",
