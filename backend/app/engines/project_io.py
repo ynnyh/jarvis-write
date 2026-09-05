@@ -65,21 +65,32 @@ _EXPORT_TABLES: list[tuple[type, dict[str, str]]] = [
     (Chapter, {"project_id": "projects"}),
     (Entity, {"project_id": "projects"}),
     (Fact, {"entity_id": "entities", "project_id": "projects"}),
-    (Relationship, {"project_id": "projects"}),
+    (
+        Relationship,
+        {
+            "project_id": "projects",
+            "from_entity_id": "entities",
+            "to_entity_id": "entities",
+        },
+    ),
     (Foreshadowing, {"project_id": "projects"}),
     (WritingCard, {"project_id": "projects"}),
 ]
 
-# 导出时排除的字段(用户级 / 系统级 / 自增 id)
-_EXCLUDE_FIELDS = frozenset({"id", "user_id", "created_at", "updated_at"})
+# 导出时排除的字段(用户级 / 系统级 / 时间戳)。
+# 注:id 必须保留在行数据里——导入器靠「旧 id → 新 id」映射重建跨表外键
+# (facts.entity_id / relationships.from_entity_id / chapters.outline_id 等),
+# 丢了 id,这些引用在导入时就无法落位。project 行本身仍不带 id
+# (新项目 id 由数据库分配,映射走 source.project_id)。
+_EXCLUDE_FIELDS = frozenset({"user_id", "created_at", "updated_at"})
 
 
-def _row_to_dict(row: Any) -> dict[str, Any]:
+def _row_to_dict(row: Any, *, include_id: bool = True) -> dict[str, Any]:
     """把 ORM 行转成可序列化的 dict,排除不需要的字段。"""
     data: dict[str, Any] = {}
     for col in row.__table__.columns:
         name = col.name
-        if name in _EXCLUDE_FIELDS:
+        if name in _EXCLUDE_FIELDS or (name == "id" and not include_id):
             continue
         value = getattr(row, name)
         # JSON 字段可能是 dict/list,直接保留;datetime 转 ISO 字符串
@@ -115,10 +126,10 @@ def export_project(db: Session, project_id: int) -> dict[str, Any]:
             "project_id": project_id,
             "title": project.title,
         },
-        "project": _row_to_dict(project),
+            "project": _row_to_dict(project, include_id=False),
     }
 
-    # 按表导出
+    # 按表导出(project 行不带 id:新项目 id 由导入方数据库分配)
     for model, _fk_map in _EXPORT_TABLES:
         table_name = model.__tablename__
         rows = db.query(model).filter(model.project_id == project_id).all()
@@ -199,8 +210,8 @@ def import_project(
         for row_data in rows_data:
             row_dict = dict(row_data)
 
-            # 保存旧 id 用于映射
-            old_id = row_data.pop("id", None)
+            # 保存旧 id 用于映射(必须从 row_dict 里 pop:显式带 id 插入会撞自增唯一键)
+            old_id = row_dict.pop("id", None)
 
             # 重新映射外键
             for fk_field, target_table in fk_map.items():
@@ -210,7 +221,8 @@ def import_project(
                     if new_fk is not None:
                         row_dict[fk_field] = new_fk
                     else:
-                        # 外键指向的记录不存在(可能导出时遗漏),置空
+                        # 外键指向的记录不存在(可能导出时遗漏),置空;
+                        # 若该列 NOT NULL,则本行会在下方 savepoint 回滚中被跳过
                         logger.warning(
                             "  %s 行 %s 的外键 %s=%s 找不到映射,置空",
                             table_name, old_id, fk_field, old_fk,
@@ -221,10 +233,13 @@ def import_project(
             if "project_id" in row_dict:
                 row_dict["project_id"] = project.id
 
+            # 单行一个 savepoint:坏行(如旧格式导出里无法落位的外键)只丢弃自己,
+            # 不污染 session,后续行与整次导入继续
             try:
-                row = model(**row_dict)
-                db.add(row)
-                db.flush()
+                with db.begin_nested():
+                    row = model(**row_dict)
+                    db.add(row)
+                    db.flush()
                 if old_id is not None:
                     id_mappings[table_name][old_id] = row.id
             except Exception as e:

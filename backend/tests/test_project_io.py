@@ -24,6 +24,7 @@ from app.db.models import (
     Foreshadowing,
     Outline,
     Project,
+    Relationship,
     User,
 )
 from app.db.session import SessionLocal
@@ -107,6 +108,39 @@ def sample_project(db: Session, test_user: User) -> Project:
     db.add(entity)
     db.flush()
 
+    # 时序事实(挂在实体上,导出/导入需重建 entity_id 映射)
+    db.add(
+        Fact(
+            project_id=project.id,
+            entity_id=entity.id,
+            fact_type="state",
+            content="练气六层,修为五年未进",
+            valid_from=1,
+            valid_until=None,
+            importance="major",
+            source_chapter=1,
+        )
+    )
+
+    # 关系边(双向实体外键,同需重建映射)
+    entity_b = Entity(
+        project_id=project.id,
+        name="师父",
+        entity_type="character",
+    )
+    db.add(entity_b)
+    db.flush()
+    db.add(
+        Relationship(
+            project_id=project.id,
+            from_entity_id=entity.id,
+            to_entity_id=entity_b.id,
+            relation="师徒",
+            valid_from=1,
+            valid_until=None,
+        )
+    )
+
     db.commit()
     db.refresh(project)
     return project
@@ -123,7 +157,7 @@ def test_export_project_contains_all_tables(db: Session, sample_project: Project
     # 各表数据存在
     assert len(data["outlines"]) == 1
     assert len(data["chapters"]) == 1
-    assert len(data["entities"]) == 1
+    assert len(data["entities"]) == 2
 
     # 不包含敏感字段
     assert "user_id" not in data["project"]
@@ -182,8 +216,7 @@ def test_import_project_data_integrity(db: Session, sample_project: Project, tes
 
     # 实体
     entities = db.query(Entity).filter(Entity.project_id == new_project.id).all()
-    assert len(entities) == 1
-    assert entities[0].name == "主角"
+    assert {e.name for e in entities} == {"主角", "师父"}
 
 
 def test_export_import_roundtrip(db: Session, sample_project: Project, test_user: User):
@@ -204,6 +237,58 @@ def test_export_import_roundtrip(db: Session, sample_project: Project, test_user
 
     # 章节内容一致
     assert data1["chapters"][0]["final_content"] == data2["chapters"][0]["final_content"]
+
+
+def test_roundtrip_rebinds_fact_and_relationship_fks(
+    db: Session, sample_project: Project, test_user: User
+):
+    """事实/关系行的实体外键在导入后必须落到新实体 id 上(回归:旧版导出丢 id,
+    facts.entity_id 无法映射,导入直接崩)。"""
+    data = export_project(db, sample_project.id)
+    new_project = import_project(db, data, user_id=test_user.id)
+
+    new_entities = {e.name: e.id for e in db.query(Entity).filter(Entity.project_id == new_project.id)}
+    assert set(new_entities) == {"主角", "师父"}
+
+    facts = db.query(Fact).filter(Fact.project_id == new_project.id).all()
+    assert len(facts) == 1
+    assert facts[0].entity_id == new_entities["主角"]
+    assert facts[0].content == "练气六层,修为五年未进"
+
+    rels = db.query(Relationship).filter(Relationship.project_id == new_project.id).all()
+    assert len(rels) == 1
+    assert rels[0].from_entity_id == new_entities["主角"]
+    assert rels[0].to_entity_id == new_entities["师父"]
+
+
+def test_import_skips_poisoned_row_without_aborting(
+    db: Session, sample_project: Project, test_user: User
+):
+    """单行外键无法落位(脏数据/旧格式导出)只跳过该行,不拖垮整次导入。"""
+    data = export_project(db, sample_project.id)
+    good_fact_count = len(data["facts"])
+    data["facts"].append(
+        {
+            "id": 99999,
+            "project_id": data["source"]["project_id"],
+            "entity_id": 424242,  # 不存在的实体
+            "fact_type": "state",
+            "content": "孤儿事实",
+            "valid_from": 1,
+            "valid_until": None,
+            "importance": "major",
+            "source_chapter": 1,
+        }
+    )
+
+    new_project = import_project(db, data, user_id=test_user.id)
+
+    # 章节/实体等其他表不受影响
+    assert db.query(Chapter).filter(Chapter.project_id == new_project.id).count() == 1
+    # 坏行被跳过,好行照常进入
+    facts = db.query(Fact).filter(Fact.project_id == new_project.id).all()
+    assert len(facts) == good_fact_count
+    assert all(f.content != "孤儿事实" for f in facts)
 
 
 def test_import_invalid_format_version(db: Session, sample_project: Project, test_user: User):
