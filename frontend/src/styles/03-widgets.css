@@ -267,3 +267,9 @@
   gap: 8px;
   margin-top: 8px;
 }
+
+/* 引擎卡复用翻牌入场(与 gacha-flip-in 同一关键帧,叠加在 engine-card 自身样式上) */
+.flip-in {
+  animation: gacha-flip-in var(--gacha-flip-ms, 520ms) cubic-bezier(0.3, 1.25, 0.4, 1) backwards;
+}
+.gacha-hand .engine-card { margin: 0; }
