@@ -73,9 +73,14 @@ class SearchResponse(BaseModel):
 
 
 def _snippet(content: str, q: str, width: int = 46) -> tuple[str, int]:
-    """就地裁剪第一个命中处前后的上下文;统计总命中次数。"""
-    hits = content.count(q)
-    idx = content.find(q)
+    """就地裁剪第一个命中处前后的上下文;统计总命中次数。
+
+    大小写不敏感,与 SQL 两条路径(LIKE 对 ASCII、trigram 默认折叠)对齐:
+    在 lower 副本上定位/计数、回原文切片,英文命中不再因大小写相异被误丢。
+    """
+    low, q_low = content.lower(), q.lower()
+    hits = low.count(q_low)
+    idx = low.find(q_low)
     if idx < 0:
         return (content[:width] + "…") if len(content) > width else content, 0
     start = max(0, idx - width // 3)

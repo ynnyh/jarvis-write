@@ -147,3 +147,29 @@ def test_empty_query_rejected(client):
     pid, headers = _seed(client, "fts_owner_g")
     r = client.get(f"/api/projects/{pid}/search", params={"q": "   "}, headers=headers)
     assert r.status_code == 422
+
+
+def test_case_insensitive_english(client):
+    """英文大小写:SQL(LIKE/trigram)不分大小写,Python 计数与摘要同样不分,
+    大小写相异的英文命中不再被 n_hits==0 过滤误丢。"""
+    from app.db.models import Chapter
+    from app.db.session import SessionLocal
+
+    pid, headers = _seed(client, "fts_owner_h")
+    db = SessionLocal()
+    try:
+        db.add(Chapter(project_id=pid, chapter_number=3, status="approved",
+                       final_content="Kern 学长把校音器递过来,寒字七十二的拓片压在箱底。"))
+        db.commit()
+    finally:
+        db.close()
+
+    # MATCH 路径(4 字):小写查询命中大写原文,计数 ≥1
+    r = client.get(f"/api/projects/{pid}/search", params={"q": "kern"}, headers=headers)
+    chs = r.json()["grouped"]["chapter"]
+    assert any(h["chapter_number"] == 3 and h["hits"] == 1 for h in chs)
+
+    # LIKE 路径(2 字):同样命中,且摘要保留原文大小写
+    r = client.get(f"/api/projects/{pid}/search", params={"q": "ke"}, headers=headers)
+    chs = r.json()["grouped"]["chapter"]
+    assert any(h["chapter_number"] == 3 and "Kern" in h["snippet"] for h in chs)
