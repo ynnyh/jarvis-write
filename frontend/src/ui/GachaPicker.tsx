@@ -22,13 +22,24 @@ const MODE_KEY = "gacha_mode";
 const SKIN_KEY = "gacha_skin";
 
 type Mode = "gacha" | "list";
-/** 舞台皮肤:paper=官网纸墨(默认) / night=暗夜黑金 / kraft=牛皮暖纸 */
-export type GachaSkin = "paper" | "night" | "kraft";
+/** 舞台皮肤:auto=跟随整体主题(默认,亮→纸墨/暗→暗夜) / paper / night / kraft */
+export type GachaSkin = "auto" | "paper" | "night" | "kraft";
 const SKINS: { key: GachaSkin; label: string }[] = [
+  { key: "auto", label: "跟随" },
   { key: "paper", label: "纸墨" },
   { key: "night", label: "暗夜" },
   { key: "kraft", label: "牛皮" },
 ];
+
+function appThemeDark(): boolean {
+  return document.documentElement.dataset.theme === "dark";
+}
+
+/** auto 时按整体主题解析:亮→paper,暗→night */
+function resolveSkin(skin: GachaSkin): Exclude<GachaSkin, "auto"> {
+  if (skin === "auto") return appThemeDark() ? "night" : "paper";
+  return skin;
+}
 
 function loadMode(): Mode {
   try {
@@ -41,9 +52,9 @@ function loadMode(): Mode {
 function loadSkin(): GachaSkin {
   try {
     const v = localStorage.getItem(SKIN_KEY);
-    return SKINS.some((s) => s.key === v) ? (v as GachaSkin) : "paper";
+    return SKINS.some((s) => s.key === v) ? (v as GachaSkin) : "auto";
   } catch {
-    return "paper";
+    return "auto";
   }
 }
 
@@ -65,6 +76,8 @@ export default function GachaPicker({ groups, cards, value, onChange }: {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<Mode>(loadMode);
   const [skin, setSkin] = useState<GachaSkin>(loadSkin);
+  // 舞台实际渲染用的皮肤;auto 时跟随整体主题(data-theme),且在弹层开着时实时响应切换
+  const [effectiveSkin, setEffectiveSkin] = useState<"paper" | "night" | "kraft">(() => resolveSkin(loadSkin()));
   // 舞台内状态:group=null → 大方向步;group=组 key → 抽卡步
   const [group, setGroup] = useState<string | null>(null);
   const [hand, setHand] = useState<GachaCard[]>([]);
@@ -88,6 +101,15 @@ export default function GachaPicker({ groups, cards, value, onChange }: {
     try {
       localStorage.setItem(SKIN_KEY, skin);
     } catch { /* 忽略 */ }
+  }, [skin]);
+
+  useEffect(() => {
+    setEffectiveSkin(resolveSkin(skin));
+    if (skin !== "auto") return;
+    // 跟随模式:观察 <html data-theme> 变化,弹层开着时切主题也实时跟随
+    const obs = new MutationObserver(() => setEffectiveSkin(resolveSkin("auto")));
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => obs.disconnect();
   }, [skin]);
 
   function openStage() {
@@ -142,7 +164,7 @@ export default function GachaPicker({ groups, cards, value, onChange }: {
   // ---------- 舞台(模态) ----------
   return (
     <div className="gacha-overlay" onClick={() => setOpen(false)}>
-      <div className="gacha-modal" data-skin={skin} onClick={(e) => e.stopPropagation()}>
+      <div className="gacha-modal" data-skin={effectiveSkin} onClick={(e) => e.stopPropagation()}>
         <div className="gacha-modal-head">
           <div className="seg">
             <button type="button" className={mode === "gacha" ? "on" : ""}
