@@ -51,6 +51,7 @@ const BOOK_TABS: { key: BookTab; label: string }[] = [
   { key: "overview", label: "概览" },
   { key: "characters", label: "人物" },
   { key: "bible", label: "故事圣经" },
+  { key: "timeline", label: "时间线" },
   { key: "foreshadow", label: "伏笔" },
   { key: "motifs", label: "桥段" },
   { key: "publish", label: "投稿" },

@@ -560,6 +560,16 @@ export interface CharacterCard {
   relations: CharacterRelation[];
 }
 export interface CharactersOut { characters: CharacterCard[]; other_entities_count: number; }
+export interface FactSpan {
+  content: string; fact_type: string; importance: string;
+  valid_from: number; valid_until: number | null;
+}
+export interface FactTrack {
+  entity_id: number; name: string; retired: boolean; facts: FactSpan[];
+}
+export interface FactsTimelineOut {
+  tracks: FactTrack[]; other_entities_count: number; max_chapter: number;
+}
 // 全书概览(看板「概览」页签):一次聚合章节状态/版本对照、伏笔区间、人物出场
 export interface OverviewChapter {
   chapter_number: number; title: string; chapter_role: string;
@@ -1169,6 +1179,9 @@ export const api = {
   // 全书剧情时间线(各章章末契约聚合,零 LLM)
   timeline: (pid: number) =>
     req<{ items: TimelineItem[] }>("GET", `/api/projects/${pid}/timeline`),
+  // 时序事实时间线(每角色一条轨道,事实为章节区间条;与故事圣经·时间机同源)
+  factsTimeline: (pid: number) =>
+    req<FactsTimelineOut>("GET", `/api/projects/${pid}/facts-timeline`),
   createCharacter: (pid: number, payload: { name: string; aliases?: string[]; profile?: string }) =>
     req<CharacterCard>("POST", `/api/projects/${pid}/characters`, payload),
   setCharacterRetired: (pid: number, entityId: number, retired: boolean) =>

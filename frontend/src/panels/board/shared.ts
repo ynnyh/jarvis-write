@@ -1,7 +1,7 @@
 // 一致性看板四子看板共享的类型与常量(拆自 BoardPanel.tsx)。
 import { Outline } from "../../api";
 
-export type BoardTab = "overview" | "characters" | "bible" | "foreshadow" | "motifs";
+export type BoardTab = "overview" | "characters" | "bible" | "timeline" | "foreshadow" | "motifs";
 
 export interface Props { pid: number; outlines: Outline[]; onGotoChapter?: (n: number) => void; }
 

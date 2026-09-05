@@ -349,6 +349,99 @@ async def list_characters(
     )
 
 
+class FactSpanOut(BaseModel):
+    """时间线上的一条事实区间条。"""
+    content: str
+    fact_type: str
+    importance: str
+    valid_from: int
+    valid_until: int | None
+
+
+class FactTrackOut(BaseModel):
+    """一条角色轨道:该角色的全部时序事实(含已关区间,历史也是时间线的一部分)。"""
+    entity_id: int
+    name: str
+    retired: bool
+    facts: list[FactSpanOut]
+
+
+class FactsTimelineOut(BaseModel):
+    tracks: list[FactTrackOut]
+    other_entities_count: int
+    max_chapter: int
+
+
+_TRACK_LIMIT = 15
+
+
+@router.get("/facts-timeline", response_model=FactsTimelineOut)
+async def facts_timeline(
+    project_id: int,
+    db: Session = Depends(get_db),
+):
+    """时序事实时间线:每条角色轨道把该角色的时序事实画成章节区间条。
+
+    「第 N 章时他是什么状态」的可视化版(与故事圣经·时间机同源同数据):
+    区间条 = valid_from→valid_until,开区间画到 max_chapter。
+    轨道按当前有效事实数排序,最多 15 条,塞不下靠 other_entities_count 提示。
+    """
+    get_project_or_404(db, project_id)
+    outlines = db.query(Outline).filter(Outline.project_id == project_id).all()
+    max_chapter = max((o.chapter_number for o in outlines), default=0)
+
+    entities = (
+        db.query(Entity)
+        .filter(Entity.project_id == project_id, Entity.entity_type == "character")
+        .order_by(Entity.id)
+        .all()
+    )
+    by_entity = {e.id: e for e in entities}
+    facts = (
+        db.query(Fact)
+        .filter(Fact.project_id == project_id)
+        .order_by(Fact.valid_from, Fact.id)
+        .all()
+    )
+    grouped: dict[int, list[Fact]] = {}
+    for f in facts:
+        if f.entity_id in by_entity:
+            grouped.setdefault(f.entity_id, []).append(f)
+
+    ranked = sorted(
+        entities,
+        key=lambda e: sum(
+            1 for f in grouped.get(e.id, []) if f.valid_until is None
+        ),
+        reverse=True,
+    )
+    tracks = [
+        FactTrackOut(
+            entity_id=e.id,
+            name=e.name,
+            retired=bool(e.retired),
+            facts=[
+                FactSpanOut(
+                    content=f.content,
+                    fact_type=f.fact_type,
+                    importance=f.importance,
+                    valid_from=f.valid_from,
+                    valid_until=f.valid_until,
+                )
+                for f in grouped.get(e.id, [])
+            ],
+        )
+        for e in ranked[:_TRACK_LIMIT]
+        if grouped.get(e.id)
+    ]
+    shown = {t.entity_id for t in tracks}
+    return FactsTimelineOut(
+        tracks=tracks,
+        other_entities_count=sum(1 for e in entities if e.id not in shown),
+        max_chapter=max_chapter,
+    )
+
+
 @router.post("/characters", response_model=CharacterOut)
 async def create_character(
     project_id: int,
