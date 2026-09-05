@@ -48,6 +48,7 @@ src-tauri/updater.key
 
 # 本地 AI 编码助手会话状态(计划/快照,机器私有)
 .zcode/
+.workbuddy/
 
 # IDE / OS
 .idea/
