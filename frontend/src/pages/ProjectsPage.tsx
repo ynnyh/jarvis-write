@@ -17,6 +17,12 @@ export default function ProjectsPage() {
   const [err, setErr] = useState("");
   const nav = useNavigate();
 
+  // 整本导入(TXT/DOCX):选文件 + 可改书名,后端解析分卷/章节建为新项目
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importTitle, setImportTitle] = useState("");
+  const [importing, setImporting] = useState(false);
+
   // 重命名编辑态:editingId 为正在改名的项目
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editTitle, setEditTitle] = useState("");
@@ -24,6 +30,24 @@ export default function ProjectsPage() {
   useEffect(() => {
     api.listProjects().then(setProjects).catch((e) => setErr(errMsg(e)));
   }, []);
+
+  async function submitImport() {
+    if (!importFile) { setErr("先选一个 .txt / .docx 文件"); return; }
+    setImporting(true); setErr("");
+    try {
+      const r = await api.importBook(importFile, importTitle);
+      setImportOpen(false);
+      setImportFile(null);
+      setImportTitle("");
+      toast.ok(`已导入《${r.title}》`, `共 ${r.chapters} 章,可直接阅读、检索或跑已有书翻新`);
+      const fresh = await api.listProjects();
+      setProjects(fresh);
+    } catch (e) {
+      toast.err("导入失败", errMsg(e));
+    } finally {
+      setImporting(false);
+    }
+  }
 
   function startRename(p: Project) {
     setEditingId(p.id);
@@ -98,8 +122,44 @@ export default function ProjectsPage() {
       <div className="page-head">
         <h1>我的小说</h1>
         {/* 三个工坊的入口在左侧全局导航(ui/Sidebar);这里只留本书创作的主行动 */}
-        <button className="primary" onClick={() => nav("/new")}>+ 新建小说</button>
+        <div className="actions">
+          <button onClick={() => setImportOpen(true)}>导入旧书</button>
+          <button className="primary" onClick={() => nav("/new")}>+ 新建小说</button>
+        </div>
       </div>
+
+      {importOpen && (
+        <div className="dlg-overlay" onClick={() => !importing && setImportOpen(false)}>
+          <div className="dlg-content" onClick={(e) => e.stopPropagation()}>
+            <h2 className="dlg-title">导入旧书</h2>
+            <p className="dlg-body">
+              支持 .txt / .docx(≤20MB)。自动识别分卷与章节标题(第X章/序章/番外/后记…),
+              没有章标题就按段落长度切章;导入的正文按「已定稿」入库,可直接阅读、检索或跑已有书翻新。
+            </p>
+            <div className="actions mt-2" style={{ flexDirection: "column", alignItems: "stretch" }}>
+              <input
+                type="file"
+                accept=".txt,.docx,.text"
+                onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
+              />
+              <input
+                type="text"
+                placeholder="书名(留空用文件名)"
+                value={importTitle}
+                maxLength={100}
+                onChange={(e) => setImportTitle(e.target.value)}
+              />
+              {err && <span className="badge err">{err}</span>}
+            </div>
+            <div className="dlg-actions">
+              <button disabled={importing} onClick={() => setImportOpen(false)}>取消</button>
+              <button className="primary" disabled={importing || !importFile} onClick={submitImport}>
+                {importing ? "解析导入中…" : "开始导入"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="proj-grid">
         {projects.map((p) => (

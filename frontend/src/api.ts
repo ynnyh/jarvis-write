@@ -37,6 +37,38 @@ function netError(timedOut: boolean, timeoutMs: number): ApiError {
   );
 }
 
+/** multipart 上传(文件导入等):不设 Content-Type(浏览器自动带 boundary),大文件放宽超时。 */
+async function reqForm<T>(path: string, form: FormData, timeoutMs = 120000): Promise<T> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const headers: Record<string, string> = {};
+    const tk = token.get();
+    if (tk) headers["Authorization"] = `Bearer ${tk}`;
+    let res: Response;
+    try {
+      res = await fetch(BASE + path, { method: "POST", headers, body: form, signal: ctrl.signal });
+    } catch {
+      throw netError(ctrl.signal.aborted, timeoutMs);
+    }
+    if (!res.ok) {
+      if (res.status === 401) {
+        token.clear();
+        onUnauthorized?.();
+      }
+      let detail = `HTTP ${res.status}`;
+      try {
+        const j = await res.json();
+        detail = j.detail ?? JSON.stringify(j);
+      } catch { /* ignore */ }
+      throw new ApiError(res.status, detail);
+    }
+    return (await res.json()) as T;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 30000): Promise<T> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -909,6 +941,15 @@ export const api = {
 
   listProjects: () => req<Project[]>("GET", "/api/projects"),
   createProject: (p: Partial<Project>) => req<Project>("POST", "/api/projects", p),
+  // 整本旧书导入(TXT/DOCX):后端解析分卷/章节,建为可继续写作的新项目
+  importBook: (file: File, title: string) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (title.trim()) form.append("title", title.trim());
+    return reqForm<{ project_id: number; title: string; chapters: number; message: string }>(
+      "/api/projects/import-book", form,
+    );
+  },
   getProject: (id: number) => req<Project>("GET", `/api/projects/${id}`),
   patchProject: (id: number, patch: Partial<Project>) =>
     req<Project>("PATCH", `/api/projects/${id}`, patch),
