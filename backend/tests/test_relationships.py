@@ -268,8 +268,8 @@ def test_hard_constraints_injects_only_present_pairs(client):
 
 
 def test_characters_relations_api(client):
-    """GET /characters:人物卡带 relations;对方退场不过滤但标记 other_retired。"""
-    from app.db.models import Entity, Relationship
+    """GET /characters:人物卡带 relations + 原文证据;对方退场不过滤但标记 other_retired。"""
+    from app.db.models import Entity, Fact, Relationship
     from app.db.session import SessionLocal
 
     headers = _auth(client, "rel_card")
@@ -294,6 +294,18 @@ def test_characters_relations_api(client):
             Relationship(project_id=p["id"], from_entity_id=a.id, to_entity_id=b.id,
                          relation="萍水相逢", valid_from=1, valid_until=2),
         ])
+        # 关系型事实 = 边的原文证据(带章节引用);一条点名对端,一条不点名
+        db.add_all([
+            Fact(project_id=p["id"], entity_id=a.id, fact_type="relationship",
+                 content="令狐冲与任盈盈在绿竹巷定情", valid_from=3, valid_until=None,
+                 importance="critical", source_chapter=3),
+            Fact(project_id=p["id"], entity_id=a.id, fact_type="relationship",
+                 content="跟任盈盈学了独孤九剑的口诀之外的心法", valid_from=4, valid_until=None,
+                 importance="major", source_chapter=4),
+            Fact(project_id=p["id"], entity_id=a.id, fact_type="state",
+                 content="与任盈盈无关的状态事实", valid_from=1, valid_until=None,
+                 importance="minor", source_chapter=1),
+        ])
         db.commit()
     finally:
         db.close()
@@ -311,6 +323,14 @@ def test_characters_relations_api(client):
     assert rels[("风清扬", "师徒")]["other_retired"] is True
     # 已失效的边不出现
     assert ("任盈盈", "萍水相逢") not in rels
+
+    # 证据链:只挂点名叫对端的关系型事实,按章号新→旧,带章节引用
+    ev = rels[("任盈盈", "恋人")]["evidence"]
+    assert [e["chapter"] for e in ev] == [4, 3]
+    assert "任盈盈" in ev[0]["content"]
+    assert all("状态事实" not in e["content"] for e in ev)
+    # 师徒边没有点名「风清扬」的事实 → 证据为空,不硬凑
+    assert rels[("风清扬", "师徒")]["evidence"] == []
 
     # 另一端对称可见
     ren = cards["任盈盈"]

@@ -175,16 +175,24 @@ class CharacterFactOut(BaseModel):
     importance: str
 
 
+class RelationEvidence(BaseModel):
+    """一条关系证据:引用到具体章节的原文事实(草蛇灰线,有据可查)。"""
+    chapter: int
+    content: str
+
+
 class RelationOut(BaseModel):
     """人物卡上的关系行:该实体作为任一端、当前有效的关系边。
 
     对方已退场时不过滤、只标记 other_retired:人物卡是作者档案视图,
     退场语义是"生成不再注入、数据保留",与事实行保留一致。
+    evidence:支撑这条边的原文事实(带章节引用),按章号新→旧,最多 3 条。
     """
     other_name: str
     description: str
     valid_from: int
     other_retired: bool
+    evidence: list[RelationEvidence] = []
 
 
 class CharacterOut(BaseModel):
@@ -229,7 +237,12 @@ def _appearance_chapters(
 
 
 def _character_relations(db: Session, project_id: int, ent: Entity) -> list[RelationOut]:
-    """该实体作为任一端、当前有效(valid_until 为空)的关系边。"""
+    """该实体作为任一端、当前有效(valid_until 为空)的关系边,每条带原文证据。
+
+    证据 = 两人之间的关系型事实(含已关区间的历史)——content 里点名了对方
+    的那条才算这条边的证据,按章号新→旧取前 3 条。关系型事实的 content 是
+    LLM 写的两人交互描述,点名对端是常态;没点名的挂不上,不硬凑。
+    """
     edges = (
         db.query(Relationship)
         .filter(
@@ -241,16 +254,33 @@ def _character_relations(db: Session, project_id: int, ent: Entity) -> list[Rela
         .order_by(Relationship.valid_from, Relationship.id)
         .all()
     )
+    rel_facts = (
+        db.query(Fact)
+        .filter(
+            Fact.project_id == project_id,
+            Fact.entity_id == ent.id,
+            Fact.fact_type == "relationship",
+        )
+        .order_by(Fact.source_chapter.desc(), Fact.id.desc())
+        .all()
+    )
     out = []
     for e in edges:
         other_id = e.to_entity_id if e.from_entity_id == ent.id else e.from_entity_id
         other = db.get(Entity, other_id)
+        other_name = other.name if other else f"实体{other_id}"
+        evidence = [
+            RelationEvidence(chapter=f.source_chapter, content=f.content)
+            for f in rel_facts
+            if other_name in f.content
+        ][:3]
         out.append(
             RelationOut(
-                other_name=other.name if other else f"实体{other_id}",
+                other_name=other_name,
                 description=e.relation,
                 valid_from=e.valid_from,
                 other_retired=bool(other.retired) if other else False,
+                evidence=evidence,
             )
         )
     return out

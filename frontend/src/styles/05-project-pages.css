@@ -319,6 +319,7 @@ button.head { height: auto; margin-left: 0; padding: 0; border: 0; background: n
 .char-relations { margin-top: 6px; font-size: var(--fs-xs); }
 .char-rel-head { margin-bottom: 2px; }
 .char-relations .fact-line.retired { opacity: 0.6; }
+.char-rel-ev { color: var(--text-2); opacity: 0.85; padding-left: 14px; text-indent: 0; }
 
 .char-form {
   margin-top: var(--sp-3);

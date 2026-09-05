@@ -146,6 +146,11 @@ export default function CharactersBoard({ pid }: { pid: number }) {
                       <span className="muted">
                         (自第{r.valid_from}章起{r.other_retired ? ",对方已退场" : ""})
                       </span>
+                      {(r.evidence ?? []).map((ev, j) => (
+                        <div key={j} className="char-rel-ev">
+                          └ 第{ev.chapter}章:{ev.content}
+                        </div>
+                      ))}
                     </div>
                   ))}
                 </div>
