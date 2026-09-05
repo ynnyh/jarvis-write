@@ -33,11 +33,23 @@ from alembic import command  # noqa: E402
 from alembic.autogenerate import compare_metadata  # noqa: E402
 from alembic.config import Config  # noqa: E402
 from alembic.runtime.migration import MigrationContext  # noqa: E402
-from sqlalchemy import create_engine  # noqa: E402
+from sqlalchemy import Column, Index, Table, create_engine  # noqa: E402
 
 import app.db.models  # noqa: F401,E402  注册全部模型到 metadata
 from app.db.base import Base  # noqa: E402
 from app.db.migration import _alembic_ini_path  # noqa: E402
+
+
+def _on_fts_shadow(item: tuple) -> bool:
+    """漂移项是否落在 fts_* 上:0008 建的 FTS5 虚表(连同 SQLite 自动衍生的
+    _content/_data/_idx/_config/_docsize 影子表)刻意不进 ORM,触发器负责同步。
+    与 tests/test_db_migration.py 的排除是同一份纪律,两处必须一起改。"""
+    for el in item[1:]:
+        if isinstance(el, Table) and el.name.startswith("fts_"):
+            return True
+        if isinstance(el, (Column, Index)) and el.table is not None and el.table.name.startswith("fts_"):
+            return True
+    return False
 
 
 def main() -> int:
@@ -55,6 +67,8 @@ def main() -> int:
     finally:
         engine.dispose()
         _tmp_db.unlink(missing_ok=True)
+
+    diff = [d for d in diff if not _on_fts_shadow(d)]
 
     if not diff:
         print("schema 无漂移:模型与 Alembic 迁移链一致。")
