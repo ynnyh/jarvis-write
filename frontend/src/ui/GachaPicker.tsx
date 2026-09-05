@@ -1,8 +1,8 @@
-// 抽卡式选择器(灵感工坊「玩法」选择):先选大方向(视觉气质组)→ 每次抽 4 张卡
-// (本组洗牌 + 1 张跨界灵感)→ 点卡选中;「换一批」重洗重翻,「全部玩法」是逃生门。
-// 动画走质感流:3D 翻牌 + 错峰入场 + 旧金描边微光;纯 CSS,无第三方依赖。
+// 抽卡式选择器(游戏卡选):表单内只放「确认态/触发按钮」,真正的选择在模态舞台上——
+// 深色舞台 + 居中卡阵 + 错峰翻牌 + 点卡抬金圈,确认才落。列表模式按气质分组折叠,
+// 模式偏好记 localStorage(用户上次用哪个,下次默认哪个)。
 // 可复用:props 全部数据驱动,情绪命题等其他口味型选择后续可直接换上。
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export interface GachaCard {
   key: string;
@@ -16,8 +16,19 @@ export interface GachaGroup {
   desc?: string;
 }
 
-// 动画参数集中一处(质感流基准):翻牌时长/错峰间隔/手牌数,想加码改这里即可
-export const GACHA_ANIM = { flipMs: 520, staggerMs: 110, handSize: 4 };
+// 动画/交互参数集中一处(质感流基准)
+export const GACHA_ANIM = { flipMs: 520, staggerMs: 120, handSize: 4 };
+const MODE_KEY = "gacha_mode";
+
+type Mode = "gacha" | "list";
+
+function loadMode(): Mode {
+  try {
+    return localStorage.getItem(MODE_KEY) === "list" ? "list" : "gacha";
+  } catch {
+    return "gacha";
+  }
+}
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -34,139 +45,197 @@ export default function GachaPicker({ groups, cards, value, onChange }: {
   value: string;
   onChange: (key: string) => void;
 }) {
-  // phase: group=null → 选大方向;group=组 key → 抽卡。
-  // drawSeq 变化重挂手牌容器(翻牌动画从零重放);showAll = 全部玩法逃生门。
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<Mode>(loadMode);
+  // 舞台内状态:group=null → 大方向步;group=组 key → 抽卡步
   const [group, setGroup] = useState<string | null>(null);
   const [hand, setHand] = useState<GachaCard[]>([]);
   const [drawSeq, setDrawSeq] = useState(0);
-  const [showAll, setShowAll] = useState(false);
+  const [staged, setStaged] = useState<string>(""); // 舞台内点选,确认才落
+  const [customText, setCustomText] = useState("");
 
   const chosen = cards.find((c) => c.key === value) ?? null;
+  const groupLabel = useMemo(
+    () => groups.find((g) => g.key === group)?.label ?? "",
+    [groups, group],
+  );
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(MODE_KEY, mode);
+    } catch { /* 忽略 */ }
+  }, [mode]);
+
+  function openStage() {
+    setOpen(true);
+    setGroup(null);
+    setStaged("");
+  }
 
   function drawHandCards(g: string, avoid: string): GachaCard[] {
     const inGroup = shuffle(cards.filter((c) => c.group === g));
     const outside = shuffle(cards.filter((c) => c.group !== g && c.key !== avoid));
     const handCards = [...inGroup];
     if (outside.length) handCards.push(outside[0]); // 跨界灵感:换一批永远有新意
-    return handCards.slice(0, Math.max(GACHA_ANIM.handSize, Math.min(inGroup.length + 1, GACHA_ANIM.handSize)));
+    return handCards.slice(0, GACHA_ANIM.handSize);
   }
 
   function enterGroup(g: string) {
     setGroup(g);
-    setHand(drawHandCards(g, value));
+    setHand(drawHandCards(g, staged || value));
     setDrawSeq((n) => n + 1);
-    setShowAll(false);
+    setStaged("");
   }
 
-  function pick(key: string) {
+  function confirmPick(key: string) {
     onChange(key);
+    setOpen(false);
     setGroup(null);
     setHand([]);
-    setShowAll(false);
+    setStaged("");
+    setCustomText("");
   }
 
-  const groupLabel = useMemo(
-    () => groups.find((g) => g.key === group)?.label ?? "",
-    [groups, group],
-  );
-
-  // —— 已选中且未在抽卡流里:收起为确认态 ——
-  if (chosen && group === null && !showAll) {
+  // ---------- 关闭态:确认态(已选)或触发按钮 ----------
+  if (!open) {
     return (
       <div className="gacha-chosen">
-        <span className="gacha-chosen-card">
-          <b>{chosen.label}</b>
-          {chosen.desc && <span className="muted">{chosen.desc.slice(0, 30)}{chosen.desc.length > 30 ? "…" : ""}</span>}
-        </span>
-        <button type="button" className="btn-sm" onClick={() => setShowAll(true)}>换一个玩法</button>
+        {chosen ? (
+          <span className="gacha-chosen-card">
+            <b>{chosen.label}</b>
+            {chosen.desc && <span className="muted">{chosen.desc}</span>}
+          </span>
+        ) : (
+          <span className="muted" style={{ alignSelf: "center" }}>还没选玩法——抽一手试试运气。</span>
+        )}
+        <button type="button" className="btn-sm primary" onClick={openStage}>
+          {chosen ? "🎴 换一个玩法" : "🎴 抽卡选玩法"}
+        </button>
       </div>
     );
   }
 
-  // —— 第一步:大方向(视觉气质组) ——
-  if (!group) {
-    return (
-      <div className="gacha-groups">
-        {groups.map((g, i) => (
-          <button key={g.key} type="button"
-            className="gacha-dir-card"
-            style={{ animationDelay: `${i * 70}ms` }}
-            onClick={() => enterGroup(g.key)}>
-            <b>{g.label}</b>
-            {g.desc && <span>{g.desc}</span>}
-          </button>
-        ))}
-        {showAll && (
-          <div className="gacha-all">
-            {cards.map((c) => (
-              <button key={c.key} type="button" className="chip" onClick={() => pick(c.key)}>
-                {c.label}
+  // ---------- 舞台(模态) ----------
+  return (
+    <div className="gacha-overlay" onClick={() => setOpen(false)}>
+      <div className="gacha-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="gacha-modal-head">
+          <div className="seg">
+            <button type="button" className={mode === "gacha" ? "on" : ""}
+              onClick={() => setMode("gacha")}>🎴 抽卡</button>
+            <button type="button" className={mode === "list" ? "on" : ""}
+              onClick={() => setMode("list")}>☰ 列表</button>
+          </div>
+          <span className="gacha-modal-title">
+            {mode === "gacha" ? (group ? `「${groupLabel}」` : "选个气质大方向") : "全部玩法"}
+          </span>
+          <button type="button" className="gacha-close" aria-label="关闭"
+            onClick={() => setOpen(false)}>×</button>
+        </div>
+
+        {mode === "gacha" && group === null && (
+          <div className="gacha-groups">
+            {groups.map((g, i) => (
+              <button key={g.key} type="button" className="gacha-dir-card"
+                style={{ animationDelay: `${i * 70}ms` }}
+                onClick={() => enterGroup(g.key)}>
+                <b>{g.label}</b>
+                {g.desc && <span>{g.desc}</span>}
               </button>
             ))}
-            <button type="button" className="chip custom"
-              onClick={() => { onChange(""); setGroup(null); setShowAll(false); }}>
-              自定义…
-            </button>
           </div>
         )}
-        {!showAll && (
-          <button type="button" className="linkbtn" onClick={() => setShowAll(true)}>
-            不抽了,直接看全部玩法 →
-          </button>
+
+        {mode === "gacha" && group !== null && (
+          <>
+            <div className="gacha-stage-head">
+              <span className="gacha-stage-hint">
+                {staged
+                  ? "已扣下这张——满意就「就选它」,或点别的再换"
+                  : `一手 ${hand.length} 张${hand.some((c) => c.group !== group) ? ",最后一张是跨界灵感" : ""},点一张扣下`}
+              </span>
+              <div className="actions">
+                <button type="button" className="btn-sm"
+                  onClick={() => { setHand(drawHandCards(group, staged || value)); setDrawSeq((n) => n + 1); setStaged(""); }}>
+                  换一批
+                </button>
+                <button type="button" className="btn-sm" onClick={() => { setGroup(null); setHand([]); setStaged(""); }}>
+                  ← 换个大方向
+                </button>
+              </div>
+            </div>
+            <div className="gacha-hand" key={drawSeq}>
+              {hand.map((c, i) => (
+                <button key={c.key} type="button"
+                  className={"gacha-card" + (staged === c.key ? " staged" : "")}
+                  style={{ animationDelay: `${i * GACHA_ANIM.staggerMs}ms`, animationDuration: `${GACHA_ANIM.flipMs}ms` }}
+                  onClick={() => setStaged(c.key)}>
+                  <span className="gacha-card-inner">
+                    <b>{c.label}</b>
+                    {c.desc && <span className="gacha-card-desc">{c.desc}</span>}
+                    {c.group !== group && <i className="gacha-wild">跨界灵感</i>}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="gacha-modal-foot">
+              <span className="gacha-stage-hint">
+                {staged ? `选定:「${cards.find((c) => c.key === staged)?.label ?? staged}」` : "点一张卡片扣下它"}
+              </span>
+              <div className="actions">
+                <button type="button" className="btn-sm" onClick={() => { setGroup(null); setStaged(""); }}>
+                  ← 大方向
+                </button>
+                <button type="button" className="btn-sm primary" disabled={!staged}
+                  onClick={() => confirmPick(staged)}>
+                  就选它 →
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {mode === "list" && (
+          <div className="gacha-list">
+            {groups.map((g) => (
+              <div key={g.key} className="gacha-list-group">
+                <div className="gacha-list-head">
+                  <b>{g.label}</b>
+                  {g.desc && <span className="muted">{g.desc}</span>}
+                </div>
+                <div className="gacha-all">
+                  {cards.filter((c) => c.group === g.key).map((c) => (
+                    <button key={c.key} type="button"
+                      className={"chip" + (staged === c.key ? " on" : "")}
+                      title={c.desc}
+                      onClick={() => setStaged(c.key)}>
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <div className="gacha-list-custom">
+              <input type="text" value={customText} maxLength={40}
+                placeholder="自定义玩法,如「一只当上店长的猫」"
+                onChange={(e) => setCustomText(e.target.value)} />
+              <button type="button" className="btn-sm primary"
+                disabled={!customText.trim()} onClick={() => confirmPick(customText.trim())}>
+                用这个
+              </button>
+            </div>
+            <div className="gacha-modal-foot">
+              <span className="gacha-stage-hint">
+                {staged ? `选定:「${cards.find((c) => c.key === staged)?.label ?? staged}」` : "点玩法标签扣下它"}
+              </span>
+              <button type="button" className="btn-sm primary" disabled={!staged}
+                onClick={() => confirmPick(staged)}>
+                就选它 →
+              </button>
+            </div>
+          </div>
         )}
       </div>
-    );
-  }
-
-  // —— 第二步:抽卡 ——
-  const wildcard = hand.find((c) => c.group !== group);
-  return (
-    <div className="gacha-stage">
-      <div className="gacha-stage-head">
-        <span className="muted">
-          「{groupLabel}」一手 {hand.length} 张{wildcard ? ",最后一张是跨界灵感,别急着换" : ""}
-        </span>
-        <div className="actions">
-          <button type="button" className="btn-sm"
-            onClick={() => { setHand(drawHandCards(group, value)); setDrawSeq((n) => n + 1); }}>
-            换一批
-          </button>
-          <button type="button" className="btn-sm" onClick={() => { setGroup(null); setHand([]); }}>
-            ← 换个大方向
-          </button>
-        </div>
-      </div>
-      <div className="gacha-hand" key={drawSeq}>
-        {hand.map((c, i) => (
-          <button key={c.key} type="button"
-            className={"gacha-card" + (value === c.key ? " picked" : "")}
-            style={{ animationDelay: `${i * GACHA_ANIM.staggerMs}ms`, animationDuration: `${GACHA_ANIM.flipMs}ms` }}
-            onClick={() => pick(c.key)}>
-            <span className="gacha-card-inner">
-              <b>{c.label}</b>
-              {c.desc && <span>{c.desc.slice(0, 34)}{c.desc.length > 34 ? "…" : ""}</span>}
-              {c.group !== group && <i className="gacha-wild">跨界灵感</i>}
-            </span>
-          </button>
-        ))}
-      </div>
-      {showAll ? (
-        <div className="gacha-all">
-          {cards.map((c) => (
-            <button key={c.key} type="button" className="chip" onClick={() => pick(c.key)}>
-              {c.label}
-            </button>
-          ))}
-          <button type="button" className="chip custom"
-            onClick={() => { onChange(""); setGroup(null); setShowAll(false); }}>
-            自定义…
-          </button>
-        </div>
-      ) : (
-        <button type="button" className="linkbtn" onClick={() => setShowAll(true)}>
-          全部玩法列表 →
-        </button>
-      )}
     </div>
   );
 }

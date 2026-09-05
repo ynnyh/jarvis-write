@@ -61,6 +61,7 @@ export default function OnboardingFlow() {
 
   // 引擎卡抽卡页码:一批 AI 生成 8 张,先翻前 4 张(零成本),翻完才再调 AI 补池
   const [enginePage, setEnginePage] = useState(0);
+  const [showAllEngines, setShowAllEngines] = useState(false);
 
   if (!project) return <div className="muted">{err || "正在创建草稿…"}</div>;
 
@@ -331,35 +332,44 @@ export default function OnboardingFlow() {
                                 <div className="card-desc">
                                   先挑对味的故事内核——都只是一句话种子,选中后再深化成完整概念
                                   (选两张 = 混搭:A 的主角遇 B 的局面)。
+                                  <button className="linkbtn" style={{ marginLeft: 8 }}
+                                    onClick={() => setShowAllEngines((v) => !v)}>
+                                    {showAllEngines ? "分两批看" : "一次看全部"}
+                                  </button>
                                 </div>
-                                <div className="gacha-hand" key={enginePage}>
-                                  {enginePageCards.map((card, i) => (
+                                <div className="gacha-hand" key={enginePage + (showAllEngines ? "-all" : "")}>
+                                  {(showAllEngines ? (engineCards ?? []) : enginePageCards).map((card, i) => (
                                     <button key={card.engine} type="button"
                                       className={"engine-card flip-in" + (enginePicked.includes(card.engine) ? " on" : "")}
                                       style={{ animationDelay: `${i * 110}ms` }}
+                                      disabled={enginePicked.length >= 2 && !enginePicked.includes(card.engine)}
+                                      title={enginePicked.length >= 2 && !enginePicked.includes(card.engine)
+                                        ? "已选满两张——先点选中的卡片取消一张,再选这张"
+                                        : undefined}
                                       onClick={() => pickEngine(card.engine)}>
                                       {card.angle && <span className="engine-angle">{card.angle}</span>}
                                       <b>{card.engine}</b>
                                       {card.hook && <span className="engine-hook">抓人点:{card.hook}</span>}
                                     </button>
                                   ))}
-                                  {enginePicked.filter((e) => !enginePageCards.some((c) => c.engine === e)).length > 0 && (
-                                    <span className="muted" style={{ alignSelf: "center" }}>
-                                      另有 {enginePicked.filter((e) => !enginePageCards.some((c) => c.engine === e)).length} 张已选在上一批
-                                    </span>
-                                  )}
                                 </div>
                                 <div className="actions mt-2">
                                   <button className="primary" disabled={!enginePicked.length || !!busy}
                                     onClick={developConcept}>
                                     {enginePicked.length > 1 ? "融合这两张,深化成概念 →" : "深化成完整概念 →"}
                                   </button>
-                                  {poolRemain > 0 ? (
+                                  {!showAllEngines && (enginePage === 0 ? (
                                     <button disabled={!!busy}
                                       onClick={() => setEnginePage((n) => n + 1)}>
-                                      换一批(池里还有 {poolRemain} 张)
+                                      下一批(池里还有 {poolRemain} 张) →
                                     </button>
                                   ) : (
+                                    <button disabled={!!busy}
+                                      onClick={() => setEnginePage((n) => Math.max(0, n - 1))}>
+                                      ← 上一批
+                                    </button>
+                                  ))}
+                                  {showAllEngines || enginePage === 1 ? (
                                     <button disabled={!!busy}
                                       onClick={() => {
                                         fetchEngines((engineCards ?? []).map((c) => c.engine));
@@ -367,7 +377,7 @@ export default function OnboardingFlow() {
                                       }}>
                                       都不对味,AI 重新出一批
                                     </button>
-                                  )}
+                                  ) : null}
                                 </div>
                               </>
                             )}
