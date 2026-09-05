@@ -3,11 +3,12 @@
 // 工作台;clips 是串行的「出本子→定手卡→出片」,没有要随时回头看的锚资产,强拆双栏反而
 // 多一层空侧栏。统一的是「现在该点哪个按钮」的步骤条心智——与另两条出片线共用 StepBar。
 import { useEffect, useState } from "react";
-import { ClipShot, ClipTheme, ClipDirection, SteeringOption, clipsApi } from "../../clipsApi";
+import { ClipShot, ClipTheme, ClipDirection, SteeringOption, PlayGroup, clipsApi } from "../../clipsApi";
 
 export interface ClipsMeta {
   themes: ClipTheme[];
   plays: ClipTheme[];
+  play_groups?: PlayGroup[];
   durations: number[];
   directions: ClipDirection[];
   dialogue_styles: SteeringOption[];

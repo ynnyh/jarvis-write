@@ -31,22 +31,31 @@ VALID_THEMES = tuple(_THEME_MAP)
 
 # 灵感工坊玩法目录:key 白名单 + 「导演提示」(含强画风锚的风格化措辞——避免直接点名
 # 有版权的品牌/IP 名,改成描述画风质感,模型更稳也不会往临幕原片跑)。
+# group = 视觉气质分组(前端「先选大方向再抽卡」的第一级,见 CLIPS_PLAY_GROUPS)。
 CLIPS_PLAYS: list[dict] = [
-    {"key": "ghibli", "label": "治愈手绘", "directive": "治愈系手绘动画质感:手绘动画笔触、明快配色(透明天空蓝/云白/草地绿),飞行与被风推动的意象;2D 细腻帧画,线条干净圆润"},
-    {"key": "clay", "label": "黏土定格", "directive": "黏土/布偶定格动画质感:手作感、忽快忽慢的定格停顿、表面能看到指纹与棉絮,光顺暖;玩偶表情夸张呆萌"},
-    {"key": "cyber", "label": "赛博雨夜", "directive": "赛博朋克霓虹都市雨夜:青紫粉撞色霓虹、雨线、逆光剪影、玻璃反光与积水倒影;夜景高对比、高饱和"},
-    {"key": "pixel", "label": "像素复古", "directive": "8-bit/16-bit 像素游戏质感、复古 CRT 色调、粒子噪点与扫描线,卷轴式镜头,角色像素小人穿插"},
-    {"key": "hk", "label": "港风胶片", "directive": "老港片胶片质感:暖黄+青色调、手持画面微晃、胶片颗粒,街市霓虹招牌与烟火气,高饱和低密度"},
-    {"key": "bw", "label": "黑白胶片", "directive": "黑白纪实摄影/胶片:颗粒与灰阶层次、强侧光、去彩色,靠明暗与构图说话,人物剪影分明"},
-    {"key": "watercolor", "label": "水彩绘本", "directive": "手绘水彩绘本质感:纸纹、晕染、留白、通透浅色调,边缘柔和,像被一页一页翻开的绘本"},
-    {"key": "papercut", "label": "剪纸皮影", "directive": "剪纸/皮影戏质感:平面多层剪纸、镂空纹理、暖色背光,光影边界清晰,有民间工艺的装饰味"},
-    {"key": "miniature", "label": "微缩玩具", "directive": "微缩模型/玩具屋视角:极浅景深、逼真材质但物件尺寸像手办,人物像小玩具,带摆拍的趣味"},
-    {"key": "timelapse", "label": "延时奇观", "directive": "延时摄影质感:天空云层与城市光线推移、宏大空镜、稳定机位,时间被压缩的流动感"},
-    {"key": "animal", "label": "动物拟人", "directive": "动物拟人日常:穿人类衣物的卡通动物、有着人类的生活场景,温馨自然、自带反差萌"},
-    {"key": "nonsense", "label": "荒诞脑洞", "directive": "荒诞即兴/黑色幽默:普通日常场景里塞一件极不合理的事,反差爽感、一本正经地荒谬"},
+    {"key": "ghibli", "label": "治愈手绘", "group": "warm", "directive": "治愈系手绘动画质感:手绘动画笔触、明快配色(透明天空蓝/云白/草地绿),飞行与被风推动的意象;2D 细腻帧画,线条干净圆润"},
+    {"key": "clay", "label": "黏土定格", "group": "retro", "directive": "黏土/布偶定格动画质感:手作感、忽快忽慢的定格停顿、表面能看到指纹与棉絮,光顺暖;玩偶表情夸张呆萌"},
+    {"key": "cyber", "label": "赛博雨夜", "group": "urban", "directive": "赛博朋克霓虹都市雨夜:青紫粉撞色霓虹、雨线、逆光剪影、玻璃反光与积水倒影;夜景高对比、高饱和"},
+    {"key": "pixel", "label": "像素复古", "group": "urban", "directive": "8-bit/16-bit 像素游戏质感、复古 CRT 色调、粒子噪点与扫描线,卷轴式镜头,角色像素小人穿插"},
+    {"key": "hk", "label": "港风胶片", "group": "retro", "directive": "老港片胶片质感:暖黄+青色调、手持画面微晃、胶片颗粒,街市霓虹招牌与烟火气,高饱和低密度"},
+    {"key": "bw", "label": "黑白胶片", "group": "retro", "directive": "黑白纪实摄影/胶片:颗粒与灰阶层次、强侧光、去彩色,靠明暗与构图说话,人物剪影分明"},
+    {"key": "watercolor", "label": "水彩绘本", "group": "warm", "directive": "手绘水彩绘本质感:纸纹、晕染、留白、通透浅色调,边缘柔和,像被一页一页翻开的绘本"},
+    {"key": "papercut", "label": "剪纸皮影", "group": "retro", "directive": "剪纸/皮影戏质感:平面多层剪纸、镂空纹理、暖色背光,光影边界清晰,有民间工艺的装饰味"},
+    {"key": "miniature", "label": "微缩玩具", "group": "warm", "directive": "微缩模型/玩具屋视角:极浅景深、逼真材质但物件尺寸像手办,人物像小玩具,带摆拍的趣味"},
+    {"key": "timelapse", "label": "延时奇观", "group": "urban", "directive": "延时摄影质感:天空云层与城市光线推移、宏大空镜、稳定机位,时间被压缩的流动感"},
+    {"key": "animal", "label": "动物拟人", "group": "whim", "directive": "动物拟人日常:穿人类衣物的卡通动物、有着人类的生活场景,温馨自然、自带反差萌"},
+    {"key": "nonsense", "label": "荒诞脑洞", "group": "whim", "directive": "荒诞即兴/黑色幽默:普通日常场景里塞一件极不合理的事,反差爽感、一本正经地荒谬"},
 ]
 _PLAY_MAP = {t["key"]: t for t in CLIPS_PLAYS}
 VALID_PLAYS = tuple(_PLAY_MAP)
+
+# 玩法的视觉气质分组(「先选大方向」第一级)。展示目录,不进白名单校验。
+CLIPS_PLAY_GROUPS: list[dict] = [
+    {"key": "warm", "label": "温暖治愈", "desc": "看得心里发软的柔和质感:手绘、绘本、玩具屋"},
+    {"key": "retro", "label": "复古光影", "desc": "胶片、纸张与手作的光:港片、黑白、剪纸、黏土"},
+    {"key": "urban", "label": "都市奇观", "desc": "霓虹、像素与时间的流动:赛博、游戏、延时"},
+    {"key": "whim", "label": "脑洞反差", "desc": "一本正经地离谱,自带反差萌"},
+]
 # free=故事工坊(自由创作):用户自带完整点子,引擎照点子拍;mood/play 是「命题驱动」
 VALID_MODES = ("mood", "play", "free")
 

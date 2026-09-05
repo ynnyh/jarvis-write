@@ -26,7 +26,8 @@ async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 
   } finally { clearTimeout(timer); }
 }
 
-export interface ClipTheme { key: string; label: string; directive: string }
+export interface ClipTheme { key: string; label: string; directive: string; group?: string }
+export interface PlayGroup { key: string; label: string; desc: string }
 export interface ClipDirection { key: string; label: string; tip: string }
 /** 导向维度目录项(台词风格/节奏/情绪浓度同形) */
 export interface SteeringOption { key: string; label: string }
@@ -117,7 +118,7 @@ export interface ClipShootUnit {
 export const clipsApi = {
   meta: () =>
     req<{
-      themes: ClipTheme[]; plays: ClipTheme[]; durations: number[]; directions: ClipDirection[];
+      themes: ClipTheme[]; plays: ClipTheme[]; play_groups: PlayGroup[]; durations: number[]; directions: ClipDirection[];
       dialogue_styles: SteeringOption[]; pacings: SteeringOption[]; intensities: SteeringOption[];
     }>("GET", "/api/clips/meta"),
   list: (projectId?: number, mode?: string) => {

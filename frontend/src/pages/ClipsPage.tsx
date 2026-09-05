@@ -10,6 +10,7 @@ import EmptyState from "../ui/EmptyState";
 import { confirmDialog } from "../ui/ConfirmDialog";
 import ClipWorkspace from "../panels/clips/ClipWorkspace";
 import { SteeringChips, useClipsMeta, clipStatusTone } from "../panels/clips/shared";
+import GachaPicker from "../ui/GachaPicker";
 
 export default function ClipsPage() {
   const { id } = useParams();
@@ -133,20 +134,33 @@ export function ClipsList({ projectId, mode = "mood" }: { projectId: number | nu
           )}
           {!novelMode && !isFree && (
             <div className="field field-full">
-              <span className="fl">{isPlay ? "灵感玩法" : "情绪命题"}<span className="hint">选一个,或用自定义</span></span>
-              <div className="chips">
-                {((isPlay ? meta?.plays : meta?.themes) ?? [])
-                  .map((t) => (
-                    <button key={t.key} type="button"
-                      className={"chip" + (theme === t.key ? " on" : "")}
-                      aria-pressed={theme === t.key}
-                      onClick={() => { setTheme(t.key); setCustom(""); }}>{t.label}</button>
-                  ))}
-                <button type="button"
-                  className={"chip custom" + (!theme && custom ? " on" : "")}
-                  aria-pressed={!theme && !!custom}
-                  onClick={() => setTheme("")}>自定义</button>
-              </div>
+              <span className="fl">{isPlay ? "灵感玩法" : "情绪命题"}<span className="hint">{isPlay ? "先挑个气质大方向,再抽卡" : "选一个,或用自定义"}</span></span>
+              {isPlay ? (
+                <GachaPicker
+                  groups={meta?.play_groups ?? []}
+                  cards={(meta?.plays ?? []).map((p) => ({
+                    key: p.key, label: p.label,
+                    desc: p.directive.replace(/^[^:]*:/, ""),
+                    group: p.group,
+                  }))}
+                  value={theme}
+                  onChange={(k) => { setTheme(k); setCustom(""); }}
+                />
+              ) : (
+                <div className="chips">
+                  {(meta?.themes ?? [])
+                    .map((t) => (
+                      <button key={t.key} type="button"
+                        className={"chip" + (theme === t.key ? " on" : "")}
+                        aria-pressed={theme === t.key}
+                        onClick={() => { setTheme(t.key); setCustom(""); }}>{t.label}</button>
+                    ))}
+                  <button type="button"
+                    className={"chip custom" + (!theme && custom ? " on" : "")}
+                    aria-pressed={!theme && !!custom}
+                    onClick={() => setTheme("")}>自定义</button>
+                </div>
+              )}
             </div>
           )}
           {!theme && !novelMode && !isFree && (

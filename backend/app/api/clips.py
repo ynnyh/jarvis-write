@@ -45,6 +45,7 @@ from app.engines.clips import (
 from app.engines.clips.common import (
     CLIP_THEMES,
     CLIPS_PLAYS,
+    CLIPS_PLAY_GROUPS,
     DIALOGUE_STYLES,
     INTENSITIES,
     PACINGS,
@@ -291,6 +292,8 @@ async def clips_meta():
     return {
         "themes": CLIP_THEMES,
         "plays": CLIPS_PLAYS,
+        # 玩法的视觉气质分组(灵感工坊「先选大方向再抽卡」第一级)
+        "play_groups": CLIPS_PLAY_GROUPS,
         "durations": list(VALID_DURATIONS),
         "directions": [
             {"key": d["key"], "label": d["label"], "tip": d["tip"]} for d in DIRECTIONS
