@@ -80,6 +80,7 @@ export default defineConfig({
       {
         text: '更多',
         items: [
+          { text: 'AI 供应商兼容性', link: '/ai-providers' },
           { text: '后端运行与测试', link: 'https://github.com/ynnyh/jarvis-write/blob/main/backend/README.md' },
           { text: '更新日志', link: 'https://github.com/ynnyh/jarvis-write/blob/main/CHANGELOG.md' },
         ],
