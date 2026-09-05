@@ -68,7 +68,7 @@ async def review_chapter(content: str, outline_block: str) -> dict:
     # 建议:结构化 {evidence, issue, fix};evidence 必须在正文里逐字存在(防举证幻觉),
     # 找不到的置空但保留建议本身。兼容模型退化输出纯字符串的情况。达标时可为空数组。
     suggestions = []
-    for s in (data.get("suggestions") or [])[:3]:
+    for s in (data.get("suggestions") or [])[:4]:
         if isinstance(s, str):
             suggestions.append({"evidence": "", "issue": s.strip(), "fix": ""})
             continue

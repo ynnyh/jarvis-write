@@ -92,6 +92,22 @@ def judges_regress(before: FlavorReport, after: FlavorReport) -> bool:
     return False
 
 
+# ---- 过度矫正检测(sepia 校准原则:把每条 AI 特征都反着来,本身是新指纹) ----
+# 人类句长节奏落在中段(参考 0.6-1.2);重写稿把节奏打碎到夸张(σ/μ 过高)、
+# 或把段落剁成满篇一行段(段长变异极端),都是"反向执行规则"的痕迹——不采纳。
+_OVER_BURST = 1.6
+_OVER_PARA_CV = 1.1
+
+
+def overcorrected(after: FlavorReport) -> bool:
+    """重写稿是否矫枉过正:指标冲到远离 AI 区也远离人类区的极端。"""
+    a = after.metrics
+    if (a.get("burstiness") or 0) > _OVER_BURST:
+        return True
+    cv = a.get("para_cv")
+    return cv is not None and cv > _OVER_PARA_CV
+
+
 def _flavor_hits_block(report: FlavorReport) -> str:
     """把检测命中明细渲染成 prompt 块:类别 + 命中套话 + 命中句。"""
     if not report.hits:
@@ -237,6 +253,12 @@ async def deai_self_heal(
         if judges_regress(best_report, after):
             logger.info(
                 "去味重写统计判据倒退(正则分 %.1f→%.1f 但人味指标变差),丢弃本轮",
+                best_report.score, after.score,
+            )
+            break
+        if overcorrected(after):
+            logger.info(
+                "去味重写过度矫正(正则分 %.1f→%.1f 但节奏/段落极端化,反向指纹),丢弃本轮",
                 best_report.score, after.score,
             )
             break
