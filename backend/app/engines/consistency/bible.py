@@ -23,6 +23,27 @@ logger = logging.getLogger("jarvis-write.bible")
 # critical 数量本身超限才会轮到被砍),minor 最先出局。
 _MAX_FACT_LINES = 40
 
+# 关系边的 relation 只留短标签:截断上限(字符)与分隔符集合。
+# 模型偶尔无视 prompt 的短标签要求,把整段事件经过塞进 content——长句挂在
+# 边上会污染人物卡与生成注入。这里做确定性兜底,不再多打一次模型;
+# 完整描述始终保留在 facts 行(账本),边上只留标签。
+_RELATION_LABEL_LIMIT = 20
+_RELATION_SEPARATORS = "，,。;；、：:（）()「」\"'"
+
+
+def short_relation_label(text: str, limit: int = _RELATION_LABEL_LIMIT) -> str:
+    """把关系描述截成短标签:取首个分隔符前的短语,超限再硬截。"""
+    t = (text or "").strip().strip("「」\"'")
+    for sep in _RELATION_SEPARATORS:
+        idx = t.find(sep)
+        if idx > 0:
+            t = t[:idx]
+            break
+    t = t.strip().strip("的了着。,，")
+    if len(t) > limit:
+        t = t[:limit]
+    return t
+
 # 资源类事实:由 ledger.py 单独渲染成「角色资源账本」(自带闭集红线与预算),
 # 因此调用方注入硬约束块时会把这两类排除掉,避免同一条在 prompt 里出现两遍。
 RESOURCE_FACT_TYPES = ("possession", "ability")
@@ -416,13 +437,16 @@ class BibleService:
             fact_by_content[content] = fact
             stats["facts"] += 1
 
-            # 关系条目双写 relationships 表:facts 行保留(时间机兼容),
-            # 结构化边供人物卡与生成注入使用
+            # 关系条目双写 relationships 表:facts 行保留完整描述(时间机兼容),
+            # 结构化边只挂短标签(供人物卡与生成注入使用);
+            # 标签归一后,模型换措辞重述同一关系也会被 upsert 幂等挡住,边不再抖动
             if (ch.get("fact_type") or "") == "relationship":
                 other_name = (ch.get("other_entity") or "").strip()
                 if other_name and other_name != ent_name:
                     other = self.get_or_create_entity(other_name)
-                    if self._upsert_relationship(chapter_number, entity, other, content):
+                    if self._upsert_relationship(
+                        chapter_number, entity, other, short_relation_label(content)
+                    ):
                         stats["relationships"] += 1
 
         for ku in extraction.get("knowledge_updates", []) or []:

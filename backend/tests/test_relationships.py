@@ -78,6 +78,65 @@ def test_extraction_dual_write(client):
         db.close()
 
 
+def test_long_event_content_gets_short_edge_label(client):
+    """模型把整段事件经过塞进 content:facts 行保留全文,关系边只落短标签。"""
+    from app.db.models import Fact, Relationship
+    from app.db.session import SessionLocal
+    from app.engines.consistency import BibleService
+
+    headers = _auth(client, "rel_short_label")
+    p = _create_project(client, headers)
+
+    db = SessionLocal()
+    try:
+        content = "苏幼白深夜闯入陆辰房间，为他封住丹田裂纹，并探查其右耳"
+        BibleService(db, p["id"]).apply_extraction(
+            2, {"fact_changes": [_rel_change("苏幼白", "陆辰", content)]}
+        )
+        db.commit()
+
+        fact = db.query(Fact).filter(Fact.project_id == p["id"]).one()
+        assert fact.content == content  # 账本留全文
+
+        rel = db.query(Relationship).filter(Relationship.project_id == p["id"]).one()
+        assert rel.relation == "苏幼白深夜闯入陆辰房间"
+        assert len(rel.relation) <= 20 and "，" not in rel.relation
+    finally:
+        db.close()
+
+
+def test_paraphrased_reaffirmation_no_edge_churn(client):
+    """同一关系换措辞重述(归一后同标签):幂等,不关旧边也不开新边。"""
+    from app.db.models import Relationship
+    from app.db.session import SessionLocal
+    from app.engines.consistency import BibleService
+
+    headers = _auth(client, "rel_churn")
+    p = _create_project(client, headers)
+
+    db = SessionLocal()
+    try:
+        bible = BibleService(db, p["id"])
+        bible.apply_extraction(
+            2, {"fact_changes": [_rel_change("钱七", "孙八", "被孙八针对，关系恶劣")]}
+        )
+        db.commit()
+
+        # 第 3 章换个说法重提同一关系:归一后同为「被孙八针对」,不应产生新边
+        stats = bible.apply_extraction(
+            3, {"fact_changes": [_rel_change("孙八", "钱七", "被孙八针对，关系恶化")]}
+        )
+        db.commit()
+        assert stats["relationships"] == 0
+
+        edges = db.query(Relationship).filter(Relationship.project_id == p["id"]).all()
+        assert len(edges) == 1
+        assert edges[0].relation == "被孙八针对"
+        assert edges[0].valid_from == 2 and edges[0].valid_until is None
+    finally:
+        db.close()
+
+
 def test_relationship_temporal_update(client):
     """同实体对(不分方向)再抽新关系:旧边关区间,新边开区间;同内容重抽不重复。"""
     from app.db.models import Relationship

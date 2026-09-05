@@ -64,7 +64,7 @@ EXTRACTION_PROMPT = """\
    fact_changes,content 写清现状(如:干粮已吃完、玉佩已送给张三、右臂灵力尽失),
    replaces 填那条"持有/会"的旧事实原文——只报"获得"不报"失去",账本只会越写越长越假。
    本章新得到的道具/新学会的本事,若正文里交代了来路,note/content 里带一句(谁给的/哪儿捡的)
-4. relationship 条目:entity 与 other_entity 必须是两个不同实体(优先用已知实体名),content 只写两人之间的当前关系(如:兄妹/反目成仇/拜为师徒),同一对人物只报一条最新关系
+4. relationship 条目:entity 与 other_entity 必须是两个不同实体(优先用已知实体名),content 只写两人之间的当前关系**短标签**(2-10 字,如:兄妹/反目成仇/拜为师徒/公开对立)——事件经过(谁做了什么、在哪一章)不要写进 content,那属于 state 类事实;同一对人物只报一条最新关系
 5. 伏笔:本章新埋的用 plant;呼应强化已有的用 reinforce;明确揭晓的用 payoff
 6. knowledge_updates:谁在本章"得知"了什么。读者视角用 knower="reader"
 7. motifs(桥段台账,防跨章复读):抽本章最有辨识度、**再写一次就会显重复**的描写母题——
