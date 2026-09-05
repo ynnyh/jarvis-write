@@ -56,6 +56,11 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///./jarvis_write.db"
 
+    # 迁移前自动备份保留份数(仅 SQLite):启动检测到有 pending 迁移时,先把库文件
+    # 用 SQLite backup API 快照到 <库目录>/migrations-backup/,再跑迁移;升级失败
+    # 可手动拿最近一份换回去。PRE_MIGRATION_BACKUP_RETENTION 可调,最小 1。
+    pre_migration_backup_retention: int = 5
+
     # 请求默认参数(max_tokens 取 8192:推理类模型思考会占用输出配额)
     default_temperature: float = 0.7
     default_max_tokens: int = 8192

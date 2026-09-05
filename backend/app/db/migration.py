@@ -109,6 +109,83 @@ def _has_business_tables() -> bool:
     return _SIGNATURE_TABLE in insp.get_table_names()
 
 
+def _has_pending_migrations() -> bool:
+    """alembic_version 当前版本落后于脚本 head → 有 pending 迁移。
+
+    只在已有 alembic_version 表时调用;ini 缺失等拿不准的情况按 True 处理
+    (宁可多备一份,不让升级裸奔)。
+    """
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    ini_path = _alembic_ini_path()
+    if not ini_path:
+        return True
+    cfg = Config(ini_path)
+    cfg.set_main_option("script_location", str(_alembic_dir()))
+    head = ScriptDirectory.from_config(cfg).get_current_head()
+    with engine.connect() as conn:
+        row = conn.execute(text("select version_num from alembic_version")).fetchone()
+    current = row[0] if row else None
+    return current != head
+
+
+def _sqlite_file_from_url(url: str) -> Path | None:
+    """从 sqlite URL 解析库文件路径;非 sqlite / 内存库返回 None。"""
+    if not url.startswith("sqlite"):
+        return None
+    marker = "sqlite:///"
+    if not url.startswith(marker):
+        return None
+    path = url[len(marker):]
+    if not path or path == ":memory:":
+        return None
+    p = Path(path)
+    if not p.is_absolute():
+        p = Path.cwd() / p
+    return p
+
+
+def pre_migration_backup(db_file: Path, retention: int) -> Path | None:
+    """把 SQLite 库文件快照到 <库目录>/migrations-backup/,并按份数裁剪旧备份。
+
+    用 SQLite backup API(而非直接 copy):连接/WAL 模式下也能拿到一致快照。
+    返回备份文件路径;库文件不存在返回 None。
+    """
+    import sqlite3
+    from datetime import datetime
+
+    retention = max(1, int(retention))
+    if not db_file.exists():
+        return None
+    backup_dir = db_file.parent / "migrations-backup"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    ts = f"{datetime.now():%Y%m%d-%H%M%S}"
+    dest = backup_dir / f"pre-migration-{ts}.db"
+    k = 1
+    while dest.exists():  # 同秒多次备份:加序号避免互相覆盖
+        dest = backup_dir / f"pre-migration-{ts}-{k}.db"
+        k += 1
+
+    src = sqlite3.connect(str(db_file))
+    try:
+        dst = sqlite3.connect(str(dest))
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
+
+    backups = sorted(backup_dir.glob("pre-migration-*.db"))
+    for old in backups[:-retention]:
+        try:
+            old.unlink()
+        except OSError:
+            logger.warning("迁移前备份裁剪失败(跳过): %s", old)
+    return dest
+
+
 def _stamp_to_baseline() -> None:
     """把数据库标记为已应用基线迁移(不实际执行 DDL)。
 
@@ -163,10 +240,29 @@ def run_alembic_migrations() -> None:
     1. 没有 alembic_version 表 + 有业务表 → 现有用户,先 stamp 基线
     2. 没有 alembic_version 表 + 没有业务表 → 全新安装,直接 upgrade
     3. 有 alembic_version 表 → 正常 upgrade
+
+    有业务表且存在 pending 迁移(含首次 stamp)时,先做迁移前自动备份
+    (SQLite backup API 快照,保留份数见 config.pre_migration_backup_retention);
+    备份失败只告警,不阻断启动。
     """
     try:
-        if not _has_alembic_version_table():
-            if _has_business_tables():
+        has_version = _has_alembic_version_table()
+        has_tables = _has_business_tables()
+        if has_tables and (not has_version or _has_pending_migrations()):
+            from app.config import get_settings
+
+            db_file = _sqlite_file_from_url(get_settings().database_url)
+            if db_file is not None:
+                try:
+                    dest = pre_migration_backup(
+                        db_file, get_settings().pre_migration_backup_retention
+                    )
+                    if dest is not None:
+                        logger.info("迁移前备份完成: %s", dest)
+                except Exception:
+                    logger.exception("迁移前备份失败(继续迁移,不阻断启动)")
+        if not has_version:
+            if has_tables:
                 # 现有用户数据库:表已存在,先 stamp 到基线
                 _stamp_to_baseline()
             # else: 全新数据库,直接 upgrade 即可
