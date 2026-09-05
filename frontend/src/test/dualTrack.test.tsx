@@ -78,4 +78,16 @@ describe("DualTrackEditor", () => {
     await waitFor(() => expect(props.onSaved).toHaveBeenCalledWith(CHAPTER));
     expect(props.onSyncAsk).toHaveBeenCalledWith(4);
   });
+
+  it("定稿在别处更新(如重写任务收尾)且右栏无改动时,左栏参照静默跟进", async () => {
+    const props = {
+      pid: 1, chapter: CHAPTER, genBlocked: false, genHint: "",
+      onSaved: vi.fn(), onSyncAsk: vi.fn(), onDirtyChange: vi.fn(), onExit: vi.fn(),
+    };
+    const { rerender } = render(<DualTrackEditor {...props} />);
+    const renewed = { ...CHAPTER, final_content: "重写任务收尾后的新定稿。" };
+    rerender(<DualTrackEditor {...props} chapter={renewed} />);
+    await waitFor(() => expect(screen.getByText("重写任务收尾后的新定稿。")).toBeTruthy());
+    expect(screen.queryByText("陆辰摸了摸左耳。")).toBeNull();
+  });
 });

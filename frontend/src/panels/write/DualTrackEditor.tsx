@@ -90,6 +90,20 @@ export default function DualTrackEditor({
   }
   useEffect(() => { ed.setSaveHandler(save); });
 
+  // 定稿在别处更新(重写任务收尾、其他窗口写回)时跟进左栏参照:
+  // 右栏无未写回改动才刷新,有改动则保持进入时的快照,差异统计的基准不被中途换掉。
+  useEffect(() => {
+    const latest = chapter.final_content || chapter.draft_content || "";
+    if (!ed.dirty && latest !== leftRef.current) {
+      leftRef.current = latest;
+      setLeftText(latest);
+      setStats(countStats(latest, ed.getDoc()));
+    }
+  });
+
+  // 卸载时清掉挂起的统计防抖计时器(挂载一次;不能挂在逐帧 effect 里,会误清在途防抖)
+  useEffect(() => () => window.clearTimeout(statsTimer.current), []);
+
   async function exit() {
     if (ed.dirty && !await confirmDialog({
       title: "有还没写回的修改",

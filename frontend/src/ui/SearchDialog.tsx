@@ -79,7 +79,7 @@ export default function SearchDialog({ pid, onClose }: Props) {
             <div className="cmdk-hint">输入至少 2 个字开始搜全书正文、大纲与设定。</div>
           )}
           {!busy && res && res.total === 0 && (
-            <div className="cmdk-hint">全书没有命中「<Highlight text={res.q} q={res.q} />」。</div>
+            <div className="cmdk-hint">全书没有命中「{res.q}」。</div>
           )}
           {!busy && res && groups.map((g) => (
             <div key={g.kind}>
