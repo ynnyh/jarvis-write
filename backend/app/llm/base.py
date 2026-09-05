@@ -19,6 +19,7 @@ from typing import AsyncIterator, Literal
 import httpx
 
 from app import live
+from app.llm import throttle
 
 logger = logging.getLogger("jarvis-write.llm")
 
@@ -309,6 +310,8 @@ class LLMAdapter(abc.ABC):
         timeout: int = 600,
         thinking_mode: str = "",
         thinking_forced: bool = False,
+        max_concurrency: int = 0,
+        rpm: int = 0,
     ) -> None:
         self.api_key = api_key
         self.model_name = model_name
@@ -322,9 +325,17 @@ class LLMAdapter(abc.ABC):
         # thinking_forced:用户在配置里显式指定(非跟随默认)——此时不受模型名启发式限制。
         self.thinking_mode = thinking_mode
         self.thinking_forced = thinking_forced
+        # 主动限速(0 = 不限):按「渠道 + 模型」维度限并发/速率,见 llm/throttle.py。
+        # 同一中转站同一模型的上游配额是共享的,按渠道限才能真防 429/防封号。
+        self.max_concurrency = max_concurrency
+        self.rpm = rpm
         # 瞬时错误重试:次数与退避基数(秒)。置 1 即关闭重试。
         self.retry_attempts = 3
         self.retry_base_delay = 2.0
+
+    def throttle_key(self) -> str:
+        """限速闸门的维度键:渠道 + 模型(上游配额真正共享的单位)。"""
+        return f"{(self.base_url or 'default').strip()}::{self.model_name}"
 
     # ---- 便捷构造:把一个纯文本 prompt 包成 messages ----
     @staticmethod
@@ -430,20 +441,24 @@ class LLMAdapter(abc.ABC):
         不清屏,免得用户眼前的字每隔几百字消失一次。
         """
         async def gen() -> AsyncIterator[str]:
-            live.begin_call()
-            try:
-                async for delta in self._iter_stream(messages, sink):
-                    if delta:
-                        live.publish(delta)
-                    yield delta
-            finally:
-                live.end_call()
+            # 全站唯一直播出水口,也是全站唯一的上游入水口:并发/速率闸门挂在这里,
+            # complete()(含流式聚合)与直连 stream() 两条路都逃不过,一处接线全覆盖
+            async with throttle.slot(self.throttle_key(), self.max_concurrency, self.rpm):
+                live.begin_call()
+                try:
+                    async for delta in self._iter_stream(messages, sink):
+                        if delta:
+                            live.publish(delta)
+                        yield delta
+                finally:
+                    live.end_call()
 
         return gen()
 
     async def _once_live(self, messages: list[LLMMessage]) -> LLMResponse:
         """非流式兜底路径:整段回来后补播一次(总比一个字都看不到强)。"""
-        resp = await self._complete_once(messages)
+        async with throttle.slot(self.throttle_key(), self.max_concurrency, self.rpm):
+            resp = await self._complete_once(messages)
         if resp.content:
             live.publish(resp.content)
         return resp

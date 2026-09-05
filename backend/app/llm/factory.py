@@ -59,6 +59,9 @@ def _row_to_config(row) -> dict:
         "timeout": row.timeout or 0,
         "max_tokens": row.max_tokens or 0,
         "thinking_mode": getattr(row, "thinking_mode", "") or "",
+        # 迁移前的旧行可能没有限速两列,getattr 兜底(0 = 不限)
+        "max_concurrency": getattr(row, "max_concurrency", 0) or 0,
+        "rpm": getattr(row, "rpm", 0) or 0,
         "is_default": row.is_default,
         "is_default_fast": row.is_default_fast,
         # 迁移前的旧行可能没有该属性,getattr 兜底
@@ -198,6 +201,8 @@ def create_llm_adapter(
     max_tokens: int | None = None,
     timeout: int | None = None,
     thinking_mode: str | None = None,
+    max_concurrency: int | None = None,
+    rpm: int | None = None,
 ) -> LLMAdapter:
     """造一个适配器。
 
@@ -233,6 +238,8 @@ def create_llm_adapter(
             "interface_format": provider,
             "timeout": db_cfg.get("timeout", 0),
             "max_tokens": db_cfg.get("max_tokens", 0),
+            "max_concurrency": db_cfg.get("max_concurrency", 0),
+            "rpm": db_cfg.get("rpm", 0),
             "thinking_mode": db_cfg.get("thinking_mode", ""),
         }
     else:
@@ -283,6 +290,13 @@ def create_llm_adapter(
         ),
         thinking_mode=resolved_thinking,
         thinking_forced=forced,
+        # 主动限速:显式参数 > 配置列 > 0(不限)。见 llm/throttle.py
+        max_concurrency=(
+            max_concurrency
+            if max_concurrency is not None
+            else (cfg.get("max_concurrency") or 0)
+        ),
+        rpm=rpm if rpm is not None else (cfg.get("rpm") or 0),
     )
 
 

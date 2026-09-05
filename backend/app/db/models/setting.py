@@ -73,3 +73,8 @@ class ProviderConfig(Base, TimestampMixin):
     is_default: Mapped[bool] = mapped_column(default=False)
     is_default_fast: Mapped[bool] = mapped_column(default=False)
     is_default_review: Mapped[bool] = mapped_column(default=False, server_default="0")
+    # 主动限速(0 = 不限,存量行为不变):同一中转站同一模型的上游配额是共享的,
+    # 按「渠道+模型」维度限并发/速率(见 llm/throttle.py)——防 429/防封号,
+    # 多用户站上也防止一人把共享配额打爆。见 docs/ai-providers.md。
+    max_concurrency: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    rpm: Mapped[int] = mapped_column(Integer, default=0, server_default="0")

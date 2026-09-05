@@ -549,8 +549,10 @@ export interface CharacterFact {
   id: number; fact_type: string; content: string;
   valid_from: number; valid_until: number | null; importance: string;
 }
+export interface RelationEvidence { chapter: number; content: string; }
 export interface CharacterRelation {
   other_name: string; description: string; valid_from: number; other_retired: boolean;
+  evidence: RelationEvidence[]; // 支撑这条边的原文事实(带章节引用),新→旧最多 3 条
 }
 export interface CharacterCard {
   id: number; name: string; aliases: string[]; entity_type: string; retired: boolean;
@@ -638,6 +640,8 @@ export interface ProviderConfigOut {
   model: string;
   timeout: number;      // 0 = 跟随全局
   max_tokens: number;   // 0 = 跟随全局/任务默认
+  max_concurrency: number; // 并发上限,0=不限(按「渠道+模型」全站共享计数)
+  rpm: number;             // 每分钟请求数上限,0=不限
   thinking_mode: string; // "" = 跟随全局默认(关思考);low/high/max = 按配置强制
   is_default: boolean;
   is_default_fast: boolean;

@@ -68,6 +68,9 @@ class ProviderConfigOut(BaseModel):
     model: str
     timeout: int
     max_tokens: int
+    # 主动限速:0=不限(存量配置默认,行为不变)。见 llm/throttle.py
+    max_concurrency: int = 0
+    rpm: int = 0
     # 思考模式:空串=跟随全局默认(关);low/high/max=按配置强制
     thinking_mode: str = ""
     is_default: bool
@@ -89,6 +92,8 @@ class ProviderConfigIn(BaseModel):
     model: str = ""
     timeout: int = Field(default=0, ge=0, le=3600, description="0=跟随全局")
     max_tokens: int = Field(default=0, ge=0, le=200000, description="0=跟随全局/任务默认")
+    max_concurrency: int = Field(default=0, ge=0, le=100, description="并发上限,0=不限")
+    rpm: int = Field(default=0, ge=0, le=6000, description="每分钟请求数上限,0=不限")
     thinking_mode: str = Field(
         default="", description="空=跟随全局默认(关思考);low/high/max=强制"
     )
@@ -117,6 +122,8 @@ def _out(row: ProviderConfig, plain_key: str, *, cloudflare: bool = False) -> Pr
         model=row.model,
         timeout=row.timeout or 0,
         max_tokens=row.max_tokens or 0,
+        max_concurrency=getattr(row, "max_concurrency", 0) or 0,
+        rpm=getattr(row, "rpm", 0) or 0,
         thinking_mode=getattr(row, "thinking_mode", "") or "",
         is_default=row.is_default,
         is_default_fast=row.is_default_fast,
@@ -248,6 +255,8 @@ async def create_provider_config(
         model=req.model.strip(),
         timeout=req.timeout,
         max_tokens=req.max_tokens,
+        max_concurrency=req.max_concurrency,
+        rpm=req.rpm,
         thinking_mode=_norm_thinking_mode(req.thinking_mode),
     )
     db.add(row)
@@ -292,6 +301,8 @@ async def update_provider_config(
     row.model = req.model.strip()
     row.timeout = req.timeout
     row.max_tokens = req.max_tokens
+    row.max_concurrency = req.max_concurrency
+    row.rpm = req.rpm
     row.thinking_mode = _norm_thinking_mode(req.thinking_mode)
     _apply_default_flags(db, user, row, req)
 

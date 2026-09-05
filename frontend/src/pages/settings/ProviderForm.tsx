@@ -16,6 +16,8 @@ export function ProviderForm({ editing, onSaved, onCancel }: {
   const [model, setModel] = useState(editing?.model || "");
   const [timeout_, setTimeout_] = useState(String(editing?.timeout ?? 0));
   const [maxTokens, setMaxTokens] = useState(String(editing?.max_tokens ?? 0));
+  const [maxConcurrency, setMaxConcurrency] = useState(String(editing?.max_concurrency ?? 0));
+  const [rpm_, setRpm_] = useState(String(editing?.rpm ?? 0));
   const [thinkingMode, setThinkingMode] = useState(editing?.thinking_mode ?? "");
   const [busy, setBusy] = useState(false);
 
@@ -33,6 +35,8 @@ export function ProviderForm({ editing, onSaved, onCancel }: {
         model: model.trim(),
         timeout: Math.max(0, parseInt(timeout_, 10) || 0),
         max_tokens: Math.max(0, parseInt(maxTokens, 10) || 0),
+        max_concurrency: Math.max(0, parseInt(maxConcurrency, 10) || 0),
+        rpm: Math.max(0, parseInt(rpm_, 10) || 0),
         thinking_mode: thinkingMode,
       };
       const saved = editing
@@ -130,7 +134,7 @@ export function ProviderForm({ editing, onSaved, onCancel }: {
 
       <details style={{ marginTop: 12 }}>
         <summary className="fld-hint" style={{ cursor: "pointer" }}>
-          高级选项(超时 / max_tokens / 思考模式)
+          高级选项(超时 / max_tokens / 限速 / 思考模式)
         </summary>
         <div className="fld-row" style={{ marginTop: 8 }}>
           <div className="fld">
@@ -152,6 +156,28 @@ export function ProviderForm({ editing, onSaved, onCancel }: {
               placeholder="0"
               spellCheck={false}
             />
+          </div>
+          <div className="fld">
+            <label className="fl">并发上限</label>
+            <input
+              type="text"
+              value={maxConcurrency}
+              onChange={(e) => setMaxConcurrency(e.target.value)}
+              placeholder="0"
+              spellCheck={false}
+            />
+            <div className="fld-hint">同时在途的请求数上限,0=不限。按「渠道+模型」全站共享计数,防把中转站打爆。</div>
+          </div>
+          <div className="fld">
+            <label className="fl">RPM(次/分钟)</label>
+            <input
+              type="text"
+              value={rpm_}
+              onChange={(e) => setRpm_(e.target.value)}
+              placeholder="0"
+              spellCheck={false}
+            />
+            <div className="fld-hint">每分钟最多发几个请求,0=不限;满了自动排队等窗口滑出。</div>
           </div>
           <div className="fld">
             <label className="fl">思考模式</label>
