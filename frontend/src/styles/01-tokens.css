@@ -1,61 +1,66 @@
 /* ==========================================================================
    jarvis-write 前端样式
-   设计目标:低饱和、克制强调色、清晰层次、充足留白 —— 适合作家长时间使用
+   主题「灰宣旧金」:与官网(docs 落地页)同源——灰宣纸底、墨色字、墨青主色、
+   旧金线点缀。低饱和、克制强调色、充足留白,适合作家长时间使用。
 
-   主题:令牌全部走 CSS 变量;[data-theme="dark"] 整组覆写即暗色模式
+   令牌全部走 CSS 变量;[data-theme="dark"] 整组覆写即暗色模式
    (切换逻辑见 src/theme.ts,首屏防闪烁脚本见 index.html)。
    阅读器(Reader)有自己的局部主题,在 .reader 作用域内覆写令牌,互不影响。
    ========================================================================== */
 
 /* ---------- 设计令牌 ---------- */
 :root {
-  /* 色板:表面 / 边框 / 文字三级 */
-  --bg: #f7f7f5;
-  --surface: #ffffff;
-  --surface-2: #f1f1ee;          /* hover 填充、次级表面 */
-  --line: #e4e4e0;
-  --line-strong: #d4d4cf;
+  /* 色板:表面 / 边框 / 文字三级(灰宣纸 + 墨) */
+  --bg: #f2f1ec;
+  --surface: #fbfaf5;
+  --surface-2: #ecebe2;          /* hover 填充、次级表面 */
+  --line: #e0ded4;
+  --line-strong: #cfccc0;
 
-  --text: #26272b;
-  --text-2: #5c5f66;
-  --text-3: #767a83;             /* 弱化文字(hint/placeholder);≈WCAG AA 对比度 */
+  --text: #2b2a26;               /* 墨 */
+  --text-2: #605d54;
+  --text-3: #8a867a;             /* 弱化文字(hint/placeholder);≈WCAG AA 对比度 */
 
-  /* 品牌色(克制的靛蓝)及语义色 */
-  --brand: #4b54e1;
-  --brand-hover: #3e46c6;
-  --brand-weak: #eef0fd;
-  --brand-line: #d9ddf9;
-  --brand-ring: rgba(75, 84, 225, 0.16);
-  --brand-2: #7a4be1;            /* 封面渐变副色 */
+  /* 品牌色(墨青)及语义色;旧金为辅(故事线/高亮/点缀) */
+  --brand: #33454e;
+  --brand-hover: #26343c;
+  --brand-weak: #e9ece7;
+  --brand-line: #ccd6d2;
+  --brand-ring: rgba(51, 69, 78, 0.16);
+  --brand-2: #b08d4f;            /* 封面渐变副色:旧金 */
 
-  /* 品牌底色上的前景:白字 / 半透明底(暗色下翻转为深色,保证对比度) */
-  --on-brand: #ffffff;
-  --on-brand-weak: rgba(255, 255, 255, 0.22);
+  /* 品牌底色上的前景:纸白字 / 半透明底(暗色下翻转为深色,保证对比度) */
+  --on-brand: #f7f6f1;
+  --on-brand-weak: rgba(247, 246, 241, 0.22);
   /* 高饱和渐变(封面等)上的前景:两种主题都用纯白 */
   --on-vivid: #ffffff;
 
-  --ok: #1a7f4b;   --ok-weak: #ecf7f1;   --ok-line: #c2e2d1;
-  --warn: #a85f0a; --warn-weak: #fdf5e8; --warn-line: #edd9b4;
-  --err: #c93333;  --err-weak: #fceeee;  --err-line: #f0c8c8;
+  --ok: #3d7050;   --ok-weak: #edf3ee;   --ok-line: #c6dacb;
+  --warn: #9a6b1f; --warn-weak: #f7f1e2; --warn-line: #e5d7b8;
+  --err: #bd3a3a;  --err-weak: #f9eeee;  --err-line: #efcaca;
+
+  /* 旧金线:贯穿全站的点缀色(高亮描边、故事线、选中态),官网同源 */
+  --gold: #b08d4f;
+  --gold-weak: #f1e9d8;
 
   /* 复合场景色:顶栏半透明底 / 遮罩 / 登录页辉光 */
-  --topbar-bg: rgba(255, 255, 255, 0.88);
-  --overlay-bg: rgba(24, 25, 28, 0.5);
-  --overlay-bg-soft: rgba(24, 25, 28, 0.4);
-  --auth-glow: #e9ebfb;
-  --auth-glow-fade: rgba(233, 235, 251, 0);
+  --topbar-bg: rgba(242, 241, 236, 0.9);
+  --overlay-bg: rgba(30, 30, 27, 0.5);
+  --overlay-bg-soft: rgba(30, 30, 27, 0.4);
+  --auth-glow: #ebe7da;
+  --auth-glow-fade: rgba(235, 231, 218, 0);
 
   /* 锁屏页:双层品牌光晕 + 玻璃卡片(暗色整组覆写) */
-  --lock-glow-a: rgba(75, 84, 225, 0.13);
-  --lock-glow-b: rgba(122, 75, 225, 0.11);
+  --lock-glow-a: rgba(51, 69, 78, 0.13);
+  --lock-glow-b: rgba(176, 141, 79, 0.12);
   --lock-card-bg: rgba(255, 255, 255, 0.75);
   --lock-card-line: rgba(255, 255, 255, 0.7);
 
-  /* 字体栈:UI 用无衬线,阅读/正文用衬线 */
+  /* 字体栈:UI 用无衬线,阅读/正文/大标题用衬线(Noto Serif SC 本地自托管) */
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
-  --font-serif: "Songti SC", "STSong", "Noto Serif CJK SC",
-    "Source Han Serif SC", Georgia, "Times New Roman", serif;
+  --font-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong",
+    "Noto Serif CJK SC", Georgia, "Times New Roman", serif;
 
   /* 字号阶梯 */
   --fs-xs: 12px;
@@ -81,17 +86,17 @@
   --r-xl: 16px;
   --r-full: 999px;
 
-  /* 阴影 */
-  --shadow-sm: 0 1px 2px rgba(31, 32, 36, 0.05);
-  --shadow-md: 0 1px 2px rgba(31, 32, 36, 0.05), 0 4px 12px rgba(31, 32, 36, 0.06);
-  --shadow-lg: 0 16px 40px rgba(31, 32, 36, 0.16);
+  /* 阴影(墨色基调) */
+  --shadow-sm: 0 1px 2px rgba(43, 42, 38, 0.05);
+  --shadow-md: 0 1px 2px rgba(43, 42, 38, 0.05), 0 4px 12px rgba(43, 42, 38, 0.06);
+  --shadow-lg: 0 16px 40px rgba(43, 42, 38, 0.16);
 
   /* 控件尺寸(移动端在媒体查询里调大);
      --ctl-r 控件圆角、--ctl-inset 输入框内阴影(轻陷感),输入/按钮共用 */
   --ctl-h: 40px;
   --ctl-h-sm: 32px;
   --ctl-r: 10px;
-  --ctl-inset: inset 0 1px 2px rgba(31, 32, 36, 0.04);
+  --ctl-inset: inset 0 1px 2px rgba(43, 42, 38, 0.04);
 
   /* 层级 */
   --z-topbar: 10;
@@ -99,41 +104,45 @@
 }
 
 /* ---------- 暗色主题:整组覆写令牌 ----------
-   低亮度暖灰 + 靛蓝提亮,不纯黑;语义色同步提亮保证在暗底上的对比度。 */
+   深夜书房:墨炭底 + 提亮墨青 + 旧金,不纯黑;语义色同步提亮保证对比度。 */
 [data-theme="dark"] {
-  --bg: #17181b;
-  --surface: #1f2025;
-  --surface-2: #28292f;
-  --line: #313237;
-  --line-strong: #434449;
+  --bg: #1c1d20;
+  --surface: #242529;
+  --surface-2: #2c2d32;
+  --line: #35363b;
+  --line-strong: #47484e;
 
-  --text: #d7d8dc;
-  --text-2: #a3a6ad;
-  --text-3: #858a92;
+  --text: #d9d8d2;
+  --text-2: #a6a49b;
+  --text-3: #8b897f;
 
-  --brand: #8b93ff;
-  --brand-hover: #a0a6ff;
-  --brand-weak: #262a49;
-  --brand-line: #3d4372;
-  --brand-ring: rgba(139, 147, 255, 0.28);
+  --brand: #9db8c4;
+  --brand-hover: #b3cbd6;
+  --brand-weak: #26333a;
+  --brand-line: #3c4d55;
+  --brand-ring: rgba(157, 184, 196, 0.26);
+  --brand-2: #d4ab5f;            /* 暗色下旧金提亮 */
 
-  /* 暗色品牌底是浅靛蓝,其上的前景翻转为深色才够对比度 */
-  --on-brand: #181a30;
-  --on-brand-weak: rgba(24, 26, 48, 0.28);
+  /* 暗色品牌底是浅墨青,其上的前景翻转为深色才够对比度 */
+  --on-brand: #1a2429;
+  --on-brand-weak: rgba(26, 36, 41, 0.28);
 
-  --ok: #55b98a;   --ok-weak: #1b2a23;   --ok-line: #2f4d3f;
-  --warn: #d99a4e; --warn-weak: #2d2517; --warn-line: #54452a;
-  --err: #e06c6c;  --err-weak: #311f22;  --err-line: #553636;
+  --ok: #6fb98c;   --ok-weak: #1d2a22;   --ok-line: #33503f;
+  --warn: #d0a35c; --warn-weak: #2d2617; --warn-line: #554829;
+  --err: #e07a7a;  --err-weak: #332023;  --err-line: #573838;
 
-  --topbar-bg: rgba(31, 32, 37, 0.86);
+  --gold: #d4ab5f;
+  --gold-weak: #332c1e;
+
+  --topbar-bg: rgba(36, 37, 41, 0.88);
   --overlay-bg: rgba(0, 0, 0, 0.6);
   --overlay-bg-soft: rgba(0, 0, 0, 0.5);
-  --auth-glow: #23274d;
-  --auth-glow-fade: rgba(35, 39, 77, 0);
+  --auth-glow: #2a2f33;
+  --auth-glow-fade: rgba(42, 47, 51, 0);
 
-  --lock-glow-a: rgba(139, 147, 255, 0.15);
-  --lock-glow-b: rgba(122, 75, 225, 0.17);
-  --lock-card-bg: rgba(31, 32, 37, 0.72);
+  --lock-glow-a: rgba(157, 184, 196, 0.14);
+  --lock-glow-b: rgba(212, 171, 95, 0.15);
+  --lock-card-bg: rgba(36, 37, 41, 0.72);
   --lock-card-line: rgba(255, 255, 255, 0.09);
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
@@ -142,4 +151,3 @@
 
   --ctl-inset: inset 0 1px 2px rgba(0, 0, 0, 0.28);
 }
-
