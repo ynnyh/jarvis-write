@@ -2,3 +2,6 @@
 # ffmpeg 二进制（末帧自动接力用，体积大且有许可问题，不入库）：
 # 构建桌面前手工放入 backend/bin/ffmpeg.exe（gyan.dev essentials 版），缺失时接力功能自动隐藏
 backend/bin/
+
+# 迁移前自动备份的运行产物(本地库快照),不入库
+migrations-backup/
