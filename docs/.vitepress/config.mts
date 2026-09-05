@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitepress'
+import { DEMO, demoReady } from './site'
 
 // jarvis-write 文档站配置。
 // 站点直接以 docs/ 为源(与仓库内设计文档单一信息源),构建产物 docs/.vitepress/dist
@@ -14,6 +15,19 @@ export default defineConfig({
   // 仓库里的设计文档即站点正文,无需排除;assets/ 下的图片可被 markdown 直接引用。
   srcExclude: ['**/node_modules/**'],
 
+  // 站点头信息:页签图标、分享卡片、浏览器主题色。base 固定为 /jarvis-write/,head 里的
+  // 站内路径需手写前缀(VitePress 不自动改写 head 里的 URL)。
+  head: [
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/jarvis-write/favicon.svg' }],
+    ['meta', { name: 'theme-color', content: '#f2f1ec' }],
+    ['meta', { property: 'og:type', content: 'website' }],
+    ['meta', { property: 'og:site_name', content: 'jarvis-write' }],
+    ['meta', { property: 'og:title', content: 'jarvis-write · AI 长篇小说创作系统' }],
+    ['meta', { property: 'og:description', content: '可控、改得动、不崩的 AI 长篇小说创作系统——时序故事圣经、伏笔调度、大纲级联、去 AI 味门禁。' }],
+    ['meta', { property: 'og:url', content: 'https://ynnyh.github.io/jarvis-write/' }],
+    ['meta', { property: 'og:image', content: 'https://ynnyh.github.io/jarvis-write/og-cover.png' }],
+  ],
+
   themeConfig: {
     logo: undefined,
     siteTitle: 'jarvis-write',
@@ -22,6 +36,9 @@ export default defineConfig({
       { text: '首页', link: '/' },
       { text: '功能导览', link: '/features' },
       { text: '设计文档', link: '/00-overview' },
+      ...(demoReady
+        ? [{ text: '在线试读', link: DEMO.url }]
+        : []),
       {
         text: '获取',
         items: [

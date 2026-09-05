@@ -1,0 +1,14 @@
+/* 全站微调:品牌化的选区颜色与平滑锚点滚动(文档页与落地页共用)。 */
+::selection {
+  background: rgba(51, 69, 78, 0.15);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
