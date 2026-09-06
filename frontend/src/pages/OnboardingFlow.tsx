@@ -87,8 +87,7 @@ export default function OnboardingFlow() {
   const [seedHint, setSeedHint] = useState(false);
   // 方案轮廓推荐:概念确认后自动请求一次;tone/scale 步进到时预填(可改)
   const [shapeSug, setShapeSug] = useState<ShapeSuggestion | null>(null);
-  const toneAppliedRef = useRef(false);
-  const scaleAppliedRef = useRef(false);
+  const [scaleApplied, setScaleApplied] = useState(false);
 
   // 题材页「随机换一张」:全池重抽题材卡 + 顺带抽口味(与随机开一本同一体验语言)
   function randomizeDraft() {
@@ -116,11 +115,11 @@ export default function OnboardingFlow() {
 
   // 篇幅步:AI 有推荐且用户尚未改过章数(仍是建书默认 30)时,自动选中推荐档
   useEffect(() => {
-    if (step !== "scale" || !shapeSug || scaleAppliedRef.current) return;
+    if (step !== "scale" || !shapeSug || scaleApplied) return;
     if (Number(chapters) === 30 && !dirty) {
       const preset = SCALE_PRESETS.find((p) => p.key === shapeSug.scale);
       if (preset) {
-        scaleAppliedRef.current = true;
+        setScaleApplied(true);
         void pickScale(preset);
       }
     }
@@ -504,8 +503,7 @@ export default function OnboardingFlow() {
                               if (pid == null) return;
                               api.suggestShape(pid).then((sug: ShapeSuggestion) => {
                                 setShapeSug(sug);
-                                toneAppliedRef.current = false;
-                                scaleAppliedRef.current = false;
+                                setScaleApplied(false);
                               }).catch(() => undefined);
                             }}
                               onRefresh={() => brainstorm()}
@@ -533,8 +531,7 @@ export default function OnboardingFlow() {
                               if (pid == null) return;
                               api.suggestShape(pid).then((sug: ShapeSuggestion) => {
                                 setShapeSug(sug);
-                                toneAppliedRef.current = false;
-                                scaleAppliedRef.current = false;
+                                setScaleApplied(false);
                               }).catch(() => undefined);
                             }}
                         onRefine={regenWithFeedback}
@@ -688,7 +685,7 @@ export default function OnboardingFlow() {
                   <div className="card">
                     <h2>打算写多长?</h2>
                     <div className="card-desc">先选个预设,数字收在「高级选项」里,之后随时能改。</div>
-                    {shapeSug && !scaleAppliedRef.current && (
+                    {shapeSug && scaleApplied && (
                       <div className="card card-info mt-2">
                         <b>🎴 AI 按概念推荐篇幅:{shapeSug.scale === "short" ? "短篇" : shapeSug.scale === "long" ? "长篇" : "中篇"}</b>
                         <div className="card-desc mt-1">{shapeSug.scale_reason} 已帮你选好(点其他卡可改)。</div>
