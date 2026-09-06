@@ -25,4 +25,5 @@
 @import "./styles/12-mobile-shell.css";   /* 移动端壳/命令面板 */
 @import "./styles/13-creative-dna.css";   /* 创作坐标/品味镜 */
 @import "./styles/14-drama-workshop.css"; /* 漫剧/宣传片/系列工坊 */
-@import "./styles/15-final.css";          /* 四层状态条/重来向导/可访问性 */
+@import "./styles/15-final.css";
+@import "./styles/16-share-pub.css";     /* 公开分享阅读页(牛皮纸) */

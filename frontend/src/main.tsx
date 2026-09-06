@@ -21,6 +21,7 @@ const AdminPage = React.lazy(() => import("./pages/AdminPage"));
 const SettingsPage = React.lazy(() => import("./pages/SettingsPage"));
 // HelpPage 不拆:未登录也能看(App 里直接渲染),拆了要多一层 Suspense 才不闪
 import HelpPage from "./pages/HelpPage";
+import SharePage from "./pages/SharePage";
 
 // 外观:应用 light/dark/auto 偏好,auto 下挂系统主题监听(首屏脚本见 index.html)
 initTheme();
@@ -37,6 +38,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <HashRouter>
         <Routes>
+          {/* 公开分享阅读页:免登录只读,必须在 App 布局(登录墙)之外 */}
+          <Route path="/share/:token" element={<SharePage />} />
           <Route element={<App />}>
             <Route index element={<ProjectsPage />} />
             {/* 创作起步流:/new 建草稿 → /new/:id/:step 五步走 */}

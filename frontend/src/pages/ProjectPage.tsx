@@ -13,6 +13,7 @@ import SearchDialog from "../ui/SearchDialog";
 import { setThemePref } from "../theme";
 import { isDesktop, onMenuAction, openReadWindow } from "../desktop";
 import { api, apiBase, downloadFile } from "../api";
+import ShareDialog from "../ui/ShareDialog";
 import { toast } from "../ui/Toaster";
 import { errMsg } from "../pollJob";
 import InspirePanel from "../panels/InspirePanel";
@@ -207,6 +208,8 @@ export default function ProjectPage() {
   const { data: chapters = [] } = useChapters(pid);
   const reload = useInvalidateProject(pid);
 
+  // 公开分享弹层(书架卡「分享」与标题行「分享」共用)
+  const [shareOpen, setShareOpen] = useState(false);
   // 全书阅读模式(有已生成章节时,标题行出现「阅读全书」入口)
   const [readingBook, setReadingBook] = useState(false);
   // 重来向导:写差了想从头重来时的跨层决策对话框(状态在组件内,导航回调在渲染处内联接线)
@@ -459,10 +462,18 @@ export default function ProjectPage() {
               <span className="badge">{PROJECT_STATUS_CN[project.status] ?? project.status}</span>
               {project.genre && <span className="badge">{project.genre}</span>}
               {chapters.length > 0 && (
-                <button className="primary read-book-btn" onClick={() => setReadingBook(true)}>
-                  阅读全书
-                </button>
+                <>
+                  <button className="primary read-book-btn" onClick={() => setReadingBook(true)}>
+                    阅读全书
+                  </button>
+                  <button className="read-book-btn" onClick={() => setShareOpen(true)}>
+                    分享
+                  </button>
+                </>
               )}
+            {shareOpen && (
+              <ShareDialog pid={Number(pid)} onClose={() => setShareOpen(false)} />
+            )}
             </h1>
             <div className="stat-strip">
               <div className="stat">主题<b className="stat-topic">{project.topic || "(未定,先去开书区)"}</b></div>

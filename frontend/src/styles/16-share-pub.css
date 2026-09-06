@@ -1,0 +1,61 @@
+/* ---------- 公开分享阅读页(牛皮纸 + 衬线正文;免登录只读) ---------- */
+.pub-wrap {
+  min-height: 100vh;
+  background:
+    radial-gradient(60% 40% at 50% 0%, rgba(176, 141, 79, 0.1) 0%, transparent 70%),
+    #f1e9d3;
+  color: #3a3428;
+  font-family: var(--font-serif, "Noto Serif SC", "Source Han Serif SC", "Songti SC", serif);
+}
+.pub-loading { padding: 40px; text-align: center; }
+.pub-err {
+  max-width: 640px; margin: 18vh auto 0; padding: 24px 28px;
+  background: #fdfbf5; border: 1px solid #e3d7ba; border-radius: 14px;
+  font-size: 15px; line-height: 1.8;
+}
+.pub-err + .pub-brand { display: inline-block; margin: 18px 0 0 calc(50% - 320px + 28px); color: #a9743a; }
+.pub-head {
+  max-width: 720px; margin: 0 auto; padding: 48px 20px 8px;
+  display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+}
+.pub-title {
+  margin: 0; font-size: 30px; font-weight: 700; letter-spacing: 0.02em;
+}
+.pub-genre {
+  font-size: 12px; color: #8a7d63;
+  border: 1px solid #d8cba6; border-radius: 999px; padding: 2px 10px;
+}
+.pub-toc {
+  max-width: 720px; margin: 14px auto 0; padding: 0 20px;
+  display: flex; flex-wrap: wrap; gap: 8px;
+}
+.pub-toc-item {
+  background: none; border: 1px solid #d8cba6; border-radius: 8px;
+  color: #6b6046; padding: 5px 12px; font-size: 13px; cursor: pointer;
+  font-family: inherit;
+}
+.pub-toc-item:hover { border-color: #a9743a; color: #7c5a2b; }
+.pub-toc-item.on {
+  background: #a9743a; border-color: #a9743a; color: #fffdf8;
+}
+.pub-body {
+  max-width: 720px; margin: 0 auto; padding: 28px 20px 48px;
+  background: #fdfaf1;
+  border-left: 1px solid #e8ddc0; border-right: 1px solid #e8ddc0;
+  font-size: 17px; line-height: 2;
+}
+.pub-body p { margin: 0 0 1.2em; text-indent: 2em; }
+.pub-foot {
+  max-width: 720px; margin: 0 auto; padding: 26px 20px 60px;
+  display: flex; flex-direction: column; gap: 8px;
+  color: #8a7d63; font-size: 13px; line-height: 1.8;
+}
+.pub-foot b { color: #6b6046; }
+.pub-brand {
+  color: #a9743a; text-decoration: none; font-weight: 600;
+}
+.pub-brand:hover { text-decoration: underline; }
+@media (max-width: 640px) {
+  .pub-body { font-size: 16px; padding: 22px 16px 36px; }
+  .pub-head { padding: 36px 16px 8px; }
+}

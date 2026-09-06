@@ -57,6 +57,7 @@ from app.api.promo import router as promo_router
 from app.api.clips import router as clips_router
 from app.api.birthday import router as birthday_router
 from app.api.series import router as series_router
+from app.api.shares import owner_router as shares_owner_router, public_router as shares_public_router
 from app.api.render import router as render_router
 from app.config import get_settings
 from app.db.base import Base
@@ -252,6 +253,9 @@ def create_app() -> FastAPI:
     app.include_router(series_router)
     app.include_router(render_router)
     app.include_router(project_io_router)
+    # 公开分享:作者面(带鉴权,挂 projects 前缀)已在 project_io 里;这里挂作者面与公开面
+    app.include_router(shares_owner_router)
+    app.include_router(shares_public_router)
     app.include_router(misc_router)
 
     # 资源定位统一走 resource_path:源码环境相对 backend/,冻结(桌面版)相对
