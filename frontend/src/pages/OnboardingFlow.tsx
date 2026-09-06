@@ -70,6 +70,8 @@ export default function OnboardingFlow() {
   const engineHalf = Math.max(1, Math.ceil((engineCards?.length ?? 0) / 2));
   const enginePageCards = (engineCards ?? []).slice(enginePage * engineHalf, enginePage * engineHalf + engineHalf);
   const poolRemain = (engineCards?.length ?? 0) - engineHalf * (enginePage + 1);
+  // 两段式引擎选择阶段(未深化出概念):概念候选区不渲染——此时尚无概念,骨架占位只会造成大片空白
+  const enginePhase = genrePath && ideas === null && engineCards !== null;
 
   const stepIdx = STEP_ORDER.indexOf(step);
   const hasConcept = !conceptIsEmpty(concept);
@@ -320,7 +322,7 @@ export default function OnboardingFlow() {
                       <>
                         {/* 两段式·第一段(P0-A):方向路先挑便宜的引擎卡(FAST 档一句话内核),
                             选 1-2 张再深化——试错成本降一个量级,强模型只跑选中的那一个 */}
-                        {genrePath && ideas === null && engineCards !== null && (
+                        {enginePhase && (
                           <div className="mt-2 mb-2">
                             {engineCards.length === 0 ? (
                               <div className="muted">
@@ -379,44 +381,53 @@ export default function OnboardingFlow() {
                                     </button>
                                   ) : null}
                                 </div>
+                                {busy && (
+                                  <div className="muted mt-2">
+                                    <span className="spin" />{busy}
+                                  </div>
+                                )}
                               </>
                             )}
                           </div>
                         )}
-                        {ideas === null && (genrePath ? engineCards === null : true) && (
+                        {!enginePhase && ideas === null && (genrePath ? engineCards === null : true) && (
                           <div className="muted mt-2 mb-2">
                             <span className="spin" /><ThinkingText phrases={THINK_CONCEPT} />
                           </div>
                         )}
-                        {ideasStale && (
-                          <div className="wiz-stale">
-                            <span>⚠ {conceptStaleText(ideaSig!, sparkText, tendency)}</span>
-                            <span className="grow" />
-                            <button className="btn-sm" onClick={() => brainstorm()}>重新生成</button>
-                            <button className="btn-sm" onClick={() => setIdeaSig(curIdeaSig)}>仍用这批</button>
-                          </div>
+                        {!enginePhase && (
+                          <>
+                            {ideasStale && (
+                              <div className="wiz-stale">
+                                <span>⚠ {conceptStaleText(ideaSig!, sparkText, tendency)}</span>
+                                <span className="grow" />
+                                <button className="btn-sm" onClick={() => brainstorm()}>重新生成</button>
+                                <button className="btn-sm" onClick={() => setIdeaSig(curIdeaSig)}>仍用这批</button>
+                              </div>
+                            )}
+                            {comparison && ideas && ideas.length > 0 && (
+                              <div className="card card-info mt-2">
+                                <b>这几个方案怎么选</b>
+                                <div className="card-desc mt-1">{comparison}</div>
+                              </div>
+                            )}
+                            <CandidateCards
+                              items={ideas} skeletonCount={4} keyOf={conceptKey}
+                              layoutIdPrefix="concept" pickedKey={pickedKey}
+                              busy={conceptBusy || !!pickedKey}
+                              renderCard={(c) => (
+                                <>
+                                  <h3 className="wiz-cand-title">{c.logline || "(无标题)"}</h3>
+                                  <ConceptBrief c={c} />
+                                </>
+                              )}
+                              onPick={pickConcept}
+                              onRefresh={() => brainstorm()}
+                              onRefine={regenWithFeedback}
+                              onCustom={() => setCustomOpen((v) => !v)}
+                            />
+                          </>
                         )}
-                        {comparison && ideas && ideas.length > 0 && (
-                          <div className="card card-info mt-2">
-                            <b>这几个方案怎么选</b>
-                            <div className="card-desc mt-1">{comparison}</div>
-                          </div>
-                        )}
-                        <CandidateCards
-                          items={ideas} skeletonCount={4} keyOf={conceptKey}
-                          layoutIdPrefix="concept" pickedKey={pickedKey}
-                          busy={conceptBusy || !!pickedKey}
-                          renderCard={(c) => (
-                            <>
-                              <h3 className="wiz-cand-title">{c.logline || "(无标题)"}</h3>
-                              <ConceptBrief c={c} />
-                            </>
-                          )}
-                          onPick={pickConcept}
-                          onRefresh={() => brainstorm()}
-                          onRefine={regenWithFeedback}
-                          onCustom={() => setCustomOpen((v) => !v)}
-                        />
                       </>
                     )}
                     {!sparkText && hasConcept && (
