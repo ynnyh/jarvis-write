@@ -61,9 +61,6 @@ export function useOnboarding() {
   // 两段式构思(P0-A):方向路先出便宜的引擎卡(FAST 档)收敛,选中 1-2 张才花强模型深化
   const [engineCards, setEngineCards] = useState<EngineCard[] | null>(null);
   const [enginePicked, setEnginePicked] = useState<string[]>([]);
-  // 随机开一本:题材/口味抽签 + 引擎自动抽 + 自动深化,概念出来交用户确认;
-  // 确认(选概念)后自动退出随机模式,后续书名/篇幅/点火回归用户逐个点击
-  const [randomMode, setRandomMode] = useState(false);
 
   // 题材屏
   const [inferBusy, setInferBusy] = useState(false);
@@ -202,32 +199,23 @@ export function useOnboarding() {
     await goto("concept");
   }
 
-  async function pickGenreBrainstorm(
-    cardOverride?: Chip,
-    prefsOverride?: { tone: string[]; elements: string[]; prota: string; avoid: string[] },
-  ) {
-    // 随机开一本:同一次点击里先 setState 再调用,读不到新 state——用显式参数兜住
-    const card = cardOverride ?? pickedGenreCard;
-    if (!card) return;
-    const tone = prefsOverride?.tone ?? prefTone;
-    const elements = prefsOverride?.elements ?? prefElements;
-    const prota = prefsOverride?.prota ?? prefProta;
-    const avoid = prefsOverride?.avoid ?? prefAvoid;
+  async function pickGenreBrainstorm() {
+    if (!pickedGenreCard) return;
     // P0-B 偏好前移:基调/元素走 tendency 结构化注入(后端渲染成【本次写作倾向】);
     // 主角类型/排斥拼进 spark 文本(无对应倾向维度,拼文本最直接且零后端改动)
-    const t: Tendency = { ...tendency, genre: card.label };
-    if (tone.length) t.tone = tone;
-    if (elements.length) t.elements = elements;
+    const t: Tendency = { ...tendency, genre: pickedGenreCard.label };
+    if (prefTone.length) t.tone = prefTone;
+    if (prefElements.length) t.elements = prefElements;
     const extras: string[] = [];
-    if (prota) extras.push(`主角偏好:${prota}`);
-    if (avoid.length) extras.push(`不要出现:${avoid.join("、")}`);
+    if (prefProta) extras.push(`主角偏好:${prefProta}`);
+    if (prefAvoid.length) extras.push(`不要出现:${prefAvoid.join("、")}`);
     const text = extras.length
-      ? `按「${card.label}」的套路来。${extras.join(";")}`
-      : `按「${card.label}」的套路来`;
+      ? `按「${pickedGenreCard.label}」的套路来。${extras.join(";")}`
+      : `按「${pickedGenreCard.label}」的套路来`;
     setSpark(text);
     try {
       await patch({
-        global_tendency: t, genre: card.label, topic: text,
+        global_tendency: t, genre: pickedGenreCard.label, topic: text,
       });
     } catch { /* 同上 */ }
     await goto("concept");
@@ -281,30 +269,18 @@ export function useOnboarding() {
     });
   }
 
-  // 两段式·第二段:选中的引擎 → 强模型深化成单个六字段概念。
-  // 随机开一本:picks 由调用方直接传入(自动抽签),不再依赖本回合的 enginePicked state。
-  async function developConcept(picks?: string[]) {
-    const chosen = picks ?? enginePicked;
-    if (!chosen.length) return;
+  // 两段式·第二段:选中的引擎 → 强模型深化成单个六字段概念
+  async function developConcept() {
+    if (!enginePicked.length) return;
     setErr(""); setIdeas(null);
     setBusy("AI 正在把选中的引擎深化成完整概念(约 1 分钟)…");
     try {
       const r = await runJob<{ concept: Concept }>(
-        () => api.developConceptAsync(chosen, sparkText, tendency, project?.dna ?? null),
+        () => api.developConceptAsync(enginePicked, sparkText, tendency, project?.dna ?? null),
         { kind: "inspire" },
       );
-      if (r) { setIdeas([r.concept]); setComparison(""); setEngineCards(null); setRandomMode(false); }
+      if (r) { setIdeas([r.concept]); setComparison(""); setEngineCards(null); }
     } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
-  }
-
-  // 随机开一本·引擎步:从当前池里随机扣 1-2 张直接深化(卡面金圈高亮,让用户看见抽中哪两张)
-  function developRandom() {
-    const pool = engineCards ?? [];
-    if (!pool.length) return;
-    const shuffled = [...pool].sort(() => Math.random() - 0.5);
-    const picks = shuffled.slice(0, Math.min(2, pool.length)).map((c) => c.engine);
-    setEnginePicked(picks);
-    void developConcept(picks);
   }
 
   async function brainstorm(feedback = "") {
@@ -573,7 +549,6 @@ export function useOnboarding() {
     stepsRef, chatEndRef, sparkRef, titleInputRef,
     // handler
     submitSpark, pickGenreBrainstorm, sendChat,
-    randomMode, setRandomMode, developRandom,
     brainstorm, regenWithFeedback, pickConcept, saveCustomConcept,
     fetchEngines, pickEngine, developConcept,
     setGenre, setDim, fetchTitles, pickTitle, pickScale, confirmScale,

@@ -583,6 +583,14 @@ export interface CharacterCard {
   relations: CharacterRelation[];
 }
 export interface CharactersOut { characters: CharacterCard[]; other_entities_count: number; }
+/** 方案轮廓推荐:阅读手感(tone/elements 标签)+ 篇幅档位,附一句话依据 */
+export interface ShapeSuggestion {
+  tone: string[];
+  elements: string[];
+  scale: "short" | "mid" | "long";
+  tone_reason: string;
+  scale_reason: string;
+}
 export interface FactSpan {
   content: string; fact_type: string; importance: string;
   valid_from: number; valid_until: number | null;
@@ -972,6 +980,10 @@ export const api = {
   // AI 起名走后台任务:返回 job_id,调用方用 pollJob 取 { titles }。
   // 同步版(/title-suggestion)还在后端留着给旧客户端,但前端不再用它——一轮起名
   // 是分钟级 LLM 调用,把连接挂那么久,链路空闲超时一掐就只剩一句 Failed to fetch。
+  // 方案轮廓推荐:概念确认后一次轻量调用,推荐阅读手感(tone/elements)与篇幅档位
+  suggestShape: (pid: number) =>
+    req<ShapeSuggestion>("POST", `/api/projects/${pid}/suggest-shape`),
+
   suggestTitleAsync: (topic: string, genre: string, concept?: Concept | null) =>
     req<{ job_id: string }>("POST", "/api/projects/title-suggestion-async",
       { topic, genre, concept: concept ?? null }),

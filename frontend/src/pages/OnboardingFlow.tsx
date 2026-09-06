@@ -5,14 +5,15 @@
 // /new → 静默建草稿 → /new/:id/idea → … → /new/:id/launch → 工作台
 // 每屏选择实时 PATCH 落库(刷新不丢、列表页可"继续创建");
 // localStorage 缓存候选内容,刷新后回到当前屏接着选。
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, MotionConfig, motion } from "motion/react";
-import { conceptIsEmpty, CONCEPT_FIELDS } from "../api";
+import { api, conceptIsEmpty, CONCEPT_FIELDS, ShapeSuggestion } from "../api";
 import { CandidateCards } from "../ui/CandidateCards";
 import { ThinkingText } from "../ui/ThinkingText";
 import { conceptSig, conceptStaleText, isStale, titleSig as calcTitleSig, titleStaleText } from "./wizSig";
 import { SetupStep, STEP_ORDER, STEP_LABEL } from "./onboarding/steps";
 import { SCALE_PRESETS, THINK_CONCEPT, THINK_TITLE } from "./onboarding/presets";
+import { composeRandomSeed } from "./onboarding/randomSeeds";
 import { ConceptBrief, conceptKey } from "./onboarding/ConceptBrief";
 import { ToneDims } from "./onboarding/ToneDims";
 import { useOnboarding } from "./onboarding/useOnboarding";
@@ -27,6 +28,27 @@ const PREF_ELEMENTS = ["逆袭", "马甲", "身份错位", "成长蜕变", "救�
 const PREF_PROTAGONISTS = ["小人物", "行内老手", "边缘人", "天才", "普通人"];
 // 排斥项对着题材边界最常拦的套路来(用户明确点了才允许,没点就是「不要」)
 const PREF_AVOIDS = ["系统", "重生", "穿越", "觉醒", "异能"];
+
+// AI 推荐的阅读手感:进入基调步时自动预填一次(仅当用户尚未自选),并显示依据横幅
+function ToneAutoApply({ shapeSug, setDim }: {
+  shapeSug: ShapeSuggestion | null;
+  setDim: (key: string, value: string | string[]) => void;
+}) {
+  const appliedRef = useRef(false);
+  useEffect(() => {
+    if (!shapeSug || appliedRef.current) return;
+    if (shapeSug.tone.length) setDim("tone", shapeSug.tone);
+    if (shapeSug.elements.length) setDim("elements", shapeSug.elements);
+    appliedRef.current = true;
+  }, [shapeSug, setDim]);
+  if (!shapeSug) return null;
+  return (
+    <div className="card card-info mt-2">
+      <b>🎴 AI 已按概念预选了阅读手感</b>
+      <div className="card-desc mt-1">{shapeSug.tone_reason} 点标签即可改。</div>
+    </div>
+  );
+}
 
 export default function OnboardingFlow() {
   const {
@@ -55,7 +77,6 @@ export default function OnboardingFlow() {
     submitSpark, pickGenreBrainstorm, sendChat,
     brainstorm, regenWithFeedback, pickConcept, saveCustomConcept,
     fetchEngines, pickEngine, developConcept,
-    randomMode, setRandomMode, developRandom,
     setGenre, setDim, fetchTitles, pickTitle, pickScale, confirmScale,
     runArch, runBp, enterWorkbench, abandon, goto, editFrom, markDirtyOk,
   } = useOnboarding();
@@ -63,63 +84,47 @@ export default function OnboardingFlow() {
   // 引擎卡抽卡页码:一批 AI 生成 8 张,先翻前 4 张(零成本),翻完才再调 AI 补池
   const [enginePage, setEnginePage] = useState(0);
   const [showAllEngines, setShowAllEngines] = useState(false);
-  const [randomCat, setRandomCat] = useState<string | null>(null); // 随机开一本抽中的类型(大类)
+  const [seedHint, setSeedHint] = useState(false);
+  // 方案轮廓推荐:概念确认后自动请求一次;tone/scale 步进到时预填(可改)
+  const [shapeSug, setShapeSug] = useState<ShapeSuggestion | null>(null);
+  const toneAppliedRef = useRef(false);
+  const scaleAppliedRef = useRef(false);
 
-  // 随机开一本·两步制:第一步随机「类型」(大类),第二步在该类型下定「题材」——
-  // 每一步结果都可见、可重抽、可手改,确认后才进概念。
-  function randomPrefs() {
+  // 题材页「随机换一张」:全池重抽题材卡 + 顺带抽口味(与随机开一本同一体验语言)
+  function randomizeDraft() {
+    if (!allGenreChips.length) return;
     const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
     const pickSome = <T,>(arr: T[], max: number): T[] =>
       [...arr].sort(() => Math.random() - 0.5).slice(0, Math.floor(Math.random() * (max + 1)));
+    setPickedGenreCard(pick(allGenreChips));
     setPrefTone(pickSome(PREF_TONES, 2));
     setPrefElements(pickSome(PREF_ELEMENTS, 2));
     setPrefProta(Math.random() < 0.6 ? pick(PREF_PROTAGONISTS) : "");
     setPrefAvoid(pickSome(PREF_AVOIDS, 1));
   }
-  function randomizeCatAndChip() {
-    const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
-    const cats = genreDim?.categories ?? [];
-    if (!cats.length || !allGenreChips.length) return;
-    const cat = pick(cats);
-    const inCat = allGenreChips.filter((c) => c.category === cat.key);
-    setRandomCat(cat.key);
-    setPickedGenreCard(pick(inCat.length ? inCat : allGenreChips));
-  }
-  function randomizeDraft() {
-    if (!allGenreChips.length) return;
-    const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
-    setPickedGenreCard(pick(allGenreChips));
-    randomPrefs();
-  }
-  function rerollCategory() {
-    randomizeCatAndChip();
-    randomPrefs();
-  }
-  function randomChipInCat() {
-    const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
-    if (!randomCat) return;
-    const inCat = allGenreChips.filter((c) => c.category === randomCat);
-    if (inCat.length) setPickedGenreCard(pick(inCat));
-  }
+
+  // 随机开一本·零成本阶段:类型卡、一句话灵感全部本地抽签,不调 LLM。
+  // 用户看着顺眼再点「让 AI 出方案」(生成 4 个概念方案)——LLM 只花在确认过的方向上。
   function randomBook() {
-    if (!allGenreChips.length) return;
-    setRandomMode(true);      // 概念阶段全随机:引擎到位后自动抽+自动深化
-    setEntry("genre");
-    randomizeCatAndChip();    // 第一步:随机类型 + 预选题材(页面上可见可改)
-    randomPrefs();            // 顺带抽口味
-    // 第二步(题材)与后续由用户在题材页确认/改选后点「按这个流派出方案」
+    if (allGenreChips.length) {
+      setPickedGenreCard(allGenreChips[Math.floor(Math.random() * allGenreChips.length)]);
+    }
+    setSpark(composeRandomSeed());
+    setSeedHint(true);
   }
 
-  // 随机模式:引擎卡到位后自动随机扣 1-2 张并深化(翻牌动画后进行,让用户看清抽中哪两张);
-  // 概念交付(randomMode 复位)后即停,书名/篇幅/点火回归用户逐个确认
+
+  // 篇幅步:AI 有推荐且用户尚未改过章数(仍是建书默认 30)时,自动选中推荐档
   useEffect(() => {
-    if (!randomMode) return;
-    if (genrePath && ideas === null && engineCards && engineCards.length > 0
-        && enginePicked.length === 0 && !busy) {
-      const t = setTimeout(() => developRandom(), 800);
-      return () => clearTimeout(t);
+    if (step !== "scale" || !shapeSug || scaleAppliedRef.current) return;
+    if (Number(chapters) === 30 && !dirty) {
+      const preset = SCALE_PRESETS.find((p) => p.key === shapeSug.scale);
+      if (preset) {
+        scaleAppliedRef.current = true;
+        void pickScale(preset);
+      }
     }
-  }, [randomMode, genrePath, ideas, engineCards, enginePicked, busy, developRandom]);
+  }, [step, shapeSug, chapters, dirty, pickScale]);
 
   if (!project) return <div className="muted">{err || "正在创建草稿…"}</div>;
 
@@ -221,6 +226,11 @@ export default function OnboardingFlow() {
                         <button onClick={() => goto("genre")}>概念已就绪,跳到题材 →</button>
                       )}
                     </div>
+                    {seedHint && (
+                      <div className="fld-hint">
+                        已抽到一句灵感(已填入上框,可随意改)——觉得方向对,就点「让 AI 出方案」;不对就再抽一次,重抽不花 token。
+                      </div>
+                    )}
 
                     {entry === "more" && (
                       <div className="entry-cards">
@@ -246,22 +256,7 @@ export default function OnboardingFlow() {
 
                     {entry === "genre" && genreDim && (
                       <div className="mt-3">
-                        {randomCat && (
-                          <div className="card card-info mt-3">
-                            <b>🎴 已随机抽中类型:{(genreDim.categories ?? []).find((c) => c.key === randomCat)?.label ?? randomCat}</b>
-                            <div className="card-desc mt-1">
-                              已在该类型下预选一个题材(下方高亮)。可重抽类型、换个题材,或点「显示全部类型」自己挑——都满意就「按这个流派出方案」。
-                            </div>
-                            <div className="actions mt-2">
-                              <button className="btn-sm" onClick={rerollCategory}>🎴 重抽类型</button>
-                              <button className="btn-sm" onClick={randomChipInCat}>🎴 换个题材</button>
-                              <button className="btn-sm" onClick={() => setRandomCat(null)}>显示全部类型</button>
-                            </div>
-                          </div>
-                        )}
-                        {(genreDim.categories ?? [])
-                          .filter((cat) => !randomCat || cat.key === randomCat)
-                          .map((cat) => {
+                        {(genreDim.categories ?? []).map((cat) => {
                           const chips = allGenreChips.filter((c) => c.category === cat.key);
                           if (!chips.length) return null;
                           return (
@@ -503,7 +498,16 @@ export default function OnboardingFlow() {
                                   <ConceptBrief c={c} />
                                 </>
                               )}
-                              onPick={pickConcept}
+                              onPick={(c) => {
+                              pickConcept(c);
+                              // 方案定了 → 顺手要一份「阅读手感 + 篇幅」推荐(轻量调用,失败静默)
+                              if (pid == null) return;
+                              api.suggestShape(pid).then((sug: ShapeSuggestion) => {
+                                setShapeSug(sug);
+                                toneAppliedRef.current = false;
+                                scaleAppliedRef.current = false;
+                              }).catch(() => undefined);
+                            }}
                               onRefresh={() => brainstorm()}
                               onRefine={regenWithFeedback}
                               onCustom={() => setCustomOpen((v) => !v)}
@@ -523,7 +527,16 @@ export default function OnboardingFlow() {
                             <ConceptBrief c={c} />
                           </>
                         )}
-                        onPick={pickConcept}
+                        onPick={(c) => {
+                              pickConcept(c);
+                              // 方案定了 → 顺手要一份「阅读手感 + 篇幅」推荐(轻量调用,失败静默)
+                              if (pid == null) return;
+                              api.suggestShape(pid).then((sug: ShapeSuggestion) => {
+                                setShapeSug(sug);
+                                toneAppliedRef.current = false;
+                                scaleAppliedRef.current = false;
+                              }).catch(() => undefined);
+                            }}
                         onRefine={regenWithFeedback}
                         onCustom={() => setCustomOpen((v) => !v)}
                       />
@@ -603,9 +616,11 @@ export default function OnboardingFlow() {
                 {step === "tone" && (
                   <div className="card">
                     <h2>想要什么样的阅读手感?</h2>
+                    <ToneAutoApply shapeSug={shapeSug} setDim={setDim} />
                     <div className="card-desc">
                       节奏 / 结构 / 基调,可不选,AI 会均衡处理;想叠加的剧情元素(暗恋、双向奔赴、逆袭…)也可在这里勾选。进了工作台也能随时调。
                     </div>
+                    <ToneAutoApply shapeSug={shapeSug} setDim={setDim} />
                     {genreDim ? (
                       <div className="mt-2"><ToneDims tendency={tendency} onSet={setDim} /></div>
                     ) : (
@@ -673,6 +688,12 @@ export default function OnboardingFlow() {
                   <div className="card">
                     <h2>打算写多长?</h2>
                     <div className="card-desc">先选个预设,数字收在「高级选项」里,之后随时能改。</div>
+                    {shapeSug && !scaleAppliedRef.current && (
+                      <div className="card card-info mt-2">
+                        <b>🎴 AI 按概念推荐篇幅:{shapeSug.scale === "short" ? "短篇" : shapeSug.scale === "long" ? "长篇" : "中篇"}</b>
+                        <div className="card-desc mt-1">{shapeSug.scale_reason} 已帮你选好(点其他卡可改)。</div>
+                      </div>
+                    )}
                     <div className="scale-cards mt-2">
                       {SCALE_PRESETS.map((p) => (
                         <button key={p.key} type="button"
