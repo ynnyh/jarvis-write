@@ -1,21 +1,15 @@
 // src/api.ts — 后端 API 客户端(对齐 backend/app/api/*)
-// 服务器地址:默认空 = 同源(桌面单机 / Docker 同宿主 / 官网体验站)。
-// 安卓壳(Capacitor)里前端资源在本地,没有同源可言——默认连官方服务器
-// (DEFAULT_SERVER,登录页可改,存 localStorage 后所有请求/导出都指过去)。
+// 服务器地址:默认空 = 同源。安卓壳(Capacitor)为热更新模式——WebView 直接加载
+// 官方服务器上的界面(server.url),页面与 API 天然同源;浏览器/桌面亦同源。
+// 若未来出现「本地壳 + 远程 API」形态,再恢复从 localStorage 读取服务器前缀。
 const SERVER_KEY = "jarvis_server";
-// 安卓壳的默认服务器:开箱即连官方部署(登录页可改,换服务器不用重装 App)。
-import { Capacitor } from "@capacitor/core";
-
-export const DEFAULT_SERVER = "http://111.228.10.230:8080";
 
 export function apiBase(): string {
   try {
-    const v = (localStorage.getItem(SERVER_KEY) || "").trim().replace(/\/+$/, "");
-    if (v) return v;
-    // 安卓壳里前端资源在本地,没有「同源」可言——默认连官方服务器
-    if (Capacitor.isNativePlatform()) return DEFAULT_SERVER;
-  } catch { /* 忽略 */ }
-  return "";
+    return (localStorage.getItem(SERVER_KEY) || "").trim().replace(/\/+$/, "");
+  } catch {
+    return "";
+  }
 }
 
 export function setServerBase(url: string): void {

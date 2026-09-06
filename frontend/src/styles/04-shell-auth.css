@@ -87,10 +87,40 @@
   border-radius: var(--r-xl);
   box-shadow: var(--shadow-md);
 }
-.auth-brand { font-size: var(--fs-2xl); margin: 0; letter-spacing: -0.02em; }
+.auth-logo { margin-bottom: 14px; }
+.auth-brand {
+  font-family: var(--font-serif);
+  font-size: 28px;
+  margin: 0;
+  letter-spacing: 0.01em;
+}
 .auth-brand span { color: var(--brand); }
 .auth-sub { color: var(--text-2); font-size: var(--fs-sm); margin-top: 6px; }
-.auth-tabs { margin: 22px 0 4px; }
+/* 登录/注册:分段胶囊(tab),替代原先挤在一起的下划线小 tab */
+.auth-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px;
+  margin: 20px 0 18px;
+}
+.auth-tabs .tab {
+  flex: 1;
+  text-align: center;
+  padding: 8px 0;
+  border-bottom: none;
+  margin-bottom: 0;
+  border-radius: 999px;
+  font-size: var(--fs-sm);
+}
+.auth-tabs .tab.on {
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  border-bottom: none;
+}
 .auth-card form .btn-block { margin-top: 18px; }
 .auth-note {
   color: var(--text-3);

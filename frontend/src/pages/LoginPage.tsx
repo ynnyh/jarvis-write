@@ -1,21 +1,18 @@
 // 登录 / 注册页(阶段 8:多用户)。注册需邀请码。
-// 安卓壳(Capacitor)里前端资源在本地,登录前需要先填一次服务器地址(存 localStorage,
-// api.ts 的 apiBase 会把所有请求指过去);浏览器/桌面同源模式不显示该字段。
+// 安卓壳(Capacitor)默认连官方服务器(api.ts 里静默处理),用户只管登录/注册;
+// 注册的邀请码在官方 QQ 群领取。浏览器/桌面同源模式行为一致。
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Capacitor } from "@capacitor/core";
-import { api, getServerBase, setServerBase, token, Me } from "../api";
+import { api, token, Me } from "../api";
+import BrandMark from "../ui/BrandMark";
 
 interface Props { onAuthed: (me: Me) => void; }
-
-const IS_NATIVE = Capacitor.isNativePlatform();
 
 export default function LoginPage({ onAuthed }: Props) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [invite, setInvite] = useState("");
-  const [server, setServer] = useState(getServerBase());
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -23,15 +20,6 @@ export default function LoginPage({ onAuthed }: Props) {
     e.preventDefault();
     setErr(""); setBusy(true);
     try {
-      if (IS_NATIVE) {
-        const addr = server.trim().replace(/\/+$/, "");
-        if (!/^https?:\/\/.+/.test(addr)) {
-          setErr("请先填服务器地址(如 https://your-server.com:8080)——App 需要 连到你的 jarvis-write 服务。");
-          setBusy(false);
-          return;
-        }
-        setServerBase(addr);
-      }
       const r = mode === "login"
         ? await api.login(username.trim(), password)
         : await api.register(username.trim(), password, invite.trim());
@@ -47,6 +35,7 @@ export default function LoginPage({ onAuthed }: Props) {
   return (
     <div className="auth-wrap">
       <div className="card auth-card">
+        <div className="auth-logo"><BrandMark size={44} /></div>
         <h1 className="auth-brand">jarvis<span>·write</span></h1>
         <div className="auth-sub">AI 长篇小说工作台 · 从一句灵感到一部成书</div>
 
@@ -56,14 +45,6 @@ export default function LoginPage({ onAuthed }: Props) {
         </div>
 
         <form onSubmit={submit}>
-          {IS_NATIVE && (
-            <>
-              <label className="fl">服务器地址</label>
-              <input type="url" inputMode="url" value={server}
-                onChange={(e) => setServer(e.target.value)}
-                placeholder="默认官方服务器,可改自己的部署" />
-            </>
-          )}
           <label className="fl">用户名</label>
           <input type="text" value={username} autoComplete="username"
             onChange={(e) => setUsername(e.target.value)} placeholder="2-50 个字符" />
@@ -77,7 +58,8 @@ export default function LoginPage({ onAuthed }: Props) {
             <>
               <label className="fl">邀请码</label>
               <input type="text" value={invite}
-                onChange={(e) => setInvite(e.target.value)} placeholder="向站长索取" />
+                onChange={(e) => setInvite(e.target.value)} placeholder="进 QQ 群免费领取" />
+              <div className="fld-hint">邀请码进官方 QQ 群 <b>1006352530</b> 领取,群内还有使用交流与版本通知。</div>
             </>
           )}
 
