@@ -117,6 +117,7 @@ export default function OnboardingFlow() {
   const poolRemain = (engineCards?.length ?? 0) - engineHalf * (enginePage + 1);
   // 两段式引擎选择阶段(未深化出概念):概念候选区不渲染——此时尚无概念,骨架占位只会造成大片空白
   const enginePhase = genrePath && ideas === null && engineCards !== null;
+  const conceptPending = genrePath && ideas === null; // 含引擎生成中/引擎待选/深化中
 
   const stepIdx = STEP_ORDER.indexOf(step);
   const hasConcept = !conceptIsEmpty(concept);
@@ -196,6 +197,9 @@ export default function OnboardingFlow() {
                     <div className="actions mt-2">
                       <button className="primary" disabled={!spark.trim()} onClick={submitSpark}>
                         ✨ 让 AI 出方案 →
+                      </button>
+                      <button onClick={randomBook} disabled={!!busy}>
+                        🎴 随机开一本
                       </button>
                       <button onClick={() => setEntry(entry ? null : "more")}>
                         {entry ? "收起" : "没有灵感?"}
@@ -440,12 +444,12 @@ export default function OnboardingFlow() {
                             )}
                           </div>
                         )}
-                        {!enginePhase && ideas === null && (genrePath ? engineCards === null : true) && (
+                        {ideas === null && (genrePath ? engineCards === null : true) && (
                           <div className="muted mt-2 mb-2">
                             <span className="spin" /><ThinkingText phrases={THINK_CONCEPT} />
                           </div>
                         )}
-                        {!enginePhase && (
+                        {!conceptPending && (
                           <>
                             {ideasStale && (
                               <div className="wiz-stale">
