@@ -209,6 +209,29 @@ async def patch_project(
             )
             if changed:
                 project.architecture.concept_stale = True
+    # 完本门槛:写完的章数(有正文的章)达到目标章数才允许标完本——
+    # 防止 0 章或写了一半就把书标成完本;先取消完本再调整目标可绕过(用户自己的杠杆)
+    if updates.get("finished") and not project.finished:
+        from sqlalchemy import func
+
+        from app.db.models import Chapter
+
+        written = (
+            db.query(func.count(Chapter.id))
+            .filter(
+                Chapter.project_id == project.id,
+                Chapter.final_content != "",
+            )
+            .scalar()
+            or 0
+        )
+        if written < project.target_chapters:
+            raise HTTPException(
+                status_code=409,
+                detail=f"还差 {project.target_chapters - written} 章没写完"
+                f"({written}/{project.target_chapters}),写完目标章数后再标完本;"
+                f"若目标定高了,可先在「篇幅」里调整目标",
+            )
     if updates.get("setup_state") == "":
         updates["setup_state"] = None  # "" = 起步完成
     if "chat_log" in updates and len(updates["chat_log"]) > 200:
