@@ -334,10 +334,6 @@ export default function OnboardingFlow() {
                                 <div className="card-desc">
                                   先挑对味的故事内核——都只是一句话种子,选中后再深化成完整概念
                                   (选两张 = 混搭:A 的主角遇 B 的局面)。
-                                  <button className="linkbtn" style={{ marginLeft: 8 }}
-                                    onClick={() => setShowAllEngines((v) => !v)}>
-                                    {showAllEngines ? "分两批看" : "一次看全部"}
-                                  </button>
                                 </div>
                                 <div className="gacha-hand" key={enginePage + (showAllEngines ? "-all" : "")}>
                                   {(showAllEngines ? (engineCards ?? []) : enginePageCards).map((card, i) => (
@@ -380,6 +376,10 @@ export default function OnboardingFlow() {
                                       都不对味,AI 重新出一批
                                     </button>
                                   ) : null}
+                                  <button disabled={!!busy}
+                                    onClick={() => setShowAllEngines((v) => !v)}>
+                                    {showAllEngines ? "回到分批抽" : "一次看全部 8 张"}
+                                  </button>
                                 </div>
                                 {busy && (
                                   <div className="muted mt-2">
