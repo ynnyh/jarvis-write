@@ -171,7 +171,9 @@ def create_app() -> FastAPI:
     )
 
     # local(桌面)模式:前端由 Tauri 壳内嵌或后端自托管,放行 tauri 与本机源;
-    # server 模式:只放行本地开发前端(生产同源,无需 CORS)。
+    # server 模式:放行本地开发前端 + Capacitor 安卓壳(默认源是 https://localhost,
+    # 安卓 App 是远程客户端,跨域请求需要这条;鉴权走 Authorization 头不靠 cookie,
+    # 放行来源不放大鉴权面)。
     _cors_origins = (
         [
             "http://localhost:5173",
@@ -182,7 +184,12 @@ def create_app() -> FastAPI:
             "https://tauri.localhost",
         ]
         if settings.is_local
-        else ["http://localhost:5173", "http://127.0.0.1:5173"]
+        else [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "https://localhost",
+            "capacitor://localhost",
+        ]
     )
     app.add_middleware(
         CORSMiddleware,

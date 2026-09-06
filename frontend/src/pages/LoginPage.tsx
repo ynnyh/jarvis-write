@@ -61,7 +61,7 @@ export default function LoginPage({ onAuthed }: Props) {
               <label className="fl">服务器地址</label>
               <input type="url" inputMode="url" value={server}
                 onChange={(e) => setServer(e.target.value)}
-                placeholder="如 https://your-server.com:8080" />
+                placeholder="默认官方服务器,可改自己的部署" />
             </>
           )}
           <label className="fl">用户名</label>
