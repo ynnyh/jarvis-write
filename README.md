@@ -142,6 +142,15 @@
 
 从 [GitHub Releases](https://github.com/ynnyh/jarvis-write/releases/latest) 下载最新的 `jarvis-write_<版本>_x64-setup.exe`，双击安装即可。免登录单机运行，作品数据存在本机（`%APPDATA%\jarvis-write`），无需部署、无需配置数据库。首次打开后在「模型设置」里填上你自己的 LLM API key 即可开始创作。
 
+### 方式一 · 五：安卓 App（远程客户端）
+
+安卓端是 **Capacitor 壳 + 你自己的 jarvis-write 服务**：App 打包了移动端全部界面，数据与生成都在你的服务上。两种装法：
+
+- **APK 直装**：从 [Releases](https://github.com/ynnyh/jarvis-write/releases/latest) 下载 `jarvis-write-android-debug.apk`（debug 签名，直接安装），首次打开已预置官方服务器地址，可改成自己的部署
+- **PWA 免安装**：浏览器打开自部署站点 → 菜单「添加到主屏幕」，同样的全屏 App 体验
+
+> APK 为 debug 签名（自用侧载定位）；要上架应用商店再补正式签名。
+
 ### 方式二：Docker（自部署多用户服务）
 
 **拉现成镜像（推荐，amd64/arm64 都有）**——每次发 `v*` 标签自动构建推送：

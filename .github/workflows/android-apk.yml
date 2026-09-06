@@ -51,11 +51,11 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
 
-      - name: 重命名产物
+      - name: 重命名产物(固定名:供 releases/latest/download 直链)
         run: |
           mkdir -p ../apk-out
           cp android/app/build/outputs/apk/debug/app-debug.apk \
-             ../apk-out/jarvis-write_${{ github.ref_name }}_android-debug.apk
+             ../apk-out/jarvis-write-android-debug.apk
 
       - name: 上传构建产物( always,供手动下载体验)
         uses: actions/upload-artifact@v4

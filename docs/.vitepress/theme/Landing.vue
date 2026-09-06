@@ -236,6 +236,11 @@ const ideas = [
             <p>安装包免登录单机运行,数据落本机;新版本自动提醒,一键升级。</p>
             <span class="dl-go">获取最新版 →</span>
           </a>
+          <a class="dl-card" href="https://github.com/ynnyh/jarvis-write/releases/latest/download/jarvis-write-android-debug.apk" data-reveal>
+            <h3>安卓 App（APK）</h3>
+            <p>Capacitor 壳 + 移动端全部界面,预置官方服务器地址,装上即用;数据与生成都在你的服务上。</p>
+            <span class="dl-go">下载 APK →</span>
+          </a>
           <a class="dl-card" href="https://github.com/ynnyh/jarvis-write#readme" target="_blank" rel="noopener" data-reveal>
             <h3>Docker 自部署</h3>
             <p>多用户服务:JWT 登录、邀请码、数据隔离,一条 compose 起自己的创作站。</p>
@@ -816,7 +821,7 @@ const ideas = [
 
 .dl-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 20px;
   margin: 48px 0 22px;
 }
