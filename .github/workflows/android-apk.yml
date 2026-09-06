@@ -64,10 +64,22 @@ jobs:
           path: apk-out/*.apk
           if-no-files-found: error
 
-      - name: 追加到同名 Release(仅标签触发)
+      - name: 追加到同名 Release(仅标签触发;等桌面工作流先建 Release,最多等 20 分钟)
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           cd ..
-          gh release upload "${{ github.ref_name }}" apk-out/*.apk --clobber
+          tag="${{ github.ref_name }}"
+          for i in $(seq 1 40); do
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "Release 已存在(第 $i 次检查)"
+              gh release upload "$tag" apk-out/*.apk --clobber
+              exit 0
+            fi
+            echo "Release 尚未创建(桌面版仍在构建),30 秒后重试…"
+            sleep 30
+          done
+          echo "等待超时,兜底自建 Release 挂 APK(桌面版随后会并入同一 Release)"
+          gh release create "$tag" apk-out/*.apk --title "jarvis-write $tag" --notes "Android APK(桌面版说明见 CHANGELOG)" --clobber
