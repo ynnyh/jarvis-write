@@ -5,7 +5,7 @@
 // /new → 静默建草稿 → /new/:id/idea → … → /new/:id/launch → 工作台
 // 每屏选择实时 PATCH 落库(刷新不丢、列表页可"继续创建");
 // localStorage 缓存候选内容,刷新后回到当前屏接着选。
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, LayoutGroup, MotionConfig, motion } from "motion/react";
 import { conceptIsEmpty, CONCEPT_FIELDS } from "../api";
 import { CandidateCards } from "../ui/CandidateCards";
@@ -55,6 +55,7 @@ export default function OnboardingFlow() {
     submitSpark, pickGenreBrainstorm, sendChat,
     brainstorm, regenWithFeedback, pickConcept, saveCustomConcept,
     fetchEngines, pickEngine, developConcept,
+    randomMode, setRandomMode, developRandom,
     setGenre, setDim, fetchTitles, pickTitle, pickScale, confirmScale,
     runArch, runBp, enterWorkbench, abandon, goto, editFrom, markDirtyOk,
   } = useOnboarding();
@@ -77,9 +78,35 @@ export default function OnboardingFlow() {
     setPrefAvoid(Math.random() < 0.3 ? pickSome(PREF_AVOIDS, 1) : []);
   }
   function randomBook() {
+    if (!allGenreChips.length) return;
+    const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+    const pickSome = <T,>(arr: T[], max: number): T[] =>
+      [...arr].sort(() => Math.random() - 0.5).slice(0, Math.floor(Math.random() * (max + 1)));
+    const card = pick(allGenreChips);
+    const tone = pickSome(PREF_TONES, 2);
+    const elements = pickSome(PREF_ELEMENTS, 2);
+    const prota = Math.random() < 0.6 ? pick(PREF_PROTAGONISTS) : "";
+    const avoid = pickSome(PREF_AVOIDS, 1);
+    setPickedGenreCard(card);
+    setPrefTone(tone);
+    setPrefElements(elements);
+    setPrefProta(prota);
+    setPrefAvoid(avoid);
+    setRandomMode(true);      // 概念阶段全随机:引擎到位后自动抽+自动深化
     setEntry("genre");
-    randomizeDraft();
+    void pickGenreBrainstorm(card, { tone, elements, prota, avoid });
   }
+
+  // 随机模式:引擎卡到位后自动随机扣 1-2 张并深化(翻牌动画后进行,让用户看清抽中哪两张);
+  // 概念交付(randomMode 复位)后即停,书名/篇幅/点火回归用户逐个确认
+  useEffect(() => {
+    if (!randomMode) return;
+    if (genrePath && ideas === null && engineCards && engineCards.length > 0
+        && enginePicked.length === 0 && !busy) {
+      const t = setTimeout(() => developRandom(), 800);
+      return () => clearTimeout(t);
+    }
+  }, [randomMode, genrePath, ideas, engineCards, enginePicked, busy, developRandom]);
 
   if (!project) return <div className="muted">{err || "正在创建草稿…"}</div>;
 
@@ -282,7 +309,7 @@ export default function OnboardingFlow() {
 
                         <div className="actions mt-3">
                           <button className="primary" disabled={!pickedGenreCard}
-                            onClick={pickGenreBrainstorm}>
+                            onClick={() => void pickGenreBrainstorm()}>
                             ✨ 按这个流派出方案 →
                           </button>
                           <button onClick={randomizeDraft}>🎴 随机换一张</button>
@@ -376,7 +403,7 @@ export default function OnboardingFlow() {
                                 </div>
                                 <div className="actions mt-2">
                                   <button className="primary" disabled={!enginePicked.length || !!busy}
-                                    onClick={developConcept}>
+                                    onClick={() => void developConcept()}>
                                     {enginePicked.length > 1 ? "融合这两张,深化成概念 →" : "深化成完整概念 →"}
                                   </button>
                                   {!showAllEngines && (enginePage === 0 ? (
