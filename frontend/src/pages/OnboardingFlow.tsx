@@ -63,38 +63,51 @@ export default function OnboardingFlow() {
   // 引擎卡抽卡页码:一批 AI 生成 8 张,先翻前 4 张(零成本),翻完才再调 AI 补池
   const [enginePage, setEnginePage] = useState(0);
   const [showAllEngines, setShowAllEngines] = useState(false);
+  const [randomCat, setRandomCat] = useState<string | null>(null); // 随机开一本抽中的类型(大类)
 
-  // 随机开一本:题材卡 + 轻偏好全部抽签(每一步都可在结果上重抽/手改)。
-  // 抽签只决定「从哪开始」,LLM 调用仍走用户点击的既有链路,不偷偷烧 token。
-  function randomizeDraft() {
-    if (!allGenreChips.length) return;
+  // 随机开一本·两步制:第一步随机「类型」(大类),第二步在该类型下定「题材」——
+  // 每一步结果都可见、可重抽、可手改,确认后才进概念。
+  function randomPrefs() {
     const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
     const pickSome = <T,>(arr: T[], max: number): T[] =>
       [...arr].sort(() => Math.random() - 0.5).slice(0, Math.floor(Math.random() * (max + 1)));
-    setPickedGenreCard(pick(allGenreChips));
     setPrefTone(pickSome(PREF_TONES, 2));
     setPrefElements(pickSome(PREF_ELEMENTS, 2));
     setPrefProta(Math.random() < 0.6 ? pick(PREF_PROTAGONISTS) : "");
-    setPrefAvoid(Math.random() < 0.3 ? pickSome(PREF_AVOIDS, 1) : []);
+    setPrefAvoid(pickSome(PREF_AVOIDS, 1));
+  }
+  function randomizeCatAndChip() {
+    const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+    const cats = genreDim?.categories ?? [];
+    if (!cats.length || !allGenreChips.length) return;
+    const cat = pick(cats);
+    const inCat = allGenreChips.filter((c) => c.category === cat.key);
+    setRandomCat(cat.key);
+    setPickedGenreCard(pick(inCat.length ? inCat : allGenreChips));
+  }
+  function randomizeDraft() {
+    if (!allGenreChips.length) return;
+    const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+    setPickedGenreCard(pick(allGenreChips));
+    randomPrefs();
+  }
+  function rerollCategory() {
+    randomizeCatAndChip();
+    randomPrefs();
+  }
+  function randomChipInCat() {
+    const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+    if (!randomCat) return;
+    const inCat = allGenreChips.filter((c) => c.category === randomCat);
+    if (inCat.length) setPickedGenreCard(pick(inCat));
   }
   function randomBook() {
     if (!allGenreChips.length) return;
-    const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
-    const pickSome = <T,>(arr: T[], max: number): T[] =>
-      [...arr].sort(() => Math.random() - 0.5).slice(0, Math.floor(Math.random() * (max + 1)));
-    const card = pick(allGenreChips);
-    const tone = pickSome(PREF_TONES, 2);
-    const elements = pickSome(PREF_ELEMENTS, 2);
-    const prota = Math.random() < 0.6 ? pick(PREF_PROTAGONISTS) : "";
-    const avoid = pickSome(PREF_AVOIDS, 1);
-    setPickedGenreCard(card);
-    setPrefTone(tone);
-    setPrefElements(elements);
-    setPrefProta(prota);
-    setPrefAvoid(avoid);
     setRandomMode(true);      // 概念阶段全随机:引擎到位后自动抽+自动深化
     setEntry("genre");
-    void pickGenreBrainstorm(card, { tone, elements, prota, avoid });
+    randomizeCatAndChip();    // 第一步:随机类型 + 预选题材(页面上可见可改)
+    randomPrefs();            // 顺带抽口味
+    // 第二步(题材)与后续由用户在题材页确认/改选后点「按这个流派出方案」
   }
 
   // 随机模式:引擎卡到位后自动随机扣 1-2 张并深化(翻牌动画后进行,让用户看清抽中哪两张);
@@ -233,7 +246,22 @@ export default function OnboardingFlow() {
 
                     {entry === "genre" && genreDim && (
                       <div className="mt-3">
-                        {(genreDim.categories ?? []).map((cat) => {
+                        {randomCat && (
+                          <div className="card card-info mt-3">
+                            <b>🎴 已随机抽中类型:{(genreDim.categories ?? []).find((c) => c.key === randomCat)?.label ?? randomCat}</b>
+                            <div className="card-desc mt-1">
+                              已在该类型下预选一个题材(下方高亮)。可重抽类型、换个题材,或点「显示全部类型」自己挑——都满意就「按这个流派出方案」。
+                            </div>
+                            <div className="actions mt-2">
+                              <button className="btn-sm" onClick={rerollCategory}>🎴 重抽类型</button>
+                              <button className="btn-sm" onClick={randomChipInCat}>🎴 换个题材</button>
+                              <button className="btn-sm" onClick={() => setRandomCat(null)}>显示全部类型</button>
+                            </div>
+                          </div>
+                        )}
+                        {(genreDim.categories ?? [])
+                          .filter((cat) => !randomCat || cat.key === randomCat)
+                          .map((cat) => {
                           const chips = allGenreChips.filter((c) => c.category === cat.key);
                           if (!chips.length) return null;
                           return (
