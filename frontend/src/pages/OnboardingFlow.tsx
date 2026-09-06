@@ -63,6 +63,24 @@ export default function OnboardingFlow() {
   const [enginePage, setEnginePage] = useState(0);
   const [showAllEngines, setShowAllEngines] = useState(false);
 
+  // 随机开一本:题材卡 + 轻偏好全部抽签(每一步都可在结果上重抽/手改)。
+  // 抽签只决定「从哪开始」,LLM 调用仍走用户点击的既有链路,不偷偷烧 token。
+  function randomizeDraft() {
+    if (!allGenreChips.length) return;
+    const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+    const pickSome = <T,>(arr: T[], max: number): T[] =>
+      [...arr].sort(() => Math.random() - 0.5).slice(0, Math.floor(Math.random() * (max + 1)));
+    setPickedGenreCard(pick(allGenreChips));
+    setPrefTone(pickSome(PREF_TONES, 2));
+    setPrefElements(pickSome(PREF_ELEMENTS, 2));
+    setPrefProta(Math.random() < 0.6 ? pick(PREF_PROTAGONISTS) : "");
+    setPrefAvoid(Math.random() < 0.3 ? pickSome(PREF_AVOIDS, 1) : []);
+  }
+  function randomBook() {
+    setEntry("genre");
+    randomizeDraft();
+  }
+
   if (!project) return <div className="muted">{err || "正在创建草稿…"}</div>;
 
   // 引擎卡抽卡分页:AI 一批生成 8 张,先翻前 4 张;「换一批」先翻池内剩余,
@@ -175,6 +193,10 @@ export default function OnboardingFlow() {
                           <h3>💬 和 AI 聊聊</h3>
                           <p>完全没头绪?边聊边捏,概念会随对话慢慢成形。</p>
                         </button>
+                        <button type="button" className="entry-card" onClick={randomBook}>
+                          <h3>🎴 随机开一本</h3>
+                          <p>题材、灵感、口味全抽签,一步不问——抽完不满意随时换、随时改。</p>
+                        </button>
                       </div>
                     )}
 
@@ -263,6 +285,7 @@ export default function OnboardingFlow() {
                             onClick={pickGenreBrainstorm}>
                             ✨ 按这个流派出方案 →
                           </button>
+                          <button onClick={randomizeDraft}>🎴 随机换一张</button>
                           <button onClick={() => setEntry(null)}>← 换个方式</button>
                         </div>
                       </div>
@@ -359,7 +382,7 @@ export default function OnboardingFlow() {
                                   {!showAllEngines && (enginePage === 0 ? (
                                     <button disabled={!!busy}
                                       onClick={() => setEnginePage((n) => n + 1)}>
-                                      下一批(池里还有 {poolRemain} 张) →
+                                      🎴 再抽一批(池里还有 {poolRemain} 张) →
                                     </button>
                                   ) : (
                                     <button disabled={!!busy}

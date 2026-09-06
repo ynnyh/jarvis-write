@@ -556,3 +556,11 @@
     animation: none;
   }
 }
+
+/* 引擎卡选中态:金圈扣卡(与抽卡舞台同一语言) */
+.gacha-hand .engine-card.on {
+  border-color: var(--gold, #b08d4f);
+  background: var(--surface);
+  box-shadow: 0 0 0 2px var(--gold, #b08d4f), 0 14px 30px -18px rgba(176, 141, 79, 0.7);
+  transform: translateY(-3px);
+}
