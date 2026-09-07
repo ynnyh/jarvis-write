@@ -4,7 +4,7 @@ export type SetupStep =
   | "idea" | "concept" | "genre" | "tone" | "title" | "scale" | "confirm" | "launch";
 
 export const STEP_ORDER: SetupStep[] = [
-  "idea", "concept", "genre", "tone", "title", "scale", "confirm", "launch",
+  "idea", "scale", "concept", "genre", "tone", "title", "confirm", "launch",
 ];
 
 export const STEP_LABEL: Record<SetupStep, string> = {

@@ -587,7 +587,7 @@ export interface CharactersOut { characters: CharacterCard[]; other_entities_cou
 export interface ShapeSuggestion {
   tone: string[];
   elements: string[];
-  scale: "short" | "mid" | "long";
+  scale: "short" | "mid" | "long" | "serial";
   tone_reason: string;
   scale_reason: string;
 }

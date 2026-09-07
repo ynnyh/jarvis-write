@@ -130,9 +130,9 @@ async def generate_project_blueprint_async(
 
 # ---------- 滚动规划:卷纲 + 分段蓝图 ----------
 
-# 每卷章数与启用阈值:目标超过阈值的书走滚动规划(首铺一卷,写到卷尾再展开)
+# 每卷章数与启用阈值:目标超过阈值的书走滚动规划(先出卷纲,首铺一卷,写到卷尾再展开)。\n# 150 以内一次铺完体验更好(量不大);超过才分卷——超长篇的章级细节一次铺既贵又质量差
 SEGMENT_SIZE = 30
-ROLLING_THRESHOLD = 40
+ROLLING_THRESHOLD = 150
 
 
 def _arch_text(p: Project) -> str:
@@ -158,10 +158,14 @@ async def _ensure_macro_plan(session, p: Project, style_block: str) -> list[dict
     if p.macro_plan:
         return p.macro_plan
     segment_count = math.ceil(p.target_chapters / SEGMENT_SIZE)
+    hard_note = (
+        f"\n注意:全书共 {p.target_chapters} 章是作者拍板的体量承诺,"
+        "分卷与节奏必须按这个总章数规划,不得擅自压缩或膨胀总章数。"
+    )
     prompt = MACRO_PLAN_PROMPT.format(
         number_of_chapters=p.target_chapters,
         novel_architecture=_arch_text(p),
-        style_directives=style_block,
+        style_directives=style_block + hard_note,
         segment_count=segment_count,
         segment_size=SEGMENT_SIZE,
     )

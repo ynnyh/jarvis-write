@@ -413,7 +413,7 @@ export function useOnboarding() {
 
   async function confirmScale() {
     const ch = Number(chapters), w = Number(words);
-    if (!Number.isInteger(ch) || ch < 1 || ch > 2000) { setErr("章节数需为 1-2000 的整数"); return; }
+    if (!Number.isInteger(ch) || ch < 1 || ch > 5000) { setErr("章节数需为 1-5000 的整数"); return; }
     if (!Number.isInteger(w) || w < 200 || w > 20000) { setErr("每章字数需为 200-20000 的整数"); return; }
     await patch({ target_chapters: ch, target_words_per_chapter: w });
     await goto("confirm");

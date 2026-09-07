@@ -26,7 +26,7 @@ router = APIRouter()
 _OUTLINE_NODE = "outline"
 _TONE_DIM = "tone"
 _ELEMENTS_DIM = "elements"
-_SCALES = ("short", "mid", "long")
+_SCALES = ("short", "mid", "long", "serial")
 
 _PROMPT = """\
 你是资深网文责编。根据下面这本书的概念与题材,推荐「阅读手感」与「篇幅轮廓」。
@@ -38,10 +38,11 @@ _PROMPT = """\
 
 【可选基调标签(从中选 2-3 个)】{tone_labels}
 【可选元素标签(从中选 0-3 个,可不选)】{elements_labels}
-【篇幅档位(三选一)】
+【篇幅档位(四选一)】
 - short:短篇,约 20 章 × 3000 字(单一主线,一口气讲完)
 - mid:中篇,约 60 章 × 3000 字(主线 + 一条副线,完整起承转合)
-- long:长篇,约 150 章 × 3000 字(多线群像,网文连载体量)
+- long:长篇,约 150 章 × 3000 字(单卷完整大故事)
+- serial:连载,百万字级(多卷滚动,体量由题材决定——群像/多线/大世界观才推荐)
 
 判断依据:
 - 篇幅看概念体量:单一起承转合 → short;主线 + 一条副线 → mid;多线群像/大世界观 → long

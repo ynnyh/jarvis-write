@@ -63,14 +63,14 @@ export default function OnboardingFlow() {
     engineCards, enginePicked, genrePath,
     inferBusy, customGenre,
     titleIdeas, titleSig, titleBusy, titleInput,
-    chapters, words, advOpen,
+    chapters, words,
     fly, pickedKey, dirty, arch, bp,
     // setter
     setSpark, setEntry, setPickedGenreCard, setChatInput,
     setIdeaSig, setCustomOpen, setCustomConcept,
     setPrefTone, setPrefElements, setPrefProta, setPrefAvoid,
     setGenreSuggests, setSuggestPage, setCustomGenre,
-    setTitleSig, setTitleInput, setChapters, setWords, setAdvOpen, setDirty,
+    setTitleSig, setTitleInput, setChapters, setWords, setDirty,
     // ref
     stepsRef, chatEndRef, sparkRef, titleInputRef,
     // handler
@@ -85,6 +85,7 @@ export default function OnboardingFlow() {
   const [enginePage, setEnginePage] = useState(0);
   const [showAllEngines, setShowAllEngines] = useState(false);
   const [seedHint, setSeedHint] = useState(false);
+  const [scaleMode, setScaleMode] = useState<"" | "auto" | "manual">("");
   // 方案轮廓推荐:概念确认后自动请求一次;tone/scale 步进到时预填(可改)
   const [shapeSug, setShapeSug] = useState<ShapeSuggestion | null>(null);
   const [scaleApplied, setScaleApplied] = useState(false);
@@ -114,16 +115,16 @@ export default function OnboardingFlow() {
 
 
   // 篇幅步:AI 有推荐且用户尚未改过章数(仍是建书默认 30)时,自动选中推荐档
+  // 体量「自动」:AI 轮廓推荐一到就生效(概念确认后到达;用户没指定过章数,默认 30 未改视为未指定)
   useEffect(() => {
-    if (step !== "scale" || !shapeSug || scaleApplied) return;
-    if (Number(chapters) === 30 && !dirty) {
-      const preset = SCALE_PRESETS.find((p) => p.key === shapeSug.scale);
-      if (preset) {
-        setScaleApplied(true);
-        void pickScale(preset);
-      }
+    if (!shapeSug || scaleMode === "manual" || scaleApplied) return;
+    if (Number(chapters) !== 30 || dirty) return;
+    const preset = SCALE_PRESETS.find((p) => p.key === shapeSug.scale);
+    if (preset) {
+      setScaleApplied(true);
+      void pickScale(preset);
     }
-  }, [step, shapeSug, chapters, dirty, pickScale]);
+  }, [shapeSug, scaleMode, scaleApplied, chapters, dirty, pickScale]);
 
   if (!project) return <div className="muted">{err || "正在创建草稿…"}</div>;
 
@@ -680,49 +681,71 @@ export default function OnboardingFlow() {
                   </div>
                 )}
 
-                {/* ---------- 篇幅 ---------- */}
+                {/* ---------- 篇幅(前置:自动/指定双模式) ---------- */}
                 {step === "scale" && (
                   <div className="card">
-                    <h2>打算写多长?</h2>
-                    <div className="card-desc">先选个预设,数字收在「高级选项」里,之后随时能改。</div>
-                    {shapeSug && scaleApplied && (
-                      <div className="card card-info mt-2">
-                        <b>🎴 AI 按概念推荐篇幅:{shapeSug.scale === "short" ? "短篇" : shapeSug.scale === "long" ? "长篇" : "中篇"}</b>
-                        <div className="card-desc mt-1">{shapeSug.scale_reason} 已帮你选好(点其他卡可改)。</div>
+                    <h2>这本书打算写多长?</h2>
+                    <div className="card-desc">
+                      「自动」= AI 按概念与题材推荐档位(概念确认后生效,随时可改);「我指定」= 按你填的章数生成——
+                      题材与章数不匹配时也按你的来,蓝图自动适配节奏。超过 150 章自动**分卷连载**:先出全书卷纲,
+                      每卷定主题,首铺只铺第一卷,写到卷尾自动展开下一卷——不用一次规划所有细节。
+                    </div>
+
+                    <div className="title-chips mt-3">
+                      <button type="button"
+                        className={"title-chip" + (scaleMode === "auto" ? " on" : "")}
+                        onClick={() => setScaleMode("auto")}>🎴 自动(AI 按题材定)</button>
+                      <button type="button"
+                        className={"title-chip" + (scaleMode === "manual" ? " on" : "")}
+                        onClick={() => setScaleMode("manual")}>✍️ 我指定章数</button>
+                    </div>
+
+                    {scaleMode === "" && (
+                      <div className="muted mt-2">选一种方式继续;不确定就选「自动」。</div>
+                    )}
+
+                    {scaleMode === "auto" && (
+                      <>
+                        <div className="scale-cards mt-3">
+                          {SCALE_PRESETS.map((p) => (
+                            <button key={p.key} type="button"
+                              className={"scale-card" + (Number(chapters) === p.chapters ? " on" : "")}
+                              onClick={() => pickScale(p)}>
+                              <b>{p.label}</b>
+                              <div className="scale-num">{p.chapters} 章 × {p.words} 字</div>
+                              <div className="hint">{p.desc}</div>
+                            </button>
+                          ))}
+                        </div>
+                        <div className="fld-hint mt-2">
+                          点卡为「预选」,仍可在概念确认后接受 AI 推荐档位;不点直接下一步 = 完全交给 AI。
+                        </div>
+                        {shapeSug && scaleApplied && (
+                          <div className="card card-info mt-2">
+                            <b>🎴 AI 按概念推荐篇幅:{shapeSug.scale === "short" ? "短篇" : shapeSug.scale === "long" ? "长篇" : shapeSug.scale === "serial" ? "连载" : "中篇"}</b>
+                            <div className="card-desc mt-1">{shapeSug.scale_reason} 已帮你选好(点其他卡可改)。</div>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {scaleMode === "manual" && (
+                      <div className="row mt-3">
+                        <div>
+                          <label className="fl">目标章节数(1-5000)</label>
+                          <input type="number" value={chapters} min={1} max={5000}
+                            onChange={(e) => setChapters(e.target.value)} />
+                        </div>
+                        <div>
+                          <label className="fl">每章目标字数</label>
+                          <input type="number" value={words} min={200} max={20000} step={500}
+                            onChange={(e) => setWords(e.target.value)} />
+                        </div>
                       </div>
                     )}
-                    <div className="scale-cards mt-2">
-                      {SCALE_PRESETS.map((p) => (
-                        <button key={p.key} type="button"
-                          className={"scale-card" + (Number(chapters) === p.chapters ? " on" : "")}
-                          onClick={() => pickScale(p)}>
-                          <b>{p.label}</b>
-                          <div className="scale-num">{p.chapters} 章 × {p.words} 字</div>
-                          <div className="hint">{p.desc}</div>
-                        </button>
-                      ))}
-                    </div>
-                    <div className="mt-3">
-                      <button type="button" className="btn-sm" onClick={() => setAdvOpen((v) => !v)}>
-                        {advOpen ? "▾" : "▸"} 高级选项(章数 / 每章字数)
-                      </button>
-                      {advOpen && (
-                        <div className="row mt-2">
-                          <div>
-                            <label className="fl">目标章节数</label>
-                            <input type="number" value={chapters} min={1} max={2000}
-                              onChange={(e) => setChapters(e.target.value)} />
-                          </div>
-                          <div>
-                            <label className="fl">每章目标字数</label>
-                            <input type="number" value={words} min={200} max={20000} step={500}
-                              onChange={(e) => setWords(e.target.value)} />
-                          </div>
-                        </div>
-                      )}
-                    </div>
+
                     <div className="actions mt-4 onboard-nav">
-                      <button onClick={() => nav(`/new/${pid}/title`)}>← 上一步</button>
+                      <button onClick={() => nav(`/new/${pid}/idea`)}>← 上一步</button>
                       <button className="primary" onClick={confirmScale}>下一步 →</button>
                     </div>
                   </div>
