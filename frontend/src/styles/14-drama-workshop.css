@@ -196,3 +196,31 @@
 /* 负面词行:和提示词间距 */
 .series-neg { margin-top: 6px; }
 
+
+/* ---------- 剧本工坊(2026-09):列表行 + 分集卡 + 剧本正文 ---------- */
+.script-list { display: flex; flex-direction: column; gap: 10px; }
+.script-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.script-row-main { min-width: 0; flex: 1; }
+.script-title { font-weight: 600; color: var(--text); text-decoration: none; }
+.script-title:hover { color: var(--brand); }
+.script-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; flex-wrap: wrap; font-size: var(--fs-xs); }
+.script-logline { margin: 4px 0 0; color: var(--text-2); font-size: var(--fs-sm); }
+.script-text { margin-top: 10px; padding: 12px 14px; background: var(--surface-2);
+  border-radius: var(--r-md); font-size: var(--fs-sm); line-height: 1.9; }
+.script-text .scene-line { font-weight: 600; color: var(--brand); margin-top: 8px; }
+.ep-list { display: flex; flex-direction: column; gap: 8px; }
+.ep-card { border: 1px solid var(--line); border-radius: var(--r-md); padding: 10px 14px; background: var(--surface-2); }
+.ep-head { display: flex; align-items: center; gap: 10px; cursor: pointer; flex-wrap: wrap; }
+.ep-no { font-weight: 600; color: var(--brand); white-space: nowrap; }
+.ep-title { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ep-dur { font-size: var(--fs-xs); }
+.ep-outline { margin-top: 6px; }
+.ep-outline p { margin: 0; color: var(--text-2); font-size: var(--fs-sm); line-height: 1.7; }
+.ep-hooks { margin-top: 2px !important; font-size: var(--fs-xs) !important; }
+.ep-body { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 10px; }
+.ep-gen { display: flex; flex-direction: column; gap: 8px; max-width: 520px; }
+.ep-editor { width: 100%; font-size: var(--fs-sm); line-height: 1.8; }

@@ -17,6 +17,7 @@ const PromoPage = React.lazy(() => import("./pages/PromoPage"));
 const ClipsPage = React.lazy(() => import("./pages/ClipsPage"));
 const BirthdayPage = React.lazy(() => import("./pages/BirthdayPage"));
 const SeriesPage = React.lazy(() => import("./pages/SeriesPage"));
+const ScriptsPage = React.lazy(() => import("./pages/ScriptsPage"));
 const AdminPage = React.lazy(() => import("./pages/AdminPage"));
 const SettingsPage = React.lazy(() => import("./pages/SettingsPage"));
 // HelpPage 不拆:未登录也能看(App 里直接渲染),拆了要多一层 Suspense 才不闪
@@ -56,6 +57,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="birthday/:id?" element={<BirthdayPage />} />
             {/* 系列短片:固定主角的 5-15 秒系列,主角档案持久化(资产制) */}
             <Route path="series/:id?" element={<SeriesPage />} />
+            {/* 剧本工坊:独立写剧 + 小说改编共用集管线 */}
+            <Route path="scripts/:id?" element={<ScriptsPage />} />
             <Route path="admin" element={<AdminPage />} />
             <Route path="help" element={<HelpPage />} />
             <Route path="settings" element={<SettingsPage />} />

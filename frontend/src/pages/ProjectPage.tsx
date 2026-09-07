@@ -466,6 +466,9 @@ export default function ProjectPage() {
                   <button className="primary read-book-btn" onClick={() => setReadingBook(true)}>
                     阅读全书
                   </button>
+                  <button className="read-book-btn" onClick={() => nav('/scripts')} title="把定稿章改编成剧本">
+                    改编成剧本
+                  </button>
                   <button className="read-book-btn" onClick={() => setShareOpen(true)}>
                     分享
                   </button>
