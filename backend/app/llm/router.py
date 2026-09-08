@@ -182,6 +182,14 @@ _TASK_MAX_TOKENS: dict[Task, int] = {
     # 4000 会把长提示词砍在半句话上(与 DRAMA_ASSET 同一教训)
     Task.SERIES_LOOK: 6000,
     Task.SERIES_PROMPT: 8000,
+    # 校验类 JSON 任务:输出本身只有几百字,但中转渠道的部分后端会忽略
+    # thinking 参数(2026-09-08 50 章压测实锤:魔芋上游轮换后端,落上不认参数的
+    # 后端时思考默认开且 effort 高,8192 预算被思考吃穿,JSON 截断在半途→
+    # 一致性检查/主审解析失败→整章隔离)。16384 与正文任务同档:思考开也兜得住,
+    # 思考关时用量不变(计费按实际输出)。
+    Task.CONSISTENCY: 16384,      # 一致性检查 + 主审评分 + 校对 + 门禁修复共用
+    Task.FACT_EXTRACT: 16384,     # 章后事实抽取
+    Task.HANDOFF_EXTRACT: 16384,  # 章末交接契约
 }
 
 
