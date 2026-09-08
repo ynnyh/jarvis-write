@@ -224,7 +224,7 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 
 ## 技术栈
 
-- **后端**：Python 3.12 + FastAPI（REST + SSE），SQLAlchemy 2.x + SQLite（可切 Postgres），Pydantic v2
+- **后端**：Python 3.12 + FastAPI（REST + SSE），SQLAlchemy 2.x + SQLite，Pydantic v2
 - **LLM 层**：自封适配层（DeepSeek / OpenAI / Gemini，不用 LangChain），任务级模型路由（强模型/快模型分档，各选一套配置），cc-switch 风格多配置管理，瞬时错误自动重试 + 流式聚合兜底（防中转站 CDN 掐断长请求）
 - **前端**：React + TypeScript + Vite
 - **部署**：单容器 Docker（多阶段构建，前端产物由 FastAPI 托管在 `/app`）
@@ -237,6 +237,12 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 已知遗留项：
 
 - **逐 token 真流式**：AI 对话（选段 / 整章讨论、重写研讨）已升级为 SSE 逐字真流式打字机，章节蓝图生成也已「逐章增量」上报进度；唯逐章正文生成因需串联多步审校（去味 / 一致性 / 字数守卫）仍走"异步任务 + 进度轮询"，更适合任务化
+- **数据库当前绑定 SQLite**：ORM 层用 SQLAlchemy，但全书全文检索建立在 SQLite 专有语法上（FTS5 + trigram 虚拟表、`MATCH` / `bm25()`、`json_each`），Postgres 无原生等价物。**改 `DATABASE_URL` 切 Postgres 目前不可行**，需先重写检索层。此前 README 标注的「可切 Postgres」是不实描述，已更正
+
+## 质量与回归
+
+- **改动前后跑评测**：`python -m app.evals run --fixture po_feng_ji --label after` → `python -m app.evals gate <after.json>`，越界即非 0 退出（可挂 CI）。门槛只锁确定性指标（AI 味 / 复读 / 事实抽取数 / blocker / 篇幅比）；主审四维是 LLM 自评、默认同模型自审，只作参考。详见 [CONTRIBUTING.md](CONTRIBUTING.md)「Prompt 改动守则」
+- **关键环节失败是显式的**：一致性检查、章后事实抽取、主审评分任一环节没跑成，都会留下 `degraded` 标记并隔离章节待人工复核，**不会**静默冒充「检查通过」
 
 ## 测试
 

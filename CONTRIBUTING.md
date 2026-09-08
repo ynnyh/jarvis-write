@@ -119,14 +119,33 @@ python -m app.evals run --fixture po_feng_ji --label after
 
 # 4. 出对比表
 python -m app.evals compare <before.json> <after.json>
+
+# 5. 过回归门槛(不达标非 0 退出,与 CI 同款判定)
+python -m app.evals gate <after.json>
 ```
 
-判定标准（以 `app/evals/report.py` 的自动判定为准）：
+判定标准分两层：
 
-- **主审四维**（情节/文笔/节奏/人物）与连贯分不低于 baseline；
-- **门禁 blocker/major 不高于 baseline**；
-- **AI 味指数、章内复读、跨章重复不高于 baseline**；
-- 三类指标有升有降时，宁可再调一轮，不要靠“整体感觉还行”合入。
+**硬门槛**（`python -m app.evals gate`，越界即失败，可直接挂 CI）：
+
+- blocker 数 = 0、隔离章 ≤ 1 —— 这是「不崩」的底线，带硬矛盾的章节一律不许流出；
+- 达标率 ≥ 0.8；
+- AI 味指数 ≤ 6.0、章内复读 ≤ 5；
+- **事实抽取数 ≥ 30** —— 掉了说明章后抽取在静默降级，故事圣经停止生长，
+  后续章的一致性对照会悄悄失去事实源（最危险的一类退化，界面上却看不出来）；
+- 篇幅比 0.7–1.4（字数守卫失效会在这露出来）。
+
+**参考项**（不设硬门槛，交人判断）：
+
+- 主审四维 plot / prose / pacing / character 与连贯分。这四项是 **LLM 自评**，
+  且默认配置下审校档与生成档指向同一个模型（自审自写），方差大、乐观偏差明显。
+  只能看趋势，不能当门禁。要真正的审校分离，在设置页给审校档配一套独立模型
+  （`review_chapter` 会返回 `self_review` 标记提示当前是否处在自审状态）。
+
+门槛定义在 `app/evals/thresholds.py`：**放宽门槛等于承认能力退化**，改它必须在
+PR 里写明理由。判别力由 `tests/test_evals_gate.py` 守着——它把几种典型退化
+（AI 味飙升 / blocker 泄漏 / 抽取静默降级 / 复读暴增 / 字数守卫失效）逐个注入
+真实基线，断言门槛确实拦得住。指标对退化不敏感的门槛，等于没有门槛。
 
 注意事项：
 
