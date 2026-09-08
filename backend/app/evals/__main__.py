@@ -8,6 +8,7 @@
   export    把库里一本书的架构 + 前 N 章蓝图导成夹具 JSON
   run       灌夹具、真跑管线逐章生成、落 JSON(要 key;默认用独立的临时库)
   compare   两份 run JSON 出对比表
+  gate      一次 run 与回归门槛对比(不达标非 0 退出,可挂 CI);--list 看门槛表
 
 `run` 的库:默认在 --out-dir 下新建一个独立 SQLite,绝不碰你的 jarvis_write.db;
 显式 --db 指向已有库时,库里若存在非「[评测] 」前缀的项目会拒跑(--force 才放行)。
@@ -230,6 +231,77 @@ def cmd_compare(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---------- gate ----------
+def cmd_gate(args: argparse.Namespace) -> int:
+    """把一次 run 与回归门槛对比:不达标即非 0 退出,可直接挂 CI。
+
+    门槛只锁确定性指标(AI 味/复读/事实数/blocker/篇幅比),不锁主审四维
+    (LLM 自评、方差大)。理由见 app/evals/thresholds.py 文件头。
+    """
+    from app.evals.runner import load_run
+    from app.evals.thresholds import THRESHOLDS, check_run, format_violations
+
+    if args.list_thresholds:
+        print("回归门槛(越界即失败):")
+        for k, bounds in THRESHOLDS.items():
+            parts = []
+            if "min" in bounds:
+                parts.append(f">= {bounds['min']}")
+            if "max" in bounds:
+                parts.append(f"<= {bounds['max']}")
+            print(f"  {k:24s} {' 且 '.join(parts)}")
+        print("\n仅参考不设门槛(LLM 自评,方差大):plot/prose/pacing/character/continuity")
+        return 0
+
+    run = load_run(args.run)
+    ok, violations = check_run(run)
+    agg = run.get("aggregate") or {}
+    print(f"回归门槛检查:{run.get('label') or args.run}")
+    print(
+        f"  达标率 {agg.get('pass_rate')} · AI 味 {agg.get('mean_flavor')} · "
+        f"blocker {agg.get('total_blockers')} · 隔离 {agg.get('quarantined')} · "
+        f"事实 {agg.get('facts_extracted')} · 复读 {agg.get('within_repeats_total')}"
+    )
+    if ok:
+        print(f"  ✓ 通过({len(THRESHOLDS)} 项指标在门槛内)")
+        return 0
+    print(f"  ✗ {len(violations)} 项越界:")
+    print(format_violations(violations))
+    return 1
+
+
+# ---------- trend ----------
+def cmd_trend(args: argparse.Namespace) -> int:
+    """把 history.jsonl 拉成表:历次评测的关键指标一眼看漂移。"""
+    path = Path(args.history)
+    if not path.exists():
+        print(f"没有趋势文件:{path}(先跑 python -m app.evals run 生成)")
+        return 1
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            import json
+
+            rows.append(json.loads(line))
+    if not rows:
+        print(f"趋势文件为空:{path}")
+        return 1
+    cols = [
+        ("ts", 20), ("label", 14), ("git", 12),
+        ("mean_flavor", 12), ("pass_rate", 10), ("total_blockers", 15),
+        ("quarantined", 12), ("facts_extracted", 16), ("seconds_per_chapter", 19),
+    ]
+    # 只打印出现过的列,避免一排空格子
+    present = [c for c in cols if any(c[0] in r for r in rows)]
+    header = " | ".join(name.ljust(w) for name, w in present)
+    print(f"{header}\n{'-' * len(header)}")
+    for r in rows:
+        print(" | ".join(str(r.get(name, "")).ljust(w) for name, w in present))
+    print(f"\n共 {len(rows)} 轮 · 源:{path}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m app.evals", description="jarvis-write 生成质量评测底座"
@@ -280,6 +352,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("b", help="新 run JSON")
     p.add_argument("--out", default=None, help="把 Markdown 写到文件")
     p.set_defaults(func=cmd_compare)
+
+    p = sub.add_parser("gate", help="run 与回归门槛对比(不达标非 0 退出,可挂 CI)")
+    p.add_argument("run", nargs="?", help="run JSON 路径")
+    p.add_argument("--list", action="store_true", dest="list_thresholds", help="只打印门槛表")
+    p.set_defaults(func=cmd_gate)
+
+    p = sub.add_parser("trend", help="把历次评测趋势(history.jsonl)拉成表")
+    p.add_argument("--history", default="evals_out/history.jsonl", help="趋势文件路径")
+    p.set_defaults(func=cmd_trend)
     return parser
 
 

@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import time
@@ -383,7 +384,47 @@ def save_run(run: dict[str, Any], out_dir: str | Path) -> tuple[Path, Path | Non
         run["chapters_text_path"] = text_path.name
     json_path = out / f"{base}.json"
     json_path.write_text(json.dumps(run, ensure_ascii=False, indent=2), encoding="utf-8")
+    _append_history(out, run, json_path.name)
     return json_path, text_path
+
+
+# 趋势里记这些就够:与门槛同一批确定性指标,外加成本,便于看长期漂移
+_HISTORY_FIELDS = (
+    "pass_rate", "mean_flavor", "total_blockers", "total_major", "quarantined",
+    "within_repeats_total", "facts_extracted", "mean_target_ratio",
+    "tokens_per_chapter", "seconds_per_chapter",
+)
+
+
+def _append_history(out: Path, run: dict[str, Any], json_name: str) -> None:
+    """往 `<out_dir>/history.jsonl` 追加一行关键指标。
+
+    过去评测结果只落一份份独立 JSON，要看「这次比上次好了还是坏了」只能靠人
+    记路径、手动 compare，时间一长就看不出漂移。这里追加一行摘要，
+    `python -m app.evals trend` 能直接把历史拉成表。写失败不影响主流程。
+    """
+    import json
+
+    agg = run.get("aggregate") or {}
+    row = {"ts": datetime.now().isoformat(timespec="seconds"), "run": json_name}
+    row.update({
+        "label": run.get("label") or "",
+        "fixture": run.get("fixture") or "",
+        "git": (run.get("git_commit") or "")[:12],
+        "prompt_fingerprint": (run.get("prompt_fingerprint") or "")[:12],
+    })
+    for k in _HISTORY_FIELDS:
+        if k in agg:
+            row[k] = agg[k]
+    scores = agg.get("mean_scores") or {}
+    for k in ("plot", "prose", "pacing", "character", "continuity"):
+        if k in scores:
+            row[f"score_{k}"] = scores[k]
+    try:
+        with (out / "history.jsonl").open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError as exc:  # 趋势是增值项,写不进去不能拖垮评测
+        logger.warning("评测趋势写入失败(不影响本次结果): %s", exc)
 
 
 def load_run(path: str | Path) -> dict[str, Any]:
