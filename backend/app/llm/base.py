@@ -300,6 +300,9 @@ class LLMResponse:
     # 推理模型的思考内容(reasoning_content / thinking block),只用于诊断
     # 与兜底,正常路径绝不当正文
     reasoning: str = ""
+    # 思考消耗的 token 数(usage.completion_tokens_details.reasoning_tokens)。
+    # 部分中转只报数不给思考文本,空正文归因/思考参数陷阱识别都靠它。
+    reasoning_tokens: int = 0
     # 原始返回,调试用;不参与业务逻辑
     raw: dict = field(default_factory=dict)
 
@@ -355,6 +358,9 @@ class LLMAdapter(abc.ABC):
         # 瞬时错误重试:次数与退避基数(秒)。置 1 即关闭重试。
         self.retry_attempts = 3
         self.retry_base_delay = 2.0
+        # 本次请求是否下发了「思考关闭」参数(由子类 _payload 如实回填)。
+        # 供思考参数陷阱识别用,见 _note_thinking_trap。
+        self._sent_thinking_disabled = False
 
     def throttle_key(self) -> str:
         """限速闸门的维度键:渠道 + 模型(上游配额真正共享的单位)。"""
@@ -500,14 +506,21 @@ class LLMAdapter(abc.ABC):
             completion_tokens=sink.get("completion_tokens", 0),
             finish_reason=sink.get("finish_reason", "") or "",
             reasoning=sink.get("reasoning", "") or "",
+            reasoning_tokens=sink.get("reasoning_tokens", 0),
         )
         if text.strip():
+            # 正文拿到了也要记账:渠道白烧思考是浪费钱,记忆撤参让后续调用受益
+            self._note_thinking_trap(resp)
             return resp
-        salvaged = self._salvage_reasoning(resp)
-        if salvaged:
-            resp.content = salvaged
-            return resp
+        trapped = self._note_thinking_trap(resp)
+        if not trapped:
+            salvaged = self._salvage_reasoning(resp)
+            if salvaged:
+                resp.content = salvaged
+                return resp
         note = "" if (chunks or resp.reasoning) else "流式连上了但一个字节都没吐"
+        if trapped:
+            raise self._trap_retry_error(resp)
         raise self._empty_content_error(resp, note=note)
 
     # ---- 空正文:归因与兜底 ----
@@ -531,6 +544,47 @@ class LLMAdapter(abc.ABC):
             len(text),
         )
         return text
+
+    # ---- 思考参数陷阱:渠道不认/反转「关闭思考」参数 ----
+    def _note_thinking_trap(self, resp: "LLMResponse") -> bool:
+        """发了思考关闭参数但上游仍产生思考 → 该渠道对此参数不认账。
+
+        实测(2026-09-08, ooioo.work / glm-5.3-flash):部分中转对
+        thinking={"type":"disabled"} 反向执行——思考全开、吃满输出预算,
+        正文为空。识别特征与「参数被无视」共用:发了 disabled 却仍有
+        思考文本或 reasoning_tokens>0。
+
+        命中即复用 thinking_param_rejected 的「不再下发」登记((渠道,模型)
+        维度,新建的适配器实例同样生效),并清空本实例的 thinking_mode——
+        同进程内的下一次调用立刻撤参,无需等重试。返回是否命中。
+        """
+        if not getattr(self, "_sent_thinking_disabled", False):
+            return False
+        self._sent_thinking_disabled = False  # 每次请求只判一次
+        if not ((resp.reasoning or "").strip() or resp.reasoning_tokens > 0):
+            return False
+        first = not thinking_param_rejected(self.base_url or "", self.model_name)
+        remember_thinking_rejected(self.base_url or "", self.model_name)
+        self.thinking_mode = ""
+        if first:
+            logger.warning(
+                "渠道 %s 对思考关闭参数不认账(发了 disabled 仍产生思考:"
+                "思考文本 %d 字 / reasoning_tokens=%d),已记忆该渠道并撤参,"
+                "后续调用不再下发思考参数",
+                self.model_name, len(resp.reasoning or ""), resp.reasoning_tokens,
+            )
+        return True
+
+    def _trap_retry_error(
+        self, resp: "LLMResponse", *, status: int | None = None
+    ) -> UpstreamError:
+        """思考参数陷阱命中且正文为空:抛可重试错误,重发时自动不带参数。"""
+        return UpstreamError(
+            "渠道不认思考关闭参数(发了 disabled 仍产生思考),已撤掉参数自动重试"
+            f"(model={self.model_name}, finish_reason={resp.finish_reason or '未知'})",
+            status=status,
+            retryable=True,
+        )
 
     def _empty_content_error(
         self, resp: LLMResponse, *, status: int | None = None, note: str = ""

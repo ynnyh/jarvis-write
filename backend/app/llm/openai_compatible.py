@@ -97,6 +97,10 @@ class OpenAICompatibleAdapter(LLMAdapter):
             "stream": stream,
         }
         payload.update(self._thinking_control())
+        # 思考参数陷阱识别用:如实记录本次是否下发了「思考关闭」参数
+        self._sent_thinking_disabled = (
+            payload.get("thinking", {}).get("type") == "disabled"
+        )
         if stream:
             # 要一份流尾 usage,否则走流式就没法记 token 账。渠道不认这个参数时
             # 会回 400,complete() 会自动回落非流式(那条路照样有 usage)。
@@ -136,14 +140,28 @@ class OpenAICompatibleAdapter(LLMAdapter):
             completion_tokens=usage.get("completion_tokens", 0),
             finish_reason=choice.get("finish_reason") or "",
             reasoning=_reasoning_of(message),
+            # 部分中转只报思考 token 数不给文本,空正文归因/陷阱识别要靠它
+            reasoning_tokens=(
+                (usage.get("completion_tokens_details") or {}).get(
+                    "reasoning_tokens"
+                )
+                or 0
+            ),
             raw=data,
         )
+        trapped = self._note_thinking_trap(resp)
         if resp.content.strip():
+            # 正文拿到了也要记账:渠道白烧思考是浪费钱,记忆撤参让后续调用受益
             return resp
-        salvaged = self._salvage_reasoning(resp)
-        if salvaged:
-            resp.content = salvaged
-            return resp
+        if not trapped:
+            # 陷阱命中时不兜底:我们要的就是「不思考」,思考内容是过程不是答案,
+            # 撤参重发一次拿真正文
+            salvaged = self._salvage_reasoning(resp)
+            if salvaged:
+                resp.content = salvaged
+                return resp
+        if trapped:
+            raise self._trap_retry_error(resp, status=status)
         raise self._empty_content_error(resp, status=status)
 
     async def _complete_once(self, messages: list[LLMMessage]) -> LLMResponse:
@@ -216,6 +234,9 @@ class OpenAICompatibleAdapter(LLMAdapter):
                         if usage:
                             sink["prompt_tokens"] = usage.get("prompt_tokens", 0)
                             sink["completion_tokens"] = usage.get("completion_tokens", 0)
+                            details = usage.get("completion_tokens_details") or {}
+                            if details.get("reasoning_tokens"):
+                                sink["reasoning_tokens"] = details["reasoning_tokens"]
                         choices = chunk.get("choices") or []
                         if not choices:
                             continue
