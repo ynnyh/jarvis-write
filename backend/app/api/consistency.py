@@ -219,7 +219,18 @@ class CharacterCreate(BaseModel):
 
 
 class CharacterPatch(BaseModel):
-    retired: bool
+    """退场/恢复 + 资料编辑(别名/简介)。
+
+    profile 变更时返回 changes(句级 diff,带 entity 名)——前端拿它
+    追问「是否扫描全书影响」,走设定级级联;不改简介时 changes 为空。
+    """
+    retired: bool | None = None
+    aliases: list[str] | None = None
+    profile: str | None = None
+
+
+class CharacterPatchOut(CharacterOut):
+    changes: list[dict] = []
 
 
 def _appearance_chapters(
@@ -491,26 +502,66 @@ async def create_character(
     return _character_out(db, project_id, ent, [])
 
 
-@router.patch("/characters/{entity_id}", response_model=CharacterOut)
+@router.patch("/characters/{entity_id}", response_model=CharacterPatchOut)
 async def patch_character(
     project_id: int,
     entity_id: int,
     body: CharacterPatch,
     db: Session = Depends(get_db),
 ):
-    """退场/恢复。退场不删任何数据:历史正文与事实保留,
-    只是后续章节生成不再注入该人物的状态约束。"""
+    """退场/恢复 + 资料编辑。
+
+    退场不删任何数据:历史正文与事实保留,只是后续章节生成不再注入
+    该人物的状态约束。简介变更会同步圣经里的登记事实(source_chapter=0
+    那条),并返回句级 diff 供前端追问级联;章后抽取的事实不动。
+    """
     get_project_or_404(db, project_id)
     ent = db.get(Entity, entity_id)
     if ent is None or ent.project_id != project_id or ent.entity_type != "character":
         raise HTTPException(status_code=404, detail="人物不存在")
-    ent.retired = body.retired
+
+    changes: list[dict] = []
+    old_profile = (ent.base_profile or {}).get("profile", "")
+
+    if body.aliases is not None:
+        ent.aliases = [a.strip() for a in body.aliases if a.strip()]
+
+    if body.profile is not None and (body.profile or "").strip() != old_profile.strip():
+        new_profile = body.profile.strip()
+        if old_profile.strip():
+            from app.engines.setting_cascade import diff_profile
+
+            changes = [
+                {**c, "entity": ent.name}
+                for c in diff_profile(old_profile, new_profile)
+            ]
+        else:  # 原来没简介:纯新增,不构成"冲突",不追问级联
+            changes = []
+        ent.base_profile = {**(ent.base_profile or {}), "profile": new_profile}
+        # 同步登记事实:找 source_chapter=0 的初始事实改写内容,防圣经里
+        # 留着旧设定误导后续注入与一致性检查
+        seed = (
+            db.query(Fact)
+            .filter(
+                Fact.project_id == project_id,
+                Fact.entity_id == ent.id,
+                Fact.source_chapter == 0,
+            )
+            .first()
+        )
+        if seed is not None:
+            seed.content = new_profile
+
+    if body.retired is not None:
+        ent.retired = body.retired
+
     db.commit()
     db.refresh(ent)
     outlines = (
         db.query(Outline).filter(Outline.project_id == project_id).all()
     )
-    return _character_out(db, project_id, ent, outlines)
+    out = _character_out(db, project_id, ent, outlines)
+    return CharacterPatchOut(**out.model_dump(), changes=changes)
 
 
 @router.delete("/facts/{fact_id}")

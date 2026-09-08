@@ -9,24 +9,26 @@
 
 
 def _changes_block(changes: list[dict]) -> str:
-    """把变更清单渲染成 prompt 片段(kind: changed/added/removed)。"""
+    """把变更清单渲染成 prompt 片段(kind: changed/added/removed;entity: 人物名)。"""
     lines: list[str] = []
     for i, c in enumerate(changes, 1):
         kind = c.get("kind") or "changed"
+        who = f"(人物「{c['entity']}」设定)" if c.get("entity") else ""
         if kind == "removed":
-            lines.append(f"{i}. 【删除】原规则:「{c.get('old', '')}」")
+            lines.append(f"{i}. 【删除】{who}原设定:「{c.get('old', '')}」")
         elif kind == "added":
-            lines.append(f"{i}. 【新增】新规则:「{c.get('new', '')}」")
+            lines.append(f"{i}. 【新增】{who}新设定:「{c.get('new', '')}」")
         else:
             lines.append(
-                f"{i}. 【修改】原:「{c.get('old', '')}」→ 新:「{c.get('new', '')}」"
+                f"{i}. 【修改】{who}原:「{c.get('old', '')}」→ 新:「{c.get('new', '')}」"
             )
     return "\n".join(lines) or "(无)"
 
 
 SETTING_SCREEN_PROMPT = """\
-你是小说连载的"设定一致性审校"。作者刚修改了若干条【世界观硬规则/设定】,
-请判断下面这一章的剧情是否受这些变更影响(受影响=按新设定该章内容需要修改)。
+你是小说连载的"设定一致性审校"。作者刚修改了若干条【设定】(世界观硬规则 \
+或人物设定),请判断下面这一章的剧情是否受这些变更影响(受影响=按新设定 \
+该章内容需要修改)。
 
 【设定变更】
 {changes_block}
@@ -38,6 +40,8 @@ SETTING_SCREEN_PROMPT = """\
 - 只在「该章的情节、描写或对话与新设定**直接冲突**」时才判受影响;
   例如规则从"主角不会剑术"改为"主角精通剑术",写过主角练剑失利/被讥讽
   不会剑的章就受影响;只提到主角名字但与新设定无关的章不受影响。
+- 人物设定变更(如性格从冷淡改热情、身份从凡人改修士)同理:该章中该人物
+  的言行/描写与新设定矛盾才算,仅出场不算。
 - 删除规则也可能是变更:原来受它约束的描写现在自由了,若新旧行为差异
   不影响读者理解,判不受影响。
 - 模棱两可、牵强附会的一律判不受影响(宁可漏报,交给作者自己发现)。
@@ -50,8 +54,8 @@ SETTING_SCREEN_PROMPT = """\
 """
 
 SETTING_LOCATE_PROMPT = """\
-你是小说连载的"设定一致性审校"。作者修改了若干条【世界观硬规则/设定】,
-下面这一章已确认受影响。请找出**正文中与新设定冲突的具体段落**。
+你是小说连载的"设定一致性审校"。作者修改了若干条【设定】(世界观硬规则 \
+或人物设定),下面这一章已确认受影响。请找出**正文中与新设定冲突的具体段落**。
 
 【设定变更】
 {changes_block}
@@ -77,8 +81,8 @@ SETTING_LOCATE_PROMPT = """\
 """
 
 SETTING_PATCH_PROMPT = """\
-你是小说连载的"设定修订师"。作者修改了设定,下面这段正文与新设定冲突,
-请产出**改写后的段落**,使其符合新设定。
+你是小说连载的"设定修订师"。作者修改了设定(世界观硬规则或人物设定),
+下面这段正文与新设定冲突,请产出**改写后的段落**,使其符合新设定。
 
 【设定变更】
 {changes_block}

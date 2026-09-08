@@ -29,8 +29,11 @@ _MAX_PASSAGES = 200  # 单批定点修上限(提案要人逐条验收,多了没�
 
 
 class ScanRequest(BaseModel):
+    """两种入口二选一:old/new 全文(后端 diff)或现成 changes
+    (人物卡编辑等场景,变更清单在保存时已算好,原样回传即可)。"""
     old_text: str = ""
     new_text: str = ""
+    changes: list[dict] | None = None
 
 
 class PatchPair(BaseModel):
@@ -61,7 +64,11 @@ async def setting_scan_async(
 ):
     """扫描设定变更的影响:返回 job,结果含章级命中与段级定位。"""
     get_project_or_404(db, project_id)
-    changes = diff_rules(req.old_text, req.new_text)
+    changes = (
+        [c for c in req.changes if isinstance(c, dict) and c.get("kind")]
+        if req.changes is not None
+        else diff_rules(req.old_text, req.new_text)
+    )
     if not changes:
         raise HTTPException(status_code=400, detail="新旧设定没有差异,无需级联。")
     if busy := _cascade_busy(project_id):

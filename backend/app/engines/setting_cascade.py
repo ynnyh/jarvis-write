@@ -44,25 +44,22 @@ def split_paras(text: str) -> list[str]:
     return [p.strip() for p in re.split(r"\n+", text) if p.strip()]
 
 
-def diff_rules(old_text: str, new_text: str) -> list[dict]:
-    """规则钉板逐行 diff:返回 [{kind: changed|added|removed, old, new}]。
+def _pairwise_changes(old_items: list[str], new_items: list[str]) -> list[dict]:
+    """SequenceMatcher 配对:块内替换按项配对,长短不齐尾部按纯增/纯删展开。
 
-    确定性、零 token:行级 SequenceMatcher,块内替换按行配对,多出的
-    行按纯增/纯删展开。空行与首尾空白不参与比较(编辑器常见噪音)。
+    diff_rules(行)与 diff_profile(句)共用;空项不参与比较(编辑噪音)。
     """
-    old_lines = [l.strip() for l in (old_text or "").splitlines() if l.strip()]
-    new_lines = [l.strip() for l in (new_text or "").splitlines() if l.strip()]
     changes: list[dict] = []
-    sm = difflib.SequenceMatcher(a=old_lines, b=new_lines, autojunk=False)
+    sm = difflib.SequenceMatcher(a=old_items, b=new_items, autojunk=False)
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
         if tag == "equal":
             continue
-        olds, news = old_lines[i1:i2], new_lines[j1:j2]
+        olds, news = old_items[i1:i2], new_items[j1:j2]
         if tag == "delete":
             changes += [{"kind": "removed", "old": o, "new": ""} for o in olds]
         elif tag == "insert":
             changes += [{"kind": "added", "old": "", "new": n} for n in news]
-        else:  # replace:块内按行配对,长短不齐的尾部按纯增/纯删补齐
+        else:  # replace:块内按项配对
             for k in range(max(len(olds), len(news))):
                 o = olds[k] if k < len(olds) else ""
                 n = news[k] if k < len(news) else ""
@@ -72,7 +69,32 @@ def diff_rules(old_text: str, new_text: str) -> list[dict]:
                     changes.append({"kind": "removed", "old": o, "new": ""})
                 else:
                     changes.append({"kind": "changed", "old": o, "new": n})
-    return changes[:_MAX_CHANGES]
+    return changes
+
+
+def _sentences(text: str) -> list[str]:
+    """把人物简介切成句:按中英句读切分,保留句尾标点,短于 4 字的碎片丢弃。"""
+    parts = re.split(r"(?<=[。！？；!?;\n])", (text or "").strip())
+    return [p.strip() for p in parts if len(p.strip()) >= 4]
+
+
+def diff_profile(old_text: str, new_text: str) -> list[dict]:
+    """人物简介句级 diff:与 diff_rules 同构,粒度从「行」到「句」。
+
+    简介常是一整段,行级 diff 会把整段算一条变更(引文太长、定位太粗);
+    句级切分让"改了哪句设定"清晰可定位。
+    """
+    return _pairwise_changes(_sentences(old_text), _sentences(new_text))[:_MAX_CHANGES]
+
+
+def diff_rules(old_text: str, new_text: str) -> list[dict]:
+    """规则钉板逐行 diff:返回 [{kind: changed|added|removed, old, new}]。
+
+    确定性、零 token;空行与首尾空白不参与比较(编辑器常见噪音)。
+    """
+    old_lines = [l.strip() for l in (old_text or "").splitlines() if l.strip()]
+    new_lines = [l.strip() for l in (new_text or "").splitlines() if l.strip()]
+    return _pairwise_changes(old_lines, new_lines)[:_MAX_CHANGES]
 
 
 def _locate_para(paras: list[str], quote: str) -> int | None:

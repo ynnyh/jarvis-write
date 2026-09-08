@@ -252,3 +252,128 @@ def test_patch_async_400_without_passages(client):
     )
     assert r.status_code == 400
     assert "冲突段落" in r.json()["detail"]
+
+
+# ---------- 二期:人物卡级联 ----------
+
+PROFILE_OLD = (
+    "林涛是高三理科生,性格沉默寡言,不擅长与人打交道。"
+    "他暗恋同桌苏晓,但从未说出口。"
+    "周末在 HackOS 论坛写技术博客。"
+)
+PROFILE_NEW = (
+    "林涛是高三理科生,性格开朗话多,是班里的气氛担当。"
+    "他暗恋同桌苏晓,但从未说出口。"
+    "周末在 HackOS 论坛写技术博客。"
+)
+
+
+def test_diff_profile_sentence_level():
+    from app.engines.setting_cascade import diff_profile
+
+    changes = diff_profile(PROFILE_OLD, PROFILE_NEW)
+    # 三句只改了第一句:句级切分让变更粒度清晰,不会整段算一条
+    assert changes == [{
+        "kind": "changed",
+        "old": "林涛是高三理科生,性格沉默寡言,不擅长与人打交道。",
+        "new": "林涛是高三理科生,性格开朗话多,是班里的气氛担当。",
+    }]
+    # 无差异(仅空白)→ 空
+    assert diff_profile(PROFILE_OLD, f"  {PROFILE_OLD} ") == []
+
+
+def _mk_char(client, headers, pid: int, profile: str) -> int:
+    r = client.post(
+        f"/api/projects/{pid}/characters", headers=headers,
+        json={"name": "林涛", "aliases": ["涛哥"], "profile": profile},
+    )
+    assert r.status_code == 200, r.text
+    return r.json()["id"]
+
+
+def test_patch_character_profile_returns_changes_and_syncs_seed_fact(client):
+    """编辑简介:返回句级 diff(带 entity),圣经登记事实同步改写。"""
+    headers = _auth(client, "setcas_char_edit")
+    pid = client.post(
+        "/api/projects", headers=headers,
+        json={"title": "人物卡级联书", "target_chapters": 3},
+    ).json()["id"]
+    cid = _mk_char(client, headers, pid, PROFILE_OLD)
+
+    r = client.patch(
+        f"/api/projects/{pid}/characters/{cid}", headers=headers,
+        json={"profile": PROFILE_NEW, "aliases": ["涛哥", "小涛"]},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["profile"] == PROFILE_NEW
+    assert body["aliases"] == ["涛哥", "小涛"]
+    # 变更清单:句级 diff + entity 标注,前端原样传给扫描端点
+    assert len(body["changes"]) == 1
+    ch = body["changes"][0]
+    assert ch["kind"] == "changed" and ch["entity"] == "林涛"
+    assert "沉默寡言" in ch["old"] and "开朗话多" in ch["new"]
+
+    # 圣经同步:登记事实(source_chapter=0)已改写为新简介
+    bible = client.get(
+        f"/api/projects/{pid}/bible?chapter=1", headers=headers,
+    ).json()
+    seed_contents = [f["content"] for f in bible["facts"]
+                     if f["entity"] == "林涛" and "开朗话多" in f["content"]]
+    assert seed_contents, "登记事实未同步新简介"
+
+
+def test_patch_character_first_profile_no_cascade_changes(client):
+    """原来没简介时补写:纯新增,不追问级联(changes 为空)。"""
+    headers = _auth(client, "setcas_char_first")
+    pid = client.post(
+        "/api/projects", headers=headers,
+        json={"title": "人物卡级联书2", "target_chapters": 3},
+    ).json()["id"]
+    cid = _mk_char(client, headers, pid, "")
+    r = client.patch(
+        f"/api/projects/{pid}/characters/{cid}", headers=headers,
+        json={"profile": "新的简介,第一句。第二句设定。"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["changes"] == []
+
+
+def test_patch_character_retire_still_works(client):
+    """回归:退场/恢复的老用法不受 schema 扩展影响。"""
+    headers = _auth(client, "setcas_char_retire")
+    pid = client.post(
+        "/api/projects", headers=headers,
+        json={"title": "人物卡级联书3", "target_chapters": 3},
+    ).json()["id"]
+    cid = _mk_char(client, headers, pid, "简介。")
+    r = client.patch(
+        f"/api/projects/{pid}/characters/{cid}", headers=headers,
+        json={"retired": True},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["retired"] is True
+    assert r.json()["changes"] == []
+
+
+def test_scan_async_accepts_preset_changes(client):
+    """扫描端点吃现成变更清单(人物卡场景):不再要求 old/new。"""
+    headers = _auth(client, "setcas_preset")
+    pid = client.post(
+        "/api/projects", headers=headers,
+        json={"title": "级联书4", "target_chapters": 3},
+    ).json()["id"]
+    changes = [{"kind": "changed", "old": "a", "new": "b",
+                "entity": "林涛"}]
+    r = client.post(
+        f"/api/projects/{pid}/setting-cascade/scan-async", headers=headers,
+        json={"changes": changes},  # 不带 old_text/new_text
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["job_id"]
+    # 脏 changes(缺 kind)被清洗后视为无差异 → 400
+    r2 = client.post(
+        f"/api/projects/{pid}/setting-cascade/scan-async", headers=headers,
+        json={"changes": [{"foo": 1}]},
+    )
+    assert r2.status_code == 400
