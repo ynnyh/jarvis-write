@@ -25,9 +25,15 @@ import re
 from sqlalchemy.orm import Session
 
 from app.db.models import Chapter, ChapterIssue, ChapterState, Project
-from app.engines.common import constitution_block
+from app.engines.common import (
+    CONTINUITY_UNVERIFIED,
+    DEGRADED_KEY,
+    SCOPE_CONSISTENCY,
+    constitution_block,
+    degraded_issue,
+)
 from app.engines.consistency.bible import RESOURCE_FACT_TYPES, BibleService
-from app.engines.consistency.extractor import parse_llm_json
+from app.engines.consistency.extractor import parse_llm_json_checked
 from app.engines.consistency.ledger import ledger_block
 from app.engines.editorial import content_hash
 from app.engines.pipeline.handoff import _fresh_contract, format_contract_block
@@ -195,10 +201,17 @@ async def check_chapter(
     try:
         raw = await get_adapter_for(Task.CONSISTENCY).ask(prompt)
     except Exception as exc:  # noqa: BLE001
+        # 显式降级:过去这里 return [] —— 下游分不清「查过没矛盾」与「根本没跑成」,
+        # 于是模型一超时/429,门禁就自动放行,「不崩」在最需要它的时候失效。
+        # 现在返回哨兵,由门禁走「隔离待人工复核」(不冒充干净,也不卡死流程)。
         logger.error("一致性检查调用失败: %s", exc)
-        return []
+        return [degraded_issue(SCOPE_CONSISTENCY, f"LLM 调用失败:{exc}")]
 
-    data = parse_llm_json(raw)
+    data, parse_err = parse_llm_json_checked(raw)
+    if parse_err:
+        # 模型说了话但没解析出来 ≠ 没有矛盾,同样降级。
+        logger.error("一致性检查输出解析失败: %s", parse_err)
+        return [degraded_issue(SCOPE_CONSISTENCY, parse_err)]
     issues = [
         _normalize_issue(i, chapter_text)
         for i in (data.get("issues") or [])
@@ -217,8 +230,15 @@ async def check_chapter(
 # ---------- 门禁判定辅助(纯函数,供 pipeline 与 API 复用) ----------
 
 def blockers_of(issues: list[dict]) -> list[dict]:
-    """筛出 blocker 级问题(门禁阻断项)。"""
-    return [i for i in issues if i.get("severity") == "blocker"]
+    """筛出 blocker 级问题(门禁阻断项)。
+
+    降级哨兵不算 blocker:它不代表发现了矛盾,只代表检查没跑成——
+    一票否决会让模型一抽风整章就卡死。降级由 is_degraded 单独处理。
+    """
+    return [
+        i for i in issues
+        if i.get("severity") == "blocker" and not i.get(DEGRADED_KEY)
+    ]
 
 
 def triage_issues(issues: list[dict]) -> str:
@@ -245,8 +265,15 @@ def continuity_score(issues: list[dict]) -> int:
     映射:blocker → 4(必不达常规阈值,触发回炉);major ≥2 → 6(多条模糊
     矛盾叠加,大概率真有问题);major ==1 → 7(major 的定义是「尚存解释空间」,
     单条不该在阈值 7 下注定回炉);仅 minor → 8;干净 → 9。
+
+    降级例外:检查没跑成(只剩哨兵)时返回 CONTINUITY_UNVERIFIED(0)——
+    0 的语义是「未校验」而非「连续性差」。过去这里回落成 9(干净),
+    等于把没跑过的检查记成满分,正是「纸面门禁」的来源。
     """
-    severities = [i.get("severity") for i in issues]
+    real = [i for i in issues if not i.get(DEGRADED_KEY)]
+    if not real and issues:
+        return CONTINUITY_UNVERIFIED
+    severities = [i.get("severity") for i in real]
     if "blocker" in severities:
         return 4
     majors = severities.count("major")

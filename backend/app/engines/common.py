@@ -1,15 +1,76 @@
 # app/engines/common.py
 # -*- coding: utf-8 -*-
-"""引擎层公共小工具:大纲查询与架构简报。
+"""引擎层公共小工具:大纲查询、架构简报、以及**显式降级**语义。
 
 architecture_brief 两个变体是按场景定制的提示词素材,字段取舍不同,
 保留两份不合并(合并会改变生成行为)。
+
+关于降级(2026-09-08 补):
+此前「LLM 调用失败 / JSON 解析失败」一律静默返回空(空列表 / 空 dict),
+下游无从区分「确实没查出问题」与「这一环节根本没跑成」——一致性门禁因此在
+模型超时/429 时自动放行,「不崩」的承诺在最需要它的时刻失效。
+现改为显式降级:失败时返回带 `degraded` 标记的哨兵,由下游显式处理
+(隔离待人工复核 / 章末标记),绝不冒充「干净」。
 """
 from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
 from app.db.models import Outline, Project
+
+# ---- 降级哨兵(degrade sentinel)----
+# 任一条带 degraded=True 的记录都表示「这一环节没跑成」,不是「查过没问题」。
+DEGRADED_KEY = "degraded"
+
+SCOPE_CONSISTENCY = "一致性检查"
+SCOPE_FACT_EXTRACT = "章后事实抽取"
+SCOPE_REVIEW = "主审评分"
+
+# 降级时连续性维度的取值:0 分是刻意的——它不是「连续性差」,而是「未校验」。
+# 绝不能回落成 9(干净),那等于把没跑过的检查当成通过了。
+CONTINUITY_UNVERIFIED = 0
+
+
+def degraded_issue(scope: str, reason: str) -> dict:
+    """构造一条降级哨兵问题(形状与 check_chapter 的 issue 一致,可直接落库/回显)。
+
+    severity 取 minor 是算过的:降级不该一票否决(那会让模型一抽风整章就卡死),
+    但必须**可见**——落进 chapter_issues 并在章节卡片显示「未经校验」。
+    """
+    return {
+        DEGRADED_KEY: True,
+        "scope": scope,
+        "reason": reason,
+        "severity": "minor",
+        "type": "degraded",
+        "description": f"【未校验】{scope}未能完成({reason}),本章未经该环节校验,请人工复核",
+        "evidence": "",
+        "conflicting_fact": "",
+        "suggestion": f"模型/网络恢复后重跑{scope}(可在章节问题面板手动触发复查)",
+        "fix_mode": "patch",
+    }
+
+
+def degraded_stats(scope: str, reason: str) -> dict:
+    """抽取类环节的降级返回(替代原来的空 dict):调用方据此判断成败。"""
+    return {DEGRADED_KEY: True, "scope": scope, "reason": reason}
+
+
+def degraded_of(items: object) -> list[dict]:
+    """从列表里挑出降级哨兵。"""
+    if not isinstance(items, list):
+        return []
+    return [i for i in items if isinstance(i, dict) and i.get(DEGRADED_KEY)]
+
+
+def is_degraded(items: object) -> bool:
+    """列表里是否含降级哨兵(针对 list 型结果,如 check_chapter)。"""
+    return bool(degraded_of(items))
+
+
+def stats_degraded(stats: object) -> bool:
+    """抽取/统计型结果是否为降级(dict 型,如 extract_and_apply 的返回值)。"""
+    return isinstance(stats, dict) and bool(stats.get(DEGRADED_KEY))
 
 
 def get_outline(db: Session, project_id: int, n: int) -> Outline | None:
