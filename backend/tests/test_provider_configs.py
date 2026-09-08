@@ -244,13 +244,17 @@ def test_migrate_old_provider_settings_to_configs(client):
 
     db = SessionLocal()
     try:
+        from app.db.models import User
+        user = User(username="fk_migrate_user")
+        db.add(user)
+        db.flush()
         db.add(ProviderSetting(
-            user_id=88881, provider="deepseek", api_key="enc-key",
+            user_id=user.id, provider="deepseek", api_key="enc-key",
             base_url="https://api.deepseek.com", model="deepseek-chat",
             is_default=True,
         ))
         db.add(ProviderSetting(
-            user_id=88881, provider="openai", api_key="",
+            user_id=user.id, provider="openai", api_key="",
             base_url="", model="", is_default=False,
         ))
         db.commit()
@@ -262,9 +266,11 @@ def test_migrate_old_provider_settings_to_configs(client):
 
     db = SessionLocal()
     try:
+        from app.db.models import User as _U
+        _uid = db.query(_U).filter(_U.username == "fk_migrate_user").one().id
         rows = (
             db.query(ProviderConfig)
-            .filter(ProviderConfig.user_id == 88881)
+            .filter(ProviderConfig.user_id == _uid)
             .order_by(ProviderConfig.id)
             .all()
         )

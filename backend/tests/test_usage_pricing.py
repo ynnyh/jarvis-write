@@ -140,7 +140,11 @@ def test_balance_requires_ownership(usage_env):
     from app.db.models import ProviderConfig
 
     with SessionLocal() as s:
-        other_uid = uid + 1  # 任意非本人 id
+        from app.db.models import User
+        other = User(username="fk_other_user")
+        s.add(other)
+        s.flush()
+        other_uid = other.id  # 真实存在的他人(外键开启,假 id 插不进)
         row = ProviderConfig(
             user_id=other_uid, name="x", interface_format="deepseek",
             api_key="enc:v1:whatever", base_url="https://api.deepseek.com",

@@ -120,11 +120,16 @@ def test_migration_encrypts_existing_plaintext(client):
     from app.db.session import SessionLocal
     from app.migrate import _encrypt_existing_keys
 
-    # 直接落一条明文 key(模拟加密上线前的存量行)
+    # 直接落一条明文 key(模拟加密上线前的存量行);
+    # 外键已开,先建真用户再插(以前假 user_id 能静默插进去,现被约束正确拒绝)
     db = SessionLocal()
     try:
+        from app.db.models import User
+        user = User(username="fk_legacy_user")
+        db.add(user)
+        db.flush()
         row = ProviderSetting(
-            provider="gemini", user_id=99999, api_key="sk-legacy-raw"
+            provider="gemini", user_id=user.id, api_key="sk-legacy-raw"
         )
         db.add(row)
         db.commit()

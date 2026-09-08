@@ -42,6 +42,10 @@ if _is_sqlite:
         cur.execute("PRAGMA journal_mode=WAL")
         cur.execute("PRAGMA busy_timeout=30000")
         cur.execute("PRAGMA synchronous=NORMAL")
+        # 外键约束(P1-6):模型里声明的 ondelete(CASCADE/SET NULL)由此生效,
+        # 脏引用在写入时即被拒,不再依赖人工记得逐表清理。删除路径本来就有
+        # 手工级联(deps.delete_project_cascade),两者不冲突——约束是最后防线。
+        cur.execute("PRAGMA foreign_keys=ON")
         cur.close()
 
 SessionLocal = sessionmaker(

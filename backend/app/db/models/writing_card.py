@@ -19,7 +19,7 @@ class WritingCard(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(
-        ForeignKey("projects.id"), index=True
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
     )
     title: Mapped[str] = mapped_column(String(100))  # 卡名,如「冷峻硬汉对峙」
     body: Mapped[str] = mapped_column(Text)  # 手法描述,注入 prompt 的实际指令文本
