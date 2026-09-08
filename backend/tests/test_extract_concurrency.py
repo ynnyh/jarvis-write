@@ -95,6 +95,7 @@ async def _llm_failure_preserves_facts_case() -> None:
     import app.db.models  # noqa: F401
     from app.db.models import Entity, Fact, Project
     from app.db.session import SessionLocal, engine
+    from app.engines.common import stats_degraded
     from app.engines.consistency import extractor as extractor_mod
 
     Base.metadata.create_all(engine)
@@ -125,7 +126,12 @@ async def _llm_failure_preserves_facts_case() -> None:
         result = await extractor_mod.extract_and_apply(sa, pid, 5, "第五章重写正文……")
     sa.close()
 
-    assert result == {}, "LLM 失败应返回空统计"
+    # 显式降级:LLM 失败必须带 degraded 标记,不能返回空 dict —— 空 dict 与
+    # 「本章确实没有状态变化」无法区分,调用方会误以为抽取成功、圣经已更新。
+    assert stats_degraded(result), (
+        f"LLM 失败应显式降级(带 degraded 标记),实际={result}"
+    )
+    assert "LLM 调用失败" in str(result.get("reason") or "")
 
     check = SessionLocal()
     survived = [

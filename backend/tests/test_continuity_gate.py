@@ -327,8 +327,13 @@ def _scripted_repair(seq: list[list[dict]]):
     return _inner, state
 
 
-def _run_generate(db, project, n, check_fn, extract_fn, adapter=None, repair_fn=None):
-    """mock LLM 跑一遍 generate_chapter;check/extract/repair 由参数注入(脚本化)。"""
+def _run_generate(
+    db, project, n, check_fn, extract_fn, adapter=None, repair_fn=None, review_fn=None
+):
+    """mock LLM 跑一遍 generate_chapter;check/extract/repair 由参数注入(脚本化)。
+
+    review_fn 可注入降级/异常的主审(用于验证「没审成 ≠ 写得差」的隔离路径)。
+    """
     from app.engines.pipeline import chapter as ch_mod
     from app.engines.pipeline import chapter_maintenance as cm_mod
 
@@ -339,7 +344,7 @@ def _run_generate(db, project, n, check_fn, extract_fn, adapter=None, repair_fn=
         patch.object(ch_mod, "check_chapter", new=check_fn),
         patch.object(cm_mod, "extract_and_apply", new=extract_fn),
         patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
-        patch.object(ch_mod, "review_chapter", new=_fake_review_high),
+        patch.object(ch_mod, "review_chapter", new=review_fn or _fake_review_high),
         patch.object(ch_mod, "preflight_chapter", new=_fake_preflight),
         patch.object(ch_mod, "repair_chapter", new=repair_fn or _fake_repair_no_fixes),
     ):
