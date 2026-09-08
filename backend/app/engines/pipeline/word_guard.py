@@ -28,6 +28,7 @@ from app.db.models import (
     Project,
     Relationship,
 )
+from app.engines.common import stats_degraded
 from app.engines.consistency.extractor import extract_and_apply
 from app.llm.router import Task, get_adapter_for
 from app.prompts.chapter import COMPRESS_REWRITE_PROMPT, SPLIT_POINT_PROMPT
@@ -408,10 +409,18 @@ async def _resync_bible_after_split(
         # 不再在此显式 purge chapter_a:extract_and_apply 内部会「预演清账→回滚→
         # 抽取成功才真正 purge+apply」,自带幂等与失败保护。此处再 purge 一次不仅冗余,
         # 还会在 extract 入口 commit 处把「清空 chapter_a」抢先落盘,重开数据丢失窗口。
-        await extract_and_apply(db, project.id, chapter_a, text_a)
+        stats_a = await extract_and_apply(db, project.id, chapter_a, text_a)
         db.flush()
-        await extract_and_apply(db, project.id, chapter_b, text_b)
+        stats_b = await extract_and_apply(db, project.id, chapter_b, text_b)
         db.flush()
+        # 抽取降级必须显式:拆章后圣经少一块,后续章的一致性对照就没了源,
+        # 静默过去等于给用户一个看起来完整、实际缺口的真相库。
+        for _n, _s in ((chapter_a, stats_a), (chapter_b, stats_b)):
+            if stats_degraded(_s):
+                logger.warning(
+                    "拆章后第 %d 章圣经重同步降级(该章事实未写入):%s",
+                    _n, _s.get("reason") or "",
+                )
         logger.info("拆章圣经重同步完成:第 %d、%d 章", chapter_a, chapter_b)
     except Exception:  # noqa: BLE001 — 圣经同步失败不阻塞拆章
         logger.exception("拆章后圣经重同步失败(不影响正文)")

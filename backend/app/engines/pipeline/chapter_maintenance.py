@@ -13,7 +13,12 @@ import logging
 from sqlalchemy.orm import Session
 
 from app.db.models import Chapter, ChapterSummary, Project
-from app.engines.common import get_outline
+from app.engines.common import (
+    SCOPE_FACT_EXTRACT,
+    degraded_issue,
+    get_outline,
+    stats_degraded,
+)
 from app.engines.consistency.extractor import extract_and_apply
 from app.engines.consistency.motifs import persist_motif_issues
 from app.engines.devices import persist_device_issues
@@ -160,6 +165,23 @@ async def apply_chapter_tail(
     _report("5/6 抽取状态写入故事圣经")
     logger.info("第 %d 章:抽取状态变化...", chapter_number)
     extraction_stats = await extract_and_apply(db, project.id, chapter_number, final)
+    if stats_degraded(extraction_stats):
+        # 「圣经没更新」必须可见:过去抽取失败静默返回 {},章节照常显示已完成,
+        # 用户以为状态已写回真相库,后续章却拿不到本章的事实——长程一致性在此断链。
+        # 现在落一条 source=extract 的可见问题,用户可待恢复后手动重抽。
+        _reason = str(extraction_stats.get("reason") or "")
+        logger.warning(
+            "第 %d 章章后抽取降级,故事圣经未更新:%s", chapter_number, _reason
+        )
+        from app.engines.consistency.checker import persist_issues  # 延迟导入避循环
+
+        persist_issues(
+            db, chapter,
+            [degraded_issue(SCOPE_FACT_EXTRACT, _reason)],
+            source="extract",
+            text=final,
+        )
+        db.commit()
 
     # ---- 滚动摘要更新 ----
     _report("6/6 更新前情摘要")

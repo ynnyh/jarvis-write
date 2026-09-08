@@ -28,6 +28,7 @@ from app.engines.consistency import (
     ForeshadowScheduler,
     ledger_block,
 )
+from app.engines.common import degraded_of, is_degraded
 from app.engines.consistency.checker import (
     blockers_of,
     blocker_fingerprint,
@@ -464,6 +465,7 @@ async def generate_chapter(
     proofread_fixed = 0  # 校对累计自动修复的硬伤数(回显给用户看"校对跑过了")
     last_fixed_issues: list[dict] = []  # 末轮校对自动修复的清单(对应最终正文,回显用)
     gate_issues: list[dict] = []  # 末轮一致性门禁结果(对应最终正文,落 chapter_issues 用)
+    review_degraded = False  # 主审是否降级(输出解析失败):没审成 ≠ 写得差,走隔离不回炉
     repair_rounds = 0  # 定点修复轮数(计入 revision_rounds,单独回显)
     last_repairs: dict = {}  # 末次定点修复明细 {applied, failed}(回显用)
     patch_tried = False  # 上一轮是否刚做过定点修复(修不掉的连续问题强制重写,防烧轮)
@@ -487,6 +489,25 @@ async def generate_chapter(
         # continuity 随门禁结果先入 scores:精修段靠它判达标;预算烧在门禁段时
         # 主审没跑过,scores 至少带上 continuity 供 API/前端回显
         review_result.setdefault("scores", {})["continuity"] = continuity_score(gate_issues)
+        # 门禁降级(LLM 调用失败 / 输出解析失败):绝不能当成「没有 blocker」放行——
+        # 那等于模型一超时,安全网就自动撤掉(过去正是这么静默放行的)。
+        # 走隔离待人工复核,且不烧回炉轮数:重跑解决不了模型抽风,只会白烧钱。
+        if is_degraded(gate_issues):
+            _reason = (degraded_of(gate_issues) or [{}])[0].get("reason", "")
+            review_result["passed"] = False
+            review_result["gate_note"] = (
+                "一致性检查未能完成,本章未经一致性校验,已隔离待人工复核"
+                "(模型/网络恢复后可在问题面板手动触发复查)"
+            )
+            rework_log.append({
+                "round": revision_rounds,
+                "trigger": "gate_degraded",
+                "note": str(_reason)[:120],
+            })
+            logger.warning(
+                "第 %d 章一致性检查降级,隔离待人工复核:%s", chapter_number, _reason
+            )
+            break
         if blockers:
             review_result["passed"] = False
             blocker_fps = {blocker_fingerprint(b) for b in blockers}
@@ -571,6 +592,19 @@ async def generate_chapter(
         # 主审打分(四维);continuity 已由门禁段写入(干净 → 9)
         review_result = await review_chapter(final, outline_block)
         review_result["scores"]["continuity"] = continuity_score(gate_issues)
+        # 主审降级(输出解析失败):四维是被「没解析出来」压成 0 的,不是真的写得差。
+        # 不回炉——重写解决不了解析问题,只会白烧钱;走隔离待人工复核。
+        if review_result.get("degraded"):
+            review_degraded = True
+            review_result["passed"] = False
+            review_result["review_note"] = (
+                "主审评分未能完成(输出解析失败),本章未经审校评分,已隔离待人工复核"
+            )
+            logger.warning(
+                "第 %d 章主审降级,隔离待人工复核:%s",
+                chapter_number, review_result.get("degraded_reason", ""),
+            )
+            break
         # 达标判定:五维阈值硬判(阈值调得再低,blocker 也已在①被拦)
         passed = judge_passed(review_result["scores"], threshold)
         review_result["passed"] = passed
@@ -725,7 +759,10 @@ async def generate_chapter(
     # 不做章后抽取(矛盾不进圣经)、不更新滚动摘要、不提契约;
     # 无 blocker → pending_review(docs/08 §5.5 审核状态机,人工 approve 后 approved)。
     blockers = blockers_of(gate_issues)
-    chapter.status = "quarantined" if blockers else "pending_review"
+    # 降级与「有硬矛盾」同等处理:都隔离、都不进圣经。差别只在给用户的说法
+    # (未校验 vs 有矛盾)——行为必须一致,未校验的正文照样会污染真相库。
+    _gate_blocked = bool(blockers) or is_degraded(gate_issues) or review_degraded
+    chapter.status = "quarantined" if _gate_blocked else "pending_review"
     # 审校快照落库:编辑部打开时回显本次主审结果,免去用户再点一次「请主编审读」
     store_review_snapshot(chapter, review_result, "generation", reviewed_text)
     # 校对快照落库:回显生成时自动修复了哪些硬伤(指纹与主审一致,正文改动同步失效)
@@ -754,13 +791,22 @@ async def generate_chapter(
     persist_issues(db, chapter, preflight_issues, source="preflight", text=final)
     db.commit()
 
-    if blockers:
-        _report("一致性门禁拦截:存在未消除的硬矛盾,本章已隔离(quarantined)")
-        logger.warning(
-            "第 %d 章被一致性门禁拦截(quarantined):%d 个 blocker 未消除,"
-            "跳过章后抽取/滚动摘要/契约提取(待人工处理或放行)",
-            chapter_number, len(blockers),
-        )
+    if _gate_blocked:
+        if not blockers:
+            _why = "主审评分未能完成" if review_degraded else "一致性检查未能完成"
+            _report(f"{_why}:本章已隔离(quarantined),待人工复核")
+            logger.warning(
+                "第 %d 章校验降级(quarantined):%s,本章未经完整校验,"
+                "跳过章后抽取/滚动摘要/契约提取(待人工复查后放行)",
+                chapter_number, _why,
+            )
+        else:
+            _report("一致性门禁拦截:存在未消除的硬矛盾,本章已隔离(quarantined)")
+            logger.warning(
+                "第 %d 章被一致性门禁拦截(quarantined):%d 个 blocker 未消除,"
+                "跳过章后抽取/滚动摘要/契约提取(待人工处理或放行)",
+                chapter_number, len(blockers),
+            )
         return chapter, gate_issues, {}, guard_result, review_result, preflight_issues
 
     # ---- 章后链路(门禁通过才走):抽取写圣经 → 滚动摘要 → 章末契约 ----
