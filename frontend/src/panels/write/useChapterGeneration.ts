@@ -12,6 +12,7 @@ import { pollJob, errMsg } from "../../pollJob";
 import { toast } from "../../ui/Toaster";
 import { confirmDialog } from "../../ui/ConfirmDialog";
 import { chapterEstimateMin, recordGenDuration } from "./genDuration";
+import { confirmPeakPricing, ackPeakPricing, peakPricingNotice } from "../../peakPricing";
 
 // running-jobs 单项(api.runningJobs 的 jobs 元素,无导出类型名,此处按结构声明)
 type RunningJob = { job_id: string; kind: string; stage: string };
@@ -91,6 +92,8 @@ export function useChapterGeneration(
   }, [setErr, setCurrent, reload, setChapterNum, openVersions]);
 
   const generate = useCallback(async (n: number, revision = "") => {
+    // 官方 DeepSeek 峰时(计费 ×2)弹一次确认;非峰时/中转站/会话内已确认则直通
+    if (!(await confirmPeakPricing(1))) return;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setErr(""); setGenResult(null); setGenDurSec(null);
@@ -117,16 +120,20 @@ export function useChapterGeneration(
   const startQueue = useCallback(async () => {
     const nums = [...queuePicked].sort((a, b) => a - b);
     if (!nums.length) return;
-    // 发起前成本预估(P1 成本透明):按本书最近每章均速估总时长,确认后再开跑
+    // 发起前成本预估(P1 成本透明):按本书最近每章均速估总时长,确认后再开跑;
+    // 峰时(官方 DeepSeek 计费 ×2)时把金额提示合进同一个弹窗,不连弹两个框
     const per = chapterEstimateMin(pid);
     const total = per * nums.length;
+    const peak = await peakPricingNotice(nums.length);
     const ok = await confirmDialog({
       title: `开始连写 ${nums.length} 章?`,
-      body: `按本书最近的生成速度,约需 ${total} 分钟(每章约 ${per} 分钟)。`
+      body: (peak ? `${peak}\n\n` : "")
+        + `按本书最近的生成速度,约需 ${total} 分钟(每章约 ${per} 分钟)。`
         + "期间可以离开页面,回来后随时查看进度;中途某章被门禁拦截时会暂停。",
       confirmText: "开始连写",
     });
     if (!ok) return;
+    if (peak) ackPeakPricing(); // 用户已看过峰时成本并确认,本会话不再重复弹
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setErr(""); setGenResult(null);

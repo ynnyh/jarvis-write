@@ -7,6 +7,7 @@ import { errMsg } from "../pollJob";
 import { useJob } from "../ui/useJob";
 import { toast } from "../ui/Toaster";
 import { confirmDialog } from "../ui/ConfirmDialog";
+import { confirmPeakPricing, ackPeakPricing, peakPricingNotice } from "../peakPricing";
 
 interface Props { pid: number; }
 
@@ -89,7 +90,10 @@ export default function RefreshPanel({ pid }: Props) {
     label: string,
     start: () => Promise<{ job_id: string }>,
     done: (r: T) => void,
+    chapters = 1,
   ) {
+    // 官方 DeepSeek 峰时(计费 ×2)弹一次确认;取消则不发起任务
+    if (!(await confirmPeakPricing(chapters))) return;
     setErr(""); setBusy(label); setStage("");
     try {
       const r = await runJob<T>(start, { kind: label, onStage: setStage });
@@ -142,18 +146,23 @@ export default function RefreshPanel({ pid }: Props) {
         else
           toast.ok(`重润完成:${r.refreshed.length}/${r.total} 章`);
       },
+      list.length || written.length || 1,
     );
 
   const runHeavy = async (list: number[]) => {
-    // 重度重写会覆盖正文:应用内确认框(替代原生 confirm),后果说清、快照兜底也写明
+    // 重度重写会覆盖正文:应用内确认框(替代原生 confirm),后果说清、快照兜底也写明;
+    // 峰时(官方 DeepSeek 计费 ×2)金额提示合进同一个弹窗,不连弹两个框
     const scope = list.length ? `选中的 ${list.length} 章` : "全书已成文章节";
+    const peak = await peakPricingNotice(list.length || written.length || 1);
     const ok = await confirmDialog({
       title: "重度重写?",
-      body: `将整章重跑生成并覆盖${scope}的正文(旧版自动存快照,可回滚),并自动重抽圣经、重建下游摘要。`,
+      body: (peak ? `${peak}\n\n` : "")
+        + `将整章重跑生成并覆盖${scope}的正文(旧版自动存快照,可回滚),并自动重抽圣经、重建下游摘要。`,
       confirmText: "开始重写",
       danger: true,
     });
     if (!ok) return;
+    if (peak) ackPeakPricing();
     doJob<HeavyResult>(
       "重度重写",
       () => api.refreshHeavy(pid, list, directive.trim()),
@@ -170,6 +179,7 @@ export default function RefreshPanel({ pid }: Props) {
         else
           toast.ok(`重写完成:${r.rewritten.length}/${r.total} 章`);
       },
+      list.length || written.length || 1,
     );
   };
 
