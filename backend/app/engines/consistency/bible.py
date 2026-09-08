@@ -86,6 +86,28 @@ class BibleService:
                 return e
         return None
 
+    def resolve_entities(self, names: list[str]) -> dict[str, Entity]:
+        """批量把名字解析成实体:一次查询建 name/alias 索引,替代逐名 find_entity。
+
+        修复 N+1(评估报告 P2-14):单章 10 个角色 = 10~20 次查询,注入热路径
+        每章都走。项目实体总量有界(几十~几百),一条查询全载最优。
+        返回 {strip 后的名字: Entity};解析不到的名字不在结果里。
+        """
+        wanted = {n.strip() for n in names if n and n.strip()}
+        if not wanted:
+            return {}
+        entities = (
+            self.db.query(Entity)
+            .filter(Entity.project_id == self.project_id)
+            .all()
+        )
+        index: dict[str, Entity] = {}
+        for e in entities:
+            index.setdefault(e.name, e)  # 重名已被 create/extract 校验挡住,防御性取先
+            for a in (e.aliases or []):
+                index.setdefault(a, e)
+        return {n: index[n] for n in wanted if n in index}
+
     def get_or_create_entity(
         self, name: str, entity_type: str = "character", aliases: list | None = None
     ) -> Entity:
@@ -121,11 +143,8 @@ class BibleService:
             )
         )
         if entity_names:
-            ids = set()
-            for name in entity_names:
-                ent = self.find_entity(str(name))
-                if ent:
-                    ids.add(ent.id)
+            resolved = self.resolve_entities([str(n) for n in entity_names])
+            ids = {e.id for e in resolved.values()}
             if not ids:
                 return []
             q = q.filter(Fact.entity_id.in_(ids))
