@@ -10,12 +10,22 @@ import { confirmDialog } from "./ConfirmDialog";
 import { jobLabel, useTaskCenter } from "./TaskCenter";
 import { toast } from "./Toaster";
 import { useJobLive } from "./useJobLive";
+import { useBreakpoint } from "../hooks/useBreakpoint";
 
 const OPEN_KEY = "jarvis_live_dock_open";
 
 export function LiveDock() {
   const { jobs, running, liveJobId, focusLive } = useTaskCenter();
-  const [open, setOpen] = useState(() => localStorage.getItem(OPEN_KEY) !== "0");
+  const { isMobile } = useBreakpoint();
+  // 默认展开性:桌面默认展开(全屏下不占地),移动端默认折叠(只露一行 head,
+  // 不挡窄屏正文;用户主动展开/折叠会写进 localStorage,后续尊重选择)。
+  const [open, setOpen] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const stored = window.localStorage.getItem(OPEN_KEY);
+    if (stored === "0") return false;
+    if (stored === "1") return true;
+    return !isMobile;
+  });
   const bodyRef = useRef<HTMLDivElement>(null);
   // 用户手动往上翻时不再抢滚动条,翻回底部自动恢复跟随
   const pinnedRef = useRef(true);
@@ -69,34 +79,43 @@ export function LiveDock() {
   const idx = running.findIndex((j) => j.job_id === target.job_id);
   const jobStage = jobs.find((j) => j.job_id === target.job_id)?.stage ?? "";
 
+  // 移动端折叠态:head 只留 dot + 标题 + 展开按钮,其他按钮(‹ › ■)收起隐藏,
+  // 否则一排 5 个 22px 小按钮在窄屏根本点不准。
+  const compactHead = isMobile && !open;
+
   return (
     <div className={"live-dock" + (open ? "" : " collapsed")}>
       <div className="live-head">
         <span className={"live-dot" + (streaming ? " on" : "")} />
         <span className="live-title" title={target.kind}>{jobLabel(target.kind)}</span>
-        <span className="live-step" title={step || jobStage}>{step || jobStage}</span>
-        <div className="grow" />
-        {running.length > 1 && (
+        {!compactHead && (
           <>
-            <span className="live-nth">{idx + 1}/{running.length}</span>
+            <span className="live-step" title={step || jobStage}>{step || jobStage}</span>
+            <div className="grow" />
+            {running.length > 1 && (
+              <>
+                <span className="live-nth">{idx + 1}/{running.length}</span>
+                <button
+                  className="live-btn"
+                  title="看上一个任务"
+                  onClick={() => focusLive(running[(idx - 1 + running.length) % running.length].job_id)}
+                >‹</button>
+                <button
+                  className="live-btn"
+                  title="看下一个任务"
+                  onClick={() => focusLive(running[(idx + 1) % running.length].job_id)}
+                >›</button>
+              </>
+            )}
             <button
               className="live-btn"
-              title="看上一个任务"
-              onClick={() => focusLive(running[(idx - 1 + running.length) % running.length].job_id)}
-            >‹</button>
-            <button
-              className="live-btn"
-              title="看下一个任务"
-              onClick={() => focusLive(running[(idx + 1) % running.length].job_id)}
-            >›</button>
+              title="终止这个任务(立刻掐断模型调用)"
+              disabled={stopping}
+              onClick={stopTarget}
+            >■</button>
           </>
         )}
-        <button
-          className="live-btn"
-          title="终止这个任务(立刻掐断模型调用)"
-          disabled={stopping}
-          onClick={stopTarget}
-        >■</button>
+        {compactHead && <div className="grow" />}
         <button
           className="live-btn"
           title={open ? "收起(不再接收实时正文)" : "展开看模型正在写什么"}

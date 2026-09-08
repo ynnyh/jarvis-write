@@ -257,24 +257,77 @@
 }
 @keyframes live-blink { 50% { opacity: 0; } }
 
-@media (max-width: 640px) {
-  /* 移动端贴底通栏。上抬 64px:底下是写作区的 .m-ai-bar(fixed,min-height 48px
-     + 8px 边距 + 安全区),直播窗 z-index 450 会把它整条压住,AI 就点不开了。 */
+/* 移动端 LiveDock 定位 + 高度。
+   - 默认(非写区场景)贴底 8px:不再硬上抬 64px 浮在屏幕中间遮挡正文。
+   - 写区场景(:has(.write-zone)):让出 .m-ai-bar(fixed,min-height 48px + 8px 边距
+     + 安全区),且把 z-index 降到 .m-ai-bar 之下,AI 输入条能被点开。
+   断点 767px 与 hooks/useBreakpoint.ts 的 MOBILE_QUERY 对齐。 */
+@media (max-width: 767px) {
   .live-dock {
     right: 8px; left: 8px; width: auto;
+    bottom: calc(8px + constant(safe-area-inset-bottom));
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    z-index: 55;
+  }
+  .live-body { max-height: 38vh; }
+  /* 写区有 .write-zone 时:让出 m-ai-bar 位置,层级也下沉到 50 以避开 */
+  body:has(.write-zone) .live-dock {
     bottom: calc(64px + constant(safe-area-inset-bottom));
     bottom: calc(64px + env(safe-area-inset-bottom));
+    z-index: 50;
   }
-  .live-body { max-height: 28vh; }
 }
 
-/* 移动端:角标在顶栏第二行最左,抽屉若沿用 right:0 会整体溢出到屏幕左外并盖住标题行。
-   改为左锚定 + 视口内限宽,保证始终落在屏幕内。 */
-@media (max-width: 640px) {
-  .tc-drawer { right: auto; left: 0; width: min(340px, calc(100vw - 16px)); max-height: 65vh; }
-  /* 「看不全」的根因:阶段/错误文本单行省略。移动端放行折行,内容完整可读 */
-  .tc-item { align-items: flex-start; }
-  .tc-item .tc-stage { white-space: normal; text-align: right; }
+/* 移动端任务中心抽屉 + 任务项。
+   问题(看截图):
+     - 旧断点 640px,与项目移动断点 767px 不对齐,中尺寸设备(平板/折叠屏)漏处理;
+     - 单行 flex 让「title-suggestio...」整条被截断、看不到阶段描述、操作按钮被挤出视野。
+   改法:
+     - 断点对齐 767px;
+     - 抽屉贴左右各 8px,自然落到角标下,不盖住顶栏标题;
+     - 用 flex-wrap 让 label / stage 各独占一行(可省略/可折行),button 半行并排,
+       比单纯 column 更紧凑、按钮仍能横向并排而不被挤窄。 */
+@media (max-width: 767px) {
+  .tc-drawer {
+    right: auto;
+    left: 8px;
+    width: calc(100vw - 16px);
+    max-width: 360px;
+    max-height: 70vh;
+    padding: 8px;
+    border-radius: var(--r-lg);
+  }
+  .tc-item {
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 8px;
+    padding: 10px 12px;
+  }
+  .tc-item .tc-label {
+    flex: 1 1 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fs-sm);
+    line-height: 1.4;
+  }
+  .tc-item .tc-stage {
+    flex: 1 1 100%;
+    min-width: 0;
+    white-space: normal;
+    text-align: left;
+    overflow: visible;
+    font-size: var(--fs-xs);
+    line-height: 1.5;
+    word-break: break-word;
+  }
+  .tc-item .tc-live-btn {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+    min-height: 36px;
+    padding: 6px 10px;
+  }
 }
 
 /* ---------- 阶段二:创作起步流 / 进度地图 / 连写队列 ---------- */
