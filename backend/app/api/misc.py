@@ -126,7 +126,13 @@ async def project_running_jobs(project_id: int, db: Session = Depends(get_db)):
 
 @router.get("/api/usage")
 async def usage_summary(db: Session = Depends(get_db)):
-    """Token 用量汇总(总量 + 按模型)——只统计当前用户。"""
+    """Token 用量汇总(总量 + 按模型 + 折算金额 + 峰时提示)——只统计当前用户。
+
+    金额口径:按官方牌价「未命中底价」估算(无峰时系数),是上界;
+    没有内置牌价的模型只算 token 不折算,绝不编价。
+    """
+    from app.llm.pricing import PEAK_WINDOWS_TEXT, estimate_cost, is_peak_now, match_price, peak_note
+
     uid = current_user_id.get()
     rows = (
         db.query(
@@ -139,17 +145,37 @@ async def usage_summary(db: Session = Depends(get_db)):
         .group_by(LlmUsage.model)
         .all()
     )
-    by_model = [
-        {
+    by_model = []
+    for m, c, p, o in rows:
+        pt, ct = int(p or 0), int(o or 0)
+        cost = estimate_cost(m, pt, ct)
+        price = match_price(m)
+        by_model.append({
             "model": m, "calls": c,
-            "prompt_tokens": int(p or 0), "completion_tokens": int(o or 0),
-        }
-        for m, c, p, o in rows
-    ]
+            "prompt_tokens": pt, "completion_tokens": ct,
+            "estimated_cost": cost,  # ¥;None = 无牌价,不折算
+            "price_note": (
+                f"{price.currency}{price.input:g}/M 输入 · {price.currency}{price.output:g}/M 输出"
+                if price else None
+            ),
+        })
+    priced = [x for x in by_model if x["estimated_cost"] is not None]
+    unpriced = sorted({x["model"] for x in by_model if x["estimated_cost"] is None})
     return {
         "total_calls": sum(x["calls"] for x in by_model),
         "total_prompt_tokens": sum(x["prompt_tokens"] for x in by_model),
         "total_completion_tokens": sum(x["completion_tokens"] for x in by_model),
+        # 累计金额只汇总有牌价模型;上下界都注明,不假装精确
+        "total_estimated_cost": round(sum(x["estimated_cost"] for x in priced), 2) if priced else None,
+        "cost_note": (
+            "按官方底价估算,实际账单因缓存命中与峰时浮动会更低或略高" if priced else None
+        ),
+        "unpriced_models": unpriced,  # 这些模型没有可靠牌价,不算钱
+        "peak_hours": {
+            "is_peak": is_peak_now(),
+            "windows": PEAK_WINDOWS_TEXT,
+            "note": peak_note(),
+        },
         "by_model": by_model,
     }
 
