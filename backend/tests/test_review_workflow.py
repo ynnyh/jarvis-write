@@ -718,9 +718,13 @@ def test_queue_strict_pauses_when_prev_not_approved(client):
         assert r.status_code == 200, r.text
         job = _wait_job(client, headers, r.json()["job_id"])
 
-    assert job["status"] == "error"
-    assert "尚未人工审核通过" in job["error"]
-    assert "pending_review" in job["error"]
+    assert job["status"] == "done"  # 暂停也是正常收尾,原因在结构化结果里(2026-09-08 新契约)
+    result = job["result"]
+    assert "尚未人工审核通过" in result["error"]
+    assert "pending_review" in result["error"]
+    assert result["stopped_at"] == 2
+    assert result["remaining"] == [2]  # 第 2 章没生成,续跑应含它
+    assert result["completed"] == []
     # 第 2 章未生成
     from app.db.session import SessionLocal
     from app.db.models import Chapter
@@ -769,6 +773,59 @@ def test_queue_lenient_ignores_prev_pending_review(client):
 
     assert job["status"] == "done", job
     assert job["result"]["completed"][0]["chapter_number"] == 2
+
+
+def test_queue_402_interrupt_returns_structured_remaining(client):
+    """连写撞 402 欠费:结构化中断,error 可读 + remaining 含失败章本尊(充值后续跑即续)。"""
+    from app.llm.base import UpstreamError
+
+    headers, pid = _seed_book("queue_402_user", client)
+    # 追加第 3 章蓝图,让队列有"中断后还有后续章"的形态
+    from app.db.session import SessionLocal
+    from app.db.models import Outline
+    session = SessionLocal()
+    try:
+        session.add(Outline(project_id=pid, chapter_number=3, title="第三幕",
+                            chapter_purpose="推进主线", summary="第3章剧情",
+                            current_version=1))
+        session.commit()
+    finally:
+        session.close()
+
+    class _BrokeAdapter(_PipelineAdapter):
+        async def ask(self, prompt: str, system=None) -> str:
+            raise UpstreamError("HTTP 402: Insufficient Balance", status=402)
+
+    adapter = _BrokeAdapter()
+    patches = (
+        patch("app.engines.pipeline.chapter.get_adapter_for", return_value=adapter),
+        patch("app.engines.pipeline.chapter_maintenance.get_adapter_for", return_value=adapter),
+        patch("app.engines.pipeline.chapter_maintenance.extract_and_apply", new=_fake_extract),
+        patch("app.engines.pipeline.chapter.check_chapter", new=_fake_check_clean),
+        patch("app.engines.pipeline.chapter.proofread_chapter", new=_fake_proofread),
+        patch("app.engines.pipeline.chapter.review_chapter", new=_fake_review_high),
+        patch(
+            "app.engines.pipeline.chapter.preflight_chapter",
+            new=_ScriptedPreflight([]),
+        ),
+    )
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        r = client.post(
+            f"/api/projects/{pid}/chapters/generate-queue",
+            headers=headers, json={"chapter_numbers": [2, 3]},
+        )
+        assert r.status_code == 200, r.text
+        job = _wait_job(client, headers, r.json()["job_id"])
+
+    assert job["status"] == "done", job
+    result = job["result"]
+    assert "欠费" in result["error"]
+    assert "充值" in result["error"]
+    assert result["completed"] == []
+    # remaining 含失败的第 2 章(重跑即续)+ 其后的第 3 章,前端一键续跑直接用
+    assert result["remaining"] == [2, 3]
+    assert result["quarantined"] is False
+    assert result["stopped_at"] == 2
 
 
 # ----- 生成响应透出 preflight 字段 -----

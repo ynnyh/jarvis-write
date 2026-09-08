@@ -204,13 +204,19 @@ async def generate_queue(
                     )
                     if prev is not None and prev.final_content and prev.status != "approved":
                         done = "、".join(str(c["chapter_number"]) for c in completed) or "无"
-                        fail_job(
-                            job_id,
-                            f"严格连写模式:第 {n - 1} 章尚未人工审核通过"
-                            f"(当前状态:{prev.status}),已暂停(已完成:{done};"
-                            "请先在章节列表审核通过该章,或关闭项目设置里的"
-                            "「连写要求审核通过」后再继续)",
-                        )
+                        # 结构化中断(对齐 heavy refresh):remaining 从待生成章起,
+                        # 前端据此挂「一键续跑」,用户不必手动重选剩余区间
+                        finish_job(job_id, {
+                            "completed": completed, "total": total,
+                            "stopped_at": n, "remaining": nums[i - 1:],
+                            "quarantined": False,
+                            "error": (
+                                f"严格连写模式:第 {n - 1} 章尚未人工审核通过"
+                                f"(当前状态:{prev.status}),已暂停(已完成:{done};"
+                                "请先在章节列表审核通过该章,或关闭项目设置里的"
+                                "「连写要求审核通过」后再继续)"
+                            ),
+                        })
                         return
                 chapter, issues, _stats, _guard, _review, _preflight = (
                     await generate_chapter(
@@ -229,12 +235,18 @@ async def generate_queue(
                         (i.get("description") or "")[:60] for i in blockers[:3]
                     ) or "详见该章问题清单"
                     done = "、".join(str(c["chapter_number"]) for c in completed) or "无"
-                    fail_job(
-                        job_id,
-                        f"第 {n} 章被一致性门禁拦截(quarantined):{desc}"
-                        f"(已完成:{done};该章未抽取进圣经、未更新摘要,已停止。"
-                        "请重写该章或确认忽略放行后再继续连写)",
-                    )
+                    # 该章正文已生成(只是被拦),用户去写作页就地处理它;
+                    # remaining 从下一章起,不把本章塞回去重跑(否则"忽略放行后续跑又被拦"死循环)
+                    finish_job(job_id, {
+                        "completed": completed, "total": total,
+                        "stopped_at": n, "remaining": nums[i:],
+                        "quarantined": True,
+                        "error": (
+                            f"第 {n} 章被一致性门禁拦截(quarantined):{desc}"
+                            f"(已完成:{done};该章未抽取进圣经、未更新摘要,已停止。"
+                            "请重写该章或确认忽略放行后再继续连写)"
+                        ),
+                    })
                     return
                 completed.append({
                     "chapter_number": n, "word_count": chapter.word_count,
@@ -242,15 +254,25 @@ async def generate_queue(
             except Exception as exc:  # noqa: BLE001 — 断链即停,保留已完成
                 session.rollback()
                 done = "、".join(str(c["chapter_number"]) for c in completed) or "无"
-                fail_job(
-                    job_id,
-                    f"第 {n} 章生成失败:{normalize_job_error(exc)[:300]}(已完成:{done};"
-                    "后续章节依赖本章摘要,已停止)",
-                )
+                # 结构化中断:剩余章(含失败的本章,重跑即续)交给前端一键续跑。
+                # 402 欠费场景尤其重要——充值后点一下就接着写,不用手动重选区间。
+                finish_job(job_id, {
+                    "completed": completed, "total": total,
+                    "stopped_at": n, "remaining": nums[i - 1:],
+                    "quarantined": False,
+                    "error": (
+                        f"第 {n} 章生成失败:{normalize_job_error(exc)[:300]}"
+                        f"(已完成:{done};后续章节依赖本章摘要,已停止)"
+                    ),
+                })
                 return
             finally:
                 session.close()
-        finish_job(job_id, {"completed": completed, "total": total})
+        finish_job(job_id, {
+            "completed": completed, "total": total,
+            "stopped_at": None, "remaining": [],
+            "quarantined": False, "error": None,
+        })
 
     fire_and_track(runner())
     return {"job_id": job_id}

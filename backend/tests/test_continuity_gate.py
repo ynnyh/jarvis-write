@@ -884,7 +884,11 @@ def _chapter_patches(check_fn, extract_fn):
 
 
 def test_queue_stops_on_quarantined(client):
-    """连写队列:第 2 章被门禁拦截 → job 报错即停,后续章不生成。"""
+    """连写队列:第 2 章被门禁拦截 → 结构化中断即停,后续章不生成。
+
+    新契约(2026-09-08 对齐 heavy refresh):中断不再 fail_job 只留一句话,
+    而是 finish_job 带结构化结果(error/remaining 等)——前端据此挂「一键续跑」。
+    """
     headers, pid = _seed_quarantine_book("gate_queue_user", client)
     check = _AlwaysCheck([BLOCKER_ISSUE])  # 默认 auto_revise 回炉封顶后仍是 blocker
 
@@ -897,9 +901,15 @@ def test_queue_stops_on_quarantined(client):
         assert r.status_code == 200, r.text
         job = _wait_job(client, headers, r.json()["job_id"])
 
-    assert job["status"] == "error"
-    assert "quarantined" in job["error"]
-    assert "一致性门禁" in job["error"]
+    assert job["status"] == "done"  # 中断也是正常收尾,错误在结果负载里
+    result = job["result"]
+    assert "quarantined" in result["error"]
+    assert "一致性门禁" in result["error"]
+    assert result["quarantined"] is True
+    assert result["stopped_at"] == 2
+    # 该章正文已生成(只是被拦),用户去写作页就地处理;续跑从下一章起,不含本章
+    assert result["remaining"] == []
+    assert result["completed"] == []
     rows = _db_rows(pid)
     assert rows["chapters"][2].status == "quarantined"  # 落库但隔离
     assert rows["summaries"][2] is None  # 未更新摘要
