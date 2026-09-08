@@ -314,13 +314,14 @@ def cmd_resume(args: argparse.Namespace) -> int:
     import asyncio
     import json as _json
 
-    from app.evals.runner import _append_history, describe_models, load_run, resume_run
-
     run_path = Path(args.run_json).resolve()
     if not run_path.exists():
         print(f"找不到 run JSON:{run_path}", file=sys.stderr)
         return 2
-    run = load_run(run_path)
+    # 必须在 import runner(它会导入 app.db.session 建 engine)之前把
+    # DATABASE_URL 定好,否则 engine 连到默认库——这里直接读 JSON,不走 load_run。
+    with run_path.open(encoding="utf-8") as f:
+        run = _json.load(f)
     out_dir = run_path.parent
 
     db_url = _db_url(args.db) if args.db else (run.get("db_path") or "").strip()
@@ -331,10 +332,12 @@ def cmd_resume(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
-    os.environ["DATABASE_URL"] = db_url
     if "app.db.session" in sys.modules:
         print("⚠️ app.db.session 已在本进程导入,DATABASE_URL 覆盖无效——请用独立进程运行 resume", file=sys.stderr)
         return 2
+    os.environ["DATABASE_URL"] = db_url
+
+    from app.evals.runner import _append_history, describe_models, resume_run
 
     failed = [c["n"] for c in run.get("chapters") or [] if not c.get("ok")]
     if not failed:
