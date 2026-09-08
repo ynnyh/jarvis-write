@@ -190,8 +190,11 @@ def normalize_job_error(exc: Exception) -> str:
         )
     if "HTTP 401" in msg:
         return "模型 API Key 无效或已欠费(HTTP 401),请到「设置」检查 key 与账户余额"
-    if "HTTP 402" in msg:
-        return "模型账户欠费(HTTP 402),请充值后重试"
+    if "HTTP 402" in msg or "余额不足" in msg:
+        return (
+            "模型账户欠费(HTTP 402):请到服务商控制台充值后重试;"
+            "已生成的章节与进度都已保存,不会丢失,充值后从断点继续即可"
+        )
     if "HTTP 404" in msg:
         return "模型不存在或接口地址错误(HTTP 404),请到「设置」检查模型名与 Base URL"
     if "HTTP 429" in msg:
