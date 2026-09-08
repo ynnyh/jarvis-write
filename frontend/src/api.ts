@@ -652,6 +652,26 @@ export interface CraftResult {
 export interface RevisePair {
   para_idx: number; old: string; new: string; notes: string | null; ok: boolean;
 }
+// 设定级级联:规则变更 / 扫描结果 / 定点修提案(与 MarksReviseResult 同构,复用验收卡)
+export interface SettingChange {
+  kind: "changed" | "added" | "removed"; old: string; new: string;
+}
+export interface SettingPassage {
+  chapter_number: number; para_idx: number; para_excerpt: string;
+  quote: string; reason: string;
+}
+export interface SettingScanResult {
+  changes: SettingChange[];  // 后端权威 diff 的回显:生成提案时原样传回
+  screened: number;
+  affected_chapters: { chapter_number: number; title: string; reason: string }[];
+  passages: SettingPassage[];
+  unlocated: number;
+  failed: number[];
+}
+export interface SettingPatchResult {
+  total: number; stale: number;
+  chapters: { chapter_number: number; pairs: RevisePair[] }[];
+}
 // 跨章标记(作者在正文里随手记的「这里不行」,落库持久):para_idx + snapshot 判失效
 export interface ChapterMark {
   id: number; chapter_number: number; para_idx: number; snapshot: string; note: string;
@@ -1303,6 +1323,13 @@ export const api = {
   // 规则扫描:逐章对照世界观硬规则(world_rules)体检正文,问题以「规则」落各章审核报告
   ruleScanAsync: (pid: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/rule-scan-async`),
+  // 设定级级联:设定变更 → 全书影响扫描 → 段落定点修提案(提案不落库,前端 diff 验收)
+  settingCascadeScan: (pid: number, oldText: string, newText: string) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/setting-cascade/scan-async`,
+      { old_text: oldText, new_text: newText }),
+  settingCascadePatch: (pid: number, changes: SettingChange[], passages: { chapter_number: number; para_idx: number }[]) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/setting-cascade/patch-async`,
+      { changes, passages }),
   contractsBackfillAsync: (pid: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/contracts/backfill-async`),
   // 指令改异步解析(应用仍走同步 apply,纯 DB 快)

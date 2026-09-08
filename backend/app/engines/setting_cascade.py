@@ -228,6 +228,7 @@ async def scan_setting_impact(
         total, len(affected), len(passages), unlocated, len(set(failed)),
     )
     return {
+        "changes": changes,  # 权威 diff 回显:前端 patch 时原样传回,不做二次 diff
         "screened": total,
         "affected_chapters": affected,
         "passages": passages,

@@ -7,6 +7,7 @@ import { useInvalidateProject } from "../hooks/queries";
 import { errMsg } from "../pollJob";
 import { toast } from "../ui/Toaster";
 import { confirmDialog } from "../ui/ConfirmDialog";
+import SettingCascade from "./SettingCascade";
 
 // 每章目标字数的合法区间(前端自校验,后端 ProjectPatch 不设上下界;区间来自交互改造计划)
 const TARGET_WORDS_MIN = 200;
@@ -108,13 +109,26 @@ export default function ProjectSettingsPanel({ pid, project }: Props) {
     } catch (e) { toast.err("审校配置保存失败", errMsg(e)); }
   }
 
-  // 保存世界观硬规则(整段覆盖,空串清空)
+  // 保存世界观硬规则(整段覆盖,空串清空);有实际变更时追问是否做设定级级联
+  // (扫描全书受影响章节 → 段落定点修提案),扫描耗 LLM,用户可跳过。
+  const [cascade, setCascade] = useState<{ oldText: string; newText: string } | null>(null);
   async function saveWorldRules() {
     setRulesSaving(true);
+    const oldRules = project.world_rules ?? "";
     try {
       await api.patchProject(pid, { world_rules: worldRules });
       await invalidateProject();
       toast.ok("世界观硬规则已保存", "将注入后续所有生成,可用于规则扫描体检正文");
+      if (worldRules.trim() !== oldRules.trim()) {
+        const ok = await confirmDialog({
+          title: "设定变了,扫描全书影响?",
+          body: "已写章节里可能有与新设定冲突的段落。可以现在做设定级级联:"
+            + "扫描受影响章节并产出段落级修订提案(逐条验收后才写回);"
+            + "也可以跳过,之后用「全书 → 规则扫描」体检。",
+          confirmText: "扫描全书影响",
+        });
+        if (ok) setCascade({ oldText: oldRules, newText: worldRules });
+      }
     } catch (e) { toast.err("世界观硬规则保存失败", errMsg(e)); } finally { setRulesSaving(false); }
   }
 
@@ -267,6 +281,12 @@ export default function ProjectSettingsPanel({ pid, project }: Props) {
             {rulesSaving && <span className="spin spin-sm" />}保存规则
           </button>
         </div>
+        {cascade && (
+          <div className="mt-2">
+            <SettingCascade pid={pid} oldText={cascade.oldText} newText={cascade.newText}
+              onClose={() => setCascade(null)} />
+          </div>
+        )}
       </div>
       <div className="card card-compact mt-2">
         <label className="fl">故事宪法(结构化,书级恒真)</label>
