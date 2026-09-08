@@ -30,6 +30,8 @@ class Task(str, Enum):
     POLISH = "polish"                   # 润色
     CONSISTENCY = "consistency"         # 一致性校验
     IMPACT = "impact"                   # 大纲级联影响分析
+    SETTING_IMPACT = "setting_impact"   # 设定级级联:影响粗筛+冲突段定位(JSON)
+    SETTING_PATCH = "setting_patch"     # 设定级级联:段落定点修提案(JSON)
     DRAMA_ASSET = "drama_asset"         # 漫剧资产卡(风格/角色/场景)
     DRAMA_PLAN = "drama_plan"           # 漫剧集数规划
     DRAMA_SCRIPT = "drama_script"       # 漫剧单集剧本
@@ -79,6 +81,8 @@ _TASK_TIER: dict[Task, Tier] = {
     # 「同模型自审自写」的评分偏差与误报;审校档未设置时回落 quality 档
     Task.CONSISTENCY: Tier.REVIEW,
     Task.IMPACT: Tier.QUALITY,
+    Task.SETTING_IMPACT: Tier.QUALITY,
+    Task.SETTING_PATCH: Tier.QUALITY,
     # 漫剧四步管线:改编质量优先,全部走强档(提示词锚段注入对模型服从性有要求)
     Task.DRAMA_ASSET: Tier.QUALITY,
     Task.DRAMA_PLAN: Tier.QUALITY,
@@ -190,6 +194,8 @@ _TASK_MAX_TOKENS: dict[Task, int] = {
     Task.CONSISTENCY: 16384,      # 一致性检查 + 主审评分 + 校对 + 门禁修复共用
     Task.FACT_EXTRACT: 16384,     # 章后事实抽取
     Task.HANDOFF_EXTRACT: 16384,  # 章末交接契约
+    Task.SETTING_IMPACT: 16384,   # 设定级联:粗筛/定位,JSON 输出同上教训
+    Task.SETTING_PATCH: 16384,    # 设定级联:段落改写提案
 }
 
 

@@ -48,6 +48,7 @@ from app.api.projects import router as projects_router
 from app.api.refresh import router as refresh_router
 from app.api.search import router as search_router
 from app.api.settings import router as settings_router
+from app.api.setting_cascade import router as setting_cascade_router
 from app.api.submission import router as submission_router
 from app.api.drama import router as drama_router
 from app.api.system import router as system_router
@@ -242,6 +243,7 @@ def create_app() -> FastAPI:
     app.include_router(overview_router)
     app.include_router(edit_directive_router)
     app.include_router(editorial_router)
+    app.include_router(setting_cascade_router)
     app.include_router(polish_router)
     app.include_router(refresh_router)
     app.include_router(inspire_router)
