@@ -117,3 +117,20 @@
   background: var(--warn-weak); color: var(--warn); border: 1px solid var(--warn-line);
 }
 
+
+/* 用量与花费卡(设置页):汇总行 + 分模型表 + 峰时提示条 */
+.usage-summary {
+  display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-sm); color: var(--text); margin: var(--sp-2) 0;
+}
+.usage-summary b { font-variant-numeric: tabular-nums; }
+.usage-table { width: 100%; border-collapse: collapse; font-size: var(--fs-xs); margin-bottom: var(--sp-3); }
+.usage-table th, .usage-table td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+.usage-table th { color: var(--text-2); font-weight: 500; }
+.usage-table td { font-variant-numeric: tabular-nums; }
+.peak-note {
+  margin: 0 0 var(--sp-3); padding: 8px 12px; border-radius: var(--r-sm);
+  font-size: var(--fs-xs); line-height: 1.6;
+  background: var(--warn-weak); color: var(--warn); border: 1px solid var(--warn-line);
+}
+.peak-note.peak-off { background: var(--ok-weak); color: var(--ok); border-color: transparent; }

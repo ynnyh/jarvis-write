@@ -12,7 +12,24 @@ export function ProviderRow({ p, onChanged, onEdit }: {
 }) {
   const [busy, setBusy] = useState(false);
   const [testMsg, setTestMsg] = useState<{ ok: boolean; warn?: string[]; text: string } | null>(null);
+  // 余额(仅 deepseek 官方支持;点「查余额」现查,不自动轮询)
+  const [balance, setBalance] = useState<string | null>(null);
+  const [balanceErr, setBalanceErr] = useState("");
   const cat = CATEGORY_BY_KEY[normalizeCategory(p.interface_format)];
+
+  async function checkBalance() {
+    setBusy(true); setBalanceErr(""); setBalance(null);
+    try {
+      const r = await api.providerBalance(p.id);
+      const parts: string[] = [];
+      if (r.total_balance != null) parts.push(`总余额 ¥${r.total_balance}`);
+      if (r.granted_balance != null && Number(r.granted_balance) > 0) parts.push(`含赠送 ¥${r.granted_balance}`);
+      setBalance(parts.join(" · ") || JSON.stringify(r));
+      if (r.is_available === false) setBalanceErr(r.reason || "余额不足,请充值后继续使用");
+    } catch (e) {
+      setBalanceErr(errMsg(e));
+    } finally { setBusy(false); }
+  }
 
   async function test() {
     setBusy(true); setTestMsg(null);
@@ -110,6 +127,11 @@ export function ProviderRow({ p, onChanged, onEdit }: {
       <div className="provider-actions">
         <button className="btn-sm" onClick={onEdit} disabled={busy}>编辑</button>
         <button className="btn-sm" onClick={test} disabled={busy}>测试连接</button>
+        {p.interface_format === "deepseek" && p.has_key && (
+          <button className="btn-sm" onClick={checkBalance} disabled={busy} title="实时查询该 Key 的上游账户余额">
+            查余额
+          </button>
+        )}
         {!p.is_default && (
           <button className="btn-sm" onClick={() => setFlag("is_default")} disabled={busy}>
             设为默认
@@ -137,6 +159,9 @@ export function ProviderRow({ p, onChanged, onEdit }: {
           ))}
         </>
       )}
+
+      {balance && <div className="test-line ok">¥ {balance}</div>}
+      {balanceErr && <div className="test-line err">✗ {balanceErr}</div>}
     </div>
   );
 }

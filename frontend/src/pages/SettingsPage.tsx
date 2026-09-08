@@ -14,6 +14,7 @@ import { AboutUpdateCard } from "./settings/AboutUpdateCard";
 import { AccountCard } from "./settings/AccountCard";
 import { AppLockCard } from "./settings/AppLockCard";
 import { ProvidersCard } from "./settings/ProvidersCard";
+import { UsageCard } from "./settings/UsageCard";
 import { PreferencesCard } from "./settings/PreferencesCard";
 import { RenderCard } from "./settings/RenderCard";
 
@@ -28,6 +29,7 @@ export default function SettingsPage() {
       <AccountCard />
       <AppLockCard />
       <ProvidersCard />
+      <UsageCard />
       <RenderCard />
       <PreferencesCard />
       <div className="settings-foot">

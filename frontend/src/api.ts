@@ -671,8 +671,40 @@ export interface SearchResponse {
 // gemini / deepseek / openai…),随后端 _REGISTRY 动态扩展,故用 Record 不写死字段。
 export type ProviderState = Record<string, boolean>;
 // 模型设置(cc-switch 风格):每用户多套命名配置,回显 key 打码与协议默认值
-export interface ProviderConfigOut {
-  id: number;
+/** /api/usage:token 用量 + 折算金额 + 峰时提示 */
+export interface UsageSummary {
+  total_calls: number;
+  total_prompt_tokens: number;
+  total_completion_tokens: number;
+  /** 累计估算花费(¥,按官方底价上界);null = 没有任何模型有牌价 */
+  total_estimated_cost: number | null;
+  /** 金额口径说明(缓存命中/峰时浮动) */
+  cost_note: string | null;
+  /** 没有可靠牌价、不折算金额的模型 */
+  unpriced_models: string[];
+  peak_hours: { is_peak: boolean; windows: string; note: string };
+  by_model: Array<{
+    model: string;
+    calls: number;
+    prompt_tokens: number;
+    completion_tokens: number;
+    estimated_cost: number | null; // null = 无牌价,只算 token
+    price_note: string | null;
+  }>;
+}
+
+/** /api/settings/providers/{id}/balance:上游账户实时余额 */
+export interface ProviderBalance {
+  supported: boolean;
+  currency: string;
+  total_balance: string | null;
+  granted_balance: string | null;
+  topped_up_balance: string | null;
+  is_available: boolean | null;
+  reason: string;
+}
+
+export interface ProviderConfigOut {  id: number;
   name: string;
   interface_format: string; // openai-compatible | anthropic | gemini | deepseek | openai
   api_key_masked: string;
@@ -1200,8 +1232,10 @@ export const api = {
     req<{ status: string; stage: string; result: GenerateChapterResponse | null; error: string | null }>(
       "GET", `/api/jobs/${jobId}`),
   usage: () =>
-    req<{ total_calls: number; total_prompt_tokens: number; total_completion_tokens: number }>(
-      "GET", "/api/usage"),
+    req<UsageSummary>("GET", "/api/usage"),
+  // 实时余额(仅 deepseek 官方支持;其余协议后端 501,前端隐藏按钮)
+  providerBalance: (id: number) =>
+    req<ProviderBalance>("GET", `/api/settings/providers/${id}/balance`),
 
   bible: (pid: number, chapter: number) =>
     req<BibleSnapshot>("GET", `/api/projects/${pid}/bible?chapter=${chapter}`),
