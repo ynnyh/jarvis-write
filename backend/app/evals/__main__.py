@@ -9,6 +9,7 @@
   run       灌夹具、真跑管线逐章生成、落 JSON(要 key;默认用独立的临时库)
   compare   两份 run JSON 出对比表
   gate      一次 run 与回归门槛对比(不达标非 0 退出,可挂 CI);--list 看门槛表
+  resume    断点续跑:只重生成 run 里的失败章(欠费 402/断网后用)
 
 `run` 的库:默认在 --out-dir 下新建一个独立 SQLite,绝不碰你的 jarvis_write.db;
 显式 --db 指向已有库时,库里若存在非「[评测] 」前缀的项目会拒跑(--force 才放行)。
@@ -208,6 +209,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             verbose_stages=args.verbose,
         )
     )
+    run["db_path"] = os.environ["DATABASE_URL"]  # 续跑时按它找回 run 库
     json_path, text_path = save_run(run, out_dir)
     print()
     print(report.run_markdown(run))
@@ -302,6 +304,81 @@ def cmd_trend(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---------- resume ----------
+def cmd_resume(args: argparse.Namespace) -> int:
+    """断点续跑:只重生成 run JSON 里的失败章,成功章与 run 库原样保留。
+
+    场景:长跑中途撞 402(欠费)/网络断。充值后对同一份 run 库续跑,
+    JSON 原地更新(先备份 .bak),聚合/跨章指标/正文旁文件重算。
+    """
+    import asyncio
+    import json as _json
+
+    from app.evals.runner import _append_history, describe_models, load_run, resume_run
+
+    run_path = Path(args.run_json).resolve()
+    if not run_path.exists():
+        print(f"找不到 run JSON:{run_path}", file=sys.stderr)
+        return 2
+    run = load_run(run_path)
+    out_dir = run_path.parent
+
+    db_url = _db_url(args.db) if args.db else (run.get("db_path") or "").strip()
+    if not db_url:
+        print(
+            "run JSON 里没记 db_path(旧版 run),请用 --db 指到该 run 的库"
+            "(out_dir 下 <label>-<启动时间>.db)",
+            file=sys.stderr,
+        )
+        return 2
+    os.environ["DATABASE_URL"] = db_url
+    if "app.db.session" in sys.modules:
+        print("⚠️ app.db.session 已在本进程导入,DATABASE_URL 覆盖无效——请用独立进程运行 resume", file=sys.stderr)
+        return 2
+
+    failed = [c["n"] for c in run.get("chapters") or [] if not c.get("ok")]
+    if not failed:
+        print("没有失败章,无需续跑")
+        return 0
+
+    plan = _plan_from_args(args)
+    models = describe_models(plan)
+    if not any(isinstance(m, dict) and m.get("has_key") for m in models.values()):
+        print("没有可用的模型 key:用 --api-key/--model/--format(或 EVAL_API_KEY 等)指定", file=sys.stderr)
+        return 2
+    print(f"模型:{_json.dumps(models, ensure_ascii=False)}")
+    print(f"库:{db_url}")
+    print(f"待续跑章:{failed}")
+
+    run = asyncio.run(resume_run(run, plan=plan, progress=print))
+
+    backup = run_path.with_suffix(".json.bak")
+    if not backup.exists():
+        backup.write_text(run_path.read_text(encoding="utf-8"), encoding="utf-8")
+        print(f"原 run 已备份:{backup.name}")
+
+    texts = run.pop("_chapter_texts", None) or {}
+    if texts and run.get("chapters_text_path"):
+        tp = out_dir / run["chapters_text_path"]
+        titles = {c["n"]: c.get("title", "") for c in run.get("chapters") or []}
+        parts = [f"# {run.get('fixture_title') or run.get('fixture')} · `{run.get('label')}`\n"]
+        for n in sorted(texts):
+            body = (texts[n] or "").strip()
+            if not body:
+                continue
+            parts.append(f"\n## 第 {n} 章 {titles.get(n, '')}\n\n{body}\n")
+        tp.write_text("".join(parts), encoding="utf-8")
+
+    run_path.write_text(_json.dumps(run, ensure_ascii=False, indent=2), encoding="utf-8")
+    _append_history(out_dir, run, run_path.name)
+    resumed = run.get("resumes") or [{}]
+    print()
+    print(f"续跑完成:恢复 {len(resumed[-1].get('recovered', []))}/{len(failed)} 章,结果已原地更新:{run_path}")
+    agg = run.get("aggregate") or {}
+    print(f"  成功章数 {agg.get('chapters_ok')}/{agg.get('chapters_total')} · 达标率 {agg.get('pass_rate')} · AI 味 {agg.get('mean_flavor')}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m app.evals", description="jarvis-write 生成质量评测底座"
@@ -361,6 +438,17 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("trend", help="把历次评测趋势(history.jsonl)拉成表")
     p.add_argument("--history", default="evals_out/history.jsonl", help="趋势文件路径")
     p.set_defaults(func=cmd_trend)
+
+    p = sub.add_parser("resume", help="断点续跑:只重生成 run 里的失败章(欠费/断网后用)")
+    p.add_argument("run_json", help="run JSON 路径(原地更新,原文件备份为 .bak)")
+    p.add_argument("--db", default=None, help="该 run 的库路径(JSON 未记 db_path 时必填)")
+    p.add_argument("--format", default=None, help="openai-compatible / anthropic / gemini / deepseek / openai")
+    p.add_argument("--api-key", default=None)
+    p.add_argument("--base-url", default=None)
+    p.add_argument("--model", default=None, help="quality 档模型")
+    p.add_argument("--fast-model", default=None, help="fast 档模型(缺省同 quality)")
+    p.add_argument("--review-model", default=None, help="review 档模型(缺省同 quality)")
+    p.set_defaults(func=cmd_resume)
     return parser
 
 

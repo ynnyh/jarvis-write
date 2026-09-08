@@ -364,6 +364,104 @@ async def run_fixture(
     return run
 
 
+async def resume_run(
+    run: dict[str, Any],
+    plan: ModelPlan | None = None,
+    progress: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """断点续跑:对同一份 run 库只重生成失败章,成功章与聚合原样保留。
+
+    场景:长跑中途撞上 402(欠费)/网络断,run JSON 里留下 ok=False 的章。
+    项目/蓝图/圣经/滚动摘要都在 run 库里,失败章带着同样的上下文续写,
+    长程一致性数字不受中断影响。usage 增量照记,聚合与跨章指标重算。
+
+    前置:调用方须先把 DATABASE_URL 指到该 run 的库(cmd_resume 负责)。
+    """
+    say = progress or (lambda _s: None)
+    failed = [c for c in run.get("chapters") or [] if not c.get("ok")]
+    if not failed:
+        say("没有失败章,无需续跑")
+        return run
+    pid = run.get("project_id")
+    if not pid:
+        raise RuntimeError("run JSON 里没有 project_id,无法定位 run 库里的项目")
+    target_words = int((run.get("project_settings") or {}).get("target_words") or 0)
+    resumed_at = datetime.now(timezone.utc)
+    t0 = time.time()
+
+    with SessionLocal() as db:
+        usage_before = db.query(func.max(LlmUsage.id)).scalar() or 0
+
+    new_records: dict[int, dict[str, Any]] = {}
+    with (plan.applied() if plan else nullcontext()):
+        for rec in failed:
+            n = int(rec["n"])
+            title = str(rec.get("title") or "")
+            t1 = time.time()
+            say(f"续跑第 {n} 章《{title}》…")
+            try:
+                with SessionLocal() as db:
+                    project = db.get(Project, pid)
+                    if project is None:
+                        raise RuntimeError(f"run 库里找不到 project_id={pid}")
+                    result = await generate_chapter(db, project, n)
+                    db.commit()
+                    new_records[n] = chapter_record(
+                        n, title, result, target_words, time.time() - t1
+                    )
+            except Exception as exc:  # noqa: BLE001 — 单章失败记录后继续
+                new_records[n] = {
+                    "n": n,
+                    "title": title,
+                    "ok": False,
+                    "seconds": round(time.time() - t1, 1),
+                    "error": f"{type(exc).__name__}: {str(exc)[:300]}",
+                }
+                say(f"第 {n} 章续跑仍失败:{new_records[n]['error']}")
+            else:
+                r = new_records[n]
+                say(f"第 {n} 章续跑成功:{r['chars']} 字,状态 {r['status']}")
+
+    run["chapters"] = [new_records.get(c["n"], c) for c in run.get("chapters") or []]
+
+    # 正文/圣经/用量/跨章指标:全部从库里重取(成功章原样,续跑章更新)
+    with SessionLocal() as db:
+        rows = (
+            db.query(Chapter)
+            .filter(Chapter.project_id == pid)
+            .order_by(Chapter.chapter_number)
+            .all()
+        )
+        texts = {c.chapter_number: c.final_content or "" for c in rows}
+        run["bible"] = {
+            "entities": db.query(Entity).filter_by(project_id=pid).count(),
+            "facts": db.query(Fact).filter_by(project_id=pid).count(),
+            "foreshadowings": db.query(Foreshadowing).filter_by(project_id=pid).count(),
+        }
+        new_rows = db.query(LlmUsage).filter(LlmUsage.id > usage_before).all()
+
+    prev_usage = run.get("usage") or {}
+    run["usage"] = {
+        "calls": int(prev_usage.get("calls") or 0) + len(new_rows),
+        "prompt_tokens": int(prev_usage.get("prompt_tokens") or 0)
+        + sum(int(r.prompt_tokens or 0) for r in new_rows),
+        "completion_tokens": int(prev_usage.get("completion_tokens") or 0)
+        + sum(int(r.completion_tokens or 0) for r in new_rows),
+    }
+    run["cross"] = cross_chapter_metrics([texts[k] for k in sorted(texts)])
+    run["aggregate"] = aggregate(run)
+    run.setdefault("resumes", []).append(
+        {
+            "at": resumed_at.isoformat(timespec="seconds"),
+            "seconds": round(time.time() - t0, 1),
+            "attempted": [int(c["n"]) for c in failed],
+            "recovered": sorted(n for n, r in new_records.items() if r.get("ok")),
+        }
+    )
+    run["_chapter_texts"] = texts  # 保存时拆到旁文件
+    return run
+
+
 def save_run(run: dict[str, Any], out_dir: str | Path) -> tuple[Path, Path | None]:
     """run → `<label>-<fixture>-<时间>.json`;正文另存同名 `.chapters.md` 供肉眼读。"""
     import json
