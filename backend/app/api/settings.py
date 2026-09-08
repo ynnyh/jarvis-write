@@ -439,3 +439,74 @@ async def test_provider_config(
         reply=(resp.content[:200] if resp else ""),
         warnings=warnings,
     )
+
+
+# ---- 余额查询(cc-switch 式实时余额;目前仅 DeepSeek 官方支持) ----
+
+
+class ProviderBalance(BaseModel):
+    """余额查询结果。supported=False 时 balance 为 None,reason 说明为什么。"""
+
+    supported: bool
+    currency: str = ""
+    total_balance: str | None = None
+    granted_balance: str | None = None  # 赠送额度(未充值部分)
+    topped_up_balance: str | None = None  # 充值余额
+    is_available: bool | None = None  # 官方返回:余额是否足够继续调用
+    reason: str = ""
+
+
+@router.get("/providers/{config_id}/balance", response_model=ProviderBalance)
+async def provider_balance(
+    config_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """查询该配置的上游账户余额(实时,点「查余额」时现查不缓存)。
+
+    DeepSeek 官方支持 GET /user/balance;openai 兼容/中转站没有统一
+    余额接口,supported=False 让前端隐藏该按钮,不假装能查。
+    """
+    from app.crypto import decrypt
+
+    row = _get_row(db, user, config_id)  # noqa: F821 — 归属校验在内
+    if row.interface_format != "deepseek":
+        raise HTTPException(
+            status_code=501,
+            detail="该协议没有统一的余额接口,仅 DeepSeek 官方支持;中转站余额请看对应站点的控制台",
+        )
+
+    base = (row.base_url or "https://api.deepseek.com").rstrip("/")
+    if base.endswith("/v1"):
+        base = base[: -len("/v1")]  # 余额端点不带 /v1
+    try:
+        assert_public_base_url(base)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{base}/user/balance",
+                headers={"Authorization": f"Bearer {decrypt(row.api_key)}"},
+            )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"余额查询请求失败:{exc}") from exc
+    if resp.status_code == 401:
+        raise HTTPException(status_code=400, detail="Key 无效或已被撤销,请检查该配置的 API Key")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"上游返回 HTTP {resp.status_code},暂无法查询余额")
+
+    data = resp.json()
+    info = (data.get("balance_information") or [{}])[0]
+    return ProviderBalance(
+        supported=True,
+        currency=info.get("currency", ""),
+        total_balance=info.get("total_balance"),
+        granted_balance=info.get("granted_balance"),
+        topped_up_balance=info.get("topped_up_balance"),
+        is_available=data.get("is_available"),
+        reason="" if data.get("is_available") else "余额不足,请充值后继续使用",
+    )
