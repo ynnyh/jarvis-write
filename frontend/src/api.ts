@@ -495,6 +495,17 @@ export interface GenerateChapterResponse extends ChapterDetail {
   // 写前审核警告(docs/08 §5.3):只警告不阻断
   preflight?: { warnings: PreflightWarning[] };
 }
+/** 连写队列任务结果。正常完成 error=null;中断(欠费 402/门禁拦截/严格模式暂停)
+ *  时 error 带原因、remaining 是待续跑章号——异常中断含失败章本尊(重跑即续),
+ *  门禁拦截不含(该章须先去写作页处理,续跑从下一章起)。 */
+export interface GenerateQueueResult {
+  completed: { chapter_number: number; word_count: number }[];
+  total: number;
+  stopped_at: number | null;
+  remaining: number[];
+  quarantined: boolean;
+  error: string | null;
+}
 /** 章节正文历史版本(覆盖前的快照)。source: generated/polished/edited/restored/spot_repair */
 export interface ChapterVersionBrief {
   id: number; version: number; source: string; word_count: number; created_at: string;

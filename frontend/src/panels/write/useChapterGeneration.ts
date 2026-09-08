@@ -6,7 +6,7 @@
 // 从 WritePanel 状态中枢抽出的自区 hook(拆分技术债,让壳回归编排+布局)。
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  api, ChapterBrief, ChapterDetail, GenerateChapterResponse, Outline, Tendency,
+  api, ChapterBrief, ChapterDetail, GenerateChapterResponse, GenerateQueueResult, Outline, Tendency,
 } from "../../api";
 import { pollJob, errMsg } from "../../pollJob";
 import { toast } from "../../ui/Toaster";
@@ -43,6 +43,9 @@ export function useChapterGeneration(
   // 连写队列:勾选多章 → 后端一个 job 串行生成(状态在此持有,目录抽屉头部跟随切换)
   const [queueMode, setQueueMode] = useState(false);
   const [queuePicked, setQueuePicked] = useState<Set<number>>(new Set());
+  // 连写中断后的待续跑章号(402 欠费/门禁拦截/严格模式暂停):非空时壳层挂「一键续跑」,
+  // 用户不必手动重选剩余区间(402 场景:充值后点一下就接着写)
+  const [queueResume, setQueueResume] = useState<number[] | null>(null);
   // 生成/重写任务卸载时中止轮询,防止卸载后继续 setState(生成/重写/连写共用一个)
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => { abortRef.current?.abort(); }, []);
@@ -117,11 +120,8 @@ export function useChapterGeneration(
     }
   }, [pid, genTendency, clearAct, setErr, trackGenerate]);
 
-  const startQueue = useCallback(async () => {
-    const nums = [...queuePicked].sort((a, b) => a - b);
-    if (!nums.length) return;
-    // 发起前成本预估(P1 成本透明):按本书最近每章均速估总时长,确认后再开跑;
-    // 峰时(官方 DeepSeek 计费 ×2)时把金额提示合进同一个弹窗,不连弹两个框
+  // 连写发起前的确认弹窗(成本预估 + 峰时提示合一个框,不连弹);开始与续跑共用
+  const confirmQueueStart = useCallback(async (nums: number[]) => {
     const per = chapterEstimateMin(pid);
     const total = per * nums.length;
     const peak = await peakPricingNotice(nums.length);
@@ -129,32 +129,49 @@ export function useChapterGeneration(
       title: `开始连写 ${nums.length} 章?`,
       body: (peak ? `${peak}\n\n` : "")
         + `按本书最近的生成速度,约需 ${total} 分钟(每章约 ${per} 分钟)。`
-        + "期间可以离开页面,回来后随时查看进度;中途某章被门禁拦截时会暂停。",
+        + "期间可以离开页面,回来后随时查看进度;中途被门禁拦截或中断时会自动暂停,可一键续跑。",
       confirmText: "开始连写",
     });
-    if (!ok) return;
-    if (peak) ackPeakPricing(); // 用户已看过峰时成本并确认,本会话不再重复弹
+    if (ok && peak) ackPeakPricing(); // 用户已看过峰时成本并确认,本会话不再重复弹
+    return ok;
+  }, [pid]);
+
+  // 连写执行体(开始与续跑共用):轮询到结构化结果,中断时挂出待续跑章号
+  const runQueue = useCallback(async (nums: number[]) => {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setErr(""); setGenResult(null);
     setGenJob({ num: nums[0], stage: `队列 ${nums.length} 章:排队中…` });
     setQueueMode(false); setQueuePicked(new Set());
+    setQueueResume(null);
     const t0 = Date.now();
     try {
       const { job_id } = await api.generateQueue(pid, nums, genTendency);
-      await pollJob(job_id, {
+      const r = await pollJob<GenerateQueueResult>(job_id, {
         signal: ctrl.signal,
         onStage: (stage) => setGenJob({ num: nums[0], stage }),
       });
       if (ctrl.signal.aborted) return;
+      await reload();
+      if (r.error) {
+        // 结构化中断:已完成章已各自落库,剩余章挂「一键续跑」(remaining 含失败章本尊,重跑即续;
+        // 门禁拦截不含该章——它要先去写作页处理)。402 欠费场景:充值后点一下就接着写。
+        setErr(r.error);
+        setQueueResume(r.remaining || []);
+        if (!r.quarantined) {
+          toast.err("连写队列中断",
+            `已完成 ${r.completed?.length ?? 0}/${r.total} 章,进度已保存。`
+            + (r.remaining?.length ? `点「从第 ${r.remaining[0]} 章继续」接着写。` : ""));
+        }
+        return;
+      }
       // 总耗时按章数均摊入账(连写里单章无独立计时,均值口径够用)
       recordGenDuration(pid, (Date.now() - t0) / 1000 / nums.length);
-      await reload();
     } catch (e) {
       if (!ctrl.signal.aborted) {
         const msg = errMsg(e);
         setErr(msg);
-        // 严格连写模式暂停:引导先去通过被卡住的那一章
+        // 兜底:旧版后端/轮询层抛错时按消息文本引导(结构化中断走不到这里)
         const paused = /第\s*(\d+)\s*章尚未人工审核通过/.exec(msg);
         if (paused) {
           toast.err("连写队列已暂停",
@@ -163,7 +180,23 @@ export function useChapterGeneration(
         await reload().catch(() => undefined);
       }
     } finally { if (!ctrl.signal.aborted) setGenJob(null); }
-  }, [pid, queuePicked, genTendency, reload, setErr]);
+  }, [pid, genTendency, reload, setErr]);
+
+  const startQueue = useCallback(async () => {
+    const nums = [...queuePicked].sort((a, b) => a - b);
+    if (!nums.length) return;
+    if (!(await confirmQueueStart(nums))) return;
+    await runQueue(nums);
+  }, [queuePicked, confirmQueueStart, runQueue]);
+
+  // 一键续跑:从上次中断处接着写(章号由后端 remaining 给出,不需要用户重选)
+  const resumeQueue = useCallback(async () => {
+    if (!queueResume?.length) return;
+    if (!(await confirmQueueStart(queueResume))) return;
+    await runQueue(queueResume);
+  }, [queueResume, confirmQueueStart, runQueue]);
+
+  const dismissQueueResume = useCallback(() => setQueueResume(null), []);
 
   const pickNextBatch = useCallback(() => {
     const written = new Set(chapters.map((c) => c.chapter_number));
@@ -184,11 +217,17 @@ export function useChapterGeneration(
     abortRef.current = ctrl;
     if (tail === "queue") {
       setGenJob({ num: 0, stage: gen.stage });
-      pollJob(gen.job_id, {
+      pollJob<GenerateQueueResult>(gen.job_id, {
         signal: ctrl.signal,
         onStage: (stage) => setGenJob({ num: 0, stage }),
-      }).then(() => reload())
-        .catch(() => reload().catch(() => undefined))
+      }).then((r) => {
+        if (r?.error) {
+          // 重连后才发现队列已中断:同样挂出一键续跑,不让用户对着一句报错手动重选
+          setErr(r.error);
+          setQueueResume(r.remaining || []);
+        }
+      }).catch(() => undefined)
+        .finally(() => reload().catch(() => undefined))
         .finally(() => { if (!ctrl.signal.aborted) setGenJob(null); });
     } else {
       const n = Number(tail);
@@ -201,6 +240,7 @@ export function useChapterGeneration(
     genJob, genResult, setGenResult, genDurSec,
     genTendency, setGenTendency,
     queueMode, setQueueMode, queuePicked, setQueuePicked,
+    queueResume, resumeQueue, dismissQueueResume,
     generate, startQueue, pickNextBatch, reconnectGenerate,
   };
 }

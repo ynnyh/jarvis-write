@@ -73,6 +73,7 @@ export default function WritePanel({ pid, outlines }: Props) {
     // useChapterGeneration
     genJob, genResult, setGenResult, genDurSec, genTendency, setGenTendency,
     queueMode, setQueueMode, queuePicked, setQueuePicked,
+    queueResume, resumeQueue, dismissQueueResume,
     generate, startQueue, pickNextBatch,
     // useReader
     reader, readerLoading, setReader, openReader, prevNum, nextNum, readerOutline,
@@ -127,6 +128,22 @@ export default function WritePanel({ pid, outlines }: Props) {
         </div>
       ))}
       {err && <div className="msg-err">{err}</div>}
+      {/* 连写中断(欠费/门禁/严格模式):一键从断点续跑,不必手动重选剩余区间 */}
+      {queueResume && queueResume.length > 0 && !genJob && (
+        <div className="queue-resume">
+          <span>
+            连写已暂停,剩余 {queueResume.length} 章
+            (第 {queueResume[0]}{queueResume.length > 1 ? `-${queueResume[queueResume.length - 1]}` : ""} 章)未写。
+            已完成的章节和进度都已保存。
+          </span>
+          <button type="button" className="btn-sm" onClick={resumeQueue}>
+            从第 {queueResume[0]} 章继续
+          </button>
+          <button type="button" className="btn-sm ghost" onClick={dismissQueueResume}>
+            忽略
+          </button>
+        </div>
+      )}
 
       {/* 首次进入的 3 步引导(点「知道了」后 localStorage 记住,不再出现) */}
       <WriteGuide />

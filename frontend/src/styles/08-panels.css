@@ -134,3 +134,13 @@
   background: var(--warn-weak); color: var(--warn); border: 1px solid var(--warn-line);
 }
 .peak-note.peak-off { background: var(--ok-weak); color: var(--ok); border-color: transparent; }
+
+/* 连写中断续跑条(欠费/门禁/严格模式暂停后,壳顶部的一键续跑) */
+.queue-resume {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin: 0 0 var(--sp-3); padding: 8px 12px; border-radius: var(--r-sm);
+  font-size: var(--fs-xs); line-height: 1.6;
+  background: var(--warn-weak); color: var(--warn); border: 1px solid var(--warn-line);
+}
+.queue-resume .btn-sm { flex: none; }
+.queue-resume .btn-sm.ghost { opacity: 0.75; }
