@@ -6,6 +6,7 @@ import { pollJob, errMsg } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
 import CardsPanel from "./CardsPanel";
 import { confirmDialog } from "../ui/ConfirmDialog";
+import { confirmPeakPricing } from "../peakPricing";
 import { toast } from "../ui/Toaster";
 import { useJobReconnect } from "../hooks/useJobReconnect";
 import { useDiscussChat } from "../hooks/useDiscussChat";
@@ -138,6 +139,7 @@ export default function ArchPanel({ project, arch, onChanged, hasContent, outlin
       });
       if (!ok) return;
     }
+    if (!(await confirmPeakPricing(1))) return; // 峰时(官方 ×2)提示:架构生成是整书级重操作,会话内确认一次
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setBusy("架构生成:排队中…"); setErr(""); setMsg("");

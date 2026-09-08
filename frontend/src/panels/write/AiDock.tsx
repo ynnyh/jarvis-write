@@ -22,6 +22,7 @@ import { emitChapterSaved } from "../../desktop";
 import { useBreakpoint } from "../../hooks/useBreakpoint";
 import { errMsg } from "../../pollJob";
 import { useJob } from "../../ui/useJob";
+import { confirmPeakPricing } from "../../peakPricing";
 import { applyParaReplacement } from "./paraEdit";
 
 export type DockMode = "chat" | "revise";
@@ -196,6 +197,7 @@ export default function AiDock({
   // 意见清单 ③:整章优化(异步 job;结果交父级渲染对照卡,默认带「去AI味」同原 PolishPanel)
   async function runPolish() {
     if (!directive.trim() || polishStage) return;
+    if (!(await confirmPeakPricing(1))) return; // 峰时(官方 ×2)提示,会话内确认一次
     setPolishStage("排队中"); setErr("");
     try {
       const r = await runJob<PolishResult>(
@@ -213,6 +215,7 @@ export default function AiDock({
   async function runRevise() {
     const fresh = chapterMarks.filter((m) => !chapterStaleIdx.has(m.para_idx));
     if (!fresh.length || reviseStage) return;
+    if (!(await confirmPeakPricing(1))) return; // 峰时(官方 ×2)提示,会话内确认一次
     setReviseStage("排队中"); setErr("");
     try {
       const r = await runJob<{ pairs: RevisePair[] }>(
@@ -229,6 +232,7 @@ export default function AiDock({
   // 标记在验收接受后才销账;失效标记后端自动跳过并计入 stale。
   async function runMarksRevise() {
     if (marksDirective.trim().length < 2 || !bookMarkCount || marksStage) return;
+    if (!(await confirmPeakPricing(1))) return; // 峰时(官方 ×2)提示:跨章批改是重操作,会话内确认一次
     setMarksStage("排队中"); setErr("");
     try {
       const r = await runJob<MarksReviseResult>(

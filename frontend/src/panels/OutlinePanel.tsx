@@ -5,6 +5,7 @@ import { pollJob, errMsg } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
 import TitleStyleControl, { DEFAULT_TITLE_STYLE, TitleStyle } from "../components/TitleStyleControl";
 import { confirmDialog } from "../ui/ConfirmDialog";
+import { confirmPeakPricing } from "../peakPricing";
 import { useJob } from "../ui/useJob";
 import { useJobReconnect } from "../hooks/useJobReconnect";
 import type { GotoTarget } from "../pages/ProjectPage";
@@ -96,6 +97,8 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
       });
       if (!ok) return;
     }
+    // 峰时(官方 DeepSeek 计费 ×2)提示:蓝图按章批量出,按已有章数估;会话内确认一次
+    if (!(await confirmPeakPricing(outlines.length || 1))) return;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setBusy("蓝图生成:排队中…"); setErr(""); setGenProgress(null);
@@ -123,6 +126,7 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
 
   // 滚动规划:展开下一卷蓝图(卷纲 + 已成文状态)
   async function extendBlueprint() {
+    if (!(await confirmPeakPricing(1))) return; // 峰时提示(会话内一次;展开篇幅后端定,按单章参考价提示)
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setBusy("展开下一卷:排队中…"); setErr("");
@@ -200,6 +204,7 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
   async function runCascade(n: number) {
     if (!impact) return;
     const chapters = [...picked];
+    if (!(await confirmPeakPricing(chapters.length || 1))) return; // 级联按章重生成,峰时先确认
     setBusy(`级联重生成第 ${chapters.join("、")} 章…`); setErr("");
     try {
       const reasons: Record<number, string> = {};
