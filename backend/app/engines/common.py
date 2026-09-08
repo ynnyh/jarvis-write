@@ -14,9 +14,82 @@ architecture_brief 两个变体是按场景定制的提示词素材,字段取舍
 """
 from __future__ import annotations
 
+import json
+import logging
+import re
+
 from sqlalchemy.orm import Session
 
 from app.db.models import Outline, Project
+
+logger = logging.getLogger("jarvis-write.common")
+
+
+# ---- LLM JSON 输出解析(从 consistency/extractor 下沉至此:主审/契约/抽取/检查共用) ----
+
+def parse_llm_json(text: str) -> dict:
+    """宽容解析 LLM 输出的 JSON:剥 markdown 围栏、截取首尾大括号。
+
+    兼容性入口:解析失败返回空 dict。**关键链路上不要用这个函数**——它无法区分
+    「模型说没问题」与「模型的话没解析出来」,后者会被下游当成干净结果(静默降级)。
+    关键链路请改用 parse_llm_json_checked,拿得到失败原因。
+    """
+    data, _err = parse_llm_json_checked(text)
+    return data
+
+
+def parse_llm_json_checked(text: str) -> tuple[dict, str | None]:
+    """宽容解析 + 显式成败:返回 (数据, 失败原因);成功时原因为 None。
+
+    与 parse_llm_json 的区别只在「失败看得见」:调用方能据此走显式降级
+    (标 degraded 待人工复核),而不是把没解析出来的输出当成「没有问题」。
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return {}, "模型返回空内容"
+    s = raw
+    # 剥 ```json ... ```
+    m = re.search(r"```(?:json)?\s*(.*?)```", s, re.DOTALL)
+    if m:
+        s = m.group(1).strip()
+    # 截取最外层大括号
+    start, end = s.find("{"), s.rfind("}")
+    if start != -1 and end > start:
+        s = s[start : end + 1]
+    try:
+        data = json.loads(s)
+    except json.JSONDecodeError as exc:
+        logger.warning("LLM JSON 解析失败: %s;原文前200字: %s", exc, raw[:200])
+        return {}, f"JSON 解析失败({exc.msg} @ 位置 {exc.pos})"
+    if not isinstance(data, dict):
+        return {}, f"顶层不是对象(得到 {type(data).__name__})"
+    return data, None
+
+
+async def ask_llm_json(
+    adapter, prompt: str, *, label: str = "JSON 任务", attempts: int = 2
+) -> tuple[dict, str | None]:
+    """LLM JSON 任务统一调用 + 重试保险:解析失败自动原样重打一次。
+
+    背景(2026-09-08 50 章压测):中转渠道会把响应尾巴随机截断——连
+    `{"issues": []`(16 字符)都被截在半途,官方渠道同构调用零失败。
+    截断是随机的,重打一次大概率就好,没必要让整章为此进隔离。这里统一兜:
+    第一次解析失败就重问,仍失败才把错误交回调用方走显式降级。
+
+    LLM 调用本身的异常不吞,原样上抛——调用方各自有「调用失败」的降级分支,
+    与「解析失败」是两种不同的现场。
+    """
+    data, err = {}, "模型返回空内容"
+    for attempt in range(1, attempts + 1):
+        raw = await adapter.ask(prompt)
+        data, err = parse_llm_json_checked(raw)
+        if not err:
+            if attempt > 1:
+                logger.warning("%s:第 %d 次解析成功(首次疑似响应被截断)", label, attempt)
+            return data, None
+        logger.warning("%s:第 %d/%d 次输出解析失败:%s", label, attempt, attempts, err)
+    return {}, err
+
 
 # ---- 降级哨兵(degrade sentinel)----
 # 任一条带 degraded=True 的记录都表示「这一环节没跑成」,不是「查过没问题」。

@@ -18,7 +18,8 @@ import logging
 from sqlalchemy.orm import Session
 
 from app.db.models import Chapter, ChapterState, Project
-from app.engines.consistency.extractor import parse_llm_json
+from app.engines.common import ask_llm_json
+from app.engines.consistency.extractor import parse_llm_json  # noqa: F401 — 兼容旧导入
 from app.engines.editorial import content_hash
 from app.prompts.consistency import HANDOFF_CONTRACT_PROMPT
 
@@ -307,14 +308,18 @@ async def extract_handoff_contract(
         devices_roster=_devices_roster(db, chapter),
     )
     try:
-        raw = await adapter.ask(prompt)
+        data, parse_err = await ask_llm_json(
+            adapter,
+            prompt,
+            label=f"第 {chapter_number} 章契约提取",
+        )
     except Exception as exc:  # noqa: BLE001 — 契约失败不阻塞章节生成
         logger.error("第 %d 章契约提取调用失败: %s", chapter_number, exc)
         _record(db, chapter, chapter_text, "failed", None, f"LLM 调用失败:{exc}")
         db.commit()
         return
 
-    contract = validate_contract(parse_llm_json(raw))
+    contract = None if parse_err else validate_contract(data)
     if contract is None:
         logger.warning("第 %d 章契约 JSON 解析/结构校验失败,已留痕", chapter_number)
         _record(db, chapter, chapter_text, "failed", None, "契约 JSON 解析或结构校验失败")

@@ -29,11 +29,11 @@ from app.engines.common import (
     CONTINUITY_UNVERIFIED,
     DEGRADED_KEY,
     SCOPE_CONSISTENCY,
+    ask_llm_json,
     constitution_block,
     degraded_issue,
 )
 from app.engines.consistency.bible import RESOURCE_FACT_TYPES, BibleService
-from app.engines.consistency.extractor import parse_llm_json_checked
 from app.engines.consistency.ledger import ledger_block
 from app.engines.editorial import content_hash
 from app.engines.pipeline.handoff import _fresh_contract, format_contract_block
@@ -199,7 +199,11 @@ async def check_chapter(
         chapter_text=chapter_text[:12000],
     )
     try:
-        raw = await get_adapter_for(Task.CONSISTENCY).ask(prompt)
+        data, parse_err = await ask_llm_json(
+            get_adapter_for(Task.CONSISTENCY),
+            prompt,
+            label=f"第 {chapter_number} 章一致性检查",
+        )
     except Exception as exc:  # noqa: BLE001
         # 显式降级:过去这里 return [] —— 下游分不清「查过没矛盾」与「根本没跑成」,
         # 于是模型一超时/429,门禁就自动放行,「不崩」在最需要它的时候失效。
@@ -207,9 +211,9 @@ async def check_chapter(
         logger.error("一致性检查调用失败: %s", exc)
         return [degraded_issue(SCOPE_CONSISTENCY, f"LLM 调用失败:{exc}")]
 
-    data, parse_err = parse_llm_json_checked(raw)
     if parse_err:
         # 模型说了话但没解析出来 ≠ 没有矛盾,同样降级。
+        # (ask_llm_json 已内置一次重试,走到这里说明重试后仍截断/坏输出)
         logger.error("一致性检查输出解析失败: %s", parse_err)
         return [degraded_issue(SCOPE_CONSISTENCY, parse_err)]
     issues = [

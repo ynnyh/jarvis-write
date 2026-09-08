@@ -13,7 +13,7 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from app.engines.consistency.extractor import parse_llm_json, parse_llm_json_checked
+from app.engines.common import ask_llm_json
 from app.llm.router import Task, get_adapter_for, review_is_self_reviewing
 from app.prompts.consistency import GATE_REPAIR_PROMPT
 from app.prompts.editorial import PROOFREAD_PROMPT, REVIEW_PROMPT
@@ -60,11 +60,14 @@ async def review_chapter(content: str, outline_block: str) -> dict:
     按项目阈值判定(引擎函数不持有阈值)。
     """
     prompt = REVIEW_PROMPT.format(outline_block=outline_block, content=content)
-    raw = await get_adapter_for(Task.CONSISTENCY).ask(prompt)
     # 用 checked 版本:解析失败必须显式。过去 data={} → 四维全 0 → judge_passed
     # 判「不达标」→ 章节被当成「写得差」回炉重写。方向完全反了:其实根本没审成,
     # 重写多少次都是白烧钱。现在交给调用方按 degraded 走隔离,不回炉。
-    data, parse_err = parse_llm_json_checked(raw)
+    data, parse_err = await ask_llm_json(
+        get_adapter_for(Task.CONSISTENCY),
+        prompt,
+        label="主审评分",
+    )
     scores = data.get("scores") or {}
     # 分数钳制到 1-10 整数,缺维度/非法值补 0(前端显示"—")
     clean = {k: _clamp_score(scores.get(k)) for k in DIMS}
@@ -108,8 +111,11 @@ async def review_chapter(content: str, outline_block: str) -> dict:
 async def proofread_chapter(content: str) -> dict:
     """校对硬伤:调 LLM → 解析 → 幻觉过滤。返回 {issues}。不碰 db。"""
     prompt = PROOFREAD_PROMPT.format(content=content)
-    raw = await get_adapter_for(Task.CONSISTENCY).ask(prompt)
-    data = parse_llm_json(raw)
+    # 校对是辅助环节:解析失败(重试后仍失败)沿用旧的宽容语义—— issues 空列表,
+    # 但先经 ask_llm_json 重试一次,不再被中转截断一击致命。
+    data, _err = await ask_llm_json(
+        get_adapter_for(Task.CONSISTENCY), prompt, label="校对硬伤"
+    )
     issues = []
     for it in (data.get("issues") or [])[:20]:
         if not isinstance(it, dict):
@@ -175,11 +181,16 @@ async def repair_chapter(chapter_number: int, content: str, issues: list[dict]) 
         issues_block="\n".join(lines) or "(无)",
     )
     try:
-        raw = await get_adapter_for(Task.CONSISTENCY).ask(prompt)
+        data, _err = await ask_llm_json(
+            get_adapter_for(Task.CONSISTENCY),
+            prompt,
+            label=f"第 {chapter_number} 章门禁定点修复",
+        )
     except Exception as exc:  # noqa: BLE001 — 修复失败回退重写,不阻塞生成
         logger.warning("第 %d 章门禁定点修复调用失败(将回退重写): %s", chapter_number, exc)
         return []
-    data = parse_llm_json(raw)
+    if _err:
+        logger.warning("第 %d 章门禁定点修复输出解析失败(将回退重写): %s", chapter_number, _err)
     fixes = []
     for f in (data.get("fixes") or [])[:20]:
         if not isinstance(f, dict):

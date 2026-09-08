@@ -13,7 +13,13 @@ import re
 from sqlalchemy.orm import Session
 
 from app.db.models import Chapter, Entity, Project
-from app.engines.common import SCOPE_FACT_EXTRACT, degraded_stats
+from app.engines.common import (
+    SCOPE_FACT_EXTRACT,
+    ask_llm_json,
+    degraded_stats,
+    parse_llm_json,  # noqa: F401 — 兼容旧导入路径(handoff 等从这里拿)
+    parse_llm_json_checked,  # noqa: F401
+)
 from app.engines.consistency.bible import BibleService
 from app.engines.consistency.foreshadow import ForeshadowScheduler
 from app.engines.consistency.motifs import apply_extraction, known_labels_block
@@ -26,43 +32,8 @@ logger = logging.getLogger("jarvis-write.extractor")
 _MAX_OPEN_FS = 40  # 抽取提示里最多列出的未回收伏笔数(取最早埋设,防长篇膨胀)
 
 
-def parse_llm_json(text: str) -> dict:
-    """宽容解析 LLM 输出的 JSON:剥 markdown 围栏、截取首尾大括号。
-
-    兼容性入口:解析失败返回空 dict。**关键链路上不要用这个函数**——它无法区分
-    「模型说没问题」与「模型的话没解析出来」,后者会被下游当成干净结果(静默降级)。
-    关键链路请改用 parse_llm_json_checked,拿得到失败原因。
-    """
-    data, _err = parse_llm_json_checked(text)
-    return data
-
-
-def parse_llm_json_checked(text: str) -> tuple[dict, str | None]:
-    """宽容解析 + 显式成败:返回 (数据, 失败原因);成功时原因为 None。
-
-    与 parse_llm_json 的区别只在「失败看得见」:调用方能据此走显式降级
-    (标 degraded 待人工复核),而不是把没解析出来的输出当成「没有问题」。
-    """
-    raw = (text or "").strip()
-    if not raw:
-        return {}, "模型返回空内容"
-    s = raw
-    # 剥 ```json ... ```
-    m = re.search(r"```(?:json)?\s*(.*?)```", s, re.DOTALL)
-    if m:
-        s = m.group(1).strip()
-    # 截取最外层大括号
-    start, end = s.find("{"), s.rfind("}")
-    if start != -1 and end > start:
-        s = s[start : end + 1]
-    try:
-        data = json.loads(s)
-    except json.JSONDecodeError as exc:
-        logger.warning("LLM JSON 解析失败: %s;原文前200字: %s", exc, raw[:200])
-        return {}, f"JSON 解析失败({exc.msg} @ 位置 {exc.pos})"
-    if not isinstance(data, dict):
-        return {}, f"顶层不是对象(得到 {type(data).__name__})"
-    return data, None
+# parse_llm_json / parse_llm_json_checked 已下沉到 app.engines.common
+# (主审/契约/检查/抽取四处共用),此处按旧路径再导出保持兼容。
 
 
 def salvage_json_objects(text: str) -> list[dict]:
@@ -305,14 +276,18 @@ async def extract_and_apply(
 
     # 2. LLM(此刻无锁无快照;失败/空返回时旧账仍在,直接返回不损数据)
     try:
-        raw = await get_adapter_for(Task.FACT_EXTRACT).ask(prompt)
+        extraction, parse_err = await ask_llm_json(
+            get_adapter_for(Task.FACT_EXTRACT),
+            prompt,
+            label=f"第 {chapter_number} 章事实抽取",
+        )
     except Exception as exc:  # noqa: BLE001 — 抽取失败不阻塞章节生成
         logger.error("抽取调用失败: %s", exc)
         return degraded_stats(SCOPE_FACT_EXTRACT, f"LLM 调用失败:{exc}")
 
-    extraction, parse_err = parse_llm_json_checked(raw)
     if parse_err:
         # 模型输出没解析出来 ≠ 本章没有状态变化:显式降级,让「圣经没更新」这件事可见。
+        # (ask_llm_json 已内置一次重试,走到这里说明重试后仍截断/坏输出)
         logger.error("抽取输出解析失败: %s", parse_err)
         return degraded_stats(SCOPE_FACT_EXTRACT, parse_err)
     if not extraction:
