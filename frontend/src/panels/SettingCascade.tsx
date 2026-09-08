@@ -16,12 +16,15 @@ import AnnotatedReviseCard from "./write/AnnotatedReviseCard";
 
 interface Props {
   pid: number;
-  oldText: string;
-  newText: string;
+  /** 世界观规则入口:传 old/new,后端 diff */
+  oldText?: string;
+  newText?: string;
+  /** 人物卡入口:保存资料时后端已算好的变更清单,直接开扫 */
+  presetChanges?: SettingChange[];
   onClose: () => void;
 }
 
-export default function SettingCascade({ pid, oldText, newText, onClose }: Props) {
+export default function SettingCascade({ pid, oldText, newText, presetChanges, onClose }: Props) {
   const { run } = useJob();
   const [scan, setScan] = useState<SettingScanResult | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set()); // `${chapter}:${para_idx}`
@@ -37,10 +40,16 @@ export default function SettingCascade({ pid, oldText, newText, onClose }: Props
     if (startedRef.current) return;
     startedRef.current = true;
     setBusy(true);
-    run<SettingScanResult>(
-      () => api.settingCascadeScan(pid, oldText, newText),
-      { kind: `setting-scan-${pid}` },
-    ).then((r) => {
+    const job = presetChanges?.length
+      ? run<SettingScanResult>(
+          () => api.settingCascadeScanChanges(pid, presetChanges),
+          { kind: `setting-scan-${pid}` },
+        )
+      : run<SettingScanResult>(
+          () => api.settingCascadeScan(pid, oldText ?? "", newText ?? ""),
+          { kind: `setting-scan-${pid}` },
+        );
+    job.then((r) => {
       if (!r) return; // 本地等待被中止(任务中心仍可见)
       changesRef.current = r.changes;
       setScan(r);

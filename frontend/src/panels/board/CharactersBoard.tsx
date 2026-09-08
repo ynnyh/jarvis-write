@@ -1,8 +1,11 @@
-// 人物卡看板:新增/退场/恢复人物,展开事实、删除抽错事实,展示关系与出场章(拆自 BoardPanel.tsx)。
+// 人物卡看板:新增/编辑/退场/恢复人物,展开事实、删除抽错事实,展示关系与出场章。
+// 简介变更保存后追问「扫描全书影响」:走设定级级联(扫描→勾选冲突段→定点修→diff 验收)。
 import { useCallback, useEffect, useState } from "react";
-import { api, CharacterCard, CharactersOut } from "../../api";
+import { api, CharacterCard, CharactersOut, SettingChange } from "../../api";
 import { FACT_PREVIEW, IMP_BADGE } from "./shared";
 import { errMsg } from "../../pollJob";
+import { confirmDialog } from "../../ui/ConfirmDialog";
+import SettingCascade from "../SettingCascade";
 
 export default function CharactersBoard({ pid }: { pid: number }) {
   const [data, setData] = useState<CharactersOut | null>(null);
@@ -13,9 +16,15 @@ export default function CharactersBoard({ pid }: { pid: number }) {
   const [aliases, setAliases] = useState("");
   const [profile, setProfile] = useState("");
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
-  // 待确认的操作:退场哪张卡 / 删哪条事实
+  // 待确认的操作:退场哪张卡 / 删哪条事实 / 编辑哪张卡
   const [retireFor, setRetireFor] = useState<number | null>(null);
   const [delFact, setDelFact] = useState<{ cid: number; fid: number } | null>(null);
+  // 编辑态:编辑哪张卡 + 草稿(别名/简介)
+  const [editing, setEditing] = useState<number | null>(null);
+  const [editAliases, setEditAliases] = useState("");
+  const [editProfile, setEditProfile] = useState("");
+  // 级联流程卡(简介变更确认扫描后挂载)
+  const [cascade, setCascade] = useState<{ key: number; changes: SettingChange[] } | null>(null);
 
   const reload = useCallback(async () => {
     setErr("");
@@ -48,6 +57,35 @@ export default function CharactersBoard({ pid }: { pid: number }) {
   const removeFact = (fid: number) =>
     run(() => api.deleteFact(pid, fid)).then(() => setDelFact(null));
 
+  // 进入编辑态:草稿从当前卡初始化(名字不可改——改名影响全书识别,不在看板做)
+  const startEdit = (c: CharacterCard) => {
+    setEditing(c.id);
+    setEditAliases(c.aliases.join("、"));
+    setEditProfile(c.profile);
+  };
+
+  // 保存编辑:简介有实质变更时后端返回句级 diff → 追问是否全书级联
+  const saveEdit = async (c: CharacterCard) => {
+    const payload = {
+      aliases: editAliases.split(/[,、,]/).map((s) => s.trim()).filter(Boolean),
+      profile: editProfile,
+    };
+    await run(async () => {
+      const updated = await api.editCharacter(pid, c.id, payload);
+      setEditing(null);
+      if (updated.changes.length) {
+        const names = [...new Set(updated.changes.map((ch) => ch.entity).filter(Boolean))];
+        const ok = await confirmDialog({
+          title: `扫描全书影响?`,
+          body: `${names.join("、") || "该人物"} 的设定已修改。可以让系统逐章扫描已写正文,`
+            + "找出与新设定冲突的段落并生成定点修提案(每处需你逐条验收)。",
+          confirmText: "扫描全书影响",
+        });
+        if (ok) setCascade({ key: Date.now(), changes: updated.changes });
+      }
+    });
+  };
+
   return (
     <div className="card">
       <div className="card-head">
@@ -62,6 +100,13 @@ export default function CharactersBoard({ pid }: { pid: number }) {
         </button>
       </div>
       {err && <div className="msg-err mt-2">{err}</div>}
+
+      {cascade && (
+        <div className="mt-2">
+          <SettingCascade pid={pid} presetChanges={cascade.changes}
+            onClose={() => setCascade(null)} />
+        </div>
+      )}
 
       {showForm && (
         <div className="char-form">
@@ -90,11 +135,30 @@ export default function CharactersBoard({ pid }: { pid: number }) {
                 <h3>{c.name}</h3>
                 <span className={"badge " + (c.retired ? "" : "ok")}>{c.retired ? "已退场" : "活跃"}</span>
                 <div className="grow" />
+                {editing !== c.id && (
+                  <button className="btn-sm" disabled={busy} onClick={() => startEdit(c)}>编辑</button>
+                )}
                 {c.retired
                   ? <button className="btn-sm" disabled={busy} onClick={() => toggleRetire(c, false)}>恢复</button>
                   : <button className="btn-sm danger" disabled={busy} onClick={() => setRetireFor(c.id)}>退场</button>}
               </div>
               {c.aliases.length > 0 && <div className="muted char-aliases">别名:{c.aliases.join("、")}</div>}
+
+              {editing === c.id ? (
+                <div className="char-form mt-2">
+                  <input type="text" placeholder="别名,逗号或顿号分隔"
+                    value={editAliases} onChange={(e) => setEditAliases(e.target.value)} />
+                  <textarea rows={3} placeholder="简介:身份/性格/关键设定。修改后可扫描全书,定点修冲突段落"
+                    value={editProfile} onChange={(e) => setEditProfile(e.target.value)} />
+                  <div className="actions mt-2">
+                    <button className="btn-sm primary" disabled={busy}
+                      onClick={() => void saveEdit(c)}>保存</button>
+                    <button className="btn-sm" disabled={busy} onClick={() => setEditing(null)}>取消</button>
+                  </div>
+                </div>
+              ) : (
+                c.profile && <div className="hint">{c.profile}</div>
+              )}
 
               {retireFor === c.id && (
                 <div className="notice notice-warn">

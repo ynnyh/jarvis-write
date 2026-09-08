@@ -655,6 +655,7 @@ export interface RevisePair {
 // 设定级级联:规则变更 / 扫描结果 / 定点修提案(与 MarksReviseResult 同构,复用验收卡)
 export interface SettingChange {
   kind: "changed" | "added" | "removed"; old: string; new: string;
+  entity?: string;  // 人物卡级联:变更所属人物名
 }
 export interface SettingPassage {
   chapter_number: number; para_idx: number; para_excerpt: string;
@@ -1286,6 +1287,10 @@ export const api = {
     req<CharacterCard>("POST", `/api/projects/${pid}/characters`, payload),
   setCharacterRetired: (pid: number, entityId: number, retired: boolean) =>
     req<CharacterCard>("PATCH", `/api/projects/${pid}/characters/${entityId}`, { retired }),
+  // 编辑人物资料(别名/简介):简介变更时返回 changes(句级 diff,带 entity),供追问级联
+  editCharacter: (pid: number, entityId: number, payload: { profile?: string; aliases?: string[] }) =>
+    req<CharacterCard & { changes: SettingChange[] }>(
+      "PATCH", `/api/projects/${pid}/characters/${entityId}`, payload),
   deleteFact: (pid: number, factId: number) =>
     req<{ ok: boolean }>("DELETE", `/api/projects/${pid}/facts/${factId}`),
 
@@ -1327,6 +1332,10 @@ export const api = {
   settingCascadeScan: (pid: number, oldText: string, newText: string) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/setting-cascade/scan-async`,
       { old_text: oldText, new_text: newText }),
+  // 现成变更清单入口(人物卡编辑场景:保存时后端已算好 diff,原样回传)
+  settingCascadeScanChanges: (pid: number, changes: SettingChange[]) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/setting-cascade/scan-async`,
+      { changes }),
   settingCascadePatch: (pid: number, changes: SettingChange[], passages: { chapter_number: number; para_idx: number }[]) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/setting-cascade/patch-async`,
       { changes, passages }),
