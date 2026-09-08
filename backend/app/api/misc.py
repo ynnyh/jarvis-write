@@ -27,7 +27,7 @@ from app.api.sse import STREAM_HEADERS, sse_event
 from app.auth import assert_project_owner, current_user_id, get_current_user
 from app.db.models import Chapter, LlmUsage, Outline, Project
 from app.db.session import get_db
-from app.jobs import cancel_running_job, get_job, list_for_user, list_running
+from app.jobs import cancel_running_job, get_job, get_job_persisted, list_for_user, list_running
 
 router = APIRouter(tags=["misc"], dependencies=[Depends(get_current_user)])
 
@@ -52,7 +52,9 @@ async def my_jobs(include_done: bool = Query(False, alias="all")):
 
 @router.get("/api/jobs/{job_id}")
 async def job_status(job_id: str):
-    job = get_job(job_id)
+    # 内存 miss 走 DB 兜底:重启后已结束任务的结果仍可查;挂着 running 的
+    # 按「服务重启,任务已中断」报错,前端立刻拿到明确失败而不是傻等超时
+    job = get_job(job_id) or get_job_persisted(job_id)
     # 归属校验:非本人的任务按"不存在"处理,不泄露 job 存在性
     if job is None or job.get("owner_id") != current_user_id.get():
         raise HTTPException(status_code=404, detail="任务不存在或已被清理")

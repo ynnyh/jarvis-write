@@ -1,5 +1,5 @@
 // 轮询后端 job 直到完成:统一间隔/超时上限/外部中止(组件卸载时取消)
-import { api } from "./api";
+import { api, ApiError } from "./api";
 
 /** 渲染错误给用户:Error 取 message(去掉 "Error: " 英文前缀),其余兜底 String。 */
 export function errMsg(e: unknown): string {
@@ -41,8 +41,14 @@ export async function pollJob<T = unknown>(jobId: string, opts: PollJobOptions =
       job = await api.getJob(jobId);
       failures = 0;
     } catch (e) {
-      // 外部取消:立即放弃;瞬时故障(网络/服务器繁忙):重试
+      // 外部取消:立即放弃
       if (signal?.aborted) throw e;
+      // 404:任务在后端已不存在(服务重启且任务丢了)——确定性失败,重试无意义,
+      // 立刻报清楚原因,不让用户对着 30 分钟超时干等
+      if (e instanceof ApiError && e.status === 404) {
+        throw new Error("任务已丢失(服务可能重启过),请刷新页面后在任务中心查看或重试");
+      }
+      // 瞬时故障(网络/服务器繁忙):重试
       if (++failures >= 5) {
         throw new Error("多次查询任务状态失败(网络不稳定),任务可能仍在后台运行,请稍后刷新查看");
       }

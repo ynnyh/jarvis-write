@@ -179,3 +179,77 @@ def test_architecture_async_llm_failure_marks_job_error(client):
     assert client.get(
         f"/api/projects/{p['id']}/architecture", headers=headers
     ).status_code == 404
+
+
+# ---------- 重启韧性:任务丢失的快速反馈(P2-13) ----------
+
+def _mk_job_row(owner_id: int, status: str, result=None) -> str:
+    """直接往 DB 插一条 job(绕过内存注册表,模拟重启后的状态)。"""
+    import uuid
+
+    from app.db.models import Job
+    from app.db.session import SessionLocal
+
+    jid = uuid.uuid4().hex[:12]
+    with SessionLocal() as db:
+        db.add(Job(id=jid, kind="test", status=status, owner_id=owner_id,
+                   stage="排队中", result=result))
+        db.commit()
+    return jid
+
+
+def test_job_status_db_fallback_after_restart(client):
+    """内存 miss → DB 兜底:已结束任务结果仍可查;挂着 running 的按
+    「服务重启,任务已中断」报错,不让前端拿到永远跑不完的假进度。"""
+    import uuid
+
+    headers = _auth(client, "restart_fallback")
+    # 拿 owner_id:Job.owner_id 记的是创建任务时的用户 id
+    from app.db.models import User
+    from app.db.session import SessionLocal
+    with SessionLocal() as db:
+        uid = db.query(User).filter(
+            User.username == "restart_fallback").one().id
+
+    done_jid = _mk_job_row(uid, "done", result={"ok": 1})
+    run_jid = _mk_job_row(uid, "running")
+
+    # 已结束:重启后结果照常可读
+    r = client.get(f"/api/jobs/{done_jid}", headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "done"
+    assert r.json()["result"] == {"ok": 1}
+
+    # 还挂 running(重启瞬间的窗口):立刻报「服务重启」错误
+    r = client.get(f"/api/jobs/{run_jid}", headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "error"
+    assert "服务重启" in r.json()["error"]
+
+    # 归属隔离不因兜底而松动:他人的任务仍按不存在处理
+    other = _mk_job_row(uid + 999999 if uid < 999999 else uid - 1, "done")
+    r = client.get(f"/api/jobs/{other}", headers=headers)
+    assert r.status_code == 404
+    assert uuid  # 避免 import 挪到顶部时的未用告警
+
+
+def test_cleanup_marks_fresh_running_jobs_failed(client):
+    """启动清理不再等 30 分钟:进程死了任务必死,全部 running 立即标失败。"""
+    from app.jobs import cleanup_stuck_jobs
+
+    headers = _auth(client, "restart_cleanup")
+    from app.db.models import User
+    from app.db.session import SessionLocal
+    with SessionLocal() as db:
+        uid = db.query(User).filter(
+            User.username == "restart_cleanup").one().id
+    jid = _mk_job_row(uid, "running")  # 刚建的,按旧语义不会被清理
+
+    cleanup_stuck_jobs()
+
+    from app.db.session import SessionLocal as S
+    with S() as db:
+        from app.db.models import Job
+        row = db.get(Job, jid)
+        assert row.status == "error"
+        assert "重启" in row.error

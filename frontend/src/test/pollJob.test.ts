@@ -1,10 +1,17 @@
-// pollJob 单元测试:轮询逻辑、重试、超时、中止
+// pollJob 单元测试:轮询逻辑、重试、超时、中止、404 快失败
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { pollJob } from "../pollJob";
-import { api } from "../api";
+import { api, ApiError } from "../api";
 
 vi.mock("../api", () => ({
   api: { getJob: vi.fn() },
+  ApiError: class ApiError extends Error {
+    status: number;
+    constructor(status: number, message: string) {
+      super(message);
+      this.status = status;
+    }
+  },
 }));
 
 const getJob = vi.mocked(api.getJob);
@@ -100,5 +107,14 @@ describe("pollJob", () => {
       .rejects.toThrow();
     // sleep 会在第一次就 reject,不会走到 getJob
     expect(getJob).not.toHaveBeenCalled();
+  });
+
+  it("404(任务已丢失)立刻报错,不当网络抖动重试", async () => {
+    getJob.mockRejectedValue(new ApiError(404, "任务不存在或已被清理"));
+
+    await expect(pollJob("j10", { intervalMs: 10, timeoutMs: 5000 }))
+      .rejects.toThrow("任务已丢失");
+    // 只查了一次:确定性失败,重试无意义
+    expect(getJob).toHaveBeenCalledTimes(1);
   });
 });

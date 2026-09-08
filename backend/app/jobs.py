@@ -12,7 +12,6 @@ import logging
 import threading
 import uuid
 from collections.abc import Awaitable, Callable, Coroutine
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -25,7 +24,6 @@ logger = logging.getLogger("jarvis-write.jobs")
 _LOCK = threading.Lock()
 _JOBS: dict[str, dict[str, Any]] = {}
 _MAX_JOBS = 200  # 内存上限:超出后清最旧的已完成任务
-_STUCK_MINUTES = 30  # 启动时:running 超过此时间视为 stuck
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +135,32 @@ def get_job(job_id: str) -> dict[str, Any] | None:
     with _LOCK:
         job = _JOBS.get(job_id)
         return dict(job) if job else None
+
+
+def get_job_persisted(job_id: str) -> dict[str, Any] | None:
+    """内存 miss 时的 DB 兜底(轮询端点专用):重启后仍能查到已结束任务的结果。
+
+    DB 里还挂着 running 的(重启窗口/清理失败)按「已随旧进程死亡」报错,
+    绝不返回 running——不然前端会拿到一个永远不会有结果的假进度。
+    """
+    try:
+        from app.db.models import Job
+        session = _db_session()
+        row = session.get(Job, job_id)
+        if row is None:
+            session.close()
+            return None
+        out = {
+            "kind": row.kind, "status": row.status, "owner_id": row.owner_id,
+            "stage": row.stage, "result": row.result, "error": row.error,
+        }
+        session.close()
+        if out["status"] == "running":
+            out.update(status="error", stage="失败", error="服务重启,任务已中断")
+        return out
+    except Exception:  # noqa: BLE001 — 兜底失败退回 404 语义
+        logger.debug("job %s DB 兜底读取失败", job_id, exc_info=True)
+        return None
 
 
 def list_running(kind_prefix: str) -> list[tuple[str, dict[str, Any]]]:
@@ -285,26 +309,22 @@ def spawn_job(kind: str, work: Callable[[Callable[[str], None]], Awaitable[Any]]
 # ---------------------------------------------------------------------------
 
 def cleanup_stuck_jobs() -> None:
-    """服务启动时调用:把 DB 中 running 超时的任务标记为 failed。
+    """服务启动时调用:把 DB 中所有 running 的任务标记为 failed。
 
-    进程重启后,之前 running 的任务不可能还活着(asyncio task 随进程消亡)。
+    进程重启后,之前 running 的任务不可能还活着(asyncio task 随进程消亡),
+    不必等 30 分钟——立刻标失败,前端轮询才能马上拿到明确错误而不是傻等。
     出片任务同理:queued/running 的 RenderTask 一并标 failed,不然任务历史里
     永远显示"进行中",同一格还会被误判为"出片中"。
     """
     try:
         from app.db.models import Job, RenderTask
         session = _db_session()
-        cutoff = datetime.now(timezone.utc) - timedelta(minutes=_STUCK_MINUTES)
-        stuck = (
-            session.query(Job)
-            .filter(Job.status == "running", Job.created_at < cutoff)
-            .all()
-        )
+        stuck = session.query(Job).filter(Job.status == "running").all()
         for job in stuck:
             job.status = "error"
             job.stage = "失败"
-            job.error = "服务重启,任务中断(超时自动标记)"
-        # 出片任务不看超时时长:启动那一刻还停在排队/进行中的,必然随上个进程死了
+            job.error = "服务重启,任务中断"
+        # 出片任务不看状态时长:启动那一刻还停在排队/进行中的,必然随上个进程死了
         stuck_renders = (
             session.query(RenderTask)
             .filter(RenderTask.status.in_(["queued", "running"]))
@@ -316,7 +336,7 @@ def cleanup_stuck_jobs() -> None:
         if stuck or stuck_renders:
             session.commit()
             logger.info(
-                "启动清理:%d 个 stuck 任务、%d 个出片任务标记为失败",
+                "启动清理:%d 个中断任务、%d 个出片任务标记为失败",
                 len(stuck), len(stuck_renders),
             )
         session.close()
