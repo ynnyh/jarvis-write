@@ -13,8 +13,8 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from app.engines.consistency.extractor import parse_llm_json
-from app.llm.router import Task, get_adapter_for
+from app.engines.consistency.extractor import parse_llm_json, parse_llm_json_checked
+from app.llm.router import Task, get_adapter_for, review_is_self_reviewing
 from app.prompts.consistency import GATE_REPAIR_PROMPT
 from app.prompts.editorial import PROOFREAD_PROMPT, REVIEW_PROMPT
 
@@ -61,7 +61,10 @@ async def review_chapter(content: str, outline_block: str) -> dict:
     """
     prompt = REVIEW_PROMPT.format(outline_block=outline_block, content=content)
     raw = await get_adapter_for(Task.CONSISTENCY).ask(prompt)
-    data = parse_llm_json(raw)
+    # 用 checked 版本:解析失败必须显式。过去 data={} → 四维全 0 → judge_passed
+    # 判「不达标」→ 章节被当成「写得差」回炉重写。方向完全反了:其实根本没审成,
+    # 重写多少次都是白烧钱。现在交给调用方按 degraded 走隔离,不回炉。
+    data, parse_err = parse_llm_json_checked(raw)
     scores = data.get("scores") or {}
     # 分数钳制到 1-10 整数,缺维度/非法值补 0(前端显示"—")
     clean = {k: _clamp_score(scores.get(k)) for k in DIMS}
@@ -84,6 +87,14 @@ async def review_chapter(content: str, outline_block: str) -> dict:
         })
     return {
         "scores": clean,
+        # 自审自写标记:审校档与强档指向同一套配置时为真。此时四维分数是「模型
+        # 给自己的作文打分」,只能当参考意见,不能当客观门禁——显式标出来,别让
+        # 用户以为这分数是客观度量。要真正的审校分离,在设置页给审校档配独立模型。
+        "self_review": review_is_self_reviewing(),
+        # 主审降级(输出解析失败):区分「写得差」与「没审成」,由调用方决定
+        # 是回炉(前者)还是隔离待人工(后者)。
+        "degraded": bool(parse_err),
+        "degraded_reason": parse_err or "",
         # 每维一句话评分依据(锚点化评分的可解释性;缺失/超长 defensively 收敛)
         "score_reasons": {
             k: str((data.get("score_reasons") or {}).get(k) or "").strip()[:120]

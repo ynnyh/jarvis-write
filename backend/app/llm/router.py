@@ -217,3 +217,31 @@ def get_adapter_for(task: Task, **overrides) -> LLMAdapter:
 
 def tier_of(task: Task) -> Tier:
     return _TASK_TIER.get(task, Tier.FAST)
+
+
+def review_is_self_reviewing() -> bool:
+    """审校档是否实际指向与强档同一套配置(即「自己写的自己打分」)。
+
+    默认配置下 review 档未单独指定 → 回落 quality 链 → 同一个模型既写正文、
+    又给这篇正文打四维分。LLM-as-judge 本身就有乐观偏差,同模型自审会再放大
+    一层;用户看到的「主审评分」因此不是客观度量。
+
+    这里不强行改配置(分不分模型是用户的成本选择),而是把这件事变成**可检测的
+    显式事实**:设置页/生成结果据此提示,别让用户以为分数是客观的。
+    读配置失败时保守返回 False(宁可不提示,也不误报)。
+    """
+    try:
+        quality = _tier_config(Tier.QUALITY) or {}
+        review = _tier_config(Tier.REVIEW) or {}
+    except Exception:  # noqa: BLE001 — 配置读取失败不影响生成主流程
+        return False
+    if not quality or not review:
+        return False
+    q_id, r_id = quality.get("id"), review.get("id")
+    if q_id is not None and r_id is not None:
+        return q_id == r_id
+    # .env 兜底路径没有 id:按协议 + 模型名 + 服务地址比对
+    key = lambda c: (c.get("interface_format"), c.get("model"), c.get("base_url"))  # noqa: E731
+    if key(quality) == (None, None, None):
+        return False  # 信息不足,不猜
+    return key(quality) == key(review)
