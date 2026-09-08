@@ -134,6 +134,15 @@ def check_upstream(resp: httpx.Response, *, hint: str = "") -> dict:
     - 非 JSON(Base URL 填错/协议不匹配,上游回了 HTML 错误页):说明原因并附 hint。
     """
     if resp.status_code >= 400:
+        # 402 单列:欠费是长篇生成必撞的场景,给出可行动的话术,并让调用方
+        # 能用 is_insufficient_balance() 程序化识别(挂任务/续跑都靠它)。
+        if resp.status_code == 402:
+            raise UpstreamError(
+                "上游返回 HTTP 402: API 余额不足(Insufficient Balance)。"
+                "请到服务商控制台充值后重试;已生成的章节与进度都已落库,不会丢失。",
+                status=402,
+                retryable=False,
+            )
         msg = f"上游返回 HTTP {resp.status_code}"
         try:
             err = resp.json()
@@ -250,6 +259,20 @@ def _is_param_rejection(exc: "UpstreamError", sent_thinking: bool) -> bool:
         return False
     text = str(exc).lower()
     return any(m in text for m in _PARAM_REJECT_MARKERS)
+
+
+def is_insufficient_balance(exc: BaseException) -> bool:
+    """是否为「服务商余额不足」类错误(402 或上游同义话术)。
+
+    用于任务层把欠费从普通失败里分出来:不重试、给出充值指引、保留断点。
+    某些中转渠道欠费时不回 402 而是回 200+error 文案,所以状态码之外再看话术。
+    """
+    text = str(exc)
+    if isinstance(exc, UpstreamError) and exc.status == 402:
+        return True
+    if "402" in text and "balance" in text.lower():
+        return True
+    return "insufficient balance" in text.lower() or "余额不足" in text
 
 
 Role = Literal["system", "user", "assistant"]
