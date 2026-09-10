@@ -17,6 +17,7 @@ from app.db.models.story_bible import (
     KnowledgeState,
 )
 from app.db.models.foreshadowing import Foreshadowing
+from app.db.models.fact_usage import FactUsage
 from app.db.models.preset import TendencyPreset
 from app.db.models.setting import ProviderConfig, ProviderSetting
 from app.db.models.summary import ChapterSummary
@@ -65,6 +66,7 @@ __all__ = [
     "Relationship",
     "KnowledgeState",
     "Foreshadowing",
+    "FactUsage",
     "TendencyPreset",
     "WritingCard",
     "ProviderSetting",

@@ -229,6 +229,21 @@ async def apply_chapter_tail(
         db.rollback()
         logger.warning("第 %d 章故事时钟校验失败(已跳过): %s", chapter_number, exc)
 
+    # ---- 事实引用追踪(§1.5):新章正文里字面命中旧事实 → 记一笔弱信号 ----
+    # 放在抽取【之后】:此刻本章新抽取的事实已入库,排除掉「本章自己刚写的」
+    # 才能只盯「引用旧事实」。这是消费日志的第二条来源(第一条是检索注入,
+    # 见 scene_write._record_retrieval_usage),供失效传播反查。
+    # 弱信号(可能只是重述),排序与提示力度都低于 retrieval;纯 contains 零 LLM。
+    try:
+        from app.engines.consistency.fact_ledger import record_extract_hits
+
+        n_hits = record_extract_hits(db, project.id, chapter_number, final)
+        if n_hits:
+            db.commit()
+    except Exception as exc:  # noqa: BLE001 — 引用追踪绝不阻塞章后主链路
+        db.rollback()
+        logger.warning("第 %d 章事实引用追踪失败(已跳过): %s", chapter_number, exc)
+
     # ---- 常驻装置断档校验(advisory,不阻断):落 source=devices 建议 ----
     # 同样放在契约抽取之后(此刻本章 devices_present 已入库)。与生成端催场块
     # (devices_reminder_block)配对成闭环:催过了本章仍没让装置出场,才在这里软报。

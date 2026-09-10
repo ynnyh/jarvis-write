@@ -71,6 +71,32 @@ class SceneWriteResult:
     stats: dict = field(default_factory=dict)
 
 
+def _record_retrieval_usage(
+    db: Session,
+    project: Project,
+    scene: Scene,
+    chapter_number: int,
+    ctx: Any,
+    revision_directive: str,
+) -> None:
+    """把「本场把这几条事实喂进了 prompt」记进消费日志(§1.5)。
+
+    失败一律吞掉:记日志是观测,不是生成的前置条件——不能在真库上多一条
+    引用记录这件事上把整章生成搞挂(与检索本身的容错口径一致)。
+
+    重写路径不记:那条 prompt 里没有 facts_block,模型没看到这些事实,
+    记了会让失效传播时误报「这一章真的依赖它」。
+    """
+    if revision_directive:
+        return
+    try:
+        from app.engines.consistency.fact_ledger import record_retrieval
+
+        record_retrieval(db, int(project.id), scene, list(getattr(ctx, "facts", None) or []))
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("场景事实消费日志写入失败(忽略):%s", exc)
+
+
 def _tail_of(text: str, limit: int = _PREV_TAIL_CHARS) -> str:
     t = (text or "").strip()
     if len(t) <= limit:
@@ -151,6 +177,11 @@ async def write_scene(
     ctx = retrieve_for_scene(db, project.id, scene, chapter_number)
     facts_block = render_facts_block(ctx)
     tail_extra = render_tail_block(ctx)
+    # 消费日志(§1.5):把「这一场确实看到了这几条事实」记下来。
+    # 只有在真正要把事实喂进 prompt 时才记(重写路径的 prompt 不带 facts_block,
+    # 记了就是假账)。放在这里而非 retrieve_for_scene 内,是因为「检索」与
+    # 「注入」是两回事:检索到了但没注入(如重写路径)不该算消费。
+    _record_retrieval_usage(db, project, scene, chapter_number, ctx, revision_directive)
 
     if revision_directive:
         from app.prompts.scene import _SCENE_REWRITE_PROMPT

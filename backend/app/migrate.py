@@ -953,6 +953,23 @@ def _add_scene_tables() -> None:
     logger.info("迁移:补齐场景卡表(scenes / scene_versions)")
 
 
+def _add_fact_usage_table() -> None:
+    """建事实消费日志表(幂等,§1.5 引用追踪)。
+
+    与 _add_scene_tables 同一套兜底策略:Alembic 正常时不做事,
+    「Alembic 未接入/迁移失败」时靠 create_all 补表。列齐不齐由
+    Base.metadata.create_all 保证,不在这里手写 DDL。
+    """
+    insp = inspect(engine)
+    if "fact_usages" in insp.get_table_names():
+        return
+    from app.db.base import Base
+    import app.db.models  # noqa: F401 — 注册全部模型
+
+    Base.metadata.create_all(bind=engine)
+    logger.info("迁移:补齐事实消费日志表(fact_usages)")
+
+
 def run_migrations() -> None:
     """启动时调用。幂等。"""
     _add_user_id_columns()
@@ -995,6 +1012,7 @@ def run_migrations() -> None:
     _add_clips_promo_film_prompt_columns()
     _add_scene_tables()
     _add_scene_level_column()
+    _add_fact_usage_table()
     _disable_word_guard_default()
     _migrate_finalized_to_approved()
     # 先补加密老表存量明文 key,再拷到新表,保证 provider_configs 落库必为密文

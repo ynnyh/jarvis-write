@@ -1145,6 +1145,16 @@ export interface AuditReport {
     notes: string;            // 节奏提示(憋太久 / 一次爆太多),无问题为空串
     next_is_twist: boolean;   // 下一章是不是转折章(会激活反转预备)
   };
+  // 事实引用(§1.5):管「设定有没有真的落进正文」。
+  // dangling = 写在圣经里却从没进过正文的 critical 事实(要么补写要么降级);
+  // unsupported_chapters = 已成文但零引用记录的章(大概率没查圣经凭感觉写)。
+  fact_usage?: {
+    referenced_facts: number;      // 至少被引用过一次的事实数
+    critical_total: number;
+    dangling: { fact_id: number; content: string; from_chapter: number | null }[];
+    unsupported_chapters: number[];
+    chapters_with_usage: number;
+  };
 }
 
 // ---------- 接口 ----------

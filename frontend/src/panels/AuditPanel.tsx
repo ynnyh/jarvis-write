@@ -187,6 +187,27 @@ export default function AuditPanel({ pid, project }: Props) {
                 {audit.reader.next_is_twist && "——下一章是转折章,这些底牌会被纳入反转预备。"}
               </div>
             )}
+            {audit.fact_usage && audit.fact_usage.dangling.length > 0 && (
+              <div className="mt-3">
+                <label className="fl">
+                  悬空的关键设定({audit.fact_usage.dangling.length})——写在故事圣经里,却从没进过正文
+                </label>
+                {audit.fact_usage.dangling.slice(0, 8).map((f) => (
+                  <div key={f.fact_id} className="fact-line">
+                    「{f.content}」{f.from_chapter ? `(自第 ${f.from_chapter} 章起生效)` : ""}——要么补写进某一场,要么降级,要么删掉
+                  </div>
+                ))}
+                {audit.fact_usage.dangling.length > 8 && (
+                  <div className="muted">…另有 {audit.fact_usage.dangling.length - 8} 条</div>
+                )}
+              </div>
+            )}
+            {audit.fact_usage && audit.fact_usage.unsupported_chapters.length > 0 && (
+              <div className="notice notice-warn mt-3">
+                第 {audit.fact_usage.unsupported_chapters.join("、")} 章没有查到任何设定引用记录——大概率是没翻
+                圣经凭感觉写的,最容易出设定漂移,建议优先复核。
+              </div>
+            )}
             {audit.stale_chapters.length > 0 && (
               <div className="notice notice-err mt-3">
                 第 {audit.stale_chapters.join("、")} 章正文与新大纲失配——大纲改过之后这些章没重写,建议去「写作」处理。

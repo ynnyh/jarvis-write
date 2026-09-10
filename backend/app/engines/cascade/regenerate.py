@@ -119,6 +119,15 @@ async def cascade_regenerate(
             ch.is_stale = True
             ch.status = "stale"
             stale.append(n)
+            # 大纲重生成 → 该章正文即将（或已被用户）重写，旧的引用日志随之作废：
+            # 它记的是「以旧大纲写出的正文消费了哪些事实」。留着会让下一次
+            # 失效传播把这一章误报成「仍依赖某条事实」。下次生成该章时会重建日志。
+            try:
+                from app.engines.consistency.fact_ledger import forget_chapter
+
+                forget_chapter(db, project.id, n)
+            except Exception as exc:  # noqa: BLE001 — 日志清理绝不阻断级联
+                logger.warning("第 %d 章引用日志清理失败(已跳过): %s", n, exc)
         # 每章写完即提交:与生成/抽取纪律一致,写事务短、不把多章攒到末尾一把梭。
         db.commit()
 

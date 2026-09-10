@@ -399,6 +399,68 @@ async def audit_report(project_id: int, db: Session = Depends(get_db)):
             "debt": debt,
         },
         "reader": reader,
+        # 事实引用追踪(§1.5):每章是在哪些事实的支撑下写出来的。
+        # 与 reader/debt 并列作为「设定层可核查性」的第三条线:债务管伏笔,
+        # 认知管读者,这一条管「设定有没有真的落进正文」——某条 critical
+        # 事实一条引用记录都没有,说明它只存在于圣经里、从没被写进故事。
+        "fact_usage": fact_usage_section(db, project_id, chapters),
+    }
+
+
+def fact_usage_section(db: Session, project_id: int, chapters: list) -> dict:
+    """事实引用面:零成本聚合,供 /audit-report 展示。
+
+    只报两类有行动价值的东西,不做全量罗列:
+      ① 悬空事实:importance=critical 却零引用记录 → 作者写在圣经里、
+         从没进过正文的设定(要么补写,要么降级,要么删);
+      ② 无据章节:已成文、却一条引用记录都没有的章 → 大概率是「没查圣经
+         凭感觉写的」,这类章最容易出设定漂移,值得优先复核。
+
+    ``chapters`` 是已过滤好的「有正文」章列表(调用方已有,不再查一遍)。
+    """
+    from app.db.models import Fact as _Fact
+    from app.db.models import FactUsage as _FactUsage
+
+    referenced_ids = {
+        int(r[0])
+        for r in db.query(_FactUsage.fact_id)
+        .filter(_FactUsage.project_id == project_id)
+        .distinct()
+        .all()
+    }
+    criticals = (
+        db.query(_Fact)
+        .filter(
+            _Fact.project_id == project_id,
+            _Fact.importance == "critical",
+        )
+        .all()
+    )
+    dangling = [
+        {"fact_id": f.id, "content": f.content, "from_chapter": f.valid_from}
+        for f in criticals
+        if f.id not in referenced_ids
+    ]
+
+    chapters_with_usage = {
+        int(r[0])
+        for r in db.query(_FactUsage.chapter_number)
+        .filter(_FactUsage.project_id == project_id)
+        .distinct()
+        .all()
+    }
+    unsupported = [
+        c.chapter_number
+        for c in chapters
+        if c.chapter_number not in chapters_with_usage
+    ]
+
+    return {
+        "referenced_facts": len(referenced_ids),
+        "critical_total": len(criticals),
+        "dangling": dangling,
+        "unsupported_chapters": unsupported,
+        "chapters_with_usage": len(chapters_with_usage),
     }
 
 
