@@ -913,6 +913,27 @@ def _add_clips_promo_film_prompt_columns() -> None:
                 logger.info("迁移:%s 补 film_prompt 列", table)
 
 
+def _add_scene_tables() -> None:
+    """建场景卡两张表(幂等)。
+
+    场景是新的生成单元(见 app/db/models/scene.py):独立成表而非往 outlines
+    塞 JSON 列,因为它要有自己的状态机、版本号、正文锚点与验收记录。
+
+    这里只兜底建表:表结构本身由 Base.metadata.create_all 负责(在
+    run_alembic_migrations 之后),此函数给「Alembic 未接入/迁移失败」的
+    路径留一条生路。列齐不齐由 create_all 保证,不在这里手写 DDL。
+    """
+    insp = inspect(engine)
+    tables = insp.get_table_names()
+    if "scenes" in tables and "scene_versions" in tables:
+        return
+    from app.db.base import Base
+    import app.db.models  # noqa: F401 — 注册全部模型
+
+    Base.metadata.create_all(bind=engine)
+    logger.info("迁移:补齐场景卡表(scenes / scene_versions)")
+
+
 def run_migrations() -> None:
     """启动时调用。幂等。"""
     _add_user_id_columns()
@@ -953,6 +974,7 @@ def run_migrations() -> None:
     _add_outline_drama_columns()
     _add_episode_film_prompt_column()
     _add_clips_promo_film_prompt_columns()
+    _add_scene_tables()
     _disable_word_guard_default()
     _migrate_finalized_to_approved()
     # 先补加密老表存量明文 key,再拷到新表,保证 provider_configs 落库必为密文

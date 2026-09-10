@@ -8,6 +8,7 @@
 """
 from app.db.models.project import Project, Architecture
 from app.db.models.outline import Outline, OutlineVersion
+from app.db.models.scene import SCENE_STATUSES, Scene, SceneVersion
 from app.db.models.chapter import Chapter, ChapterVersion
 from app.db.models.story_bible import (
     Entity,
@@ -54,6 +55,9 @@ __all__ = [
     "Architecture",
     "Outline",
     "OutlineVersion",
+    "Scene",
+    "SceneVersion",
+    "SCENE_STATUSES",
     "Chapter",
     "ChapterVersion",
     "Entity",

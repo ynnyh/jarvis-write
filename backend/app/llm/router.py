@@ -22,6 +22,9 @@ class Task(str, Enum):
 
     ARCHITECTURE = "architecture"       # 种子/角色/世界观/情节
     BLUEPRINT = "blueprint"             # 章节蓝图
+    SCENE_PLAN = "scene_plan"           # 场景卡切分(一章 → 3-5 张卡,JSON)
+    SCENE_DRAFT = "scene_draft"         # 场景级正文生成(一次只写一场)
+    SCENE_ACCEPT = "scene_accept"       # 场景级验收(只判这一场,JSON)
     DRAFT = "draft"                     # 正文草稿
     SUMMARY = "summary"                 # 章节摘要
     FACT_EXTRACT = "fact_extract"       # 章后事实/状态抽取
@@ -72,6 +75,13 @@ class Tier(str, Enum):
 _TASK_TIER: dict[Task, Tier] = {
     Task.ARCHITECTURE: Tier.QUALITY,
     Task.BLUEPRINT: Tier.QUALITY,
+    # 场景切分是结构判断活:切错了整章的骨架就歪了,与蓝图同档
+    Task.SCENE_PLAN: Tier.QUALITY,
+    # 场景级生成:这是真正的创作刀口(取代原「整章一发」的 DRAFT)。
+    # 走 QUALITY 档是刻意的——钱应该只花在创作那一刀上,校验/抽取/去味走便宜档。
+    Task.SCENE_DRAFT: Tier.QUALITY,
+    # 场景验收与主审同属审校:与写手分模型,治「同模型自审自写」的评分偏差
+    Task.SCENE_ACCEPT: Tier.REVIEW,
     Task.DRAFT: Tier.FAST,
     Task.SUMMARY: Tier.FAST,
     Task.FACT_EXTRACT: Tier.QUALITY,  # 抽取写圣经是长程一致性的数据源头,抽错污染全书,上强档
@@ -123,6 +133,13 @@ _TASK_TIER: dict[Task, Tier] = {
 _TASK_TEMPERATURE: dict[Task, float] = {
     Task.ARCHITECTURE: 0.85,   # 顶层设定要有想象力
     Task.BLUEPRINT: 0.75,      # 章节施工图,创意与结构兼顾
+    # 切分是结构判断:要稳(同一章两次切分不该给出完全不同的骨架),但张力波形
+    # 要给一点创意空间,所以比抽取类高、比创作类低
+    Task.SCENE_PLAN: 0.6,
+    # 场景级生成:比整章草稿更发散。单场注意力收窄后,高温带来的灵气不会再被
+    # 「兼顾全章 31 个变量」稀释掉——这是治白水的直接手段。
+    Task.SCENE_DRAFT: 1.0,
+    Task.SCENE_ACCEPT: 0.2,    # 验收是判断活,低温最稳可复现
     Task.DRAFT: 0.95,          # 草稿最发散,先把灵气写出来,后面定稿收
     Task.FINALIZE: 0.7,        # 定稿拔高但克制,不放飞
     Task.POLISH: 0.7,          # 润色同上
@@ -160,6 +177,13 @@ _TASK_TEMPERATURE: dict[Task, float] = {
 # 短任务不在表里,用配置/全局默认即可。
 _TASK_MAX_TOKENS: dict[Task, int] = {
     Task.DRAFT: 16384,
+    # 场景级生成:单场 1200-1800 字,预算比整章宽松——整章一发时的 16384 要装下
+    # 4000+ 字,场景级只需装下 1800 字,留出的余量让模型不必为省 token 收着写。
+    # 上限拉到 16384 是因为推理模型思考会先吃一大截(与 CONSISTENCY 同一教训)。
+    Task.SCENE_DRAFT: 16384,
+    # 单章 3-5 张卡的 JSON,每卡约 200 字 ≈ 300 token,加上思考余量给 8192
+    Task.SCENE_PLAN: 8192,
+    Task.SCENE_ACCEPT: 16384,   # 与 CONSISTENCY 同理由:思考可能吃穿预算
     Task.FINALIZE: 16384,
     Task.POLISH: 12288,
     Task.ARCHITECTURE: 8192,

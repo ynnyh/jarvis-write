@@ -154,6 +154,8 @@ DEGRADED_KEY = "degraded"
 SCOPE_CONSISTENCY = "一致性检查"
 SCOPE_FACT_EXTRACT = "章后事实抽取"
 SCOPE_REVIEW = "主审评分"
+SCOPE_SCENE_PLAN = "场景切分"
+SCOPE_SCENE_ACCEPT = "场景验收"
 
 # 降级时连续性维度的取值:0 分是刻意的——它不是「连续性差」,而是「未校验」。
 # 绝不能回落成 9(干净),那等于把没跑过的检查当成通过了。
