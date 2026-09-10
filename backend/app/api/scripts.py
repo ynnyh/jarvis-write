@@ -453,3 +453,73 @@ async def adapt_to_script(
         "script_id": script.id, "title": script.title,
         "episodes": len(episodes), "logline": script.logline,
     }
+
+
+# ---------- 改编质量验收(§5.3)----------
+
+@adapt_router.get("/{project_id}/adapt-fidelity")
+async def adapt_fidelity(
+    project_id: int,
+    script_id: int | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """核对剧本改编稿对原著事实层的保真度(确定性,零 LLM,不改任何东西)。
+
+    ``script_id`` 给了就核那部剧本;不给则核本项目下最近一部由它改编的剧本。
+    报告是 **advisory**:只给人看,不设卡口——事实抽取本身有噪声,拿它硬卡
+    改编会误杀好稿(见 engines/adapt_audit.py 的模块 docstring)。
+    """
+    from app.engines.adapt_audit import audit_adaptation, render_fidelity
+    from app.engines.adapt_extract import script_episodes_text
+
+    project = (
+        db.query(Project)
+        .filter(Project.id == project_id, Project.user_id == user.id)
+        .first()
+    )
+    if project is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    query = db.query(Script).filter(Script.source_project_id == project_id)
+    if script_id is not None:
+        query = query.filter(Script.id == script_id)
+    script = query.order_by(Script.id.desc()).first()
+    if script is None:
+        raise HTTPException(status_code=404, detail="这个项目还没有由它改编的剧本")
+
+    episodes = (
+        db.query(ScriptEpisode)
+        .filter(ScriptEpisode.script_id == script.id)
+        .order_by(ScriptEpisode.episode_number)
+        .all()
+    )
+    drafted = [e for e in episodes if (e.content or "").strip()]
+    text = script_episodes_text(drafted)
+    # 取材章范围:改编是按章取材的,核全书会报出一堆「本就不在这部剧本里」的
+    # 事实,反而掩盖真丢失。用已写集的梗概反查不了章号,故按「全书」核,
+    # 但把报告交给调用方按需过滤——这里先给全量,诚实优先。
+    report = audit_adaptation(
+        db, project_id, text,
+        adapt_note=script.style_memo or "",
+    )
+    return {
+        "script_id": script.id,
+        "episodes_drafted": len(drafted),
+        "episodes_total": len(episodes),
+        "adapted_chars": report.adapted_chars,
+        "facts_total": report.facts_total,
+        "facts_kept": report.facts_kept,
+        "ratio": round(report.ratio, 4),
+        "lost_critical": [
+            {"fact_id": c.fact_id, "content": c.content, "from_chapter": c.from_chapter}
+            for c in report.lost_critical
+        ],
+        "lost": [
+            {"fact_id": c.fact_id, "content": c.content, "importance": c.importance}
+            for c in report.lost[:30]
+        ],
+        "gaps": report.gaps,
+        "note_issues": report.note_issues,
+        "render": render_fidelity(report),
+    }

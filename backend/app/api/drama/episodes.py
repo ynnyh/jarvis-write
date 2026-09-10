@@ -413,3 +413,56 @@ async def delete_episode_bgm(
     if not removed:
         raise HTTPException(status_code=404, detail="这一集还没有 BGM。")
     return {"ok": True}
+
+
+# ---------- 改编质量验收(§5.3)----------
+
+@router.get("/adapt-fidelity")
+async def adapt_fidelity(project_id: int, db: Session = Depends(get_db)):
+    """核对漫剧剧本对原著事实层的保真度(确定性,零 LLM,不改任何东西)。
+
+    报告是 **advisory**:只给人看,不设卡口——事实抽取本身有噪声,拿它硬卡
+    改编会误杀好稿(见 engines/adapt_audit.py 的模块 docstring)。
+    """
+    from app.engines.adapt_audit import audit_adaptation, render_fidelity
+    from app.engines.adapt_extract import drama_episodes_text
+
+    get_project_or_404(db, project_id)
+    episodes = (
+        db.query(DramaEpisode)
+        .filter(DramaEpisode.project_id == project_id)
+        .order_by(DramaEpisode.ep_index)
+        .all()
+    )
+    scripted = [e for e in episodes if (e.script or {}).get("lines")]
+    text = drama_episodes_text(scripted)
+    # 取材章范围:用各集已声明/已回填的 source_chapters 并集。漫剧按章取材,
+    # 核全书会把「本就不在这些章里」的事实一起报成丢失,掩盖真问题。
+    covered: list[int] = []
+    for ep in scripted:
+        for n in (getattr(ep, "source_chapters", None) or []):
+            try:
+                n = int(n)
+            except (TypeError, ValueError):
+                continue
+            if n > 0 and n not in covered:
+                covered.append(n)
+    report = audit_adaptation(db, project_id, text, chapter_numbers=covered or None)
+    return {
+        "episodes_scripted": len(scripted),
+        "episodes_total": len(episodes),
+        "covered_chapters": sorted(covered),
+        "adapted_chars": report.adapted_chars,
+        "facts_total": report.facts_total,
+        "facts_kept": report.facts_kept,
+        "ratio": round(report.ratio, 4),
+        "lost_critical": [
+            {"fact_id": c.fact_id, "content": c.content, "from_chapter": c.from_chapter}
+            for c in report.lost_critical
+        ],
+        "lost": [
+            {"fact_id": c.fact_id, "content": c.content, "importance": c.importance}
+            for c in report.lost[:30]
+        ],
+        "render": render_fidelity(report),
+    }
