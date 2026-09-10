@@ -149,6 +149,10 @@ class ProjectPatch(BaseModel):
     review_pass_threshold: int | None = Field(default=None, ge=1, le=10)
     review_auto_revise: bool | None = None
     review_max_revisions: int | None = Field(default=None, ge=0, le=5)
+    # 场景级生成开关:True=把「章」降级为容器、逐场生成 + 逐场验收(场景不合格只重写该场);
+    # False(默认)= 老路径(一次调用写整章)。默认关是刻意的:新链路先让作者手动开、
+    # 实测手感,确认更好了再考虑改默认。
+    scene_level_enabled: bool | None = None
     # 连写前置开关:True=严格(上一章 approved 才能连写),False=宽松(仅 quarantined 停)
     queue_require_approved: bool | None = None
     # 完本标记:True=已完本。完本后重命名/删除/清空被后端拦截(见 patch/delete/reset)。

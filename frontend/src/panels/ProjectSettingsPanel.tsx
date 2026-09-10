@@ -109,6 +109,18 @@ export default function ProjectSettingsPanel({ pid, project }: Props) {
     } catch (e) { toast.err("审校配置保存失败", errMsg(e)); }
   }
 
+  // 场景级生成开关:换掉「章级单发」的生成段(逐场生成 + 逐场验收,不合格只重写该场)。
+  // 单独一个 patch 是因为它的报错文案不同——这是实验性开关,失败要说清「没切过去」。
+  async function patchSceneLevel(on: boolean) {
+    try {
+      await api.patchProject(pid, { scene_level_enabled: on });
+      await invalidateProject();
+      toast.ok(on ? "已开启场景级生成" : "已切回整章生成",
+        on ? "下一章起逐场生成:先切场景卡,再逐场写,只重写不合格的场"
+          : "下一章起仍由一次调用写完整章");
+    } catch (e) { toast.err("场景级开关保存失败", errMsg(e)); }
+  }
+
   // 保存世界观硬规则(整段覆盖,空串清空);有实际变更时追问是否做设定级级联
   // (扫描全书受影响章节 → 段落定点修提案),扫描耗 LLM,用户可跳过。
   const [cascade, setCascade] = useState<{ oldText: string; newText: string } | null>(null);
@@ -263,6 +275,19 @@ export default function ProjectSettingsPanel({ pid, project }: Props) {
           <span>
             连写要求上一章审核通过
             <b className="hint">开启后队列遇待审章会暂停,先人工通过该章再继续</b>
+          </span>
+        </label>
+        <label className="guard-toggle mt-2">
+          <input type="checkbox" checked={!!project.scene_level_enabled}
+            onChange={(e) => patchSceneLevel(e.target.checked)} />
+          <span>
+            场景级生成(实验)
+            <b className="hint">
+              把「章」降级为容器、把「场景」升格为生成单元:先切 3-5 张场景卡,
+              再逐场写、逐场验收,不合格只重写那一场而非整章重新抽签。
+              每场只带一个情绪指令 + 一组按需检索的事实,注意力更集中
+              ——针对「该精彩时精彩、该压抑时压抑」。下一章起生效。
+            </b>
           </span>
         </label>
       </div>

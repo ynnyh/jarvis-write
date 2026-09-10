@@ -46,6 +46,9 @@ class ProjectOut(BaseModel):
     review_pass_threshold: int = 7
     review_auto_revise: bool = True
     review_max_revisions: int = 3
+    # 场景级生成:True=逐场生成+逐场验收(不合格只重写该场),False=一次调用写整章
+    # (默认)。见 docs/15 与 app/engines/pipeline/scene_chapter.py
+    scene_level_enabled: bool = False
     # 连写前置:True=严格模式(上一章 approved 才能连写下一章),False=宽松(默认)
     queue_require_approved: bool = False
     # 完本标记:True=已完本。完本后重命名/删除为置灰与后端拦截状态,防误删误改。

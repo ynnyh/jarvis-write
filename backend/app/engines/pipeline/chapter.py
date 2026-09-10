@@ -503,9 +503,65 @@ async def generate_chapter(
         outline_changed=bool(existing and existing.is_stale),
     )
 
+    # ---- 场景级生成(阶段二):逐场写 + 逐场验收 + 只重写不合格的场 ----
+    # 开关按项目走(scene_level_enabled),默认关 → 完全走下面的老路径,行为不变。
+    # 为什么把这一步放在这里而不是替换整个 generate_chapter:薄的是「生成」这一层,
+    # 后面的门禁/精修/字数守卫/去味/落库/章后链路是「校验」那一层,它们是有效的,
+    # 不该跟着一起换。所以只换生成段,其余原样复用。
+    scene_result = None
+    if project.scene_level_enabled:
+        from app.engines.pipeline.scene_chapter import compose_by_scenes
+
+        scene_result = await compose_by_scenes(
+            db, project, chapter_number,
+            style_block=style_block,
+            deai_rules=_deai_rules_block(recent_full),
+            rolling_summary=rolling,
+            recent_tail=recent,
+            handoff_block=handoff_block,
+            outline_summary=outline.summary,
+            outline_title=outline.title,
+            scene_anchor=str(getattr(outline, "scene_anchor", "") or ""),
+            threshold=project.review_pass_threshold,
+            report=_report,
+            revision_directive=revision_block,
+        )
+        draft = scene_result.text
+        # 场景级已有逐场情绪/画面判定,定稿只做「文字层面」的收束(去味诊断 +
+        # 配对反例),不再重复判断情节——同一件事两处判必然给出不一致的结论。
+        _report("2/6 定稿修订")
+        flavor_hits_scene = _flavor_hits_block(ai_flavor_report(draft))
+        finalize_prompt_scene = CHAPTER_FINALIZE_PROMPT.format(
+            chapter_number=chapter_number,
+            chapter_title=outline.title,
+            chapter_purpose=outline.chapter_purpose,
+            drama_task=_drama_task_block(outline),
+            foreshadowing=outline.foreshadowing,
+            chapter_summary=outline.summary,
+            rolling_summary=rolling,
+            known_roster=known_roster,
+            resource_ledger=resource_ledger,
+            draft_text=draft,
+            flavor_hits=flavor_hits_scene,
+            style_directives=style_block + pairwise_examples_block(),
+        )
+        final = _strip_meta(await get_adapter_for(Task.FINALIZE).ask(finalize_prompt_scene))
+        logger.info(
+            "第 %d 章场景级生成:%d 场(通过 %d,未过 %d),定稿完成",
+            chapter_number, scene_result.stats.get("scene_count", 0),
+            scene_result.stats.get("accepted", 0), scene_result.stats.get("rejected", 0),
+        )
+        if scene_result.stats.get("rejected"):
+            review_result["scene_stats"] = scene_result.stats
+
     # ---- 草稿 + 定稿(封装成 _compose,审校回炉时复用) ----
     async def _compose(rev_block: str, draft_label: str, finalize_label: str) -> tuple[str, str]:
         """草稿 → 定稿。rev_block 注入草稿 prompt;返回 (草稿, 定稿)。"""
+        # 场景级模式下,首次生成已由 compose_by_scenes 完成;这里的调用只发生在
+        # 门禁/主审触发的回炉轮——回炉整章重写本就该走「整章一发」,因为意见是
+        # 针对整章的(逐场重写无法响应「第 3 段和第 7 段互相矛盾」这类意见)。
+        if scene_result is not None and not rev_block:
+            return draft, final
         _report(draft_label)
         draft_prompt = CHAPTER_DRAFT_PROMPT.format(
             chapter_number=chapter_number,
@@ -564,8 +620,9 @@ async def generate_chapter(
         f = _strip_meta(await get_adapter_for(Task.FINALIZE).ask(finalize_prompt))
         return d, f
 
-    logger.info("第 %d 章:生成草稿...", chapter_number)
-    draft, final = await _compose(revision_block, "1/6 生成草稿", "2/6 定稿修订")
+    if scene_result is None:
+        logger.info("第 %d 章:生成草稿...", chapter_number)
+        draft, final = await _compose(revision_block, "1/6 生成草稿", "2/6 定稿修订")
 
     # ---- 分级回炉:门禁先行(先修对,再修好),封顶 review_max_revisions 轮 ----
     # 循环两段:①一致性门禁有 blocker → 定点修复(patch)或整章重写,回门禁复查;

@@ -41,6 +41,11 @@ class Project(Base, TimestampMixin):
     review_pass_threshold: Mapped[int] = mapped_column(Integer, default=7)
     review_auto_revise: Mapped[bool] = mapped_column(default=True)
     review_max_revisions: Mapped[int] = mapped_column(Integer, default=3)
+    # 场景级生成(把「章」降级为容器、把「场景」升格为生成单元):
+    # True = 逐场生成 + 逐场验收 + 不合格只重写该场,最后拼成整章;
+    # False(默认)= 一次调用写整章的老路径。默认关是刻意的:新链路先让用户
+    # 手动开、实测手感,确认更好了再考虑改默认。
+    scene_level_enabled: Mapped[bool] = mapped_column(default=False)
     # 连写前置(docs/08 §5.5):True=严格模式,队列中下一章生成前要求上一章
     # 已人工审核通过(approved),否则队列暂停;False(默认,宽松)= 仅 quarantined 暂停。
     queue_require_approved: Mapped[bool] = mapped_column(default=False)

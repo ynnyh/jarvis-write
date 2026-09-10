@@ -157,8 +157,10 @@ async def write_scene(
         recent_tail=recent_tail or "",
         handoff_contract=handoff_block or "",
         previous_scene_tail=(
-            f"\n【上一场结尾(直接接住,不要重述)】\n{_tail_of(previous_text)}\n"
-            if previous_text.strip()
+            # 用「上一场结尾」这个词而不是「上一场尾部」:与 prompt 正文里的措辞一致,
+            # 便于阅读与检索;上一场为空(首场或上一场生成失败)时整块不出现。
+            f"【上一场结尾(直接接住,不要重述)】\n{_tail_of(previous_text)}\n"
+            if (previous_text or "").strip()
             else ""
         ),
         style_directives=style_block or "",
@@ -177,34 +179,64 @@ async def write_scene(
 
 
 def _strip_scene_meta(text: str) -> str:
-    """清掉模型偶尔带出的元信息:场景小标题、markdown 标题、"第N场" 之类。
+    """清掉模型偶尔带出的元信息:场景小标题、markdown 标题、"第N场:xxx" 之类。
 
-    比章级 _strip_meta 更严格:场景级生成明确要求「不要写标题」,所以只要
-    首行像一个短标题(且不含句末标点)就删掉。
+    这个函数踩过一次坑,值得把边界写清楚。
+
+    初版是「只要首行像短标题就删」:既按 `^第\\s*[0-9一二三四五六七八九十]+\\s*场`
+    一刀切,又拿「长度 <= 20 且无句末标点」当判据。结果是「第一场。」「第一场正文内容。」
+    这类正常的叙事首句被整句吃掉,正文直接变空——而这类句子恰恰是场景级生成最想要的
+    「短促有力」。教训:判据必须落在「这一行是元信息」而不是「这一行看起来短」。
+
+    现在的规则:
+      · 明星形态(直接删,不论后面有没有正文):`## 标题`、`第3场 - 祭坛撞破`、
+        `第3场:祭坛撞破`、`第3场《祭坛撞破》`、`【祭坛撞破】`/`（祭坛撞破）`;
+      · 长度启发式(仅当后面还有正文时才删,且一个字的行不算)——整段只有一行时,
+        那一行就是正文,删了等于把这一场清空;
+      · 带句末标点的一律当正文留下。
     """
     import re
 
-    lines = (text or "").strip().splitlines()
-    while lines:
-        head = lines[0].strip()
-        if not head:
-            lines.pop(0)
-            continue
-        if head.startswith("#"):
-            lines.pop(0)
-            continue
-        # "第3场 - 祭坛撞破" / "【祭坛撞破】" / 纯短标题行
-        if re.match(r"^第\s*[0-9一二三四五六七八九十]+\s*场", head):
-            lines.pop(0)
-            continue
-        if re.match(r"^[\[【(（].{1,30}[\]】)）]\s*$", head):
-            lines.pop(0)
-            continue
-        # 短行且无句末标点 → 视为小标题
-        if len(head) <= 20 and not re.search(r"[。!?!?…;:,、\"」』]", head):
+    # 元信息的小标题形态:
+    #   "第3场 - 祭坛撞破" / "第3场:祭坛撞破" / "第3场·祭坛撞破"
+    #   "第3场《祭坛撞破》" / "第3场【祭坛撞破】"
+    #   "【祭坛撞破】" / "（祭坛撞破）" / "## 祭坛撞破"
+    _SEQ_TITLE = re.compile(
+        r"^第\s*[0-9一二三四五六七八九十]+\s*场\s*[-—–:：·、\-]\s*\S+$"
+    )
+    _SEQ_BARE_TITLE = re.compile(
+        r"^第\s*[0-9一二三四五六七八九十]+\s*场\s*[《「【].+[》」】]$"
+    )
+    _BRACKET_TITLE = re.compile(r"^[\[【(（].{1,30}[\]】)）]$")
+    _SENTENCE_END = re.compile(r"[。!?!?…]")
+    # 无句末标点的短行,长度上限;一个字的行不参与(那是正文)
+    _BARE_TITLE_MAX = 16
+
+    def _looks_like_bare_title(s: str) -> bool:
+        return (
+            1 < len(s) <= _BARE_TITLE_MAX
+            and not _SENTENCE_END.search(s)
+        )
+
+    def _is_marker(s: str) -> bool:
+        return bool(
+            s.startswith("#")
+            or _SEQ_TITLE.match(s)
+            or _SEQ_BARE_TITLE.match(s)
+            or _BRACKET_TITLE.match(s)
+        )
+
+    lines = [ln.strip() for ln in (text or "").strip().splitlines() if ln.strip()]
+    # 第一轮:后面还有正文,可以放心地把标题行剥掉(含长度启发式)
+    while len(lines) > 1:
+        head = lines[0]
+        if _is_marker(head) or _looks_like_bare_title(head):
             lines.pop(0)
             continue
         break
+    # 第二轮:只剩一行,只剥明星形态,不拿长度猜
+    while lines and _is_marker(lines[0]):
+        lines.pop(0)
     return "\n".join(lines).strip()
 
 
@@ -322,13 +354,16 @@ def join_scenes(scenes: list[Scene]) -> tuple[str, list[tuple[int, int]]]:
 
     用字符 offset 精确记录而非事后字符串搜索:场与场之间可能有相似的句子,
     搜索定位会歧义,而 offset 是拼的时候就知道的。
+
+    正文本身是「裸的」——小标题、场号、分隔符都是生成时要求模型不要写的东西,
+    这里也不替它补,以免同一处排版规则散落在两处。
     """
     parts: list[str] = []
     anchors: list[tuple[int, int]] = []
     cursor = 0
     for i, s in enumerate(scenes):
         body = (s.content or "").strip()
-        if i > 0:
+        if i > 0 and body:
             parts.append(SCENE_JOIN_SEPARATOR)
             cursor += len(SCENE_JOIN_SEPARATOR)
         start = cursor

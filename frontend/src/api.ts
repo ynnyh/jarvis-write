@@ -372,6 +372,9 @@ export interface Project {
   review_pass_threshold?: number;
   review_auto_revise?: boolean;
   review_max_revisions?: number;
+  // 场景级生成:True=把「章」降级为容器、逐场生成+逐场验收(不合格只重写该场);
+  // False(默认)= 一次调用写整章。默认关,开启为实测手感(见 docs/15)。
+  scene_level_enabled?: boolean;
   // 连写前置:True=严格模式(上一章 approved 才能连写下一章,遇待审章队列暂停)
   queue_require_approved?: boolean;
   // 完本标记:True=已完本。完本后重命名/删除/清空为置灰与后端拦截态,防误删误改。

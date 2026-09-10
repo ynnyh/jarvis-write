@@ -87,6 +87,24 @@ def test_strip_scene_meta_keeps_real_first_sentence():
     assert sw._strip_scene_meta("谁?\n他推开门。") == "谁?\n他推开门。"
 
 
+def test_strip_scene_meta_never_eats_whole_scene():
+    """单行正文无论多短都必须留下 —— 删了就等于把这一场清空。
+
+    这是实测踩出来的坑:初版按 `^第N场` 一刀切,「第一场。」被整句吃掉,
+    整章拼接结果成了「\\n\\n\\n\\n」(四个空场)。同样的道理也适用于「甲」「他死了」
+    这种短到极致但合法的正文。
+    """
+    for body in ["第一场。", "第一场正文内容。", "甲", "他死了", "祭坛撞破"]:
+        assert sw._strip_scene_meta(body) == body, body
+
+
+def test_strip_scene_meta_bare_title_only_when_body_follows():
+    """长度启发式只在这行后面还有正文时才生效。"""
+    assert sw._strip_scene_meta("祭坛撞破\n他推开门。") == "他推开门。"
+    # 单独一行就是正文本身,不猜
+    assert sw._strip_scene_meta("祭坛撞破") == "祭坛撞破"
+
+
 def test_strip_scene_meta_handles_empty():
     assert sw._strip_scene_meta("") == ""
     assert sw._strip_scene_meta("\n\n  \n") == ""

@@ -913,6 +913,25 @@ def _add_clips_promo_film_prompt_columns() -> None:
                 logger.info("迁移:%s 补 film_prompt 列", table)
 
 
+def _add_scene_level_column() -> None:
+    """给 projects 表补 scene_level_enabled 列(场景级生成开关,幂等)。
+
+    存量项目默认 0(关)= 走原来的一次调用写整章,行为零变化。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "projects" not in insp.get_table_names():
+            return
+        if not _column_exists("projects", "scene_level_enabled"):
+            conn.execute(
+                text(
+                    "ALTER TABLE projects ADD COLUMN scene_level_enabled "
+                    "BOOLEAN NOT NULL DEFAULT 0"
+                )
+            )
+            logger.info("迁移:projects 补 scene_level_enabled 列")
+
+
 def _add_scene_tables() -> None:
     """建场景卡两张表(幂等)。
 
@@ -975,6 +994,7 @@ def run_migrations() -> None:
     _add_episode_film_prompt_column()
     _add_clips_promo_film_prompt_columns()
     _add_scene_tables()
+    _add_scene_level_column()
     _disable_word_guard_default()
     _migrate_finalized_to_approved()
     # 先补加密老表存量明文 key,再拷到新表,保证 provider_configs 落库必为密文
