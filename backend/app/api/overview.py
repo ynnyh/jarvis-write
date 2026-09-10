@@ -178,3 +178,31 @@ async def timeline(project_id: int, db: Session = Depends(get_db)):
     """全书剧情时间线:从各章有效章末契约聚合(零 LLM);无契约的章自然断档。"""
     get_project_or_404(db, project_id)
     return {"items": book_timeline(db, project_id)}
+
+
+@router.get("/health-report")
+async def health_report(
+    project_id: int,
+    format: str = "json",
+    db: Session = Depends(get_db),
+):
+    """成书体检报告(docs/15 §7.3):把散在各页签的质量信号收成一份报告。
+
+    只读聚合,零 LLM。`format=markdown` 直接回纯文本(供下载/贴官网),
+    默认 JSON(给前端画曲线)。数据缺失的块**留空并附口径说明**,不填 0 冒充
+    「没问题」——见 engines/book_health.py 的设计边界。
+    """
+    from fastapi.responses import PlainTextResponse
+
+    from app.engines.book_health import book_health
+
+    get_project_or_404(db, project_id)
+    report = book_health(db, project_id)
+    if format == "markdown":
+        return PlainTextResponse(
+            report.markdown, media_type="text/markdown; charset=utf-8"
+        )
+    payload = {
+        k: v for k, v in report.__dict__.items() if not k.startswith("_")
+    }
+    return payload

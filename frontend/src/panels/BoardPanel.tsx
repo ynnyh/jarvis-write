@@ -9,6 +9,7 @@ import BibleBoard from "./board/BibleBoard";
 import TimelineBoard from "./board/TimelineBoard";
 import ForeshadowBoard from "./board/ForeshadowBoard";
 import MotifBoard from "./board/MotifBoard";
+import HealthBoard from "./board/HealthBoard";
 
 export type { BoardTab };
 
@@ -19,5 +20,6 @@ export default function BoardPanel({ pid, outlines, tab, onGotoChapter }: Props 
   if (tab === "timeline") return <TimelineBoard pid={pid} onGotoChapter={onGotoChapter} />;
   if (tab === "foreshadow") return <ForeshadowBoard pid={pid} outlines={outlines} />;
   if (tab === "motifs") return <MotifBoard pid={pid} />;
+  if (tab === "health") return <HealthBoard pid={pid} onGotoChapter={onGotoChapter} />;
   return <OverviewBoard pid={pid} onGotoChapter={onGotoChapter} />;
 }

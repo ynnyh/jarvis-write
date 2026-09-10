@@ -55,6 +55,7 @@ const BOOK_TABS: { key: BookTab; label: string }[] = [
   { key: "timeline", label: "时间线" },
   { key: "foreshadow", label: "伏笔" },
   { key: "motifs", label: "桥段" },
+  { key: "health", label: "成书体检" },
   { key: "publish", label: "投稿" },
   { key: "drama", label: "漫剧" },
   { key: "clips", label: "投流" },
@@ -542,7 +543,7 @@ export default function ProjectPage() {
             {zone === "book" && (
               <>
                 {(bookTab === "overview" || bookTab === "characters" || bookTab === "bible"
-                  || bookTab === "foreshadow" || bookTab === "motifs") && (
+                  || bookTab === "foreshadow" || bookTab === "motifs" || bookTab === "health") && (
                   outlines.length
                     ? <BoardPanel pid={pid} outlines={outlines} tab={bookTab}
                         onGotoChapter={(n) => {

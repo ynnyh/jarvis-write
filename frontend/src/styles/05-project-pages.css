@@ -480,3 +480,73 @@ table.tbl tbody tr:hover { background: var(--surface-2); }
 /* 宽表格滚动容器:表格超宽时容器内横向滚动,表格保持 table 布局(表头/内容列对齐) */
 .tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
+
+/* ---------- 看板:成书体检(docs/15 §7.3) ---------- */
+/* 概要数字格:自适应网格,窄屏自动落两列 */
+.bh-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--sp-2);
+}
+.bh-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+.bh-stat b { font-size: var(--fs-lg); color: var(--text-1); }
+.bh-stat span { font-size: var(--fs-xs); color: var(--text-3); }
+
+/* 逐章条形图:纯 CSS,不引图表库(报告数据稀疏,条形足够看趋势) */
+.bh-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 72px;
+  padding: 6px 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+.bh-bars i {
+  flex: 1;
+  min-width: 3px;
+  border-radius: 2px 2px 0 0;
+  background: var(--brand);
+  transition: height 0.2s ease;
+}
+/* 质感(AI 味)越低越好,用暖色提示「这里高」;节奏用品牌色 */
+.bh-bars.bh-flavor i { background: var(--warn); }
+.bh-bars.bh-tension i { background: var(--brand); }
+.bh-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* 报告里的行内可点按钮(跳章):长得像链接,但是真按钮 */
+.bh-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--brand);
+  font-size: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+.bh-link:hover { color: var(--brand-hover); }
+
+/* 报告内的警示条(无起伏章等) */
+.bh-warn {
+  padding: 8px 10px;
+  background: var(--warn-weak);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-sm);
+  color: var(--warn);
+  font-size: var(--fs-sm);
+}

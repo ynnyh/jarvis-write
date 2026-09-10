@@ -116,6 +116,39 @@ jobs:
         run: npx vitest run --coverage
         continue-on-error: false  # 覆盖率配置可能不全,但测试本身必须通过
 
+  # ============ 评测:确定性轨 + 判别力轨(docs/15 §7.1,零 LLM 零成本) ============
+  # 这两条轨的价值:把「动 prompt 前先跑评测」从口头纪律变成 CI 自动检查。
+  # 确定性轨对既有正文样本算指标比门槛;判别力轨故意写坏正文,验证指标确实会掉
+  # ——后者回答「这套门槛到底拦不拦得住退化」,没做过它,门槛本身也是未经验证的。
+  # 全程不调模型,所以可以每次 PR 都跑(质量轨仍需低峰手动、要 key)。
+  evals-deterministic:
+    name: Evals · deterministic + mutation (no LLM)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 判别力轨(故意写坏正文,验证指标确实会掉)
+        run: python -m app.evals mutation
+
+      - name: 确定性轨门禁(对既有正文样本比门槛)
+        run: python -m app.evals deterministic --dir evals_corpus --target-words 3000
+
   # ============ 工程约定门禁 ============
   convention-check:
     name: Conventions · engine layering + UI conventions

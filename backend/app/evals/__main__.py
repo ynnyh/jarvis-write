@@ -2,14 +2,21 @@
 # -*- coding: utf-8 -*-
 """评测底座命令行(在 backend/ 下执行 `python -m app.evals <子命令>`)。
 
-  prompts   打印全部 prompt 的内容指纹;--save 存档,--diff 与存档比对(改了哪几条)
-  fixtures  列出内置黄金样本书
-  score     对任意正文文件算确定性指标(零 LLM,秒回)
-  export    把库里一本书的架构 + 前 N 章蓝图导成夹具 JSON
-  run       灌夹具、真跑管线逐章生成、落 JSON(要 key;默认用独立的临时库)
-  compare   两份 run JSON 出对比表
-  gate      一次 run 与回归门槛对比(不达标非 0 退出,可挂 CI);--list 看门槛表
-  resume    断点续跑:只重生成 run 里的失败章(欠费 402/断网后用)
+三条轨(docs/15 §7.1):
+  A. 确定性轨(零 LLM,进 CI)
+     deterministic  对既有正文算确定性指标并比门槛(--dir / --files);不调模型
+     mutation       故意写坏正文,验证指标确实会掉——检验「门槛有没有判别力」
+  B. 质量轨(真跑 LLM,低峰手动)
+     run       灌夹具、真跑管线逐章生成、落 JSON(要 key;默认用独立的临时库)
+     compare   两份 run JSON 出对比表
+     gate      一次 run 与回归门槛对比(不达标非 0 退出,可挂 CI);--list 看门槛表
+     resume    断点续跑:只重生成 run 里的失败章(欠费 402/断网后用)
+     trend     把 history.jsonl 拉成表
+  辅助:
+     prompts   打印全部 prompt 的内容指纹;--save 存档,--diff 与存档比对(改了哪几条)
+     fixtures  列出内置黄金样本书
+     score     对任意正文文件算确定性指标(零 LLM,秒回)
+     export    把库里一本书的架构 + 前 N 章蓝图导成夹具 JSON
 
 `run` 的库:默认在 --out-dir 下新建一个独立 SQLite,绝不碰你的 jarvis_write.db;
 显式 --db 指向已有库时,库里若存在非「[评测] 」前缀的项目会拒跑(--force 才放行)。
@@ -382,6 +389,84 @@ def cmd_resume(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---------- deterministic(轨 A:零 LLM,可进 CI) ----------
+def cmd_deterministic(args: argparse.Namespace) -> int:
+    """确定性轨:对既有正文样本算指标并比门槛,不调 LLM。
+
+    正文来源(按优先级):
+      ① `--files` 显式给的文件;
+      ② `--dir` 目录下的 *.txt / *.md(按文件名排序,顺序即章序);
+      ③ 缺省用内置黄金样本的**落盘正文**(若有)——即上轮质量轨留下的正文旁文件。
+    ②③ 都能让 CI 在没有任何模型调用的情况下,对真实生成产物做回归检查。
+    """
+    from pathlib import Path
+
+    from app.evals.deterministic import (
+        evaluate_texts, format_summary, format_violations,
+    )
+
+    texts: list[str] = []
+    source = ""
+    if args.files:
+        for f in args.files:
+            texts.append(Path(f).read_text(encoding="utf-8"))
+        source = f"{len(args.files)} 个文件"
+    elif args.dir:
+        d = Path(args.dir)
+        files = sorted(
+            [p for p in d.iterdir() if p.suffix.lower() in (".txt", ".md")]
+        )
+        for f in files:
+            texts.append(f.read_text(encoding="utf-8"))
+        source = f"{d}({len(files)} 个文件)"
+    if not texts:
+        print(
+            "确定性轨需要正文样本:用 --files 指定文件,或 --dir 指定目录"
+            "(目录下的 *.txt / *.md 按名排序即章序)",
+            file=sys.stderr,
+        )
+        return 2
+
+    run, ok, violations = evaluate_texts(
+        texts, label=args.label or "deterministic",
+        target_words=args.target_words,
+    )
+    print(f"确定性轨 · 样本:{source}")
+    print(format_summary(run))
+    if args.json:
+        print(json.dumps(
+            {"label": run.label, "aggregate": run.aggregate,
+             "per_chapter": run.per_chapter},
+            ensure_ascii=False, indent=2,
+        ))
+    if ok:
+        print("  ✓ 通过:确定性指标在门槛内")
+        return 0
+    print(f"  ✗ {len(violations)} 项越界:")
+    print(format_violations(violations))
+    return 1
+
+
+# ---------- mutation(轨 C:验证门槛有没有判别力) ----------
+def cmd_mutation(args: argparse.Namespace) -> int:
+    """判别力轨:故意写坏正文,验证确定性指标**确实会掉**。
+
+    这是对「门槛本身」的检验——没做过这一步,门槛数值再严也只是未经验证的假设。
+    全检出退出 0;有退化没被检出即退出 1(说明评测体系有盲区,该补指标)。
+    """
+    from app.evals.mutation import (
+        format_mutations, run_mutations,
+    )
+
+    results = run_mutations()
+    print(format_mutations(results))
+    if args.json:
+        print(json.dumps(
+            [r.__dict__ for r in results], ensure_ascii=False, indent=2,
+        ))
+    return 0 if all(r.detected for r in results) else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m app.evals", description="jarvis-write 生成质量评测底座"
@@ -452,6 +537,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fast-model", default=None, help="fast 档模型(缺省同 quality)")
     p.add_argument("--review-model", default=None, help="review 档模型(缺省同 quality)")
     p.set_defaults(func=cmd_resume)
+
+    p = sub.add_parser(
+        "deterministic",
+        help="确定性轨:对既有正文算指标比门槛,零 LLM(可进 CI)",
+    )
+    p.add_argument("files", nargs="*", help="正文文件(按命令行顺序即章序)")
+    p.add_argument("--dir", default=None, help="正文目录(*.txt/*.md,按名排序即章序)")
+    p.add_argument("--label", default=None)
+    p.add_argument("--target-words", type=int, default=None,
+                   help="每章目标字数;给了才判篇幅比")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_deterministic)
+
+    p = sub.add_parser(
+        "mutation",
+        help="判别力轨:故意写坏正文,验证指标确实会掉(检验门槛有效性)",
+    )
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_mutation)
     return parser
 
 

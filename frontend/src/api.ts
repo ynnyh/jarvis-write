@@ -706,6 +706,28 @@ export interface OverviewOut {
   foreshadowings: OverviewForeshadow[];
   characters: OverviewCharacter[];
 }
+/** 成书体检报告(docs/15 §7.3):把散在各页签的质量信号收成一份报告,只读零 LLM。
+ *  缺数据的块留空并附 notes 口径说明——不填 0 冒充「没问题」 */
+export interface HealthFlavorPoint { chapter: number; score: number; chars: number; }
+export interface HealthTensionPoint {
+  chapter: number; scenes: number; mean: number; peak: number; swing: number;
+}
+export interface HealthOverdue {
+  content: string; planted: number; expected: number; importance: string;
+}
+export interface HealthReportOut {
+  project_id: number; title: string;
+  chapters_planned: number; chapters_written: number;
+  total_words: number; avg_chapter_words: number; completion: number;
+  flavor_curve: HealthFlavorPoint[]; mean_flavor: number | null;
+  worst_flavor: HealthFlavorPoint[];
+  tension_curve: HealthTensionPoint[]; tension_flat_chapters: number[];
+  open_issues: number; issues_by_type: Record<string, number>; issue_chapters: number[];
+  foreshadow_total: number; foreshadow_by_status: Record<string, number>;
+  overdue: HealthOverdue[]; debt_ratio: number;
+  prompt_tokens: number; completion_tokens: number; tokens_per_chapter: number;
+  notes: string[]; markdown: string;
+}
 /** 剧情时间线一格:该章章末契约聚合(零 LLM);无契约的章断档不显示 */
 export interface TimelineItem {
   chapter: number; in_story_time: string | null; location: string | null;
@@ -1453,6 +1475,17 @@ export const api = {
   // 全书剧情时间线(各章章末契约聚合,零 LLM)
   timeline: (pid: number) =>
     req<{ items: TimelineItem[] }>("GET", `/api/projects/${pid}/timeline`),
+  // 成书体检报告(只读聚合,零 LLM):体量/质感曲线/节奏曲线/一致性/伏笔/成本
+  healthReport: (pid: number) =>
+    req<HealthReportOut>("GET", `/api/projects/${pid}/health-report`),
+  // 报告原文下载(服务端已渲染好 Markdown,直接取文本)
+  healthReportMarkdown: (pid: number) =>
+    fetch(`${apiBase()}/api/projects/${pid}/health-report?format=markdown`, {
+      headers: authHeaders(),
+    }).then((r) => {
+      if (!r.ok) throw new ApiError(r.status, `HTTP ${r.status}`);
+      return r.text();
+    }),
   // 时序事实时间线(每角色一条轨道,事实为章节区间条;与故事圣经·时间机同源)
   factsTimeline: (pid: number) =>
     req<FactsTimelineOut>("GET", `/api/projects/${pid}/facts-timeline`),
