@@ -29,8 +29,17 @@ from app.engines.adapt import (
     open_threads_block,
     source_text as adapt_source_text,
 )
+from app.engines.script import (
+    ScriptError,
+    find_version,
+    generate_episode as engine_generate_episode,
+    generate_outline as engine_generate_outline,
+    push_version,
+    version_list,
+)
 from app.engines.consistency.extractor import parse_llm_json
 from app.llm.router import Task, get_adapter_for
+from app.prompts.script import SCRIPT_ADAPT_PROMPT
 
 router = APIRouter(prefix="/api/scripts", tags=["scripts"])
 
@@ -74,6 +83,18 @@ class EpisodeOut(BaseModel):
     status: str
     content: str
     word_count: int
+    # 集末交接契约提取状态("ok"/"failed"/"",空=还没提取过)与历史版本数。
+    # 都是 extra 里的元信息,空值不影响老前端。
+    end_state_status: str = ""
+    versions: int = 0
+
+
+class EpisodeVersionOut(BaseModel):
+    version: int
+    word_count: int
+    source: str
+    saved_at: str
+    content: str
 
 
 class EpisodeGenerate(BaseModel):
@@ -109,10 +130,13 @@ def _script_out(s: Script) -> ScriptOut:
 
 
 def _episode_out(e: ScriptEpisode) -> EpisodeOut:
+    extra = e.extra if isinstance(e.extra, dict) else {}
     return EpisodeOut(
         id=e.id, episode_number=e.episode_number, title=e.title,
         synopsis=e.synopsis, opening_hook=e.opening_hook, ending_hook=e.ending_hook,
         status=e.status, content=e.content, word_count=e.word_count,
+        end_state_status=str(extra.get("end_state_status") or ""),
+        versions=len(extra.get("versions") or []),
     )
 
 
@@ -233,7 +257,9 @@ async def update_episode(
     row = _get_episode(db, script_id, n)
     if req.title is not None:
         row.title = req.title.strip()
-    if req.content is not None:
+    if req.content is not None and req.content != (row.content or ""):
+        # 手改也算一版:改坏了能退回去,不用重新生成一遍
+        push_version(row, source="manual")
         row.content = req.content
         row.word_count = len(req.content)
     if req.status is not None:
@@ -243,24 +269,47 @@ async def update_episode(
     return _episode_out(row)
 
 
+@router.get("/{script_id}/episodes/{n}/versions", response_model=list[EpisodeVersionOut])
+async def list_episode_versions(
+    script_id: int,
+    n: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """本集的历史版本(最新在前)。生成与手改前都会自动存一版。"""
+    _get_script(db, script_id, user)
+    row = _get_episode(db, script_id, n)
+    return version_list(row)
+
+
+@router.post(
+    "/{script_id}/episodes/{n}/versions/{version}/restore",
+    response_model=EpisodeOut,
+)
+async def restore_episode_version(
+    script_id: int,
+    n: int,
+    version: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """回退到某一历史版本;当前正文会先存成一版,回退本身也可再退。"""
+    _get_script(db, script_id, user)
+    row = _get_episode(db, script_id, n)
+    target = find_version(row, version)
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"第 {version} 版不存在")
+    push_version(row, source=f"before-restore-v{version}")
+    row.content = target["content"]
+    row.word_count = len(target["content"])
+    if row.status == "outlined":
+        row.status = "drafted"
+    db.commit()
+    db.refresh(row)
+    return _episode_out(row)
+
+
 # ---------- LLM:分集大纲 ----------
-
-_OUTLINE_PROMPT = """你是资深电视剧编剧。根据下面的剧本设定,生成分集大纲。
-
-【剧名】{title}
-【类型】{genre}
-【一句话故事】{logline}
-【总集数】{target_episodes} 集
-{seed_block}
-要求:
-1. 恰好 {target_episodes} 集,每集包含:集名(2-8字)、本集梗概(60-120字)、开场钩子(一句)、结尾钩子(一句)
-2. 主线贯穿全部集数,有整体爬升感;每集有独立小冲突
-3. 集与集之间因果关系清楚,结尾钩子勾着观众看下一集
-
-严格输出 JSON(不要 markdown 围栏):
-{{"episodes": [{{"episode_number": 1, "title": "集名", "synopsis": "梗概", "opening_hook": "开场钩子", "ending_hook": "结尾钩子"}}]}}
-"""
-
 
 @router.post("/{script_id}/generate-outline")
 async def generate_outline(
@@ -270,20 +319,11 @@ async def generate_outline(
 ):
     """AI 生成分集大纲:清掉旧集,按 target_episodes 重建全部集大纲。"""
     s = _get_script(db, script_id, user)
-    seed_block = f"【灵感种子】{s.logline}\n" if s.logline.strip() else ""
-    prompt = _OUTLINE_PROMPT.format(
-        title=s.title, genre=s.genre or "剧情", logline=s.logline or "(未填)",
-        target_episodes=s.target_episodes, seed_block=seed_block,
-    )
     adapter = get_adapter_for(Task.SUMMARY, max_tokens=3000, timeout=180)
     try:
-        raw = await adapter.ask(prompt)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"分集大纲生成失败: {exc}") from exc
-    data = parse_llm_json(raw) or {}
-    episodes = data.get("episodes") or []
-    if not episodes:
-        raise HTTPException(status_code=502, detail="模型没有返回可用的大纲,请重试。")
+        episodes = await engine_generate_outline(adapter, s)
+    except ScriptError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     db.query(ScriptEpisode).filter(ScriptEpisode.script_id == script_id).delete()
     for i, ep in enumerate(episodes[: s.target_episodes], 1):
@@ -306,29 +346,7 @@ async def generate_outline(
     return {"episodes": [_episode_out(r).model_dump() for r in rows]}
 
 
-# ---------- LLM:逐集剧本生成 ----------
-
-_EPISODE_PROMPT = """你是职业电视剧编剧,撰写第 {n} 集「{title}」的完整剧本。
-
-【类型】{genre}
-【本集梗概】{synopsis}
-【开场钩子】{opening_hook}
-【结尾钩子】{ending_hook}
-{prev_block}{memo_block}{extra_block}
-格式(Fountain 风格,纯文本):
-场景标题行:内景/外景 · 日/夜 · 地点
-动作行:现在时态描写,只写可见可听的
-对白:人物名独立一行居中,下一行是台词;括号内注语气
-
-要求:
-1. 只写本集内容,不越界到其他集
-2. 场景 3-6 个,每个场景有明确的地点与时间变化
-3. 对白要有潜台词,不要直接说明情绪
-4. 结尾必须落在结尾钩子上
-
-直接输出剧本正文,不要解释:
-"""
-
+# ---------- LLM:逐集剧本生成(编排在 app/engines/script/) ----------
 
 @router.post("/{script_id}/episodes/{n}/generate", response_model=EpisodeOut)
 async def generate_episode(
@@ -338,62 +356,27 @@ async def generate_episode(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """AI 生成单集剧本:基于分集大纲 + 前集结尾 + 风格备忘。"""
+    """AI 生成单集剧本:分集大纲 + 上一集集末契约与结尾 + 风格备忘。
+
+    编排在 app/engines/script/:输出过不了 Fountain 格式门禁会整发重试一次,
+    写成后顺带提取「集末交接契约」供下一集衔接,覆盖正文前存一版快照。
+    """
     s = _get_script(db, script_id, user)
     ep = _get_episode(db, script_id, n)
-    prev = (
-        db.query(ScriptEpisode)
-        .filter(ScriptEpisode.script_id == script_id, ScriptEpisode.episode_number < n)
-        .order_by(ScriptEpisode.episode_number.desc())
-        .first()
-    )
-    prev_block = ""
-    if prev is not None and prev.content:
-        prev_block = f"【上一集结尾(衔接用,只取最后 400 字)】\n{prev.content[-400:]}\n"
-    memo = s.style_memo or ""
-    memo_block = f"【剧本文风备忘】\n{memo}\n" if memo.strip() else ""
-    extra_block = f"【用户补充方向】\n{req.extra_direction}\n" if req.extra_direction.strip() else ""
-    prompt = _EPISODE_PROMPT.format(
-        n=n, title=ep.title or s.title, genre=s.genre or "剧情",
-        synopsis=ep.synopsis or ep.title, opening_hook=ep.opening_hook,
-        ending_hook=ep.ending_hook, prev_block=prev_block, memo_block=memo_block,
-        extra_block=extra_block,
-    )
-    adapter = get_adapter_for(Task.DRAFT, max_tokens=4000, timeout=300)
+    draft_adapter = get_adapter_for(Task.DRAFT, max_tokens=4000, timeout=300)
+    state_adapter = get_adapter_for(Task.SUMMARY, max_tokens=2000, timeout=180)
     try:
-        content = await adapter.ask(prompt)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"剧本生成失败: {exc}") from exc
-    if not content.strip():
-        raise HTTPException(status_code=502, detail="模型没有返回剧本内容,请重试。")
-    ep.content = content
-    ep.word_count = len(content)
-    ep.status = "drafted"
-    db.commit()
+        await engine_generate_episode(
+            db, s, ep, draft_adapter, state_adapter,
+            extra_direction=req.extra_direction,
+        )
+    except ScriptError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     db.refresh(ep)
     return _episode_out(ep)
 
 
 # ---------- 小说改编:定稿章 → 改编蓝本 → 分集大纲 → 建剧本 ----------
-
-_ADAPT_PROMPT = """你是资深电视剧编剧兼改编顾问。把下面的小说原文改编成 {target_episodes} 集的剧本分集大纲。
-
-【原著】{title}({chapter_count} 章)
-{assets_block}{banned_block}{threads_block}
-【原著正文(改编素材)】
-{source_text}
-
-改编要求:
-1. 忠实原著的主线冲突与人物弧光;必要的取舍写进 "adapt_note"
-2. 上面的【本书基因】是作者给这本书定的味,改编后味道不能丢;【创作偏好档案】里的禁忌避雷同样适用于本剧
-3. 【作者雷区】里的桥段/意象,新写的内容一律不得使用(源正文里已有的按正文忠实改编,不受此限)
-4. 【章末未决线索】是原书在此处欠着的悬念,能兑现的就在对应集里兑现,不要凭空另起炉灶
-5. 恰好 {target_episodes} 集,每集:集名/梗概(60-120字)/开场钩子/结尾钩子
-6. "logline" 用一句话概括整部剧
-
-严格输出 JSON(不要 markdown 围栏):
-{{"logline": "一句话", "adapt_note": "取舍说明", "episodes": [{{"episode_number": 1, "title": "集名", "synopsis": "梗概", "opening_hook": "钩子", "ending_hook": "钩子"}}]}}
-"""
 
 
 @adapt_router.post("/{project_id}/adapt-to-script")
@@ -425,7 +408,7 @@ async def adapt_to_script(
     # 中段(结尾是卡点素材的来源)+ 书级资产 + 未决线索。
     chapter_numbers = [ch.chapter_number for ch in chapters]
     body, used = adapt_source_text(db, project_id, chapter_numbers, DEFAULT_SOURCE_BUDGET)
-    prompt = _ADAPT_PROMPT.format(
+    prompt = SCRIPT_ADAPT_PROMPT.format(
         title=project.title, chapter_count=len(chapters),
         target_episodes=req.target_episodes, source_text=body,
         assets_block=book_assets_block(project),

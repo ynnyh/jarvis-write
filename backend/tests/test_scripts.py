@@ -50,6 +50,38 @@ class _Adapter:
         return self.reply
 
 
+class _DispatchAdapter:
+    """按 prompt 内容分派回复的桩(大纲 / 剧本正文 / 集末契约各回各的)。"""
+
+    def __init__(self, *, outline: str = "", episode: str = "", end_state: str = "{}"):
+        self.outline = outline
+        self.episode = episode
+        self.end_state = end_state
+        self.prompts: list[str] = []
+
+    async def ask(self, prompt: str, system=None) -> str:
+        self.prompts.append(prompt)
+        if "on_stage" in prompt:          # 集末交接契约提取
+            return self.end_state
+        if '"episodes"' in prompt:        # 分集大纲 / 改编
+            return self.outline
+        return self.episode               # 单集剧本正文
+
+
+# 够长、带多个场景标题行的剧本正文(长度需过格式门禁的 120 字下限)
+_EPISODE_BODY = (
+    "第一场 内景·夜·当铺\n"
+    "掌柜:(抬眼)当什么?\n客人:当一段往事。\n"
+    "柜台上那枚戒指滚了半圈,停在灯影里,没人去捡。\n\n"
+    "第二场 外景·夜·长街\n"
+    "雨没停。客人把领子竖起来,拐进巷口,身后当铺的灯一盏盏灭下去。\n"
+    "更夫的梆子响了两声,像是在数谁还醒着。\n\n"
+    "第三场 内景·晨·渡口茶棚\n"
+    "堂倌:(擦桌子)客官,这么早?\n客人:等人。\n"
+    "他把那张当票摊在桌上,墨迹被水汽洇开了一角。"
+)
+
+
 def _outline_reply(n: int = 4) -> str:
     return json.dumps({"episodes": [
         {
@@ -195,7 +227,7 @@ def test_generate_episode_uses_prev_tail_and_memo(client):
     db.commit()
     db.close()
 
-    adapter = _Adapter("第一场 内景·夜·当铺\n掌柜:(抬眼)当什么?\n客人:当一段往事。")
+    adapter = _Adapter(_EPISODE_BODY)
     with patch("app.api.scripts.get_adapter_for", return_value=adapter):
         r = client.post(f"/api/scripts/{sid}/episodes/2/generate", headers=headers,
                         json={"extra_direction": "本集多写市井声"})
@@ -215,6 +247,128 @@ def test_generate_episode_uses_prev_tail_and_memo(client):
                            headers=headers, json={}).status_code == 502
     eps_now = client.get(f"/api/scripts/{sid}/episodes", headers=headers).json()
     assert next(e for e in eps_now if e["episode_number"] == 3)["content"] == ""
+
+
+def test_generate_episode_rejects_broken_output(client):
+    """格式门禁:输出没有场景标题行 → 整发重试一次;仍崩坏则 502 且不落库。"""
+    headers = _auth(client, "scripts_gate")
+    sid = client.post("/api/scripts", headers=headers, json={
+        "title": "断桥", "genre": "悬疑", "target_episodes": 2,
+    }).json()["id"]
+    _script_with_outline(client, headers, sid)
+
+    # 够长但没有场景标题行 —— 模型跑偏成了散文
+    adapter = _Adapter("这一集讲的是一个人在雨夜里反复回想往事,想起的那些人一个个走远了。" * 6)
+    with patch("app.api.scripts.get_adapter_for", return_value=adapter):
+        r = client.post(f"/api/scripts/{sid}/episodes/1/generate", headers=headers, json={})
+    assert r.status_code == 502, r.text
+    assert "场景标题" in r.json()["detail"]
+    assert len(adapter.prompts) >= 2  # 崩坏后确实重试了一次
+    eps = client.get(f"/api/scripts/{sid}/episodes", headers=headers).json()
+    assert next(e for e in eps if e["episode_number"] == 1)["content"] == ""
+
+
+def test_end_state_feeds_next_episode(client):
+    """集末交接契约:写完后落 extra,下一集 prompt 注入「上一集集末状态」。"""
+    headers = _auth(client, "scripts_state")
+    sid = client.post("/api/scripts", headers=headers, json={
+        "title": "渡口", "genre": "年代", "target_episodes": 3,
+    }).json()["id"]
+    _script_with_outline(client, headers, sid)
+
+    end_state = json.dumps({
+        "in_story_time": "第三日 深夜", "location": "破庙内",
+        "on_stage": ["沈墨", "老船工"],
+        "character_states": [{"name": "沈墨", "state": "左臂刀伤未愈", "doing": "刚入睡"}],
+        "resolved": ["戒指当了三两银子"],
+        "open_threads": ["庙外脚步声未查明"],
+    }, ensure_ascii=False)
+    adapter = _DispatchAdapter(episode=_EPISODE_BODY, end_state=end_state)
+    with patch("app.api.scripts.get_adapter_for", return_value=adapter):
+        assert client.post(f"/api/scripts/{sid}/episodes/1/generate",
+                           headers=headers, json={}).status_code == 200
+        r2 = client.post(f"/api/scripts/{sid}/episodes/2/generate", headers=headers, json={})
+    assert r2.status_code == 200, r2.text
+
+    from app.db.session import SessionLocal
+    from app.db.models import ScriptEpisode
+
+    db = SessionLocal()
+    row = db.query(ScriptEpisode).filter(
+        ScriptEpisode.script_id == sid, ScriptEpisode.episode_number == 1
+    ).first()
+    assert row.extra.get("end_state_status") == "ok"
+    assert row.extra["end_state"]["location"] == "破庙内"
+    db.close()
+
+    # 第 2 集的 prompt 拿到了上一集的集末状态(契约供事实,不再只靠末 400 字)
+    assert any("上一集集末状态" in p for p in adapter.prompts)
+    assert any("破庙内" in p for p in adapter.prompts)
+    assert any("庙外脚步声未查明" in p for p in adapter.prompts)
+
+
+def test_regenerate_keeps_previous_version(client):
+    """重写不丢旧版:覆盖正文前存一版到 extra.versions。"""
+    headers = _auth(client, "scripts_ver")
+    sid = client.post("/api/scripts", headers=headers, json={
+        "title": "旧稿", "genre": "剧情", "target_episodes": 2,
+    }).json()["id"]
+    _script_with_outline(client, headers, sid)
+    client.patch(f"/api/scripts/{sid}/episodes/1", headers=headers,
+                 json={"content": _EPISODE_BODY})
+
+    adapter = _DispatchAdapter(episode=_EPISODE_BODY + "\n\n第四场 外景·日·码头\n船靠岸了。")
+    with patch("app.api.scripts.get_adapter_for", return_value=adapter):
+        assert client.post(f"/api/scripts/{sid}/episodes/1/generate",
+                           headers=headers, json={}).status_code == 200
+
+    from app.db.session import SessionLocal
+    from app.db.models import ScriptEpisode
+
+    db = SessionLocal()
+    row = db.query(ScriptEpisode).filter(
+        ScriptEpisode.script_id == sid, ScriptEpisode.episode_number == 1
+    ).first()
+    versions = list(row.extra.get("versions") or [])
+    db.close()
+    assert len(versions) == 1 and _EPISODE_BODY in versions[0]["content"]
+
+
+def test_episode_versions_list_and_restore(client):
+    """历史版本可查可回退:覆盖正文前存一版,回退后当前稿也存一版。"""
+    headers = _auth(client, "scripts_vrestore")
+    sid = client.post("/api/scripts", headers=headers, json={
+        "title": "回档", "genre": "剧情", "target_episodes": 2,
+    }).json()["id"]
+    _script_with_outline(client, headers, sid)
+
+    first = _EPISODE_BODY
+    second = _EPISODE_BODY + "\n\n第四场 外景·日·码头\n船靠岸了,没人下船。"
+    # 首版(此前是空稿)→ 不存版;再改 → 把首版存成 v1
+    assert client.patch(f"/api/scripts/{sid}/episodes/1", headers=headers,
+                        json={"content": first}).status_code == 200
+    r = client.patch(f"/api/scripts/{sid}/episodes/1", headers=headers,
+                     json={"content": second})
+    assert r.status_code == 200 and r.json()["content"] == second
+    assert r.json()["versions"] == 1
+    # 内容没变 → 不重复存版
+    assert client.patch(f"/api/scripts/{sid}/episodes/1", headers=headers,
+                        json={"content": second}).json()["versions"] == 1
+
+    versions = client.get(f"/api/scripts/{sid}/episodes/1/versions", headers=headers).json()
+    assert [v["version"] for v in versions] == [1]
+    assert versions[0]["source"] == "manual"
+    assert versions[0]["content"] == first and versions[0]["word_count"] == len(first)
+
+    # 回退到 v1 → 正文变回 first,且当前稿(second)被存成新的一版
+    r = client.post(f"/api/scripts/{sid}/episodes/1/versions/1/restore", headers=headers)
+    assert r.status_code == 200 and r.json()["content"] == first
+    versions = client.get(f"/api/scripts/{sid}/episodes/1/versions", headers=headers).json()
+    assert [v["version"] for v in versions] == [2, 1]
+    assert versions[0]["source"] == "before-restore-v1" and versions[0]["content"] == second
+    # 不存在的版本 → 404
+    assert client.post(f"/api/scripts/{sid}/episodes/1/versions/99/restore",
+                       headers=headers).status_code == 404
 
 
 # ---------- 小说改编 ----------
