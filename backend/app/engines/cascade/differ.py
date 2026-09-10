@@ -30,9 +30,11 @@ OUTLINE_EDITABLE_FIELDS = (
     "chapter_role",
     "chapter_purpose",
     "suspense_level",
+    "emotional_tone",
     "foreshadowing",
     "plot_twist_level",
     "summary",
+    "scene_anchor",
     "beats",
     "characters_involved",
     "key_items",
@@ -40,12 +42,16 @@ OUTLINE_EDITABLE_FIELDS = (
 )
 
 # 动了这些字段 → 疑似 major,交 LLM 精判
+# 情绪基调 / 本章戏核也算情节性:改了它们,本章正文的写法就整体不成立了
+# (基调决定场景与对白节奏,戏核决定全章围着哪一瞬铺)。
 _PLOT_FIELDS = {
     "summary",
     "foreshadowing",
     "plot_twist_level",
     "characters_involved",
     "chapter_purpose",
+    "emotional_tone",
+    "scene_anchor",
 }
 
 # 纯展示性元数据:标题不进正文,改了也不需要重写正文

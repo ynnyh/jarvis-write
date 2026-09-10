@@ -9,8 +9,8 @@ function mk(n: number, title: string, summary: string, role: string, fore = ""):
   return {
     id: n, chapter_number: n, title, chapter_role: role,
     chapter_purpose: "", suspense_level: "", foreshadowing: fore,
-    plot_twist_level: "", summary, characters_involved: null,
-    key_items: [], scene_location: "", current_version: 1,
+    emotional_tone: "", plot_twist_level: "", summary, characters_involved: null,
+    key_items: [], scene_location: "", current_version: 1, scene_anchor: "",
   };
 }
 

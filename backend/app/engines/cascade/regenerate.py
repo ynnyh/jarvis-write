@@ -87,7 +87,8 @@ async def cascade_regenerate(
 
         for field in (
             "title", "chapter_role", "chapter_purpose", "suspense_level",
-            "foreshadowing", "plot_twist_level", "summary",
+            "emotional_tone", "foreshadowing", "plot_twist_level", "summary",
+            "scene_anchor",
             "characters_involved", "key_items", "scene_location",
         ):
             if field in target:

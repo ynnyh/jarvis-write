@@ -109,9 +109,11 @@ class OutlineOut(BaseModel):
     chapter_role: str
     chapter_purpose: str
     suspense_level: str
+    emotional_tone: str = ""
     foreshadowing: str
     plot_twist_level: str
     summary: str
+    scene_anchor: str = ""
     characters_involved: list[Any]
     key_items: list[Any]
     scene_location: str

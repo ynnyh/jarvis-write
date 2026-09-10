@@ -49,8 +49,11 @@ export default function OutlineItem({
       {open && !editing && (
         <div className="outline-detail">
           <div className="muted">{o.summary}</div>
+          {o.scene_anchor?.trim() && (
+            <div className="meta-line">戏核:{o.scene_anchor}</div>
+          )}
           <div className="meta-line">
-            伏笔:{o.foreshadowing || "无"} · 人物:{(o.characters_involved ?? []).join("、") || "—"} · 场景:{o.scene_location || "—"}
+            基调:{o.emotional_tone?.trim() || "—"} · 伏笔:{o.foreshadowing || "无"} · 人物:{(o.characters_involved ?? []).join("、") || "—"} · 场景:{o.scene_location || "—"}
           </div>
           <div className="actions mt-2">
             <button className="btn-sm" onClick={onStartEdit}>编辑本章</button>
@@ -94,6 +97,18 @@ export default function OutlineItem({
                 onChange={(e) => onFormChange({ ...form, scene_location: e.target.value })} />
             </div>
           </div>
+          <div className="row">
+            <div>
+              <label className="fl">情绪基调(压抑 / 紧绷 / 荒诞 / 温热 / 悲凉 / 亢奋…)</label>
+              <input type="text" value={(form.emotional_tone as string) ?? ""}
+                placeholder="决定本章的调子;相邻章别总用一个调"
+                onChange={(e) => onFormChange({ ...form, emotional_tone: e.target.value })} />
+            </div>
+          </div>
+          <label className="fl">本章戏核(这一章必须让读者记住的那一个瞬间)</label>
+          <input type="text" value={(form.scene_anchor as string) ?? ""}
+            placeholder="如:他终于认出那道疤 —— 全章围着它铺,其余都是铺垫"
+            onChange={(e) => onFormChange({ ...form, scene_anchor: e.target.value })} />
           <label className="fl">本章简述(改情节走向会触发大改分析)</label>
           <textarea rows={4} value={form.summary as string}
             onChange={(e) => onFormChange({ ...form, summary: e.target.value })} />

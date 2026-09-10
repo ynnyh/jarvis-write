@@ -841,6 +841,27 @@ def _add_drama_dialogue_chain_columns() -> None:
                 logger.info("迁移:drama_shots 补 emotion 列")
 
 
+def _add_outline_drama_columns() -> None:
+    """outlines 补情绪基调 / 本章戏核两列(幂等)。
+
+    蓝图层就定下"这一章是什么调子、必须让读者记住哪一瞬",正文才谈得上
+    "该精彩时精彩、该压抑时压抑"。老蓝图没有这两列 → 空串,行为不变。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "outlines" not in insp.get_table_names():
+            return  # create_all 会按新模型建表,无需补列
+        for col, ddl in (
+            ("emotional_tone", "VARCHAR(100) DEFAULT ''"),
+            ("scene_anchor", "TEXT DEFAULT ''"),
+        ):
+            if not _column_exists("outlines", col):
+                conn.execute(
+                    text(f"ALTER TABLE outlines ADD COLUMN {col} {ddl}")
+                )
+                logger.info("迁移:outlines 补 %s 列", col)
+
+
 def _add_render_episode_id_column() -> None:
     """render_tasks 补 episode_id 列(整集一键合成任务,幂等)。
 
@@ -929,6 +950,7 @@ def run_migrations() -> None:
     _add_project_render_mode_column()
     _add_drama_dialogue_chain_columns()
     _add_render_episode_id_column()
+    _add_outline_drama_columns()
     _add_episode_film_prompt_column()
     _add_clips_promo_film_prompt_columns()
     _disable_word_guard_default()

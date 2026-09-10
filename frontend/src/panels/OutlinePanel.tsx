@@ -175,6 +175,7 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
       title: o.title, summary: o.summary, foreshadowing: o.foreshadowing,
       chapter_role: o.chapter_role, chapter_purpose: o.chapter_purpose,
       scene_location: o.scene_location, suspense_level: o.suspense_level,
+      emotional_tone: o.emotional_tone, scene_anchor: o.scene_anchor,
     });
     setEditResult(null); setImpact(null); setErr(""); setFlash(""); setGenDone(null);
   }

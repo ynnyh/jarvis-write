@@ -28,9 +28,16 @@ class Outline(Base, TimestampMixin):
     chapter_role: Mapped[str] = mapped_column(String(100), default="")
     chapter_purpose: Mapped[str] = mapped_column(Text, default="")
     suspense_level: Mapped[str] = mapped_column(String(50), default="")
+    # 本章情绪基调(压抑 / 紧绷 / 荒诞 / 温热 / 悲凉 / 亢奋 …)。
+    # 蓝图层就定调,正文才有"该精彩时精彩、该压抑时压抑"的编排——此前每章的
+    # 情绪全靠写正文时随机,全书就成了一条平线(白水的根因之一)。
+    emotional_tone: Mapped[str] = mapped_column(String(100), default="")
     foreshadowing: Mapped[str] = mapped_column(Text, default="")
     plot_twist_level: Mapped[str] = mapped_column(String(50), default="")
     summary: Mapped[str] = mapped_column(Text, default="")
+    # 本章戏核:这一章必须让读者记住的那一个瞬间(一句话)。
+    # 没有戏核的章,写得再工整也是白水——正文围绕它铺,其余都是铺垫。
+    scene_anchor: Mapped[str] = mapped_column(Text, default="")
     # 章内节拍:3-5 个场景 beat(list[str]),让正文有骨架、不靠模型即兴铺场景。
     # 存量章节为空 list;为空时 draft prompt 回落到只用 summary(向后兼容)。
     beats: Mapped[list[Any]] = mapped_column(JSON, default=list)

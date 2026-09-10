@@ -414,8 +414,12 @@ export interface Architecture {
 export interface Outline {
   id: number; chapter_number: number; title: string; chapter_role: string;
   chapter_purpose: string; suspense_level: string; foreshadowing: string;
+  // 情绪基调:蓝图层定的本章底色(压抑/紧绷/荒诞/温热…),正文照此定调
+  emotional_tone: string;
   plot_twist_level: string; summary: string; characters_involved: string[] | null;
   key_items: unknown[]; scene_location: string; current_version: number;
+  // 本章戏核:这一章必须让读者记住的那一个瞬间,全章围着它铺
+  scene_anchor: string;
   beats?: string[] | null;
 }
 export interface ChapterBrief {

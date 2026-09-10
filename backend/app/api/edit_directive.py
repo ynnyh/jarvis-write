@@ -72,9 +72,13 @@ class ApplyResult(BaseModel):
 
 
 def _blueprint_digest(outlines: list[Outline]) -> str:
-    """全部章蓝图的紧凑文本(章号/标题/简述),超长截断控制 token。"""
+    """全部章蓝图的紧凑文本(章号/标题/简述/情绪基调),超长截断控制 token。
+
+    基调是「哪几章太平/太压」这类指令的定位依据——只给简述,模型看不出情绪线。
+    """
     lines = [
         f"第{o.chapter_number}章《{o.title}》:{(o.summary or '')[:_SUMMARY_SNIPPET]}"
+        + (f"[基调:{o.emotional_tone}]" if (o.emotional_tone or "").strip() else "")
         for o in outlines
     ]
     digest = "\n".join(lines)

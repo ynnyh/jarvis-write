@@ -32,12 +32,14 @@ _FIELD_MAP = {
     "本章定位": "chapter_role",
     "核心作用": "chapter_purpose",
     "悬念密度": "suspense_level",
+    "情绪基调": "emotional_tone",
     "伏笔操作": "foreshadowing",
     "认知颠覆": "plot_twist_level",
     "涉及人物": "characters_involved",
     "关键道具": "key_items",
     "场景地点": "scene_location",
     "本章简述": "summary",
+    "本章戏核": "scene_anchor",
     "本章节拍": "beats",
 }
 

@@ -78,6 +78,10 @@ logger = logging.getLogger("jarvis-write.chapter")
 
 _REVISION_EXCERPT_CHARS = 1500  # 重写时上一版正文注入草稿 prompt 的截断长度
 
+# 反 AI 腔扩展规则的触发线:最近几章的加权命中总数达到这个数,说明本书正在往
+# 套话里滑,生成阶段就得把完整禁令摆出来;否则只给核心版(见 _deai_rules_block)。
+_DEAI_ESCALATE_HITS = 8
+
 # 兼容性再导出:章后维护/共享上下文/重写研讨已拆到子模块,老调用方
 # (api/chapters/*、diagnosis、outline_discuss 等)仍从这里导入,不动。
 from app.engines.pipeline.chapter_context import (  # noqa: E402,F401
@@ -140,6 +144,114 @@ def _beats_block(outline: Outline) -> str:
         "按以下场景节拍逐个推进(每个节拍写成一个有画面、有张力的场景,"
         "顺序可微调,但都要落实):\n" + lines
     )
+
+
+# ---- 本章戏剧任务:把「写什么」的注意力补回来 ----
+# 蓝图只交代「发生了什么」,没人告诉模型「这一章要让读者感受到什么」。而形式
+# 约束(反 AI 腔 + 文风质感)长期占掉草稿模板近半篇幅,净信号就成了「别出格、
+# 别用力」——生成结果正是「每章都工整、都挑不出毛病,但都像喝白水」。
+# 这里用蓝图已有字段(定位/悬念密度/认知颠覆)做确定性推导,零额外 LLM 调用。
+_ROLE_TASKS: tuple[tuple[str, str], ...] = (
+    ("高潮", "本章是这一段的总爆发,前面攒的力要在这里兑现。把最强的场面压在中后段,"
+             "别一上来就用满,让读者一路提到顶点再砸下来。"),
+    ("转折", "本章必须把读者已经相信的某件事掀翻。前 2/3 铺垫得越稳、越像那么回事,"
+             "翻的那一刻才越响;不要提前泄底,也不要翻完立刻解释。"),
+    ("危机", "本章要把主角逼到没有退路的境地。让读者跟着他一起难受、一起想办法,"
+             "困境别轻轻就解开——轻易脱身的危机等于没危机。"),
+    ("铺垫", "本章可以压着写,但压是为了后面弹得更高。压不等于没味道:埋一个让人"
+             "不安的细节、一句后来才懂的话,让平静底下有东西在走。"),
+    ("过渡", "本章承上启下,篇幅可以收着,但必须完成一件事:让读者对下一章产生"
+             "具体的期待,而不是读完毫无牵挂。"),
+    ("结局", "本章收束全书:该还的债要还,人物要有落点。收得干脆,别拖泥带水,"
+             "也别急着把一切解释清楚。"),
+)
+_DEFAULT_ROLE_TASK = (
+    "本章要往前推一格:让读者读完时,人物的处境或心境与开头相比确实变了,"
+    "而不是原地走了一圈。"
+)
+_SUSPENSE_TASKS: tuple[tuple[str, str], ...] = (
+    ("高", "每 300-500 字就要有一个勾着读者往下看的东西——一个疑问、一个反常、"
+           "一句没说完的话。"),
+    ("中", "章内至少两处让读者心里一紧的地方,别一路平推到底。"),
+    ("低", "可以写得从容,但章末必须留下一个具体的悬念,不是一句空泛的感叹。"),
+)
+
+
+def _drama_task_block(outline: Outline) -> str:
+    """本章的戏剧任务:这一章要让读者的情绪往哪走。
+
+    确定性推导,不给模型加任何调用。治「文绉绉、喝白水」——每章先定调、定戏核,
+    再动笔。
+    """
+    role = str(outline.chapter_role or "")
+    task = _DEFAULT_ROLE_TASK
+    for key, value in _ROLE_TASKS:
+        if key in role:
+            task = value
+            break
+    lines = [f"- 本章任务({role or '未指定定位'}):{task}"]
+
+    suspense = str(outline.suspense_level or "")
+    for key, value in _SUSPENSE_TASKS:
+        if key in suspense:
+            lines.append(f"- 悬念密度({suspense}):{value}")
+            break
+
+    # 认知颠覆在蓝图里是「1-5 星」(如 ★★★★☆),也可能被写成「强/高」字样
+    twist = str(outline.plot_twist_level or "")
+    if "强" in twist or "高" in twist or twist.count("★") >= 4:
+        lines.append(
+            f"- 认知颠覆({twist}):必须有一个推翻读者既有判断的时刻,"
+            "且要在正文里给出足以支撑它的细节,不能靠人物嘴上说破。"
+        )
+
+    # 这三条与定位无关,任何一章都该有——「戏核」「基调」「落差」是治白水的三件套
+    # 调子与戏核:蓝图定过就照蓝图执行(那是全书编排),老蓝图没定过才让模型自定
+    tone = str(getattr(outline, "emotional_tone", "") or "").strip()
+    if tone:
+        lines.append(
+            f"- 情绪基调(蓝图已定:{tone}):全章的场景、对话节奏、细节选择都贴着这个"
+            "调子走;要换调必须是有意为之的转折,不是写着写着跑掉了。"
+        )
+    else:
+        lines.append(
+            "- 情绪基调:先给本章定一个调子(压抑/紧绷/荒诞/温热/悲凉/亢奋…),场景、"
+            "对话节奏、细节选择都贴着这个调子走;换调必须是有意为之的转折,"
+            "不是写着写着跑掉了。"
+        )
+    anchor = str(getattr(outline, "scene_anchor", "") or "").strip()
+    if anchor:
+        lines.append(
+            f"- 本章戏核(蓝图已定):{anchor}。全章围着这一瞬铺,其余都是铺垫——"
+            "别把力气平均分给每一个段落。"
+        )
+    else:
+        lines.append(
+            "- 本章戏核:动笔前先定一个让读者记住的瞬间(一句话,如「他终于认出那道疤」),"
+            "全章围着它铺;没有戏核的章,写得再工整也是白水。"
+        )
+    lines.append(
+        "- 情绪落差:章内必须有起落。该精彩的段落放开写,该压抑的段落压住写——"
+        "全章一个温度,读者就会走神。"
+    )
+    return "\n".join(lines)
+
+
+def _deai_rules_block(recent_texts: list[str]) -> str:
+    """反 AI 腔规则分级注入:核心版永远在,扩展版只在最近几章确实脏时追加。
+
+    与 fatigue_block 分工:那边管「本书特有的高频词」,这边管「通用禁令的力度」。
+    全书干净时只给核心版——平时把十几条禁令全摆出来,模型会把力气全花在
+    「不出错」上,写出来的就平。
+    """
+    from app.prompts.chapter import _DEAI_CORE, _DEAI_EXTRA
+
+    hits = 0
+    for text in recent_texts:
+        hits += sum(c["count"] for c in ai_flavor_report(text).categories.values())
+    if hits >= _DEAI_ESCALATE_HITS:
+        return _DEAI_CORE + _DEAI_EXTRA
+    return _DEAI_CORE
 
 
 def _next_chapter_brief(nxt: Outline | None) -> str:
@@ -398,6 +510,7 @@ async def generate_chapter(
         draft_prompt = CHAPTER_DRAFT_PROMPT.format(
             chapter_number=chapter_number,
             chapter_title=outline.title,
+            drama_task=_drama_task_block(outline),
             architecture_brief=chapter_architecture_brief(project),
             rolling_summary=rolling,
             recent_tail=recent,
@@ -425,6 +538,7 @@ async def generate_chapter(
             scene_count=max(2, project.target_words_per_chapter // 1000),
             scene_words=project.target_words_per_chapter // max(2, project.target_words_per_chapter // 1000),
             style_directives=style_block,
+            deai_rules=_deai_rules_block(recent_full),
         )
         d = _strip_meta(await get_adapter_for(Task.DRAFT).ask(draft_prompt))
         _report(finalize_label)
@@ -435,6 +549,7 @@ async def generate_chapter(
             chapter_number=chapter_number,
             chapter_title=outline.title,
             chapter_purpose=outline.chapter_purpose,
+            drama_task=_drama_task_block(outline),
             foreshadowing=outline.foreshadowing,
             chapter_summary=outline.summary,
             rolling_summary=rolling,

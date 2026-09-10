@@ -47,9 +47,11 @@ class OutlineUpdate(BaseModel):
     chapter_role: str | None = None
     chapter_purpose: str | None = None
     suspense_level: str | None = None
+    emotional_tone: str | None = None
     foreshadowing: str | None = None
     plot_twist_level: str | None = None
     summary: str | None = None
+    scene_anchor: str | None = None
     characters_involved: list[Any] | None = None
     key_items: list[Any] | None = None
     scene_location: str | None = None
@@ -162,6 +164,11 @@ def _outline_block(o: Outline) -> str:
         f"出场人物:{'、'.join(map(str, o.characters_involved or [])) or '—'}",
         f"场景地点:{o.scene_location or '—'}",
     ]
+    # 定调字段:研讨「这一章太平/太压」时就是靠它俩定位,空值不占位
+    if (o.emotional_tone or "").strip():
+        lines.append(f"情绪基调:{o.emotional_tone}")
+    if (o.scene_anchor or "").strip():
+        lines.append(f"本章戏核:{o.scene_anchor}")
     beats = [str(b).strip() for b in (o.beats or []) if str(b).strip()]
     if beats:
         lines.append("场景节拍:" + ";".join(beats[:8]))
