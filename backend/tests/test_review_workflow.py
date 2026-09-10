@@ -242,6 +242,9 @@ class _PipelineAdapter:
         self.prompts.append(prompt)
         if "现在开始写" in prompt:
             return "草稿正文。" * 30
+        if "草稿正文" in prompt and "AI 腔检测命中" in prompt:
+            # 定稿 prompt: 回干净正文, 不把 stub 当读数
+            return "定稿正文。" * 30
         if "修订后的" in prompt:
             return "定稿正文。" * 30
         if "场记" in prompt:
@@ -280,17 +283,20 @@ class _ScriptedPreflight:
 def _run_generate(db, project, n, preflight_fn):
     """mock LLM 跑一遍 generate_chapter;preflight 由参数注入(脚本化)。"""
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_compose as cc_mod
+    from app.engines.pipeline import chapter_finalize as cf_mod
+    from app.engines.pipeline import chapter_rework as rw_mod
     from app.engines.pipeline import chapter_maintenance as cm_mod
     from app.engines.pipeline import rewrite_session as rs_mod
 
     adapter = _PipelineAdapter()
     with (
-        patch.object(ch_mod, "get_adapter_for", return_value=adapter),
+        patch.object(cc_mod, "get_adapter_for", return_value=adapter),
         patch.object(cm_mod, "get_adapter_for", return_value=adapter),
         patch.object(cm_mod, "extract_and_apply", new=_fake_extract),
-        patch.object(ch_mod, "check_chapter", new=_fake_check_clean),
-        patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
-        patch.object(ch_mod, "review_chapter", new=_fake_review_high),
+        patch.object(rw_mod, "_check", new=_fake_check_clean),
+        patch.object(rw_mod, "_proofread", new=_fake_proofread),
+        patch.object(rw_mod, "_review", new=_fake_review_high),
         patch.object(ch_mod, "preflight_chapter", new=preflight_fn),
     ):
         result = asyncio.run(ch_mod.generate_chapter(db, project, n))
@@ -507,17 +513,20 @@ def _set_ch2(status: str, pid: int, with_issue: bool = False) -> int:
 def _chapter_patches(check_fn=_fake_check_clean, preflight_fn=None, extract_fn=_fake_extract):
     """generate_chapter 的 LLM 依赖统一 mock(patch 定义模块,走 API 同样生效)。"""
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_compose as cc_mod
+    from app.engines.pipeline import chapter_finalize as cf_mod
+    from app.engines.pipeline import chapter_rework as rw_mod
     from app.engines.pipeline import chapter_maintenance as cm_mod
     from app.engines.pipeline import rewrite_session as rs_mod
 
     adapter = _PipelineAdapter()
     return adapter, (
-        patch.object(ch_mod, "get_adapter_for", return_value=adapter),
+        patch.object(cc_mod, "get_adapter_for", return_value=adapter),
         patch.object(cm_mod, "get_adapter_for", return_value=adapter),
         patch.object(cm_mod, "extract_and_apply", new=_fake_extract),
-        patch.object(ch_mod, "check_chapter", new=check_fn),
-        patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
-        patch.object(ch_mod, "review_chapter", new=_fake_review_high),
+        patch.object(rw_mod, "_check", new=check_fn),
+        patch.object(rw_mod, "_proofread", new=_fake_proofread),
+        patch.object(rw_mod, "_review", new=_fake_review_high),
         patch.object(
             ch_mod, "preflight_chapter",
             new=preflight_fn or _ScriptedPreflight([]),
@@ -630,15 +639,18 @@ def test_apply_revision_endpoint(client):
         return []
 
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_compose as cc_mod
+    from app.engines.pipeline import chapter_finalize as cf_mod
+    from app.engines.pipeline import chapter_rework as rw_mod
     from app.engines.pipeline import chapter_maintenance as cm_mod
     from app.engines.pipeline import rewrite_session as rs_mod
     patches = (
-        patch.object(ch_mod, "get_adapter_for", return_value=adapter),
+        patch.object(cc_mod, "get_adapter_for", return_value=adapter),
         patch.object(cm_mod, "get_adapter_for", return_value=adapter),
         patch.object(cm_mod, "extract_and_apply", new=_fake_extract),
-        patch.object(ch_mod, "check_chapter", new=_blocking_check),
-        patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
-        patch.object(ch_mod, "review_chapter", new=_fake_review_high),
+        patch.object(rw_mod, "_check", new=_blocking_check),
+        patch.object(rw_mod, "_proofread", new=_fake_proofread),
+        patch.object(rw_mod, "_review", new=_fake_review_high),
         patch.object(ch_mod, "preflight_chapter", new=_ScriptedPreflight([])),
     )
     with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
@@ -798,12 +810,12 @@ def test_queue_402_interrupt_returns_structured_remaining(client):
 
     adapter = _BrokeAdapter()
     patches = (
-        patch("app.engines.pipeline.chapter.get_adapter_for", return_value=adapter),
+        patch("app.engines.pipeline.chapter_compose.get_adapter_for", return_value=adapter),
         patch("app.engines.pipeline.chapter_maintenance.get_adapter_for", return_value=adapter),
         patch("app.engines.pipeline.chapter_maintenance.extract_and_apply", new=_fake_extract),
-        patch("app.engines.pipeline.chapter.check_chapter", new=_fake_check_clean),
-        patch("app.engines.pipeline.chapter.proofread_chapter", new=_fake_proofread),
-        patch("app.engines.pipeline.chapter.review_chapter", new=_fake_review_high),
+        patch("app.engines.pipeline.chapter_rework._check", new=_fake_check_clean),
+        patch("app.engines.pipeline.chapter_rework._proofread", new=_fake_proofread),
+        patch("app.engines.pipeline.chapter_rework._review", new=_fake_review_high),
         patch(
             "app.engines.pipeline.chapter.preflight_chapter",
             new=_ScriptedPreflight([]),

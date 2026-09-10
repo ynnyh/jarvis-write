@@ -178,6 +178,9 @@ def _run_generate(final_text: str, heal_output: str | None):
     """跑第 2 章生成:定稿正文按 final_text 给;heal_output 非空时模拟去味重写输出。"""
     db, project = _make_db()
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_compose as cc_mod
+    from app.engines.pipeline import chapter_finalize as cf_mod
+    from app.engines.pipeline import chapter_rework as rw_mod
     from app.engines.pipeline import chapter_maintenance as cm_mod
     from app.engines.pipeline import rewrite_session as rs_mod
 
@@ -191,13 +194,13 @@ def _run_generate(final_text: str, heal_output: str | None):
     import app.engines.polish.polisher as polish_mod
 
     with (
-        patch.object(ch_mod, "get_adapter_for", return_value=adapter),
+        patch.object(cc_mod, "get_adapter_for", return_value=adapter),
         patch.object(cm_mod, "get_adapter_for", return_value=adapter),
         patch.object(cm_mod, "extract_and_apply", new=_fake_extract),
         patch.object(polish_mod, "get_adapter_for", return_value=adapter),
-        patch.object(ch_mod, "check_chapter", new=_fake_check),
-        patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
-        patch.object(ch_mod, "review_chapter", new=_fake_review),
+        patch.object(rw_mod, "_check", new=_fake_check),
+        patch.object(rw_mod, "_proofread", new=_fake_proofread),
+        patch.object(rw_mod, "_review", new=_fake_review),
     ):
         chapter, _issues, _stats, _guard, review, _pf = asyncio.run(
             ch_mod.generate_chapter(db, project, 2)

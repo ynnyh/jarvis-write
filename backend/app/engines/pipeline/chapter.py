@@ -10,13 +10,13 @@
 from __future__ import annotations
 
 import logging
-import re
+from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.db.models import (
     Chapter,
-    ChapterVersion,
     Outline,
     Project,
     WritingCard,
@@ -30,60 +30,60 @@ from app.engines.consistency import (
 )
 from app.engines.consistency.foreshadow_agenda import build_agenda, render_agenda_block
 from app.engines.consistency.reader_knowledge import build_reader_view, render_twist_block
-from app.engines.common import degraded_of, is_degraded
-from app.engines.consistency.checker import (
-    blockers_of,
-    blocker_fingerprint,
-    check_chapter,
-    continuity_score,
-    persist_issues,
-    triage_issues,
-)
+from app.engines.consistency.checker import persist_issues
 from app.engines.consistency.preflight import preflight_chapter
-from app.engines.consistency.repetition import avoid_block, dedup_paragraphs
+from app.engines.consistency.repetition import avoid_block
 from app.engines.consistency.motifs import banned_block, ledger_avoid_block
 from app.engines.pipeline.handoff import load_handoff_block
 from app.engines.devices import devices_reminder_block
 from app.engines.polish import ai_flavor_report
 from app.engines.polish.polisher import (
     _flavor_hits_block,
-    deai_self_heal,
     fatigue_block,
     memo_notes_block,
-)
-from app.engines.editorial import (
-    CONTINUITY_DIM,
-    DIMS,
-    apply_gate_fixes,
-    apply_proofread_fixes,
-    build_revision_directive,
-    judge_passed,
-    proofread_chapter,
-    repair_chapter,
-    review_chapter,
-    store_proofread_snapshot,
-    store_review_snapshot,
 )
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import _PROFILE_KEY, dna_block_of, render_style_block
 from app.engines.tendency.cards import render_cards_block
 from app.prompts.style_capsules import pairwise_examples_block, render_voice_block
 from app.llm.router import Task, get_adapter_for
-from app.prompts.chapter import (
-    CHAPTER_DRAFT_PROMPT,
-    CHAPTER_FINALIZE_PROMPT,
+from app.prompts.chapter import CHAPTER_FINALIZE_PROMPT
+from app.engines.pipeline.word_guard import GuardResult
+from app.engines.pipeline.chapter_compose import (
+    ChapterContext,
+    Composer,
+    _beats_block,
+    _deai_rules_block,
+    _drama_task_block,
+    _next_chapter_brief,
+    _strip_meta,
 )
-from app.engines.pipeline.word_guard import GuardResult, word_count_guard
-from app.engines.pipeline.tension_bus import tension_bus_block
+from app.engines.pipeline.chapter_finalize import finalize_and_persist
+from app.engines.pipeline.chapter_rework import (
+    _gate_merged_review,
+    _revision_block,
+    _with_prose_directive,
+    review_and_rework,
+)
 from app.schemas.tendency import Tendency
 
 logger = logging.getLogger("jarvis-write.chapter")
 
-_REVISION_EXCERPT_CHARS = 1500  # 重写时上一版正文注入草稿 prompt 的截断长度
-
-# 反 AI 腔扩展规则的触发线:最近几章的加权命中总数达到这个数,说明本书正在往
-# 套话里滑,生成阶段就得把完整禁令摆出来;否则只给核心版(见 _deai_rules_block)。
-_DEAI_ESCALATE_HITS = 8
+# 兼容性再导出:以下符号已随拆解搬到子模块,老调用方仍从这里导入,不动。
+# (test_chapter_drama_task 导入 _deai_rules_block/_drama_task_block;
+#  test_consistency_guardrail 导入 _with_prose_directive;
+#  api/chapters/* 与 rewrite_session 导入 _revision_block/_strip_meta 等)
+from app.engines.pipeline.chapter_compose import (  # noqa: E402,F401
+    _DEAI_ESCALATE_HITS,
+    _DEFAULT_ROLE_TASK,
+    _ROLE_TASKS,
+    _SUSPENSE_TASKS,
+)
+from app.engines.pipeline.chapter_rework import (  # noqa: E402,F401
+    _DIM_CN,
+    _PROSE_REWRITE_DIRECTIVE,
+    _REVISION_EXCERPT_CHARS,
+)
 
 # 兼容性再导出:章后维护/共享上下文/重写研讨已拆到子模块,老调用方
 # (api/chapters/*、diagnosis、outline_discuss 等)仍从这里导入,不动。
@@ -108,295 +108,86 @@ from app.engines.pipeline.rewrite_session import (  # noqa: E402,F401
     discuss_revision_stream,
 )
 
+# 兼容再导出:常量随 helper 一起搬到了子模块(chapter_compose / chapter_rework),
+# 老调用方与测试仍从 chapter.py 读,故在此显式再导出(见本文件顶部 import 块)。
+# 注意:_DEAI_ESCALATE_HITS 的定义在 chapter_compose,这里不要重复定义——
+# 两份常量会各走各的,改一处另一处不生效。
 
-def _strip_meta(text: str) -> str:
-    """清理模型输出的元信息:开头的 markdown 标题行 / 章节标题行。
 
-    只删真正的「标题行」,不误伤正文首句。此前用
-    `startswith("第") and "章" in [:12] and len<30` 会误删以「第」开头的正常
-    短句(如「第二天,他没来。」)。改为精确匹配章节标题结构:
-      - markdown 标题(# 开头)
-      - 「第X章」「第X章 标题」「第X章:标题」这类整行标题,X 是数字或中文数字,
-        且全行简短(<25 字)——正文叙述句几乎不会长这样。
+@dataclass
+class PreparedContext:
+    """generate_chapter 阶段 1 的产出:写这一章要知道的一切(见 _prepare_chapter_context)。
+
+    字段都是 prompt 实参的直接来源;`compose_context(project)` 是它与
+    chapter_compose.ChapterContext 的显式转换——**不在组装时就构造**,因为
+    style_block 还要在本阶段末尾追加疲劳词/雷区(顺序有语义)。
     """
-    # 「第」+数字/中文数字+「章」,后接空/标点/短标题,直到行尾
-    chap_title = re.compile(
-        r"^第[0-9零一二三四五六七八九十百千两]+章"
-        r"([\s:：、·.。\-—《（(]*.{0,20})?$"
-    )
-    lines = text.strip().splitlines()
-    while lines:
-        head = lines[0].strip()
-        if head.startswith("#") or (len(head) < 25 and chap_title.match(head)):
-            lines.pop(0)
-            continue
-        break
-    return "\n".join(lines).strip()
 
+    outline: Any
+    next_outline: Any
+    style_block: str
+    rolling: str
+    recent: str
+    recent_full: list[str]
+    handoff_block: str
+    hard_constraints: str
+    resource_ledger: str
+    known_roster: str
+    foreshadow_reminders: str
+    device_reminders: str
+    avoid_repetition: str
+    twist_prep: str
+    revision_block: str
+    preflight_issues: list[dict]
 
-def _beats_block(outline: Outline) -> str:
-    """把本章场景节拍渲染成草稿的施工清单;无节拍时提示模型自行拆分。
+    def compose_context(self, *, project) -> "ChapterContext":
+        """转成 Composer 用的上下文(含运行时算出的 deai_rules)。"""
+        from app.engines.pipeline.chapter_compose import ChapterContext
 
-    治"一句 100 字简述撑几千字"的结构松散:有节拍就按节拍逐个铺场景。
-    """
-    beats = [str(b).strip() for b in (outline.beats or []) if str(b).strip()]
-    if not beats:
-        return "(本章未预设节拍,请自行把剧情拆成若干有起伏的场景,不要平铺直叙)"
-    lines = "\n".join(f"  {i}. {b}" for i, b in enumerate(beats, 1))
-    return (
-        "按以下场景节拍逐个推进(每个节拍写成一个有画面、有张力的场景,"
-        "顺序可微调,但都要落实):\n" + lines
-    )
-
-
-# ---- 本章戏剧任务:把「写什么」的注意力补回来 ----
-# 蓝图只交代「发生了什么」,没人告诉模型「这一章要让读者感受到什么」。而形式
-# 约束(反 AI 腔 + 文风质感)长期占掉草稿模板近半篇幅,净信号就成了「别出格、
-# 别用力」——生成结果正是「每章都工整、都挑不出毛病,但都像喝白水」。
-# 这里用蓝图已有字段(定位/悬念密度/认知颠覆)做确定性推导,零额外 LLM 调用。
-_ROLE_TASKS: tuple[tuple[str, str], ...] = (
-    ("高潮", "本章是这一段的总爆发,前面攒的力要在这里兑现。把最强的场面压在中后段,"
-             "别一上来就用满,让读者一路提到顶点再砸下来。"),
-    ("转折", "本章必须把读者已经相信的某件事掀翻。前 2/3 铺垫得越稳、越像那么回事,"
-             "翻的那一刻才越响;不要提前泄底,也不要翻完立刻解释。"),
-    ("危机", "本章要把主角逼到没有退路的境地。让读者跟着他一起难受、一起想办法,"
-             "困境别轻轻就解开——轻易脱身的危机等于没危机。"),
-    ("铺垫", "本章可以压着写,但压是为了后面弹得更高。压不等于没味道:埋一个让人"
-             "不安的细节、一句后来才懂的话,让平静底下有东西在走。"),
-    ("过渡", "本章承上启下,篇幅可以收着,但必须完成一件事:让读者对下一章产生"
-             "具体的期待,而不是读完毫无牵挂。"),
-    ("结局", "本章收束全书:该还的债要还,人物要有落点。收得干脆,别拖泥带水,"
-             "也别急着把一切解释清楚。"),
-)
-_DEFAULT_ROLE_TASK = (
-    "本章要往前推一格:让读者读完时,人物的处境或心境与开头相比确实变了,"
-    "而不是原地走了一圈。"
-)
-_SUSPENSE_TASKS: tuple[tuple[str, str], ...] = (
-    ("高", "每 300-500 字就要有一个勾着读者往下看的东西——一个疑问、一个反常、"
-           "一句没说完的话。"),
-    ("中", "章内至少两处让读者心里一紧的地方,别一路平推到底。"),
-    ("低", "可以写得从容,但章末必须留下一个具体的悬念,不是一句空泛的感叹。"),
-)
-
-
-def _drama_task_block(outline: Outline) -> str:
-    """本章的戏剧任务:这一章要让读者的情绪往哪走。
-
-    确定性推导,不给模型加任何调用。治「文绉绉、喝白水」——每章先定调、定戏核,
-    再动笔。
-    """
-    role = str(outline.chapter_role or "")
-    task = _DEFAULT_ROLE_TASK
-    for key, value in _ROLE_TASKS:
-        if key in role:
-            task = value
-            break
-    lines = [f"- 本章任务({role or '未指定定位'}):{task}"]
-
-    suspense = str(outline.suspense_level or "")
-    for key, value in _SUSPENSE_TASKS:
-        if key in suspense:
-            lines.append(f"- 悬念密度({suspense}):{value}")
-            break
-
-    # 认知颠覆在蓝图里是「1-5 星」(如 ★★★★☆),也可能被写成「强/高」字样
-    twist = str(outline.plot_twist_level or "")
-    if "强" in twist or "高" in twist or twist.count("★") >= 4:
-        lines.append(
-            f"- 认知颠覆({twist}):必须有一个推翻读者既有判断的时刻,"
-            "且要在正文里给出足以支撑它的细节,不能靠人物嘴上说破。"
+        return ChapterContext(
+            chapter_number=self.outline.chapter_number,
+            outline=self.outline,
+            next_outline=self.next_outline,
+            style_block=self.style_block,
+            rolling=self.rolling,
+            recent=self.recent,
+            handoff_block=self.handoff_block,
+            hard_constraints=self.hard_constraints,
+            known_roster=self.known_roster,
+            resource_ledger=self.resource_ledger,
+            foreshadow_reminders=self.foreshadow_reminders,
+            device_reminders=self.device_reminders,
+            avoid_repetition=self.avoid_repetition,
+            twist_prep=self.twist_prep,
+            deai_rules=_deai_rules_block(self.recent_full),
+            project=project,
         )
 
-    # 这三条与定位无关,任何一章都该有——「戏核」「基调」「落差」是治白水的三件套
-    # 调子与戏核:蓝图定过就照蓝图执行(那是全书编排),老蓝图没定过才让模型自定
-    tone = str(getattr(outline, "emotional_tone", "") or "").strip()
-    if tone:
-        lines.append(
-            f"- 情绪基调(蓝图已定:{tone}):全章的场景、对话节奏、细节选择都贴着这个"
-            "调子走;要换调必须是有意为之的转折,不是写着写着跑掉了。"
-        )
-    else:
-        lines.append(
-            "- 情绪基调:先给本章定一个调子(压抑/紧绷/荒诞/温热/悲凉/亢奋…),场景、"
-            "对话节奏、细节选择都贴着这个调子走;换调必须是有意为之的转折,"
-            "不是写着写着跑掉了。"
-        )
-    anchor = str(getattr(outline, "scene_anchor", "") or "").strip()
-    if anchor:
-        lines.append(
-            f"- 本章戏核(蓝图已定):{anchor}。全章围着这一瞬铺,其余都是铺垫——"
-            "别把力气平均分给每一个段落。"
-        )
-    else:
-        lines.append(
-            "- 本章戏核:动笔前先定一个让读者记住的瞬间(一句话,如「他终于认出那道疤」),"
-            "全章围着它铺;没有戏核的章,写得再工整也是白水。"
-        )
-    lines.append(
-        "- 情绪落差:章内必须有起落。该精彩的段落放开写,该压抑的段落压住写——"
-        "全章一个温度,读者就会走神。"
-    )
-    return "\n".join(lines)
 
-
-def _deai_rules_block(recent_texts: list[str]) -> str:
-    """反 AI 腔规则分级注入:核心版永远在,扩展版只在最近几章确实脏时追加。
-
-    与 fatigue_block 分工:那边管「本书特有的高频词」,这边管「通用禁令的力度」。
-    全书干净时只给核心版——平时把十几条禁令全摆出来,模型会把力气全花在
-    「不出错」上,写出来的就平。
-    """
-    from app.prompts.chapter import _DEAI_CORE, _DEAI_EXTRA
-
-    hits = 0
-    for text in recent_texts:
-        hits += sum(c["count"] for c in ai_flavor_report(text).categories.values())
-    if hits >= _DEAI_ESCALATE_HITS:
-        return _DEAI_CORE + _DEAI_EXTRA
-    return _DEAI_CORE
-
-
-def _next_chapter_brief(nxt: Outline | None) -> str:
-    if nxt is None:
-        return "(本章为最后一章,收束全书)"
-    return (
-        f"第{nxt.chapter_number}章《{nxt.title}》:{nxt.summary}"
-        f"(伏笔操作:{nxt.foreshadowing})"
-    )
-
-
-def _revision_block(
-    revision: str | None, previous_text: str, *, outline_changed: bool = False
-) -> str:
-    """重写意见注入块。
-
-    - outline_changed=True(大纲改过后正文失配):不再注入旧正文节选——旧文基于
-      旧大纲,注入会把模型锚回旧情节。改为明确指令"按新蓝图重新构思",用户补充
-      意见(有则)一并带上。即使没有意见也生成该块:失配章的重写本质是重新生成。
-    - 常规重写(大纲未变):上一版正文截断为前 _REVISION_EXCERPT_CHARS 字作反面
-      参照,避免 token 爆炸;无意见则不生成。
-    """
-    revision = (revision or "").strip()
-    if outline_changed:
-        block = (
-            "【按新大纲重写】本章大纲已更新,上一版正文基于旧大纲,与当前蓝图失配。\n"
-            "请完全以上方最新蓝图为准重新构思本章情节,不要延续、不要修补旧版正文"
-            "的情节安排;旧版正文中与旧大纲绑定的桥段应直接舍弃。\n"
-        )
-        if revision:
-            block += f"用户补充意见(在满足新蓝图的前提下采纳):\n{revision}\n"
-        return block
-    if not revision or not previous_text.strip():
-        return ""
-    excerpt = previous_text[:_REVISION_EXCERPT_CHARS]
-    if len(previous_text) > _REVISION_EXCERPT_CHARS:
-        excerpt += "……(后略)"
-    return (
-        "【重写要求】这是重写:上一版正文用户不满意,修改意见如下:\n"
-        f"{revision}\n"
-        "请在保持本章蓝图、人物状态与伏笔约束不变的前提下,针对以上意见改进。\n\n"
-        "【上一版正文(反面参照,仅供对照问题,不可照抄)】\n"
-        f"{excerpt}"
-    )
-
-
-# prose 维未达标时的定向重写要求:「AI 腔/套话」靠同一模型自由发挥修不掉
-# (实测每轮都因 prose=6 烧满回炉预算),必须把要求落到具体禁则上。
-_PROSE_REWRITE_DIRECTIVE = (
-    "文笔硬要求(上轮 prose 维未达标,重写必须逐条执行):"
-    "①每段以具体画面、动作或对白开笔,禁止以心理独白或情绪陈述开段;"
-    "②情绪一律外化成动作与感官细节,不写「他很紧张/她很难过」这类直陈;"
-    "③比喻每段至多一处,禁用「仿佛/宛如/像是」连用,禁用「空气中弥漫着」"
-    "「不知过了多久」「一瞬间,他明白了」这类万能套话;"
-    "④对话删解释性台词,每句要么推进信息要么暴露性格;"
-    "⑤长短句交错,连续三句同一结构必改写。"
-)
-
-# 维度中文名(死锁提示文案用)
-_DIM_CN = {
-    "plot": "情节", "prose": "文笔", "pacing": "节奏",
-    "character": "人物", "continuity": "连续性",
-}
-
-
-def _with_prose_directive(directive: str, scores: dict, threshold: int) -> str:
-    """prose 维低于阈值时,把「去 AI 腔」的具体禁则追加进重写指令。
-
-    审校没报这一维(None/缺字段/脏值)视为不适用,原样返回——禁则只该在
-    prose 确实挂了的时候出现。
-    """
-    raw = scores.get("prose")
-    if raw is None:
-        return directive
-    try:
-        prose = int(raw)
-    except (TypeError, ValueError):
-        return directive
-    if prose >= threshold:
-        return directive
-    return f"{directive};{_PROSE_REWRITE_DIRECTIVE}" if directive else _PROSE_REWRITE_DIRECTIVE
-
-
-def _gate_merged_review(review_result: dict, blockers: list[dict]) -> dict:
-    """把门禁 blocker 问题并入主审结果,供 build_revision_directive 拼修订指令。"""
-    merged = dict(review_result)
-    merged["suggestions"] = list(review_result.get("suggestions") or []) + [
-        {
-            "evidence": i.get("evidence") or "",
-            "issue": f"一致性矛盾({i.get('type') or 'state'}):{i.get('description')}",
-            "fix": i.get("suggestion") or "",
-        }
-        for i in blockers
-    ]
-    return merged
-
-
-async def generate_chapter(
+async def _prepare_chapter_context(
     db: Session,
     project: Project,
     chapter_number: int,
-    tendency: Tendency | None = None,
-    progress=None,
+    *,
+    outline: Outline,
     revision: str | None = None,
-) -> tuple[Chapter, list[dict], dict, "GuardResult", dict, list[dict]]:
-    """生成一章:写前审核 → 草稿 → 定稿 → 审校把关+一致性门禁 → 落库 → 抽取写圣经 → 摘要 → 契约。
+    tendency: Tendency | None = None,
+    report=None,
+) -> PreparedContext:
+    """阶段 1/4:组装本章写作上下文。纯读 + 确定性推导(唯一 LLM 是写前审核)。
 
-    progress: 可选回调 fn(stage_text),六段各报一次(异步任务进度用)。
-    revision: 重写时用户的修改意见;仅当本章已有正文时连同上一版
-        (截断)注入草稿 prompt,首次生成传了也会被忽略。
-
-    审校把关与一致性门禁(第 3/4 段,分级回炉):**门禁先行**——先确认事实对,
-    再做文字精修,精修成果不会因方向错而作废。回炉循环(封顶 review_max_revisions
-    轮,共享预算):
-      ① 一致性门禁(checker:对照圣经 + 上一章契约 + 上章结尾原文)有 blocker →
-         分诊(triage_issues):全部可定点修 → repair_chapter 一次小调用出精确
-         替换对(apply_gate_fixes 逐字+唯一锚校验后应用),回门禁复查;修不掉/
-         锚全失配/上轮刚修过 → 整章重写。auto_revise 关 → 不回炉直接隔离。
-      ② 门禁干净才精修:校对硬伤自修(精确替换)+ 主审四维打分,continuity=9
-         并入五维阈值硬判;不达标带主审意见(+prose 禁则)回炉重写。
-    到点无论是否达标都接受当前最好的一版;回炉封顶仍有 blocker → 落库但
-    status="quarantined":不做章后抽取(矛盾不进圣经)、不更新滚动摘要、
-    不提契约;无 blocker 才走章后链路(apply_chapter_tail)。
-
-    返回 (Chapter, 一致性门禁问题列表, 抽取统计, 字数守卫结果, 审校结果 dict, 写前审核警告列表)。
-    审校结果含 scores(四维+continuity)/comment/suggestions/passed/
-    revision_rounds/threshold/repair_rounds/repairs(定点修复明细);
-    quarantined 时抽取统计为空 dict。
-    写前审核警告(docs/08 §5.3)severity 一律 major,只警告不阻断,已随落库
-    持久化(source="preflight");无契约/LLM 失败时为空列表。
+    从 generate_chapter 拆出。这一段的特点是「变量多、依赖散」:文风块被六处
+    依次追加(顺序有语义),一致性引擎产四块,再加防复读、反转预备、重写块。
+    收成一个数据结构后,后续阶段只认 PreparedContext 的字段名,不必再追闭包。
     """
 
     def _report(stage: str) -> None:
-        if progress:
+        if report:
             try:
-                progress(stage)
+                report(stage)
             except Exception:  # noqa: BLE001 — 进度上报绝不影响生成
                 pass
 
-    outline = get_outline(db, project.id, chapter_number)
-    if outline is None:
-        raise ValueError(f"第 {chapter_number} 章没有大纲,请先生成蓝图")
     next_outline = get_outline(db, project.id, chapter_number + 1)
 
     assembled = assemble_tendency("chapter", tendency, project.global_tendency)
@@ -523,11 +314,82 @@ async def generate_chapter(
         outline_changed=bool(existing and existing.is_stale),
     )
 
-    # ---- 场景级生成(阶段二):逐场写 + 逐场验收 + 只重写不合格的场 ----
-    # 开关按项目走(scene_level_enabled),默认关 → 完全走下面的老路径,行为不变。
-    # 为什么把这一步放在这里而不是替换整个 generate_chapter:薄的是「生成」这一层,
-    # 后面的门禁/精修/字数守卫/去味/落库/章后链路是「校验」那一层,它们是有效的,
-    # 不该跟着一起换。所以只换生成段,其余原样复用。
+    return PreparedContext(
+        outline=outline,
+        next_outline=next_outline,
+        style_block=style_block,
+        rolling=rolling,
+        recent=recent,
+        recent_full=recent_full,
+        handoff_block=handoff_block,
+        hard_constraints=hard_constraints,
+        resource_ledger=resource_ledger,
+        known_roster=known_roster,
+        foreshadow_reminders=foreshadow_reminders,
+        device_reminders=device_reminders,
+        avoid_repetition=avoid_repetition,
+        twist_prep=twist_prep,
+        revision_block=revision_block,
+        preflight_issues=preflight_issues,
+    )
+
+
+async def generate_chapter(
+    db: Session,
+    project: Project,
+    chapter_number: int,
+    tendency: Tendency | None = None,
+    progress=None,
+    revision: str | None = None,
+) -> tuple[Chapter, list[dict], dict, "GuardResult", dict, list[dict]]:
+    """生成一章(编排器):写前审核 → 草稿 → 定稿 → 门禁+精修 → 落库 → 章后链路。
+
+    本函数只做**编排**:四个阶段各自成模块,这里负责按顺序串起来 + 持有跨阶段的
+    少数共享状态。要看某一阶段的具体逻辑,去对应模块(docs/14 诊断②:章级单发
+    无分解——这次拆解是对该诊断的结构性回应)。
+
+      阶段 1  prepare  `_prepare_chapter_context`(本文件)——上下文组装
+      阶段 2  compose  `chapter_compose.Composer`——草稿 → 定稿(31 个占位符)
+      阶段 3  rework   `chapter_rework.review_and_rework`——门禁 + 精修回炉
+      阶段 4  finalize `chapter_finalize.finalize_and_persist`——守卫/去味/落库
+
+    progress: 可选回调 fn(stage_text),六段各报一次(异步任务进度用)。
+    revision: 重写时用户的修改意见;仅当本章已有正文时连同上一版
+        (截断)注入草稿 prompt,首次生成传了也会被忽略。
+
+    回炉语义(阶段 3,封顶 review_max_revisions 轮共享预算)与隔离语义
+    (阶段 4)的完整说明见两个子模块的模块头 docstring,不在这里重复。
+
+    返回 (Chapter, 一致性门禁问题列表, 抽取统计, 字数守卫结果, 审校结果 dict,
+    写前审核警告列表)。quarantined 时抽取统计为空 dict;写前审核警告
+    (docs/08 §5.3)severity 一律 major,只警告不阻断,已随落库持久化。
+    """
+
+    def _report(stage: str) -> None:
+        if progress:
+            try:
+                progress(stage)
+            except Exception:  # noqa: BLE001 — 进度上报绝不影响生成
+                pass
+
+    outline = get_outline(db, project.id, chapter_number)
+    if outline is None:
+        raise ValueError(f"第 {chapter_number} 章没有大纲,请先生成蓝图")
+
+    # ================= 阶段 1/4:上下文组装(prepare) =================
+    # 组装出「写这一章要知道的一切」。纯读 + 纯确定性推导,不含 LLM 创作调用
+    # (唯一的例外是写前审核的一次快模型调用,它是校验性质)。
+    ctx = await _prepare_chapter_context(
+        db, project, chapter_number, outline=outline,
+        revision=revision, tendency=tendency, report=_report,
+    )
+    preflight_issues = ctx.preflight_issues
+    style_block = ctx.style_block
+    recent_full = ctx.recent_full
+
+    # ================= 阶段 2/4:生成(get draft + finalize) =================
+    # 场景级开关开启时逐场写;否则整章一发。两条路的产物都是 (draft, final),
+    # 之后完全同路。回炉轮的重写统一走 Composer(整章一发,理由见其 docstring)。
     scene_result = None
     if project.scene_level_enabled:
         from app.engines.pipeline.scene_chapter import compose_by_scenes
@@ -536,16 +398,16 @@ async def generate_chapter(
             db, project, chapter_number,
             style_block=style_block,
             deai_rules=_deai_rules_block(recent_full),
-            rolling_summary=rolling,
-            recent_tail=recent,
-            handoff_block=handoff_block,
+            rolling_summary=ctx.rolling,
+            recent_tail=ctx.recent,
+            handoff_block=ctx.handoff_block,
             outline_summary=outline.summary,
             outline_title=outline.title,
             scene_anchor=str(getattr(outline, "scene_anchor", "") or ""),
             threshold=project.review_pass_threshold,
             outline=outline,
             report=_report,
-            revision_directive=revision_block,
+            revision_directive=ctx.revision_block,
         )
         draft = scene_result.text
         # 场景级已有逐场情绪/画面判定,定稿只做「文字层面」的收束(去味诊断 +
@@ -559,9 +421,9 @@ async def generate_chapter(
             drama_task=_drama_task_block(outline),
             foreshadowing=outline.foreshadowing,
             chapter_summary=outline.summary,
-            rolling_summary=rolling,
-            known_roster=known_roster,
-            resource_ledger=resource_ledger,
+            rolling_summary=ctx.rolling,
+            known_roster=ctx.known_roster,
+            resource_ledger=ctx.resource_ledger,
             draft_text=draft,
             flavor_hits=flavor_hits_scene,
             style_directives=style_block + pairwise_examples_block(),
@@ -572,457 +434,48 @@ async def generate_chapter(
             chapter_number, scene_result.stats.get("scene_count", 0),
             scene_result.stats.get("accepted", 0), scene_result.stats.get("rejected", 0),
         )
-        if scene_result.stats.get("rejected"):
-            review_result["scene_stats"] = scene_result.stats
-
-    # ---- 草稿 + 定稿(封装成 _compose,审校回炉时复用) ----
-    async def _compose(rev_block: str, draft_label: str, finalize_label: str) -> tuple[str, str]:
-        """草稿 → 定稿。rev_block 注入草稿 prompt;返回 (草稿, 定稿)。"""
-        # 场景级模式下,首次生成已由 compose_by_scenes 完成;这里的调用只发生在
-        # 门禁/主审触发的回炉轮——回炉整章重写本就该走「整章一发」,因为意见是
-        # 针对整章的(逐场重写无法响应「第 3 段和第 7 段互相矛盾」这类意见)。
-        if scene_result is not None and not rev_block:
-            return draft, final
-        _report(draft_label)
-        draft_prompt = CHAPTER_DRAFT_PROMPT.format(
-            chapter_number=chapter_number,
-            chapter_title=outline.title,
-            drama_task=_drama_task_block(outline),
-            tension_bus_block=tension_bus_block(
-                chapter_number,
-                target_chapters=int(project.target_chapters or 0),
-                macro_plan=project.macro_plan,
-                chapter_role=str(outline.chapter_role or ""),
-                suspense_level=str(outline.suspense_level or ""),
-            ),
-            architecture_brief=chapter_architecture_brief(project),
-            rolling_summary=rolling,
-            recent_tail=recent,
-            handoff_contract=handoff_block,
-            hard_constraints=hard_constraints,
-            known_roster=known_roster,
-            resource_ledger=resource_ledger,
-            foreshadow_reminders=foreshadow_reminders,
-            device_reminders=device_reminders,
-            avoid_repetition=avoid_repetition,
-            revision_block=rev_block,
-            twist_prep=twist_prep,
-            chapter_role=outline.chapter_role,
-            chapter_purpose=outline.chapter_purpose,
-            suspense_level=outline.suspense_level,
-            foreshadowing=outline.foreshadowing,
-            characters_involved="、".join(map(str, outline.characters_involved)) or "(未指定)",
-            key_items="、".join(map(str, outline.key_items)) or "无",
-            scene_location=outline.scene_location,
-            chapter_summary=outline.summary,
-            chapter_beats=_beats_block(outline),
-            next_chapter_brief=_next_chapter_brief(next_outline),
-            word_number=project.target_words_per_chapter,
-            word_floor=project.target_words_per_chapter * 4 // 5,
-            word_ceil=project.target_words_per_chapter * 6 // 5,
-            scene_count=max(2, project.target_words_per_chapter // 1000),
-            scene_words=project.target_words_per_chapter // max(2, project.target_words_per_chapter // 1000),
-            style_directives=style_block,
-            deai_rules=_deai_rules_block(recent_full),
-        )
-        d = _strip_meta(await get_adapter_for(Task.DRAFT).ask(draft_prompt))
-        _report(finalize_label)
-        # 定稿前的去味诊断(纯规则零成本):草稿先过 AI 味检测,命中句贴进定稿
-        # prompt 定点改写 —— 复用润色端"先诊断后治疗"的成熟模式,生成端不再只靠自觉。
-        flavor_hits = _flavor_hits_block(ai_flavor_report(d))
-        finalize_prompt = CHAPTER_FINALIZE_PROMPT.format(
-            chapter_number=chapter_number,
-            chapter_title=outline.title,
-            chapter_purpose=outline.chapter_purpose,
-            drama_task=_drama_task_block(outline),
-            tension_bus_block=tension_bus_block(
-                chapter_number,
-                target_chapters=int(project.target_chapters or 0),
-                macro_plan=project.macro_plan,
-                chapter_role=str(outline.chapter_role or ""),
-                suspense_level=str(outline.suspense_level or ""),
-            ),
-            foreshadowing=outline.foreshadowing,
-            chapter_summary=outline.summary,
-            rolling_summary=rolling,
-            known_roster=known_roster,
-            resource_ledger=resource_ledger,
-            draft_text=d,
-            flavor_hits=flavor_hits,
-            # 定稿额外注入「AI 腔→人话」配对反例(给 pattern 比给 rule 有效);草稿不注入
-            # 以控 token(草稿还没成文,无从对照,正向锚 voice 已在 style_block 里够用)
-            style_directives=style_block + pairwise_examples_block(),
-        )
-        f = _strip_meta(await get_adapter_for(Task.FINALIZE).ask(finalize_prompt))
-        return d, f
-
+    composer = Composer(
+        ctx.compose_context(project=project),
+        precomputed=(draft, final) if scene_result is not None else None,
+    )
     if scene_result is None:
         logger.info("第 %d 章:生成草稿...", chapter_number)
-        draft, final = await _compose(revision_block, "1/6 生成草稿", "2/6 定稿修订")
+        draft, final = await composer(
+            ctx.revision_block, "1/6 生成草稿", "2/6 定稿修订", report=_report
+        )
 
-    # ---- 分级回炉:门禁先行(先修对,再修好),封顶 review_max_revisions 轮 ----
-    # 循环两段:①一致性门禁有 blocker → 定点修复(patch)或整章重写,回门禁复查;
-    # ②门禁干净才精修:校对自修 + 主审四维,不达标带意见(+prose 禁则)回炉重写。
-    # 精修永远只发生在门禁干净的文本上——方向错了不浪费文字加工;主审触发的重写
-    # 也回到①先过门禁,「精修完才发现方向错」从结构上不会发生。
-    threshold = project.review_pass_threshold
-    auto_revise = project.review_auto_revise
-    max_revisions = project.review_max_revisions
-    outline_block = (
-        f"标题:{outline.title}\n目的:{outline.chapter_purpose}\n概要:{outline.summary}"
+    # ================= 阶段 3/4:分级回炉(门禁 + 精修) =================
+    # 门禁先行(先修对)再精修(再修好);三条退出路径见 chapter_rework 模块头。
+    # 场景级逐场验收的统计也并进主审结果(前端生成结果卡展示)。
+    outcome = await review_and_rework(
+        db, project, chapter_number, draft, final,
+        outline=outline, rolling=ctx.rolling, compose=composer, report=_report,
     )
-    review_result: dict = {}
-    revision_rounds = 0
-    proofread_fixed = 0  # 校对累计自动修复的硬伤数(回显给用户看"校对跑过了")
-    last_fixed_issues: list[dict] = []  # 末轮校对自动修复的清单(对应最终正文,回显用)
-    gate_issues: list[dict] = []  # 末轮一致性门禁结果(对应最终正文,落 chapter_issues 用)
-    review_degraded = False  # 主审是否降级(输出解析失败):没审成 ≠ 写得差,走隔离不回炉
-    repair_rounds = 0  # 定点修复轮数(计入 revision_rounds,单独回显)
-    last_repairs: dict = {}  # 末次定点修复明细 {applied, failed}(回显用)
-    patch_tried = False  # 上一轮是否刚做过定点修复(修不掉的连续问题强制重写,防烧轮)
-    rework_log: list[dict] = []  # 逐轮回炉原因(落快照:checker 意见稳不稳一眼可辨)
-    prev_dim_scores: dict[str, int] = {}  # 上一轮主审各维得分(判断「无改善」)
-    stalled_dims: set[str] = set()  # 连续 2 轮无改善的维度:不再为它重写
-    prev_blocker_fps: set[str] = set()  # 上一轮 blocker 指纹(识别「同一问题复现」)
-    while True:
-        # ---- ① 一致性门禁(docs/08 §5.4):对照圣经 + 上章契约 + 上章结尾原文 ----
-        # 有 blocker 不进精修:分诊后定点修复或重写,复查通过才往下走。门禁在落库前,
-        # 拦住的矛盾不会抽进圣经。
-        _report(
-            "3/6 一致性门禁"
-            if revision_rounds == 0
-            else f"3/6 一致性门禁(第 {revision_rounds}/{max_revisions} 轮回炉)"
-        )
-        gate_issues = await check_chapter(
-            db, project.id, chapter_number, final, rolling_summary=rolling
-        )
-        blockers = blockers_of(gate_issues)
-        # continuity 随门禁结果先入 scores:精修段靠它判达标;预算烧在门禁段时
-        # 主审没跑过,scores 至少带上 continuity 供 API/前端回显
-        review_result.setdefault("scores", {})["continuity"] = continuity_score(gate_issues)
-        # 门禁降级(LLM 调用失败 / 输出解析失败):绝不能当成「没有 blocker」放行——
-        # 那等于模型一超时,安全网就自动撤掉(过去正是这么静默放行的)。
-        # 走隔离待人工复核,且不烧回炉轮数:重跑解决不了模型抽风,只会白烧钱。
-        if is_degraded(gate_issues):
-            _reason = (degraded_of(gate_issues) or [{}])[0].get("reason", "")
-            review_result["passed"] = False
-            review_result["gate_note"] = (
-                "一致性检查未能完成,本章未经一致性校验,已隔离待人工复核"
-                "(模型/网络恢复后可在问题面板手动触发复查)"
-            )
-            rework_log.append({
-                "round": revision_rounds,
-                "trigger": "gate_degraded",
-                "note": str(_reason)[:120],
-            })
-            logger.warning(
-                "第 %d 章一致性检查降级,隔离待人工复核:%s", chapter_number, _reason
-            )
-            break
-        if blockers:
-            review_result["passed"] = False
-            blocker_fps = {blocker_fingerprint(b) for b in blockers}
-            all_recurring = bool(blocker_fps) and blocker_fps <= prev_blocker_fps
-            prev_blocker_fps = blocker_fps
-            if not auto_revise or revision_rounds >= max_revisions:
-                break
-            if all_recurring:
-                # 同一批 blocker 上一轮就原样出现过:重写=重新抽签,消不掉还烧钱。
-                # 止损隔离(矛盾照旧不进圣经),「疑似误报」的判断交给人工。
-                # 本轮没有花任何重工作量,不计回炉轮数。
-                review_result["gate_note"] = (
-                    f"{len(blockers)} 个 blocker 连续 2 轮重写后仍未消除,"
-                    "疑似检查误报;本章已隔离,请人工判断正文后放行或重写"
-                )
-                rework_log.append({
-                    "round": revision_rounds, "trigger": "gate",
-                    "blockers": [b.get("description", "")[:80] for b in blockers],
-                    "note": "连续复现,止损隔离",
-                })
-                logger.info(
-                    "第 %d 章 blocker 连续复现(%s…),止损隔离",
-                    chapter_number, sorted(blocker_fps)[0][:40] if blocker_fps else "",
-                )
-                break
-            revision_rounds += 1
-            # 分诊:全部可定点修且上一轮没刚修过 → patch(一次小调用,保住好文);
-            # 否则整章重写。修完不在这里复查——回到循环顶,门禁说了算。
-            if not patch_tried and triage_issues(blockers) == "patch":
-                patch_tried = True
-                repair_rounds += 1
-                _report(
-                    f"3/6 一致性门禁(第 {revision_rounds}/{max_revisions} 轮·定点修复)"
-                )
-                fixes = await repair_chapter(chapter_number, final, blockers)
-                new_final, applied, failed = apply_gate_fixes(final, fixes)
-                if applied:
-                    final = new_final
-                    last_repairs = {"applied": applied, "failed": failed}
-                    logger.info(
-                        "第 %d 章门禁定点修复:%d 处(失配 %d 处),回门禁复查",
-                        chapter_number, len(applied), len(failed),
-                    )
-                    continue
-                logger.info(
-                    "第 %d 章门禁问题不可定点修(%d 条修复全部未应用),转整章重写",
-                    chapter_number, len(fixes),
-                )
-            patch_tried = False
-            rework_log.append({
-                "round": revision_rounds, "trigger": "gate",
-                "blockers": [b.get("description", "")[:80] for b in blockers],
-            })
-            logger.info(
-                "第 %d 章门禁拦截 %d 个 blocker,第 %d/%d 轮回炉(重写)",
-                chapter_number, len(blockers), revision_rounds, max_revisions,
-            )
-            directive = build_revision_directive(_gate_merged_review(review_result, blockers))
-            draft, final = await _compose(
-                _revision_block(directive, final),
-                f"3/6 一致性门禁(第 {revision_rounds}/{max_revisions} 轮回炉·重写草稿)",
-                f"3/6 一致性门禁(第 {revision_rounds}/{max_revisions} 轮回炉·定稿)",
-            )
-            continue
-        # ---- ② 门禁干净,精修:校对硬伤自修 + 主审四维达标判定 ----
-        patch_tried = False
-        _report(
-            "4/6 审校把关"
-            if revision_rounds == 0
-            else f"4/6 审校把关(第 {revision_rounds}/{max_revisions} 轮回炉)"
-        )
-        # 校对硬伤:错字/语病/标点/重复,精确替换自修(幻觉片段已在引擎里过滤)
-        proof = await proofread_chapter(final)
-        round_fixed: list[dict] = []
-        if proof["issues"]:
-            final, _applied, _failed = apply_proofread_fixes(final, proof["issues"])
-            proofread_fixed += len(_applied)
-            # 留下真正修掉的那几条(带类型/理由),供编辑部「校对」tab 回显
-            applied_originals = {a["original"] for a in _applied}
-            round_fixed = [it for it in proof["issues"] if it["original"] in applied_originals]
-        last_fixed_issues = round_fixed
-        # 主审打分(四维);continuity 已由门禁段写入(干净 → 9)
-        review_result = await review_chapter(final, outline_block)
-        review_result["scores"]["continuity"] = continuity_score(gate_issues)
-        # 主审降级(输出解析失败):四维是被「没解析出来」压成 0 的,不是真的写得差。
-        # 不回炉——重写解决不了解析问题,只会白烧钱;走隔离待人工复核。
-        if review_result.get("degraded"):
-            review_degraded = True
-            review_result["passed"] = False
-            review_result["review_note"] = (
-                "主审评分未能完成(输出解析失败),本章未经审校评分,已隔离待人工复核"
-            )
-            logger.warning(
-                "第 %d 章主审降级,隔离待人工复核:%s",
-                chapter_number, review_result.get("degraded_reason", ""),
-            )
-            break
-        # 达标判定:五维阈值硬判(阈值调得再低,blocker 也已在①被拦)
-        passed = judge_passed(review_result["scores"], threshold)
-        review_result["passed"] = passed
-        if passed:
-            break
-        if not auto_revise or revision_rounds >= max_revisions:
-            break
-        # ---- 回炉原因记账:同一维度连续 2 轮无改善 → 退出重写原因集 ----
-        # 重写对同一个模型就是重新抽签:prose 6→6→6 的死锁靠它破——第 2 轮
-        # 还停在原地,就不再为这个维度烧草稿+定稿(实测 4 章 12 轮 prose 纹丝不动)。
-        scores_now = review_result["scores"]
-        failing = [
-            d for d in (*DIMS, CONTINUITY_DIM)
-            if int(scores_now.get(d) or 0) < threshold
-        ]
-        stalled_dims &= set(failing)  # 已达标的维度不再算停滞
-        retryable: list[str] = []
-        for d in failing:
-            now_v, prev_v = int(scores_now.get(d) or 0), prev_dim_scores.get(d)
-            if prev_v is not None and now_v <= prev_v:
-                stalled_dims.add(d)
-            elif prev_v is not None and now_v > prev_v:
-                stalled_dims.discard(d)  # 有改善,再给一轮机会
-            if d not in stalled_dims:
-                retryable.append(d)
-        rework_log.append({
-            "round": revision_rounds + 1, "trigger": "review",
-            "failing": list(failing), "stalled": sorted(stalled_dims),
-        })
-        if not retryable:
-            # 所有未达标维度都连续两轮无改善:再重写注定同样结果,接受当前版本
-            review_result["stall_note"] = (
-                "未达标维度连续 2 轮回炉无改善,已停止重写并接受当前版本;"
-                "建议写手与审校使用不同模型,或适当调低达标线"
-            )
-            logger.info(
-                "第 %d 章 %s 维连续无改善,停止重写,接受当前版本",
-                chapter_number, "/".join(failing),
-            )
-            break
-        revision_rounds += 1
-        logger.info(
-            "第 %d 章未通过(五维=%s,阈值=%d,待改维度=%s),第 %d/%d 轮回炉",
-            chapter_number, review_result["scores"], threshold,
-            "/".join(retryable), revision_rounds, max_revisions,
-        )
-        directive = build_revision_directive(review_result)
-        if "prose" in retryable:
-            directive = _with_prose_directive(
-                directive, review_result.get("scores") or {}, threshold
-            )
-        draft, final = await _compose(
-            _revision_block(directive, final),
-            f"4/6 审校把关(第 {revision_rounds}/{max_revisions} 轮回炉·草稿)",
-            f"4/6 审校把关(第 {revision_rounds}/{max_revisions} 轮回炉·定稿)",
-        )
-        prev_dim_scores = {
-            d: int(scores_now.get(d) or 0) for d in (*DIMS, CONTINUITY_DIM)
-        }
-    review_result["revision_rounds"] = revision_rounds
-    review_result["repair_rounds"] = repair_rounds
-    review_result["repairs"] = last_repairs
-    review_result["rework_log"] = rework_log
-    review_result["threshold"] = threshold
-    review_result["proofread_fixed"] = proofread_fixed
-    # 死锁提示:停滞维度显式告知(模型配比可能系统性不可达),决策留给作者
-    if stalled_dims:
-        review_result["hints"] = [
-            f"「{_DIM_CN.get(d, d)}」维连续多轮回炉无改善:当前写手/审校模型配比下"
-            f"该维度可能无法稳定达到阈值 {threshold}。建议写手与审校使用不同模型,"
-            "或在项目设置中适当调低达标线。"
-            for d in sorted(stalled_dims)
-        ]
-    reviewed_text = final  # 审校/门禁对应的正文(字数守卫可能在其后改动,指纹以此为准)
-    logger.info(
-        "第 %d 章审校+门禁完成:通过=%s,五维=%s,blocker=%d,回炉 %d 轮(定点修 %d)",
-        chapter_number, review_result.get("passed"),
-        review_result.get("scores"), len(blockers_of(gate_issues)),
-        revision_rounds, repair_rounds,
+    draft, final = outcome.draft, outcome.final
+    review_result = outcome.state.review_result
+    if scene_result is not None and scene_result.stats.get("rejected"):
+        review_result["scene_stats"] = scene_result.stats
+    # ================= 阶段 4/4:收尾(守卫 + 去味 + 落库 + 章后链路) =================
+    fin = await finalize_and_persist(
+        db, project, chapter_number, outline, final,
+        draft=draft,
+        review_result=review_result,
+        gate_issues=outcome.gate_issues,
+        review_degraded=outcome.state.review_degraded,
+        reviewed_text=outcome.reviewed_text,
+        last_fixed_issues=outcome.state.last_fixed_issues,
+        preflight_issues=preflight_issues,
+        style_block=style_block,
+        report=_report,
     )
-
-    # ---- 字数守卫:超标压缩/拆章(只对审校后的最终定稿跑一次) ----
-    guard_result = await word_count_guard(
-        db, project, chapter_number, outline, final, style_block, report=_report
-    )
-    final = guard_result.final_text
-
-    # ---- AI 味自愈闭环:定稿终版体检,超标则定向去味重写(带安全阀) ----
-    # 摆在字数守卫之后(最后一道文字加工):守卫的压缩本身是又一次 LLM 重写,可能重新
-    # 引入套话——把去味放最后,既能修守卫引入的 AI 腔,又不会被守卫回炉抵消。安全阀在
-    # deai_self_heal 内:未降分/篇幅越界/空输出一律丢弃回退,绝不落一版比守卫后更差的
-    # 正文;干净文本(score≤门槛)直接短路、不调 LLM。style_block 带正向锚+配对反例。
-    _report("5/6 AI 味自愈")
-    _heal_input = final  # 去味前正文(P4 自愈埋记录:采纳了重写就存版本快照)
-    final, _deai_before, _deai_after = await deai_self_heal(
-        final, style_block, progress=_report
-    )
-    # 采纳了去味重写:去味前正文留一版快照(source=deai,前端「放弃去味」回退用),
-    # 分数变化透传 review.deai(生成结果卡展示)。dedup 只删不写,发生在其后。
-    pre_deai_final: str | None = None
-    if _deai_after.score < _deai_before.score:
-        pre_deai_final = _heal_input
-        review_result["deai"] = {
-            "before": _deai_before.score, "after": _deai_after.score,
-        }
-        logger.info(
-            "第 %d 章 AI 味自愈:%.1f → %.1f(去味前正文已存版本快照)",
-            chapter_number, _deai_before.score, _deai_after.score,
-        )
-
-    # ---- 去重段落守卫:删掉模型复读出的整段重复(纯规则零成本,落库前末道加工) ----
-    # 摆在所有 LLM 文字加工(定稿/回炉/守卫压缩/去味重写)之后:上游任一步都可能复读出
-    # 重复段,这里统一兜底。只删不写,不会引入新问题;鲜有的有意呼应靠长度门槛豁免。
-    final, _dup_removed = dedup_paragraphs(final)
-    if _dup_removed:
-        logger.info("第 %d 章去重:删掉 %d 个重复段落", chapter_number, _dup_removed)
-
-    # ---- 落库 ----
-    # 先结束生成期间一直开着的读事务:期间用量记录等已在别的连接提交,
-    # 旧快照直接升级写锁会撞 SQLITE_BUSY;commit 后用新事务写入。
-    db.commit()
-    chapter = (
-        db.query(Chapter)
-        .filter(
-            Chapter.project_id == project.id,
-            Chapter.chapter_number == chapter_number,
-        )
-        .first()
-    )
-    if chapter is None:
-        chapter = Chapter(
-            project_id=project.id,
-            outline_id=outline.id,
-            chapter_number=chapter_number,
-        )
-        db.add(chapter)
-    elif guard_result.action != "split":
-        # 重写:覆盖前把当前正文存一版快照,供新旧对比与回滚。
-        # 拆章分支例外:_split_chapter 已把第 N 章正文原子落成 part_a 并提交,
-        # 此刻 chapter.final_content 已是 part_a,再快照只会存一版 part_a→part_a
-        # 的无意义历史;且下面的赋值(final 也 = part_a)对拆章是幂等的。
-        from app.chapter_versions import snapshot_chapter
-
-        snapshot_chapter(db, chapter, source="generated")
-    chapter.outline_id = outline.id
-    chapter.draft_content = draft
-    chapter.final_content = final
-    chapter.word_count = len(final)
-    chapter.outline_version_used = outline.current_version
-    chapter.is_stale = False
-    # 门禁判定(docs/08 §5.4.3):回炉封顶仍有 blocker → 落库但隔离(quarantined),
-    # 不做章后抽取(矛盾不进圣经)、不更新滚动摘要、不提契约;
-    # 无 blocker → pending_review(docs/08 §5.5 审核状态机,人工 approve 后 approved)。
-    blockers = blockers_of(gate_issues)
-    # 降级与「有硬矛盾」同等处理:都隔离、都不进圣经。差别只在给用户的说法
-    # (未校验 vs 有矛盾)——行为必须一致,未校验的正文照样会污染真相库。
-    _gate_blocked = bool(blockers) or is_degraded(gate_issues) or review_degraded
-    chapter.status = "quarantined" if _gate_blocked else "pending_review"
-    # 审校快照落库:编辑部打开时回显本次主审结果,免去用户再点一次「请主编审读」
-    store_review_snapshot(chapter, review_result, "generation", reviewed_text)
-    # 校对快照落库:回显生成时自动修复了哪些硬伤(指纹与主审一致,正文改动同步失效)
-    store_proofread_snapshot(chapter, last_fixed_issues, "generation", reviewed_text)
-    db.flush()
-    # P4 自愈埋记录:去味前的正文在此存一版快照(source=deai)。挪到这里是因为
-    # 新建章的 id 要 flush 后才有;不 commit,随下面的正文提交一起落。
-    if pre_deai_final is not None:
-        from app.chapter_versions import next_version_number
-
-        db.add(ChapterVersion(
-            chapter_id=chapter.id,
-            version=next_version_number(db, chapter.id),
-            draft_content=draft,
-            final_content=pre_deai_final,
-            word_count=len(pre_deai_final),
-            source="deai",
-        ))
-    # 正文立刻提交:后面章后链路还有数分钟 LLM 调用,
-    # 不能拿着写锁跨这些 await(会把并发写卡到超时),失败也不该丢正文。
-    db.commit()
-    # issues 落库:purge 本章旧 open 按当前结果重建(幂等);
-    # 指纹已变的旧 ignored 清除(不再生效),未变的保留(用户已确认忽略)。
-    persist_issues(db, chapter, gate_issues, source="gate", text=final)
-    # 写前审核警告同法落库(source="preflight"),与门禁问题同面板展示
-    persist_issues(db, chapter, preflight_issues, source="preflight", text=final)
-    db.commit()
-
-    if _gate_blocked:
-        if not blockers:
-            _why = "主审评分未能完成" if review_degraded else "一致性检查未能完成"
-            _report(f"{_why}:本章已隔离(quarantined),待人工复核")
-            logger.warning(
-                "第 %d 章校验降级(quarantined):%s,本章未经完整校验,"
-                "跳过章后抽取/滚动摘要/契约提取(待人工复查后放行)",
-                chapter_number, _why,
-            )
-        else:
-            _report("一致性门禁拦截:存在未消除的硬矛盾,本章已隔离(quarantined)")
-            logger.warning(
-                "第 %d 章被一致性门禁拦截(quarantined):%d 个 blocker 未消除,"
-                "跳过章后抽取/滚动摘要/契约提取(待人工处理或放行)",
-                chapter_number, len(blockers),
-            )
-        return chapter, gate_issues, {}, guard_result, review_result, preflight_issues
+    if fin.quarantined:
+        return (fin.chapter, outcome.gate_issues, {}, fin.guard_result,
+                review_result, preflight_issues)
 
     # ---- 章后链路(门禁通过才走):抽取写圣经 → 滚动摘要 → 章末契约 ----
     extraction_stats = await apply_chapter_tail(
-        db, project, chapter, chapter_number, final, outline.title, report=_report
+        db, project, fin.chapter, chapter_number, fin.final_text, outline.title,
+        report=_report,
     )
 
     # ---- 重写场景:下游章节的滚动摘要基于旧文,重建 ----
@@ -1031,15 +484,14 @@ async def generate_chapter(
     # 「要避开的」小节,下一章草稿的黑名单由此长出本书特有的部分。
     _report("文风备忘更新")
     await update_style_memo(
-        db, project, chapter_number, final,
-        flavor_notes=memo_notes_block(_deai_after),
+        db, project, chapter_number, fin.final_text,
+        flavor_notes=memo_notes_block(fin.deai_report),
     )
 
     rebuilt = await rebuild_summaries_after(db, project, chapter_number, progress)
     if rebuilt:
         logger.info("第 %d 章重写,已重建下游摘要: %s", chapter_number, rebuilt)
 
-    logger.info("第 %d 章完成,共 %d 字。", chapter_number, chapter.word_count)
-    return chapter, gate_issues, extraction_stats, guard_result, review_result, preflight_issues
-
-
+    logger.info("第 %d 章完成,共 %d 字。", chapter_number, fin.chapter.word_count)
+    return (fin.chapter, outcome.gate_issues, extraction_stats, fin.guard_result,
+            review_result, preflight_issues)

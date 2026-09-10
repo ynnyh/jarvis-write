@@ -279,6 +279,9 @@ class _PipelineAdapter:
         self.prompts.append(prompt)
         if "现在开始写" in prompt:
             return "草稿正文。" * 30
+        if "草稿正文" in prompt and "AI 腔检测命中" in prompt:
+            # 定稿 prompt: 回干净正文, 不把 stub 当读数
+            return "定稿正文。" * 30
         if "修订后的" in prompt:
             return "定稿正文。" * 30
         if "场记" in prompt:
@@ -335,18 +338,21 @@ def _run_generate(
     review_fn 可注入降级/异常的主审(用于验证「没审成 ≠ 写得差」的隔离路径)。
     """
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_compose as cc_mod
+    from app.engines.pipeline import chapter_finalize as cf_mod
+    from app.engines.pipeline import chapter_rework as rw_mod
     from app.engines.pipeline import chapter_maintenance as cm_mod
 
     adapter = adapter or _PipelineAdapter()
     with (
-        patch.object(ch_mod, "get_adapter_for", return_value=adapter),
+        patch.object(cc_mod, "get_adapter_for", return_value=adapter),
         patch.object(cm_mod, "get_adapter_for", return_value=adapter),
-        patch.object(ch_mod, "check_chapter", new=check_fn),
+        patch.object(rw_mod, "_check", new=check_fn),
         patch.object(cm_mod, "extract_and_apply", new=extract_fn),
-        patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
-        patch.object(ch_mod, "review_chapter", new=review_fn or _fake_review_high),
+        patch.object(rw_mod, "_proofread", new=_fake_proofread),
+        patch.object(rw_mod, "_review", new=review_fn or _fake_review_high),
         patch.object(ch_mod, "preflight_chapter", new=_fake_preflight),
-        patch.object(ch_mod, "repair_chapter", new=repair_fn or _fake_repair_no_fixes),
+        patch.object(rw_mod, "_repair", new=repair_fn or _fake_repair_no_fixes),
     ):
         result = asyncio.run(ch_mod.generate_chapter(db, project, n))
     return adapter, result
@@ -517,17 +523,20 @@ def test_gate_patches_blocker_then_passes():
     review_fn, review_state = _counting(_fake_review_high)
     adapter = _PatchAdapter()
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_compose as cc_mod
+    from app.engines.pipeline import chapter_finalize as cf_mod
+    from app.engines.pipeline import chapter_rework as rw_mod
     from app.engines.pipeline import chapter_maintenance as cm_mod
 
     with (
-        patch.object(ch_mod, "get_adapter_for", return_value=adapter),
+        patch.object(cc_mod, "get_adapter_for", return_value=adapter),
         patch.object(cm_mod, "get_adapter_for", return_value=adapter),
-        patch.object(ch_mod, "check_chapter", new=check),
+        patch.object(rw_mod, "_check", new=check),
         patch.object(cm_mod, "extract_and_apply", new=extract),
-        patch.object(ch_mod, "proofread_chapter", new=proofread),
-        patch.object(ch_mod, "review_chapter", new=review_fn),
+        patch.object(rw_mod, "_proofread", new=proofread),
+        patch.object(rw_mod, "_review", new=review_fn),
         patch.object(ch_mod, "preflight_chapter", new=_fake_preflight),
-        patch.object(ch_mod, "repair_chapter", new=repair),
+        patch.object(rw_mod, "_repair", new=repair),
     ):
         _chapter, _issues, _stats, _guard, review, _pf = asyncio.run(
             ch_mod.generate_chapter(db, project, 2)
@@ -564,17 +573,20 @@ def test_gate_patch_miss_falls_back_to_rewrite():
     repair, repair_state = _scripted_repair([[TIME_FIX], []])
     adapter = _PatchAdapter()
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_compose as cc_mod
+    from app.engines.pipeline import chapter_finalize as cf_mod
+    from app.engines.pipeline import chapter_rework as rw_mod
     from app.engines.pipeline import chapter_maintenance as cm_mod
 
     with (
-        patch.object(ch_mod, "get_adapter_for", return_value=adapter),
+        patch.object(cc_mod, "get_adapter_for", return_value=adapter),
         patch.object(cm_mod, "get_adapter_for", return_value=adapter),
-        patch.object(ch_mod, "check_chapter", new=check),
+        patch.object(rw_mod, "_check", new=check),
         patch.object(cm_mod, "extract_and_apply", new=extract),
-        patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
-        patch.object(ch_mod, "review_chapter", new=_fake_review_high),
+        patch.object(rw_mod, "_proofread", new=_fake_proofread),
+        patch.object(rw_mod, "_review", new=_fake_review_high),
         patch.object(ch_mod, "preflight_chapter", new=_fake_preflight),
-        patch.object(ch_mod, "repair_chapter", new=repair),
+        patch.object(rw_mod, "_repair", new=repair),
     ):
         _chapter, _issues, _stats, _guard, review, _pf = asyncio.run(
             ch_mod.generate_chapter(db, project, 2)
@@ -596,17 +608,20 @@ def test_gate_recurring_blocker_stops_early():
     repair, repair_state = _scripted_repair([[TIME_FIX]])
     adapter = _PatchAdapter()
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_compose as cc_mod
+    from app.engines.pipeline import chapter_finalize as cf_mod
+    from app.engines.pipeline import chapter_rework as rw_mod
     from app.engines.pipeline import chapter_maintenance as cm_mod
 
     with (
-        patch.object(ch_mod, "get_adapter_for", return_value=adapter),
+        patch.object(cc_mod, "get_adapter_for", return_value=adapter),
         patch.object(cm_mod, "get_adapter_for", return_value=adapter),
-        patch.object(ch_mod, "check_chapter", new=check),
+        patch.object(rw_mod, "_check", new=check),
         patch.object(cm_mod, "extract_and_apply", new=extract),
-        patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
-        patch.object(ch_mod, "review_chapter", new=_fake_review_high),
+        patch.object(rw_mod, "_proofread", new=_fake_proofread),
+        patch.object(rw_mod, "_review", new=_fake_review_high),
         patch.object(ch_mod, "preflight_chapter", new=_fake_preflight),
-        patch.object(ch_mod, "repair_chapter", new=repair),
+        patch.object(rw_mod, "_repair", new=repair),
     ):
         _chapter, _issues, _stats, _guard, review, _pf = asyncio.run(
             ch_mod.generate_chapter(db, project, 2)
@@ -636,17 +651,20 @@ def test_stalled_dim_stops_rework():
 
     adapter = _PatchAdapter()
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_compose as cc_mod
+    from app.engines.pipeline import chapter_finalize as cf_mod
+    from app.engines.pipeline import chapter_rework as rw_mod
     from app.engines.pipeline import chapter_maintenance as cm_mod
 
     with (
-        patch.object(ch_mod, "get_adapter_for", return_value=adapter),
+        patch.object(cc_mod, "get_adapter_for", return_value=adapter),
         patch.object(cm_mod, "get_adapter_for", return_value=adapter),
-        patch.object(ch_mod, "check_chapter", new=check),
+        patch.object(rw_mod, "_check", new=check),
         patch.object(cm_mod, "extract_and_apply", new=extract),
-        patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
-        patch.object(ch_mod, "review_chapter", new=_review_low_prose),
+        patch.object(rw_mod, "_proofread", new=_fake_proofread),
+        patch.object(rw_mod, "_review", new=_review_low_prose),
         patch.object(ch_mod, "preflight_chapter", new=_fake_preflight),
-        patch.object(ch_mod, "repair_chapter", new=_fake_repair_no_fixes),
+        patch.object(rw_mod, "_repair", new=_fake_repair_no_fixes),
     ):
         _chapter, _issues, _stats, _guard, review, _pf = asyncio.run(
             ch_mod.generate_chapter(db, project, 2)
@@ -672,17 +690,20 @@ def test_gate_unpatchable_blocker_rewrites_directly():
     repair, repair_state = _scripted_repair([[TIME_FIX]])
     adapter = _PatchAdapter()
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_compose as cc_mod
+    from app.engines.pipeline import chapter_finalize as cf_mod
+    from app.engines.pipeline import chapter_rework as rw_mod
     from app.engines.pipeline import chapter_maintenance as cm_mod
 
     with (
-        patch.object(ch_mod, "get_adapter_for", return_value=adapter),
+        patch.object(cc_mod, "get_adapter_for", return_value=adapter),
         patch.object(cm_mod, "get_adapter_for", return_value=adapter),
-        patch.object(ch_mod, "check_chapter", new=check),
+        patch.object(rw_mod, "_check", new=check),
         patch.object(cm_mod, "extract_and_apply", new=extract),
-        patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
-        patch.object(ch_mod, "review_chapter", new=_fake_review_high),
+        patch.object(rw_mod, "_proofread", new=_fake_proofread),
+        patch.object(rw_mod, "_review", new=_fake_review_high),
         patch.object(ch_mod, "preflight_chapter", new=_fake_preflight),
-        patch.object(ch_mod, "repair_chapter", new=repair),
+        patch.object(rw_mod, "_repair", new=repair),
     ):
         _chapter, _issues, _stats, _guard, review, _pf = asyncio.run(
             ch_mod.generate_chapter(db, project, 2)
@@ -869,16 +890,19 @@ def _db_rows(pid: int):
 def _chapter_patches(check_fn, extract_fn):
     """generate_chapter 的 LLM 依赖统一 mock(走 API 时同样生效:patch 的是定义模块)。"""
     from app.engines.pipeline import chapter as ch_mod
+    from app.engines.pipeline import chapter_compose as cc_mod
+    from app.engines.pipeline import chapter_finalize as cf_mod
+    from app.engines.pipeline import chapter_rework as rw_mod
     from app.engines.pipeline import chapter_maintenance as cm_mod
 
     adapter = _PipelineAdapter()
     return adapter, (
-        patch.object(ch_mod, "get_adapter_for", return_value=adapter),
+        patch.object(cc_mod, "get_adapter_for", return_value=adapter),
         patch.object(cm_mod, "get_adapter_for", return_value=adapter),
-        patch.object(ch_mod, "check_chapter", new=check_fn),
+        patch.object(rw_mod, "_check", new=check_fn),
         patch.object(cm_mod, "extract_and_apply", new=extract_fn),
-        patch.object(ch_mod, "proofread_chapter", new=_fake_proofread),
-        patch.object(ch_mod, "review_chapter", new=_fake_review_high),
+        patch.object(rw_mod, "_proofread", new=_fake_proofread),
+        patch.object(rw_mod, "_review", new=_fake_review_high),
         patch.object(ch_mod, "preflight_chapter", new=_fake_preflight),
     )
 
