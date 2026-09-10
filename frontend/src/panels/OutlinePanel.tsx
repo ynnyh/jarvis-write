@@ -13,6 +13,7 @@ import DirectivePanel from "./outline/DirectivePanel";
 import BatchRetitlePanel from "./outline/BatchRetitlePanel";
 import OutlineDiscussChat from "./outline/OutlineDiscussChat";
 import OutlineItem from "./outline/OutlineItem";
+import TensionCurvePanel from "./outline/TensionCurvePanel";
 
 interface Props {
   pid: number;
@@ -430,6 +431,7 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
             onClose={() => setShowBatchRetitle(false)}
           />
         )}
+        {outlines.length > 0 && <TensionCurvePanel pid={pid} />}
         {genProgress && (
           <div className="gen-progress mt-2">
             <div className="gen-progress-label">已生成 {genProgress.done}/{genProgress.total} 章</div>

@@ -425,6 +425,26 @@ export interface Outline {
   scene_anchor: string;
   beats?: string[] | null;
 }
+/** 全书张力总线的节奏体检:用来判断"整本书是不是一条平线" */
+export interface TensionReport {
+  span: number;          // 极差(峰值 - 谷值),小于 2 就该警惕
+  mean: number;          // 均值
+  flat: boolean;         // True = 平线,全书节奏最致命的病
+  longest_run: number;   // 最长同值连续段(连续 N 章一个温度)
+  peak_at: number;       // 峰值落在第几章
+  chapters: number;
+}
+/**
+ * 全书张力曲线:每章目标张力 1-5。
+ * 1=蓄力压制 2=暗流收紧 3=常规推进 4=情绪高点 5=全力爆发。
+ * 章内分场以它为基准做起伏,正文生成时把"这一章在全书的坐标"注入 prompt。
+ */
+export interface TensionCurve {
+  chapters: number[];
+  tension: number[];
+  roles: string[];
+  report: TensionReport;
+}
 export interface ChapterBrief {
   chapter_number: number; status: string; word_count: number; is_stale: boolean;
 }
@@ -1206,6 +1226,10 @@ export const api = {
   extendBlueprintAsync: (id: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${id}/blueprint-extend-async`, {}),
   listOutlines: (id: number) => req<Outline[]>("GET", `/api/projects/${id}/outlines`),
+  // 全书张力总线:每章目标张力(1-5)+ 节奏体检(极差/均值/是否平/峰值章)。
+  // 确定性计算,不花 LLM;前端用来画节奏曲线,治「全书一条平线」。
+  tensionCurve: (id: number) =>
+    req<TensionCurve>("GET", `/api/projects/${id}/outlines/tension-curve`),
 
   editOutline: (pid: number, n: number, updates: Partial<Outline>) =>
     req<EditResult>("PUT", `/api/projects/${pid}/outlines/${n}`, updates, LLM_TIMEOUT),

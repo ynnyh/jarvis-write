@@ -72,6 +72,7 @@ from app.prompts.chapter import (
     CHAPTER_FINALIZE_PROMPT,
 )
 from app.engines.pipeline.word_guard import GuardResult, word_count_guard
+from app.engines.pipeline.tension_bus import tension_bus_block
 from app.schemas.tendency import Tendency
 
 logger = logging.getLogger("jarvis-write.chapter")
@@ -567,6 +568,13 @@ async def generate_chapter(
             chapter_number=chapter_number,
             chapter_title=outline.title,
             drama_task=_drama_task_block(outline),
+            tension_bus_block=tension_bus_block(
+                chapter_number,
+                target_chapters=int(project.target_chapters or 0),
+                macro_plan=project.macro_plan,
+                chapter_role=str(outline.chapter_role or ""),
+                suspense_level=str(outline.suspense_level or ""),
+            ),
             architecture_brief=chapter_architecture_brief(project),
             rolling_summary=rolling,
             recent_tail=recent,
@@ -606,6 +614,13 @@ async def generate_chapter(
             chapter_title=outline.title,
             chapter_purpose=outline.chapter_purpose,
             drama_task=_drama_task_block(outline),
+            tension_bus_block=tension_bus_block(
+                chapter_number,
+                target_chapters=int(project.target_chapters or 0),
+                macro_plan=project.macro_plan,
+                chapter_role=str(outline.chapter_role or ""),
+                suspense_level=str(outline.suspense_level or ""),
+            ),
             foreshadowing=outline.foreshadowing,
             chapter_summary=outline.summary,
             rolling_summary=rolling,

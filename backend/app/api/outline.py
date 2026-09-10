@@ -501,3 +501,47 @@ async def versions(
         .filter(OutlineVersion.outline_id == outline.id)
         .order_by(OutlineVersion.version)
     )
+
+
+class TensionCurveOut(BaseModel):
+    """全书张力曲线(总线)+ 节奏体检。
+
+    前端拿它画一条折线:「哪几章在蓄力、哪几章要爆」一眼可见。
+    事实层是确定性的(不花 LLM),所以每次请求都实时算,不用缓存。
+    """
+
+    chapters: list[int]
+    tension: list[int]
+    # 已铺蓝图的章的定位/悬念密度(画 tooltip 用)
+    roles: list[str] = Field(default_factory=list)
+    # 节奏体检:极差 / 均值 / 是否平 / 最长同值段 / 峰值章号
+    report: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.get("/tension-curve", response_model=TensionCurveOut)
+async def tension_curve(project_id: int, db: Session = Depends(get_db)):
+    """全书张力总线:每章的目标张力(1-5)。
+
+    这是「该精彩时精彩、该压抑时压抑」的全局坐标。章内分场以它为基准做起伏,
+    正文生成时把「这一章在全书的哪个位置」注入 prompt。
+    """
+    from app.engines.pipeline.tension_bus import bus_for_book, flatness_report
+
+    project = get_project_or_404(db, project_id)
+    outlines = (
+        db.query(Outline)
+        .filter(Outline.project_id == project_id)
+        .order_by(Outline.chapter_number)
+        .all()
+    )
+    tension = bus_for_book(
+        target_chapters=int(project.target_chapters or 0),
+        macro_plan=project.macro_plan,
+        outlines=outlines,
+    )
+    return TensionCurveOut(
+        chapters=list(range(1, len(tension) + 1)),
+        tension=tension,
+        roles=[str(o.chapter_role or "") for o in outlines],
+        report=flatness_report(tension),
+    )

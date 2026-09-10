@@ -232,12 +232,16 @@ def _merge_planned(
     planned: list[dict[str, Any]],
     outline: Outline,
     chapter_target: int,
+    *,
+    macro_plan: list[dict] | None = None,
+    project_target_chapters: int = 0,
 ) -> list[dict[str, Any]]:
     """把模型给的场景数组规整成可直接落库的形状。
 
     - 数量收敛到 [MIN_SCENES, MAX_SCENES]
     - 张力:模型没给/给脏 → 用基础波形对应位置补
     - **整条波形太平 → 叠加基础波形**(核心修正,见下)
+    - **有全书总线时,以总线的章级目标为基准重塑场间曲线**(D5)
     - 字数:收敛到合法区间并对齐章目标
     - 章节级字段(地点/人物)缺失时从蓝图继承(模型经常漏)
     """
@@ -259,6 +263,28 @@ def _merge_planned(
         )
     else:
         levels = raw_levels
+
+    # 全书总线:章级目标张力是有全局坐标的,场间曲线要对它负责。
+    # 总线缺失(短篇/未生成卷纲)时跳过,保持原有行为。
+    if project_target_chapters > 0:
+        from app.engines.pipeline.tension_bus import (
+            adjust_scene_waves,
+            chapter_tension_target,
+        )
+
+        ch_target = chapter_tension_target(
+            int(outline.chapter_number),
+            chapter_role=str(outline.chapter_role or ""),
+            suspense_level=str(outline.suspense_level or ""),
+            macro_plan=macro_plan,
+        )
+        adjusted = adjust_scene_waves(levels, chapter_target=ch_target)
+        if adjusted != levels:
+            logger.info(
+                "第 %d 章按全书总线(目标张力 %d)重塑场间曲线:%s → %s",
+                outline.chapter_number, ch_target, levels, adjusted,
+            )
+            levels = adjusted
 
     out: list[dict[str, Any]] = []
     for i, item in enumerate(planned):
@@ -340,7 +366,11 @@ async def plan_scenes(
             max_scenes=MAX_SCENES,
         )
         raw = await get_adapter_for(Task.BLUEPRINT).ask(prompt)
-        planned = _merge_planned(_extract_json(raw), outline, chapter_target)
+        planned = _merge_planned(
+            _extract_json(raw), outline, chapter_target,
+            macro_plan=project.macro_plan,
+            project_target_chapters=int(project.target_chapters or 0),
+        )
     except Exception as exc:  # noqa: BLE001 — 切分失败必须兜底,不能阻断生成
         logger.warning(
             "第 %d 章场景切分失败,回落到节拍切分:%s", outline.chapter_number, exc
