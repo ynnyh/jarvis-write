@@ -21,7 +21,13 @@ from app.db.models import Chapter, Project
 from app.db.session import get_db
 from app.llm.router import Task, get_adapter_for
 from app.prompts.profile import PROFILE_ABSORB_PROMPT, PROFILE_EXTRACT_PROMPT
-from app.prompts.style_capsules import capsule_choices, get_capsule
+from app.prompts.style_capsules import (
+    CATEGORY_LABELS,
+    CATEGORY_ORDER,
+    _MAX_SAMPLE_CHARS,
+    capsule_choices,
+    get_capsule,
+)
 
 from ._common import _get_project_or_404
 
@@ -34,7 +40,8 @@ _PROFILE_FIELDS = ("style", "taboos", "audience", "other")
 # 提取样本设定)。voice_key = 名家/预设胶囊 key;voice_sample = 作者范文/提取的正文样本。
 _VOICE_FIELDS = ("voice_key", "voice_sample")
 _ALL_PROFILE_FIELDS = _PROFILE_FIELDS + _VOICE_FIELDS
-_MAX_VOICE_SAMPLE = 1200  # 与 style_capsules._MAX_SAMPLE_CHARS 对齐,存时即截断
+# 与 style_capsules._MAX_SAMPLE_CHARS 对齐,存时即截断(直接引用常量,避免两处漂移)
+_MAX_VOICE_SAMPLE = _MAX_SAMPLE_CHARS
 
 
 def _read_profile(project: Project) -> dict:
@@ -297,10 +304,17 @@ async def extract_voice_sample(project_id: int, db: Session = Depends(get_db)):
 
 @router.get("/{project_id}/style-profile/voice-capsules")
 async def list_voice_capsules(project_id: int, db: Session = Depends(get_db)):
-    """名家/预设文风胶囊列表,供前端下拉选择。
+    """文风胶囊列表,供前端下拉选择(按分组展示)。
 
-    只回 key/name/directive,不含 sample 正文(前端选择即可)。均为「风格参考·非
-    原作节选」——sample 一律本项目自撰的仿写,不含任何在世作家的原作文字。
+    只回 key/name/directive/category,不含 sample 正文(前端选择即可)。均为
+    「风格参考·非原作节选」——sample 一律本项目自撰的仿写,不含任何在世作家的
+    原作文字。categories 给出分组顺序与展示名,前端据此渲染 optgroup。
     """
     _get_project_or_404(db, project_id)
-    return {"capsules": capsule_choices()}
+    return {
+        "capsules": capsule_choices(),
+        "categories": [
+            {"key": k, "label": CATEGORY_LABELS.get(k, "其他")} for k in CATEGORY_ORDER
+        ],
+        "max_sample_chars": _MAX_SAMPLE_CHARS,
+    }

@@ -23,8 +23,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# 用户范文注入上限:范本只作语感参照,不必整章塞入,防 prompt 膨胀
-_MAX_SAMPLE_CHARS = 1200
+# 用户范文注入上限:范本只作语感参照,不必整章塞入,防 prompt 膨胀。
+# 2026-09-10 由 1200 提到 3000:1200 字连一个完整场景都铺不完(往往只够开头),
+# 模型只能学到起手的语气,学不到句与句之间的节奏——而节奏恰恰是"像不像自己"的关键。
+# 3000 字约合 2000-2500 token,换来的语感贴合度值得,再往上则边际收益骤降。
+_MAX_SAMPLE_CHARS = 3000
 
 
 @dataclass(frozen=True)
@@ -33,14 +36,149 @@ class StyleCapsule:
     name: str       # 展示名
     directive: str  # 笔法特征描述(模仿"怎么写")
     sample: str     # 仿写示范(few-shot 正例;非原作节选)
+    # 分组(前端下拉按此分组,顺序即展示顺序):
+    #   web=网文类型笔法 / literary=文学名家笔法 / neutral=中性预设
+    category: str = ""
 
 
 # 一批风格胶囊。所有 sample 均为"仿其笔法"的原创短段,非任何原作节选。
 # 排序即前端下拉展示顺序;先名家(辨识度高)后中性预设(不点名作家)。
 CAPSULES: list[StyleCapsule] = [
+    # ---------- 网文类型笔法(主力用户场景) ----------
+    StyleCapsule(
+        key="shuangwen",
+        name="爽文快节奏(男频)",
+        category="web",
+        directive=(
+            "节奏第一:短句、碎段,能推进就推进,不铺陈。"
+            "情绪直给——爽点、打脸、反转都落在一两句上,不解释前因后果;"
+            "少形容词,多动作与结果,每段落都带信息增量。"
+            "主角始终占主动,被动处境只做铺垫、不拖过三段。"
+        ),
+        sample=(
+            "「三百万,你拿得出吗?」\n"
+            "「不用三百万。」他把合同推回去,「一百二十万。现在,现金。」\n"
+            "包厢里静了两秒。\n"
+            "有人笑出声,笑到一半停了——他手机上的到账提示,响了一声。"
+        ),
+    ),
+    StyleCapsule(
+        key="xianxia",
+        name="仙侠古风(疏朗写意)",
+        category="web",
+        directive=(
+            "半文白为底,句读短,四字词组与对偶自然穿插。"
+            "写意境用物象、不经情绪词:不写「他很悲伤」,写「雪落满肩他也不掸」。"
+            "招式、器物、境界名要具体可信;留白多、不作解释,让读者自己补。"
+        ),
+        sample=(
+            "剑出鞘时,山门那口古钟自鸣了三声。\n"
+            "他抬手,指诀一引,檐下积了十年的雪齐齐向内塌了半寸。\n"
+            "老道在阶上睁眼,看了很久。\n"
+            "「你这一剑,」他说,「跟谁学的?」"
+        ),
+    ),
+    StyleCapsule(
+        key="xuanyi",
+        name="悬疑冷硬(信息控制)",
+        category="web",
+        directive=(
+            "叙述冷,只写看得见、听得见的。信息分段释放,读者知道的与主角一样多。"
+            "用细节(时间、气味、声音、位置)代替形容词制造压迫;"
+            "不写心理推测,只写行为;章末留一个未解答的钩子。"
+        ),
+        sample=(
+            "23:47,走廊的灯灭了第四盏。\n"
+            "他数过,从电梯口到房门是七步,前六步的地砖是松的,踩上去会响。\n"
+            "今晚第七步没有响。\n"
+            "他停在那儿,没有回头。"
+        ),
+    ),
+    StyleCapsule(
+        key="yanqing",
+        name="言情细腻(感官优先)",
+        category="web",
+        directive=(
+            "感官优先:温度、气息、触感、视线落点,都先于情绪名词。"
+            "心理用短句碎片,不堆叠;情绪靠动作与距离变化传递——靠近、退开、停顿,"
+            "而不是直说「爱」「难过」。节奏允许放慢,长句拖出暧昧,关键处一句短句收住。"
+        ),
+        sample=(
+            "她把杯子往他那边推了推,指尖碰到杯壁,又很快收回去。\n"
+            "「烫。」她说。\n"
+            "他说好,没有去端。\n"
+            "雨一直下,两个人坐着,谁也没先开口。后来她想起那天,只记得那杯水凉得很慢。"
+        ),
+    ),
+    StyleCapsule(
+        key="quanmou",
+        name="历史权谋(话里有话)",
+        category="web",
+        directive=(
+            "对话交锋为主体,话里有话,字面与真意分离。"
+            "叙述克制,不揭示人物真实想法;用人名、官职、礼节、器物建立时代质感。"
+            "关键转折放在一句看似平淡的话或一个动作里;谋略靠信息差推进,不靠独白解释。"
+        ),
+        sample=(
+            "「此事,」中丞替他斟了半杯酒,「还得从长计议。」\n"
+            "他双手接过,低头谢过。酒是温的,恰好不烫手。\n"
+            "出门时风起了。他想起方才那半杯——斟满是要人明着喝,\n"
+            "斟半杯,是留三分给人自己掂量。"
+        ),
+    ),
+    StyleCapsule(
+        key="kehuan",
+        name="硬科幻(冷叙述·概念密度)",
+        category="web",
+        directive=(
+            "技术细节具体且自洽,术语克制、不炫;设定通过人物行动与器物带出,"
+            "避免科普独白。叙述视角冷静,允许长句承载概念密度;"
+            "陌生感靠名词与量化数据制造,而非形容词堆砌。人仍然在故事中心。"
+        ),
+        sample=(
+            "跃迁前的十一秒,舱内重力降到 0.3。\n"
+            "他把固定带又收紧一格,看了一眼读数:燃料余量 14%,误差 ±0.7。\n"
+            "警报没响,这说明那 0.7 还在容差里。\n"
+            "「准备,」他说,「别看窗外。」"
+        ),
+    ),
+    StyleCapsule(
+        key="qingxiaoshuo",
+        name="轻小说吐槽(内心弹幕)",
+        category="web",
+        directive=(
+            "第一人称口语,内心弹幕与正文自然交错。"
+            "玩梗与自嘲点到为止,不喧宾夺主;句尾松散,允许破折号、括号、断句。"
+            "节奏轻快,紧张场景也留一点跳脱;情绪可以夸张,但人物面对处境仍然认真。"
+        ),
+        sample=(
+            "转生第七天,我确认了三件事:一,这里有魔法;二,我没有;三,村长看我的眼神,\n"
+            "很像在看一张未缴纳的账单。\n"
+            "「勇者大人,」他说,「请先从锄地开始吧。」\n"
+            "——好的。我懂。所有异世界都从种地开始。"
+        ),
+    ),
+    StyleCapsule(
+        key="kongbu",
+        name="恐怖惊悚(慢压·错位)",
+        category="web",
+        directive=(
+            "慢压:先铺日常,再渗入一点错位。不解释恐怖来源,只写可被感知的异常——"
+            "声音、影子、重复出现的细节、熟悉之物的微小偏差。"
+            "禁用「恐怖」「毛骨悚然」这类结论词;句子在关键处突然变短。"
+        ),
+        sample=(
+            "他睡前把拖鞋摆在床边,鞋头朝外。这是他十年的习惯。\n"
+            "凌晨三点,他醒了。\n"
+            "拖鞋还是那双,还是那个位置。\n"
+            "只是鞋头,朝里。"
+        ),
+    ),
+    # ---------- 文学名家笔法(辨识度高的经典语感) ----------
     StyleCapsule(
         key="luxun",
         name="鲁迅·冷峻反讽",
+        category="literary",
         directive=(
             "白描为主,句子短而顿挫,克制、冷峻,底下压着反讽与悲悯。"
             "不渲染情绪,靠精确的细节和动作让读者自己去感到;"
@@ -55,6 +193,7 @@ CAPSULES: list[StyleCapsule] = [
     StyleCapsule(
         key="yuhua",
         name="余华·平静叙苦",
+        category="literary",
         directive=(
             "用平静甚至近乎温和的语气叙述残酷与苦难,情感克制到近乎冷。"
             "句子朴素、口语化、偏短;靠重复和白描积累力量;"
@@ -69,6 +208,7 @@ CAPSULES: list[StyleCapsule] = [
     StyleCapsule(
         key="wangzengqi",
         name="汪曾祺·淡而有味",
+        category="literary",
         directive=(
             "散文化,淡而有味,生活气息浓;写吃食、风物、市井,闲笔从容。"
             "白描为主,少用形容词堆叠;节奏舒缓,句子清爽干净;"
@@ -83,6 +223,7 @@ CAPSULES: list[StyleCapsule] = [
     StyleCapsule(
         key="jinyong",
         name="金庸·武侠白话",
+        category="literary",
         directive=(
             "古典白话,武侠节奏明快利落;对话见人物性格与身份。"
             "动作描写有画面,一招一式交代清楚,不拖泥带水;"
@@ -97,6 +238,7 @@ CAPSULES: list[StyleCapsule] = [
     StyleCapsule(
         key="wangxiaobo",
         name="王小波·冷静荒诞",
+        category="literary",
         directive=(
             "黑色幽默与冷静的荒诞并存;比喻新奇而精确,常出人意料。"
             "理性、反抒情,越荒唐的事写得越一本正经;"
@@ -111,6 +253,7 @@ CAPSULES: list[StyleCapsule] = [
     StyleCapsule(
         key="hemingway",
         name="海明威·冰山极简(译笔)",
+        category="literary",
         directive=(
             "冰山理论:只写水面上的动作与对话,情绪压在水下不说破。"
             "句子极简,多用名词和动词,少形容词副词;靠短对话推进;"
@@ -125,6 +268,7 @@ CAPSULES: list[StyleCapsule] = [
     StyleCapsule(
         key="cooldry",
         name="冷硬克制(硬汉派)",
+        category="neutral",
         directive=(
             "克制、冷、不抒情;让动作和对话说话,不解释人物的感受。"
             "短句为主,信息干脆;环境只写与当下有关、能被感知的细节;"
@@ -139,6 +283,7 @@ CAPSULES: list[StyleCapsule] = [
     StyleCapsule(
         key="plain",
         name="素淡白描(平实)",
+        category="neutral",
         directive=(
             "平实、干净、不炫技的白描。用最朴素的词把事情说清楚;"
             "不堆形容词、不上比喻、不升华;"
@@ -161,8 +306,20 @@ def get_capsule(key: str) -> StyleCapsule | None:
 
 
 def capsule_choices() -> list[dict]:
-    """给前端下拉/API 的选项(带简介,不含 sample 正文——前端只需选择即可)。"""
-    return [{"key": c.key, "name": c.name, "directive": c.directive} for c in CAPSULES]
+    """给前端下拉/API 的选项(带简介与分组,不含 sample 正文——前端只需选择即可)。"""
+    return [
+        {"key": c.key, "name": c.name, "directive": c.directive, "category": c.category}
+        for c in CAPSULES
+    ]
+
+
+# 下拉分组的展示名;未登记的分组名兜底为「其他」,顺序按 CATEGORY_ORDER
+CATEGORY_ORDER = ("web", "literary", "neutral")
+CATEGORY_LABELS = {
+    "web": "网文类型笔法",
+    "literary": "文学笔法参照",
+    "neutral": "中性预设",
+}
 
 
 _VOICE_HEADER = (

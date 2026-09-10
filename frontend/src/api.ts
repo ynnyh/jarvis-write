@@ -348,6 +348,7 @@ export interface VoiceCapsule {
   key: string;
   name: string;
   directive: string;
+  category: "web" | "literary" | "neutral"; // 网文类型 / 文学名家 / 通用笔法
 }
 
 // 写作手法卡:本书自己的手法库,勾选启用即拼成一块注入生成/润色/重写

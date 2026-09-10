@@ -31,8 +31,10 @@ def test_capsule_choices_shape_no_sample_leak():
     choices = capsule_choices()
     assert len(choices) == len(CAPSULES)
     for ch in choices:
-        assert set(ch) == {"key", "name", "directive"}  # 不泄露 sample 正文
+        assert set(ch) == {"key", "name", "directive", "category"}  # 不泄露 sample 正文
     assert [ch["key"] for ch in choices] == [c.key for c in CAPSULES]  # 顺序一致
+    # 三个分组都在:网文类型(新增的空缺补齐)、文学名家、中性通用
+    assert {ch["category"] for ch in choices} == {"web", "literary", "neutral"}
 
 
 def test_render_voice_block_both_empty_returns_blank():
@@ -53,7 +55,7 @@ def test_render_voice_block_with_capsule_marks_copyright():
 def test_render_voice_block_user_sample_truncated():
     block = render_voice_block(voice_sample="字" * 5000)
     assert "作者自备" in block
-    assert block.count("字") <= 1200  # 范本注入截断到上限
+    assert block.count("字") <= 3000  # 范本注入截断到上限(3000:够铺一个完整场景)
 
 
 def test_render_voice_block_capsule_and_sample_combined():

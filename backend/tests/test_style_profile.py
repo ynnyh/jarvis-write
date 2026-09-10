@@ -320,4 +320,4 @@ def test_voice_capsules_list(client, seeded):
     assert r.status_code == 200
     caps = r.json()["capsules"]
     assert any(c["key"] == "yuhua" for c in caps)
-    assert all(set(c) == {"key", "name", "directive"} for c in caps)  # 不泄露 sample
+    assert all(set(c) == {"key", "name", "directive", "category"} for c in caps)  # 不泄露 sample

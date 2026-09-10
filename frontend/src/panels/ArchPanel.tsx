@@ -11,6 +11,13 @@ import { toast } from "../ui/Toaster";
 import { useJobReconnect } from "../hooks/useJobReconnect";
 import { useDiscussChat } from "../hooks/useDiscussChat";
 
+// 文风胶囊下拉的分组与顺序:网文类型是主诉求,放最前
+const CAPSULE_GROUPS: { cat: VoiceCapsule["category"]; label: string }[] = [
+  { cat: "web", label: "网文类型" },
+  { cat: "literary", label: "文学名家" },
+  { cat: "neutral", label: "通用笔法" },
+];
+
 interface Props {
   project: Project; arch: Architecture | null; onChanged: () => Promise<void>; hasContent?: boolean;
   // 重生成架构的代价提示用:现有大纲/正文规模
@@ -336,9 +343,17 @@ export default function ArchPanel({ project, arch, onChanged, hasContent, outlin
           <select value={profile.voice_key}
             onChange={(e) => { setProfile({ ...profile, voice_key: e.target.value }); setProfileDirty(true); }}>
             <option value="">不指定(用通用去味规则)</option>
-            {capsules.map((c) => (
-              <option key={c.key} value={c.key}>{c.name}</option>
-            ))}
+            {CAPSULE_GROUPS.map(({ cat, label }) => {
+              const group = capsules.filter((c) => c.category === cat);
+              if (!group.length) return null;
+              return (
+                <optgroup key={cat} label={label}>
+                  {group.map((c) => (
+                    <option key={c.key} value={c.key}>{c.name}</option>
+                  ))}
+                </optgroup>
+              );
+            })}
           </select>
           {selectedCapsule && (
             <div className="muted mt-1">
@@ -348,11 +363,11 @@ export default function ArchPanel({ project, arch, onChanged, hasContent, outlin
         </div>
         <div className="profile-field mt-3">
           <label className="fl">文风范文</label>
-          <textarea rows={4}
-            placeholder="贴一段你欣赏的文字当范本,或用右上角「从已认可章节提取」自动填入…"
+          <textarea rows={6}
+            placeholder="贴一段你欣赏的文字当范本(3000 字内,建议一两个完整场景),或用右上角「从已认可章节提取」自动填入…"
             value={profile.voice_sample}
             onChange={(e) => { setProfile({ ...profile, voice_sample: e.target.value }); setProfileDirty(true); }} />
-          <div className="muted mt-1">{(profile.voice_sample || "").length}/1200 字,超出保存时自动截断</div>
+          <div className="muted mt-1">{(profile.voice_sample || "").length}/3000 字,超出保存时自动截断</div>
         </div>
         {voiceExtracting && <div className="muted mt-2"><span className="spin" />正在从已认可章节提取范本…</div>}
       </div>
