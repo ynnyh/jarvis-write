@@ -10,7 +10,7 @@ from app.db.models import Outline, Project
 from app.db.session import SessionLocal, get_db
 from app.engines.pipeline.blueprint import generate_blueprint, save_blueprint
 from app.engines.tendency import assemble_tendency
-from app.engines.tendency.assembler import render_style_block
+from app.engines.tendency.assembler import dna_block_of, render_style_block
 from app.engines.title_style import resolve_title_directive
 from app.jobs import create_job, fail_job, finish_job, fire_and_track, list_running, normalize_job_error, update_stage
 from app.llm.router import Task, get_adapter_for
@@ -94,7 +94,7 @@ async def generate_project_blueprint_async(
             if p.target_chapters > ROLLING_THRESHOLD:
                 style_block = render_style_block(
                     assemble_tendency("outline", req.tendency, p.global_tendency)
-                )
+                ) + dna_block_of(p.dna)
                 update_stage(job_id, "生成全书卷纲(指南针)")
                 segments = await _ensure_macro_plan(session, p, style_block)
                 end_chapter = min(segments[0]["end"], p.target_chapters)
@@ -276,7 +276,7 @@ async def extend_blueprint_async(project_id: int, db: Session = Depends(get_db))
             p = session.get(Project, project_id)
             style_block = render_style_block(
                 assemble_tendency("outline", {}, p.global_tendency)
-            )
+            ) + dna_block_of(p.dna)
             update_stage(job_id, "读取卷纲与前情状态")
             segments = await _ensure_macro_plan(session, p, style_block)
             start = planned_upto + 1

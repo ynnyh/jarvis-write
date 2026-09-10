@@ -33,6 +33,7 @@ from app.jobs import spawn_job
 from app.llm.base import LLMAdapter, LLMMessage, complete_text_with_budget
 from app.llm.router import Task, get_adapter_for
 from app.prompts.dna_capsules import dna_capsule_choices, get_dna_capsule
+from app.prompts.story_patterns import pattern_choices
 from app.prompts.inspire import (
     CHAT_DISTILL_PROMPT,
     CHAT_SYSTEM_PROMPT,
@@ -559,6 +560,7 @@ async def dna_options() -> dict:
     """
     return {
         "capsules": dna_capsule_choices(),
+        "patterns": pattern_choices(),
         "modes": [{"key": k, "label": label} for k, label in DNA_MODES],
         "axes": [
             {"key": k, "label": label, "left": lo, "right": hi}

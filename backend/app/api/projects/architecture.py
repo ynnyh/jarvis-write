@@ -65,6 +65,7 @@ async def generate_project_architecture(
         concept=project.concept,
         tendency=req.tendency,
         global_tendency=project.global_tendency,
+        dna=project.dna,
         directive=req.directive,
     )
     arch = save_architecture(db, project, result)
@@ -99,6 +100,7 @@ async def generate_project_architecture_async(
                 concept=project.concept,
                 tendency=req.tendency,
                 global_tendency=project.global_tendency,
+        dna=project.dna,
                 directive=req.directive,
                 progress=lambda s: update_stage(job_id, s),
             )

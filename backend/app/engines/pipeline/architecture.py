@@ -86,6 +86,7 @@ async def generate_architecture(
     tendency: Tendency | None = None,
     global_tendency: Tendency | None = None,
     directive: str | None = None,
+    dna: object | None = None,
     progress=None,
 ) -> ArchitectureResult:
     """执行雪花四步,返回完整架构。纯生成,不落库。
@@ -106,6 +107,11 @@ async def generate_architecture(
 
     assembled = assemble_tendency("outline", tendency, global_tendency)
     style_block = render_style_block(assembled)
+    if dna is not None:
+        # 故事 DNA(味道锚+故事骨架):未设置时返回空串,prompt 一字不变
+        from app.engines.tendency.assembler import dna_block_of
+
+        style_block += dna_block_of(dna)
     adapter = get_adapter_for(Task.ARCHITECTURE)
     topic_block = _render_topic_block(topic, concept)
     directive_block = _render_directive_block(directive)

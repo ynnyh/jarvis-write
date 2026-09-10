@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   api, ChatTurn, Concept, CONCEPT_FIELDS, EMPTY_CONCEPT, conceptIsEmpty,
   Project, Tendency,
-  StoryDNA, EMPTY_DNA, dnaIsEmpty, DnaOptions, DnaCapsuleChoice, MirrorResult, EngineCard,
+  StoryDNA, EMPTY_DNA, dnaIsEmpty, DnaOptions, DnaCapsuleChoice, PatternChoice, MirrorResult, EngineCard,
 } from "../api";
 import TendencySelector from "../components/TendencySelector";
 import { useJob } from "../ui/useJob";
@@ -108,6 +108,7 @@ function DnaCard({
   }
 
   const pickedCap = options?.capsules.find((c) => c.key === dna.taste_key) || null;
+  const pickedPattern = options?.patterns.find((p) => p.key === dna.pattern_key) || null;
   const forbidden = (dna.mode && options?.forbidden_by_mode[dna.mode]) || [];
   const empty = dnaIsEmpty(dna);
 
@@ -135,6 +136,25 @@ function DnaCard({
             {pickedCap && (
               <div className="dna-cap-hint">
                 <b>{pickedCap.name}</b>（参照:{pickedCap.comps_hint}）<br />{pickedCap.directive}
+              </div>
+            )}
+          </div>
+
+          {/* 故事骨架:一步定「情节怎么组织」(短剧爆款的结构配方) */}
+          <div className="dna-field">
+            <label className="fl">认领一个故事骨架 <span className="dna-field-hint">· 打脸/重生/前世今生等结构配方,选中后情节按套路节奏长;不选则按普通长篇节奏</span></label>
+            <div className="title-chips">
+              {(options?.patterns ?? []).map((p: PatternChoice) => (
+                <button key={p.key} type="button"
+                  className={"title-chip sm" + (dna.pattern_key === p.key ? " on" : "")}
+                  onClick={() => set({ pattern_key: dna.pattern_key === p.key ? "" : p.key })}>{p.name}</button>
+              ))}
+            </div>
+            {pickedPattern && (
+              <div className="dna-cap-hint">
+                <b>{pickedPattern.name}</b>（参照:{pickedPattern.comps_hint}）<br />
+                {pickedPattern.formula}<br />
+                <span className="muted">节奏:{pickedPattern.rhythm}</span>
               </div>
             )}
           </div>

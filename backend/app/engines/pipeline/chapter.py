@@ -63,7 +63,7 @@ from app.engines.editorial import (
     store_review_snapshot,
 )
 from app.engines.tendency import assemble_tendency
-from app.engines.tendency.assembler import _PROFILE_KEY, render_style_block
+from app.engines.tendency.assembler import _PROFILE_KEY, dna_block_of, render_style_block
 from app.engines.tendency.cards import render_cards_block
 from app.prompts.style_capsules import pairwise_examples_block, render_voice_block
 from app.llm.router import Task, get_adapter_for
@@ -309,6 +309,9 @@ async def generate_chapter(
             str(_profile.get("voice_key") or ""),
             str(_profile.get("voice_sample") or ""),
         )
+    # 故事 DNA(味道锚+故事骨架):题材/口味的正样本锚定 + 情节组织的结构配方
+    # (节奏/卡点/桥段)。DNA 未设置时 dna_block_of 返回空串,行为不变。
+    style_block += dna_block_of(project.dna)
 
     rolling = _rolling_summary(db, project.id, chapter_number)
     recent = _recent_tail(db, project.id, chapter_number)

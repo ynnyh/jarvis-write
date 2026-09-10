@@ -200,4 +200,10 @@ def dna_block_of(dna: object) -> str:
     pw = genre_pairwise_block(story.mode).strip()
     if pw:
         parts.append(pw)
+    # 故事骨架(结构配方):管「情节按什么套路组织」——味道/笔法之外的第三个胶囊维度
+    from app.prompts.story_patterns import render_pattern_block
+
+    pat = render_pattern_block(story.pattern_key).strip()
+    if pat:
+        parts.append(pat)
     return "\n" + "\n\n".join(parts) + "\n" if parts else ""
