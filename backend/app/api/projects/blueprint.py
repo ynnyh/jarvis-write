@@ -228,6 +228,22 @@ def _segment_for(segments: list[dict], chapter: int) -> tuple[dict, dict | None]
     return segments[-1], None
 
 
+def _next_goal_text(next_seg: dict | None, open_ended: bool) -> str:
+    """展开段的「下一卷预告」注入文本。
+
+    契约式最后一段=收束全书;连载式最后一段=本批次收束点(留钩子,不是结局)——
+    否则模板「本卷结尾要为下一卷埋好势能」会把模型往写结局上带,违背连载式设计。
+    """
+    if next_seg is not None:
+        return next_seg["goal"]
+    if open_ended:
+        return (
+            "(本书为开放式连载,下一卷尚未规划:把本卷结尾写成「本批次收束点:"
+            "悬念半解、留最大钩子」,不是全书结局,势能留给续订后的下一卷)"
+        )
+    return "(已是最终卷,收束全书)"
+
+
 def _written_state_block(session, p: Project, seg: dict, next_seg: dict | None) -> str:
     """展开下一卷时注入的已成文状态(前情摘要 + 未回收伏笔 + 卷目标)。"""
     from app.db.models import Chapter, Foreshadowing
@@ -268,7 +284,7 @@ def _written_state_block(session, p: Project, seg: dict, next_seg: dict | None) 
     ) or "(无)"
     return ROLLING_CONTEXT_BLOCK.format(
         start=seg["start"], end=seg["end"], segment_goal=seg["goal"],
-        next_goal=(next_seg["goal"] if next_seg else "(已是最终卷,收束全书)"),
+        next_goal=_next_goal_text(next_seg, p.open_ended),
         written_upto=written_upto, rolling_summary=rolling[:2500],
         open_foreshadows=fore_lines,
     )

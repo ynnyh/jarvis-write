@@ -191,3 +191,15 @@ def test_blueprint_extend_contract_still_blocked(client):
     r = client.post(f"/api/projects/{p['id']}/blueprint-extend-async", headers=headers)
     assert r.status_code == 400
     assert "铺满" in r.json()["detail"]
+
+
+def test_next_goal_text_open_ended():
+    """展开「当前批次最后一段」时的下一卷预告:连载式=收束点留钩子,契约式=收束全书。"""
+    from app.api.projects.blueprint import _next_goal_text
+
+    # 有下一段:直接用卷纲里的卷目标,两种模式一致
+    assert _next_goal_text({"goal": "中段卷目标"}, open_ended=True) == "中段卷目标"
+    # 无下一段(本批次末段):契约式收束全书;连载式不许写结局
+    assert _next_goal_text(None, open_ended=False) == "(已是最终卷,收束全书)"
+    serial = _next_goal_text(None, open_ended=True)
+    assert "不是全书结局" in serial and "收束点" in serial
