@@ -4,12 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import {
   api, ChatTurn, Concept, CONCEPT_FIELDS, EMPTY_CONCEPT, conceptIsEmpty,
   Project, Tendency,
-  StoryDNA, EMPTY_DNA, dnaIsEmpty, DnaOptions, DnaCapsuleChoice, PatternChoice, MirrorResult, EngineCard,
+  StoryDNA, EMPTY_DNA, dnaIsEmpty, DnaOptions, DnaCapsuleChoice, PatternChoice, PatternDerived, MirrorResult, EngineCard,
 } from "../api";
 import TendencySelector from "../components/TendencySelector";
 import { useJob } from "../ui/useJob";
 import { confirmDialog } from "../ui/ConfirmDialog";
 import { errMsg } from "../pollJob";
+import { toast } from "../ui/Toaster";
 import type { SetupStep } from "../pages/ProjectPage";
 
 interface Props {
@@ -82,6 +83,10 @@ function DnaCard({
   onMirror: () => void;
 }) {
   const [mustInput, setMustInput] = useState("");
+  const [showCustomPattern, setShowCustomPattern] = useState(false);
+  const [customPatternInput, setCustomPatternInput] = useState("");
+  const [deriving, setDeriving] = useState(false);
+  const [derived, setDerived] = useState<PatternDerived | null>(null);
   const [banInput, setBanInput] = useState("");
   const set = (patch: Partial<StoryDNA>) => onChange({ ...dna, ...patch });
 
@@ -147,14 +152,47 @@ function DnaCard({
               {(options?.patterns ?? []).map((p: PatternChoice) => (
                 <button key={p.key} type="button"
                   className={"title-chip sm" + (dna.pattern_key === p.key ? " on" : "")}
-                  onClick={() => set({ pattern_key: dna.pattern_key === p.key ? "" : p.key })}>{p.name}</button>
+                  onClick={() => set({ pattern_key: dna.pattern_key === p.key ? "" : p.key, pattern_custom: dna.pattern_key === p.key ? dna.pattern_custom : "" })}>{p.name}</button>
               ))}
+              <button type="button"
+                className={"title-chip sm" + (!dna.pattern_key && dna.pattern_custom ? " on" : "")}
+                onClick={() => setShowCustomPattern(!showCustomPattern)}>✍ 自定义</button>
             </div>
             {pickedPattern && (
               <div className="dna-cap-hint">
                 <b>{pickedPattern.name}</b>（参照:{pickedPattern.comps_hint}）<br />
                 {pickedPattern.formula}<br />
                 <span className="muted">节奏:{pickedPattern.rhythm}</span>
+              </div>
+            )}
+            {showCustomPattern && (
+              <div className="dna-cap-hint">
+                <label className="fl">描述你想要的题材/套路（一句话或一段话,AI 反推成结构配方）</label>
+                <textarea rows={2} value={customPatternInput}
+                  onChange={(e) => setCustomPatternInput(e.target.value)}
+                  placeholder='如:"山东小伙去韩国做练习生,认识财阀大小姐" / "末日来临前囤货躺赢的爽文"' />
+                <div className="mt-1" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <button type="button" className="btn-sm" disabled={deriving || customPatternInput.trim().length < 8}
+                    onClick={async () => {
+                      setDeriving(true);
+                      try {
+                        const r = await api.derivePattern(customPatternInput.trim());
+                        set({ pattern_key: "", pattern_custom: r.custom });
+                        setDerived(r);
+                      } catch (e) { toast.err("反推失败", errMsg(e)); } finally { setDeriving(false); }
+                    }}>{deriving ? "AI 反推中…" : "AI 反推配方"}</button>
+                  <span className="muted">也可以直接在下面手写配方,不走 AI</span>
+                </div>
+                {derived && (
+                  <div className="mt-1">
+                    <b>{derived.name || "自定义骨架"}</b><br />
+                    {derived.formula}<br />
+                    <span className="muted">节奏:{derived.rhythm}</span>
+                  </div>
+                )}
+                <textarea rows={5} className="mt-1" value={dna.pattern_custom}
+                  onChange={(e) => set({ pattern_key: "", pattern_custom: e.target.value })}
+                  placeholder="骨架配方/节奏规则/必备桥段…(AI 反推结果落在这里,可手改)" />
               </div>
             )}
           </div>

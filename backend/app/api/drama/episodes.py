@@ -85,7 +85,8 @@ async def plan(project_id: int, body: PlanIn, db: Session = Depends(get_db)):
         with SessionLocal() as session:
             proj = session.get(Project, project_id)
             return await plan_episodes(
-                session, proj, from_ch, to_ch, mode, duration, progress
+                session, proj, from_ch, to_ch, mode, duration, progress,
+                target_episodes=body.target_episodes,
             )
 
     return {"job_id": spawn_job(kind, work)}

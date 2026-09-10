@@ -172,7 +172,7 @@ EPISODE_PLAN_PROMPT = """\
 【书名】{title}
 【类型】{genre}
 【改编模式】{mode_desc}
-{concept_block}{chapters_block}
+{target_block}{concept_block}{chapters_block}
 严格按 JSON 输出(不要 markdown 围栏,不要任何解释),结构如下:
 {{
   "episodes": [

@@ -827,16 +827,17 @@ export interface StoryDNA {
   vibe: string;                  // 自备 vibe 范本(只描述味道,非原作节选)
   taste_key: string;             // 选中的味道锚胶囊 key(见后端 dna_capsules)
   pattern_key: string;           // 选中的故事骨架 key(见后端 story_patterns:情节结构配方)
+  pattern_custom: string;        // 自定义骨架配方(用户手写或 AI 反推;pattern_key 为空时生效)
   capsule: string;               // 蒸馏出的『本书基因』整块文本
 }
 export const EMPTY_DNA: StoryDNA = {
-  comps: "", mode: "", axes: {}, must: [], must_not: [], vibe: "", taste_key: "", pattern_key: "", capsule: "",
+  comps: "", mode: "", axes: {}, must: [], must_not: [], vibe: "", taste_key: "", pattern_key: "", pattern_custom: "", capsule: "",
 };
 /** DNA 是否所有维度都没表态(与后端 StoryDNA.is_empty 同口径) */
 export function dnaIsEmpty(d: StoryDNA | null | undefined): boolean {
   if (!d) return true;
   return !(
-    d.comps?.trim() || d.mode?.trim() || d.vibe?.trim() || d.taste_key?.trim() || d.pattern_key?.trim() || d.capsule?.trim() ||
+    d.comps?.trim() || d.mode?.trim() || d.vibe?.trim() || d.taste_key?.trim() || d.pattern_key?.trim() || d.pattern_custom?.trim() || d.capsule?.trim() ||
     Object.values(d.axes || {}).some((v) => (v ?? "").trim()) ||
     (d.must || []).some((x) => (x ?? "").trim()) ||
     (d.must_not || []).some((x) => (x ?? "").trim())
@@ -850,6 +851,11 @@ export interface DnaCapsuleChoice {
 /** 故事骨架选项(GET /inspire/dna/options 的 patterns 项;不含 opener 正文) */
 export interface PatternChoice {
   key: string; name: string; comps_hint: string; formula: string; rhythm: string;
+}
+/** AI 反推的故事骨架配方(POST /inspire/dna/pattern-derive) */
+export interface PatternDerived {
+  name: string; formula: string; rhythm: string; beats: string[]; opener: string;
+  custom: string; // 收敛后的配方整块文本,直接存 DNA.pattern_custom
 }
 /** 坐标卡静态选项:味道锚胶囊 / 故事骨架 / 题材模式 / 味道轴 / 各模式会拦的套路(与硬门同口径) */
 export interface DnaOptions {
@@ -1164,6 +1170,8 @@ export const api = {
     req<ChatResult>("POST", "/api/inspire/chat", { messages, concept, tendency, dna }, LLM_TIMEOUT),
   // 坐标卡静态选项(味道锚/模式/味道轴/各模式禁忌)
   dnaOptions: () => req<DnaOptions>("GET", "/api/inspire/dna/options"),
+  derivePattern: (text: string) =>
+    req<PatternDerived>("POST", "/api/inspire/dna/pattern-derive", { text }, 180000),
   // 品味镜:坐标卡 → 一段人话复述 + 矛盾检测 + 会拦的套路(生成前照镜子,先核对再烧 token)
   dnaMirror: (dna: StoryDNA, spark = "") =>
     req<MirrorResult>("POST", "/api/inspire/dna/mirror", { dna, spark }, 60000),

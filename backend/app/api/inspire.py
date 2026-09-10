@@ -570,9 +570,59 @@ async def dna_options() -> dict:
     }
 
 
+
+
 class MirrorRequest(BaseModel):
     dna: StoryDNA
     spark: str = Field(default="", description="灵感碎片(可选,仅供蒸馏参考)")
+
+
+class PatternDeriveRequest(BaseModel):
+    """故事骨架反推:一段概念/题材/观感描述 → 可执行的结构配方。"""
+    text: str = Field(min_length=8, max_length=2000, description="概念/题材/爆款观感描述")
+
+
+class PatternDeriveResponse(BaseModel):
+    name: str = ""
+    formula: str = ""
+    rhythm: str = ""
+    beats: list[str] = Field(default_factory=list)
+    opener: str = ""
+    custom: str = Field(default="", description="收敛后的配方整块文本,直接存 DNA.pattern_custom")
+
+
+@router.post("/dna/pattern-derive", response_model=PatternDeriveResponse)
+async def pattern_derive(req: PatternDeriveRequest) -> PatternDeriveResponse:
+    """概念/描述 → 故事骨架配方(AI 发挥)。
+
+    预置骨架只有八个,题材是无限的:用户给一段描述(「修仙界快递员SYSTEM文」
+    「末日囤货流」……),AI 反推成与内置骨架同构的四件套配方,前端填进
+    DNA.pattern_custom。纯 JSON 校验任务,失败即 502 不降级——配方是整本书
+    的骨架,宁可让用户重试也不能拿半截的糊弄。
+    """
+    from app.engines.common import ask_llm_json
+    from app.prompts.story_patterns import PATTERN_DERIVE_PROMPT, pattern_from_derived
+
+    try:
+        data, err = await ask_llm_json(
+            get_adapter_for(Task.PATTERN_DERIVE),
+            PATTERN_DERIVE_PROMPT.format(text=req.text.strip()),
+            label="故事骨架反推",
+        )
+    except Exception as exc:  # noqa: BLE001 — 上游网络/鉴权错误统一口径
+        raise HTTPException(status_code=502, detail=f"骨架反推调用失败:{exc}") from exc
+    if err:
+        raise HTTPException(status_code=502, detail=f"骨架反推输出无法解析:{err}")
+
+    beats = [str(b).strip() for b in (data.get("beats") or []) if str(b).strip()]
+    return PatternDeriveResponse(
+        name=str(data.get("name") or "").strip()[:20],
+        formula=str(data.get("formula") or "").strip(),
+        rhythm=str(data.get("rhythm") or "").strip(),
+        beats=beats,
+        opener=str(data.get("opener") or "").strip(),
+        custom=pattern_from_derived(data),
+    )
 
 
 class MirrorResponse(BaseModel):

@@ -318,7 +318,7 @@ export const dramaApi = {
 
   getEpisodes: (pid: number) =>
     req<{ episodes: DramaEpisode[] }>("GET", `/api/projects/${pid}/drama/episodes`),
-  plan: (pid: number, body: { from_chapter: number; to_chapter: number; mode: string; duration_s: number }) =>
+  plan: (pid: number, body: { from_chapter: number; to_chapter: number; mode: string; duration_s: number; target_episodes?: number }) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/episodes/plan`, body, LLM_TIMEOUT),
   deleteEpisode: (pid: number, eid: number) =>
     req<{ ok: boolean }>("DELETE", `/api/projects/${pid}/drama/episodes/${eid}`),

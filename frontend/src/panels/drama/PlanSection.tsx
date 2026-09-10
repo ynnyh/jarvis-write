@@ -21,6 +21,7 @@ export function PlanSection({ pid, approved, episodes, onChanged, selectedId, on
   const [to, setTo] = useState(approved[approved.length - 1] ?? from);
   const [mode, setMode] = useState("dialogue");
   const [duration, setDuration] = useState(90);
+  const [targetEp, setTargetEp] = useState(0);
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState("");
   const [err, setErr] = useState("");
@@ -34,7 +35,7 @@ export function PlanSection({ pid, approved, episodes, onChanged, selectedId, on
     setBusy(true); setErr(""); setStage("");
     try {
       const r = await run<DramaEpisode[]>(
-        () => dramaApi.plan(pid, { from_chapter: from, to_chapter: to, mode, duration_s: duration }),
+        () => dramaApi.plan(pid, { from_chapter: from, to_chapter: to, mode, duration_s: duration, target_episodes: targetEp || undefined }),
         { kind: `drama-plan-${pid}`, onStage: setStage },
       );
       if (r) {
@@ -97,6 +98,15 @@ export function PlanSection({ pid, approved, episodes, onChanged, selectedId, on
           <input id="dp-dur" type="number" min={30} max={180} value={duration}
             onChange={(e) => setDuration(Number(e.target.value) || 90)} />
         </div>
+        <div className="field">
+          <label className="fl" htmlFor="dp-eps">目标集数<span className="hint">0=AI 自定</span></label>
+          <input id="dp-eps" type="number" min={0} max={300} value={targetEp}
+            onChange={(e) => setTargetEp(Math.max(0, Number(e.target.value) || 0))} />
+        </div>
+      </div>
+      <div className="card-desc mt-1">
+        换算参考(对白演绎、单集 90 秒):1 章约 2500 字 ≈ 2-4 集;一部 80-100 集的短剧,
+        通常对应 25-40 章的小说。骨架选了「短剧向」的话,切出来的集会更碎、钩子更密。
       </div>
       <div className="form-actions">
         <button className="primary" disabled={busy} onClick={plan}>

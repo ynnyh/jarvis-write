@@ -140,6 +140,7 @@ async def plan_episodes(
     mode: str,
     duration_s: int,
     progress=lambda s: None,
+    target_episodes: int = 0,
 ) -> list[dict]:
     chapters_block, material_count = _chapter_material(db, project.id, from_ch, to_ch)
     if not material_count:
@@ -160,6 +161,13 @@ async def plan_episodes(
             concept_block(project) + book_block(project) + _banned_block(db, project.id)
         ),
         chapters_block=chapters_block,
+        # 目标集数:0=AI 按素材密度自定(与旧行为一致);给了就约束在 ±10%
+        target_block=(
+            f"【目标集数(硬约束)】全范围切出约 {target_episodes} 集(允许 ±10%),"
+            "以每集钩子/卡点完整为先,不为凑数硬切。\n"
+            if target_episodes > 0
+            else ""
+        ),
     )
     raw = await adapter.ask(prompt)
     data = parse_llm_json(raw)

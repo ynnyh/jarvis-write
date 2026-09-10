@@ -66,6 +66,10 @@ class StoryDNA(BaseModel):
         default="",
         description="选中的故事骨架 key(见 prompts/story_patterns):情节组织的结构配方",
     )
+    pattern_custom: str = Field(
+        default="",
+        description="自定义故事骨架配方(用户手写或 AI 反推产物);pattern_key 为空时生效",
+    )
     capsule: str = Field(default="", description="蒸馏出的『本书基因』整块文本")
 
     def is_empty(self) -> bool:
@@ -77,6 +81,7 @@ class StoryDNA(BaseModel):
                 self.vibe.strip(),
                 self.taste_key.strip(),
                 self.pattern_key.strip(),
+                self.pattern_custom.strip(),
                 self.capsule.strip(),
                 any((v or "").strip() for v in self.axes.values()),
                 any((x or "").strip() for x in self.must),
@@ -170,5 +175,6 @@ def coerce_dna(raw: object) -> StoryDNA:
         vibe=_s("vibe"),
         taste_key=_s("taste_key"),
         pattern_key=_s("pattern_key"),
+        pattern_custom=_s("pattern_custom"),
         capsule=_s("capsule"),
     )

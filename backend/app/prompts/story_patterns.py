@@ -310,3 +310,45 @@ def render_pattern_block(pattern_key: str = "") -> str:
             "- 开场示范(本项目自撰的原创短段,只学结构与力度,不搬内容):\n" + p.opener
         )
     return "\n".join(lines) + "\n"
+
+
+# =============== AI 反推配方:概念/描述 → 结构配方 ===============
+PATTERN_DERIVE_PROMPT = """\
+你是短剧/网文的故事结构专家。用户会给你一段概念、题材或剧情描述(可能只是
+一句话,也可能是某类爆款的观感描述),请把它反推成一套**可执行的故事骨架配方**
+——之后 AI 将严格按这套配方组织整本书的情节,所以每一条都要具体到能照着做。
+
+【用户的描述(原话)】
+{text}
+
+严格按 JSON 输出(不要 markdown 围栏,不要任何解释):
+{{
+  "name": "骨架名(≤12字,格式如「XX·XX流」)",
+  "formula": "结构配方:核心错位/故事引擎是什么,情节靠什么一直往前拱,80字内",
+  "rhythm": "节奏规则:第1章必须完成什么、每章几个钩子/反转、几章一个高潮、章末卡在哪,90字内",
+  "beats": ["必备桥段1(一句话,可执行)", "必备桥段2", "必备桥段3", "必备桥段4", "必备桥段5"],
+  "opener": "开场钩子示范:80-150字原创短段,展示这套配方第一集/第一章怎么开场(直接写正文,不要解说)"
+}}
+
+要求:
+1. beats 是观众冲着这个题材来的「必看场面」,宁具体勿笼统(「被当众羞辱」好于「遭遇挫折」)
+2. rhythm 必须有数字(第几章/每几章),不能只说「节奏要快」
+3. opener 必须是原创,禁止化用任何在世作家的原作文字
+4. 如果描述里已有明确的身份设定(如「练习生×财阀大小姐」),配方要贴合这个设定,不要泛化
+"""
+
+
+def pattern_from_derived(data: dict) -> dict:
+    """把反推 LLM 的 JSON 收敛成可直接存进 pattern_custom 的渲染文本。
+
+    字段缺失/类型不对一律兜底:配方是注入 prompt 的,宁短勿脏。
+    """
+    beats = [str(b).strip() for b in (data.get("beats") or []) if str(b).strip()]
+    lines = [f"骨架配方:{str(data.get('formula') or '').strip()}",
+             f"节奏规则:{str(data.get('rhythm') or '').strip()}"]
+    if beats:
+        lines.append("必备桥段(不可缺席):" + "、".join(beats))
+    opener = str(data.get("opener") or "").strip()
+    if opener:
+        lines.append("开场示范(只学结构与力度,不搬内容):\n" + opener)
+    return "\n".join(line for line in lines if not line.endswith(":"))

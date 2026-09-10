@@ -59,6 +59,7 @@ class Task(str, Enum):
     COVER = "cover"                     # 封面提示词
     ANTHEM = "anthem"                   # 主题曲提示词(Suno)
     SUBMISSION = "submission"           # 投稿包(标题/标签/金句/简介/封面)
+    PATTERN_DERIVE = "pattern_derive"   # 故事骨架反推:概念/描述 → 结构配方(JSON)
 
 
 class Tier(str, Enum):
@@ -82,6 +83,7 @@ _TASK_TIER: dict[Task, Tier] = {
     Task.CONSISTENCY: Tier.REVIEW,
     Task.IMPACT: Tier.QUALITY,
     Task.SETTING_IMPACT: Tier.QUALITY,
+    Task.PATTERN_DERIVE: Tier.QUALITY,  # 配方质量决定整书的骨架,上强档
     Task.SETTING_PATCH: Tier.QUALITY,
     # 漫剧四步管线:改编质量优先,全部走强档(提示词锚段注入对模型服从性有要求)
     Task.DRAMA_ASSET: Tier.QUALITY,
@@ -195,6 +197,7 @@ _TASK_MAX_TOKENS: dict[Task, int] = {
     Task.FACT_EXTRACT: 16384,     # 章后事实抽取
     Task.HANDOFF_EXTRACT: 16384,  # 章末交接契约
     Task.SETTING_IMPACT: 16384,   # 设定级联:粗筛/定位,JSON 输出同上教训
+    Task.PATTERN_DERIVE: 16384,   # 骨架反推:配方四件套 JSON,同上
     Task.SETTING_PATCH: 16384,    # 设定级联:段落改写提案
 }
 
