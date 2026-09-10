@@ -64,41 +64,24 @@ class DramaPlanError(ValueError):
 
 def _banned_block(db: Session, project_id: int) -> str:
     """作者雷区块(桥段台账的 banned 行)——切集的钩子/卡点是再创作自由度最大的
-    环节,最容易把作者写烦的桥段换个说法又写回来。只约束**新设计**的部分:
-    源正文里已有的内容不在此列(那是剧本忠实改编的对象,正文修完自然干净)。"""
-    from app.engines.consistency.motifs import banned_rows
+    环节,最容易把作者写烦的桥段换个说法又写回来。
 
-    rows = banned_rows(db, project_id)
-    if not rows:
-        return ""
-    lines = [f"  - {r.label}" + (f":{r.detail}" if r.detail else "") for r in rows]
-    return (
-        "【作者雷区(再创作硬约束:设计钩子/卡点/集标题时不得使用以下桥段或意象,"
-        "换措辞也算;源正文里已有的内容不在此列,按正文忠实改编)】\n"
-        + "\n".join(lines) + "\n"
-    )
+    实现收在 app/engines/adapt.py(与剧本改编同一口径):只约束**新设计**的部分,
+    源正文里已有的内容不在此列(那是剧本忠实改编的对象,正文修完自然干净)。
+    """
+    from app.engines.adapt import banned_block
+
+    return banned_block(db, project_id)
 
 
 def _chapter_threads(db: Session, project_id: int, n: int) -> list[str]:
-    """第 n 章章末契约的未决线索(open_threads,最新优先取前 N);无契约 → 空表。"""
-    from app.engines.pipeline.handoff import _fresh_contract
+    """第 n 章章末契约的未决线索(open_threads);无契约 → 空表。
 
-    ch = (
-        db.query(Chapter)
-        .filter(Chapter.project_id == project_id, Chapter.chapter_number == n)
-        .first()
-    )
-    if ch is None:
-        return []
-    state = db.query(ChapterState).filter(ChapterState.chapter_id == ch.id).first()
-    contract = _fresh_contract(state, ch) if state is not None else None
-    if not contract:
-        return []
-    return [
-        str(t).strip()
-        for t in (contract.get("open_threads") or [])
-        if str(t or "").strip()
-    ][:_THREADS_PER_CHAPTER]
+    实现收在 app/engines/adapt.py,与剧本改编共用。
+    """
+    from app.engines.adapt import open_threads
+
+    return open_threads(db, project_id, [n], per_chapter=_THREADS_PER_CHAPTER)
 
 
 def _chapter_material(

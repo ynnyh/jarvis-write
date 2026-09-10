@@ -22,6 +22,13 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user
 from app.db.models import Chapter, Project, Script, ScriptEpisode, User
 from app.db.session import get_db
+from app.engines.adapt import (
+    DEFAULT_SOURCE_BUDGET,
+    banned_block,
+    book_assets_block,
+    open_threads_block,
+    source_text as adapt_source_text,
+)
 from app.engines.consistency.extractor import parse_llm_json
 from app.llm.router import Task, get_adapter_for
 
@@ -369,15 +376,20 @@ async def generate_episode(
 
 # ---------- 小说改编:定稿章 → 改编蓝本 → 分集大纲 → 建剧本 ----------
 
-_ADAPT_PROMPT = """你是资深电视剧编剧兼改编顾问。把下面的小说定稿章节改编成 {target_episodes} 集的剧本分集大纲。
+_ADAPT_PROMPT = """你是资深电视剧编剧兼改编顾问。把下面的小说原文改编成 {target_episodes} 集的剧本分集大纲。
 
 【原著】{title}({chapter_count} 章)
+{assets_block}{banned_block}{threads_block}
+【原著正文(改编素材)】
 {source_text}
 
 改编要求:
-1. 保留主线冲突与人物弧光;必要的取舍写进 "adapt_note"
-2. 恰好 {target_episodes} 集,每集:集名/梗概(60-120字)/开场钩子/结尾钩子
-3. "logline" 用一句话概括整部剧
+1. 忠实原著的主线冲突与人物弧光;必要的取舍写进 "adapt_note"
+2. 上面的【本书基因】是作者给这本书定的味,改编后味道不能丢;【创作偏好档案】里的禁忌避雷同样适用于本剧
+3. 【作者雷区】里的桥段/意象,新写的内容一律不得使用(源正文里已有的按正文忠实改编,不受此限)
+4. 【章末未决线索】是原书在此处欠着的悬念,能兑现的就在对应集里兑现,不要凭空另起炉灶
+5. 恰好 {target_episodes} 集,每集:集名/梗概(60-120字)/开场钩子/结尾钩子
+6. "logline" 用一句话概括整部剧
 
 严格输出 JSON(不要 markdown 围栏):
 {{"logline": "一句话", "adapt_note": "取舍说明", "episodes": [{{"episode_number": 1, "title": "集名", "synopsis": "梗概", "opening_hook": "钩子", "ending_hook": "钩子"}}]}}
@@ -407,12 +419,18 @@ async def adapt_to_script(
     if not chapters:
         raise HTTPException(status_code=400, detail="没有可改编的定稿章节,先在小说里生成正文")
 
-    source_text = "\n".join(
-        f"第{ch.chapter_number}章:{(ch.final_content or '')[:600]}" for ch in chapters
-    )[:12000]
+    # 改编素材(2026-09-10 修):此前每章只取前 600 字纯头截断、总截 12000,
+    # 一本书 80% 的内容在改编时凭空消失,且完全看不到本书基因 / 作者雷区 /
+    # 章末未决线索——比更远的漫剧衍生链吃得还少。现与漫剧同一口径:保头尾去
+    # 中段(结尾是卡点素材的来源)+ 书级资产 + 未决线索。
+    chapter_numbers = [ch.chapter_number for ch in chapters]
+    body, used = adapt_source_text(db, project_id, chapter_numbers, DEFAULT_SOURCE_BUDGET)
     prompt = _ADAPT_PROMPT.format(
         title=project.title, chapter_count=len(chapters),
-        target_episodes=req.target_episodes, source_text=source_text,
+        target_episodes=req.target_episodes, source_text=body,
+        assets_block=book_assets_block(project),
+        banned_block=banned_block(db, project_id),
+        threads_block=open_threads_block(db, project_id, used or chapter_numbers),
     )
     adapter = get_adapter_for(Task.SUMMARY, max_tokens=4000, timeout=300)
     try:

@@ -56,38 +56,10 @@ def concept_block(project: Project) -> str:
     return "【故事概念】\n" + "\n".join(lines) + "\n" if lines else ""
 
 
-def dna_block(project: Project) -> str:
-    """本书基因(故事 DNA,作者的「定味锚」)渲染成提示词块。
-
-    此前漫剧线完全看不到 project.dna——改编等于丢味。直接复用
-    schemas/dna.render()(参照坐标/味道轴/必须有/绝不能有/vibe 的现成
-    渲染口径),空 DNA → 空串,开书零影响。
-    """
-    from app.schemas.dna import coerce_dna
-
-    dna = coerce_dna(project.dna)
-    if dna.is_empty():
-        return ""
-    return "【本书基因(作者的定味锚,改编遵循)】\n" + dna.render() + "\n"
-
-
-def profile_block(project: Project) -> str:
-    """创作偏好档案(global_tendency._profile:文风/禁忌避雷/读者定位)块。
-
-    「禁忌/避雷」对改编尤其值钱——作者整书级的「不要什么」应当约束漫剧的
-    再创作环节。无档案 → 空串。
-    """
-    from app.engines.tendency.assembler import _PROFILE_KEY, _PROFILE_LABELS
-
-    profile = (project.global_tendency or {}).get(_PROFILE_KEY)
-    if not isinstance(profile, dict):
-        return ""
-    lines = [
-        f"  {label}:{clip(str(profile.get(key) or ''), 200)}"
-        for key, label in _PROFILE_LABELS
-        if str(profile.get(key) or "").strip()
-    ]
-    return "【创作偏好档案(作者的整书主张,改编遵循)】\n" + "\n".join(lines) + "\n" if lines else ""
+# 书级资产(DNA / 创作偏好档案)与源章正文截断口径已统一收进 app/engines/adapt.py。
+# 此前剧本改编看不到这些、且只取每章前 600 字,与漫剧口径分叉(2026-09-10 审查)。
+# 这里改为直接复用同一份实现,漫剧内部几十处调用点不用动。
+from app.engines.adapt import dna_block, head_tail, profile_block  # noqa: F401
 
 
 def book_block(project: Project) -> str:
@@ -168,31 +140,14 @@ def chapters_final_text(
 ) -> tuple[str, list[int]]:
     """多章正文拼接(带章号小标题),总量控制在 budget 字符内。
 
-    并集的每一章都要进剧本上下文——只喂主章会把并进来的章静默丢掉。
-    预算按章平分(至少 800 字/章,避免章多时每章都被砍成碎片)。
-    超预算的章**头尾保留、中段省略**:开头是衔接上文的关键,结尾是卡点素材
-    的来源——旧的从头截断会把章尾砍掉,剧本经常写不好结尾,根在这里。
+    实现收在 app/engines/adapt.py(与剧本改编同一口径):并集的每一章都要进剧本
+    上下文——只喂主章会把并进来的章静默丢掉;预算按章平分,超预算的章保头尾
+    去中段(开头是衔接的关键,结尾是卡点素材的来源)。
     返回 (拼接文本, 真的有正文的章号)。
     """
-    got: list[int] = []
-    texts: list[str] = []
-    per = max(800, budget // max(1, len(chapter_numbers)))
-    for n in chapter_numbers:
-        body = chapter_final_text(db, project_id, n)
-        if not body:
-            continue
-        got.append(n)
-        texts.append(f"—— 第 {n} 章 ——\n{_head_tail(body, per)}")
-    return "\n\n".join(texts)[:budget], got
+    from app.engines.adapt import source_text
 
-
-def _head_tail(body: str, keep: int) -> str:
-    """超预算的文本保头尾去中段(头 60% 尾 40%,衔接与卡点各得其所)。"""
-    if len(body) <= keep:
-        return body
-    head = keep * 6 // 10
-    tail = keep - head
-    return body[:head] + "\n……(中略)……\n" + body[-tail:]
+    return source_text(db, project_id, chapter_numbers, budget)
 
 
 # =============== 行 → dict 序列化(API 响应/导出共用) ===============
