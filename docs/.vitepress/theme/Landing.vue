@@ -83,6 +83,11 @@ const capabilities = [
     title: '剧本工坊',
     desc: '一句话直接开写,或把写完的小说改编成剧:AI 出分集大纲,一集一集生成 Fountain 风格剧本,场景块高亮,正文随手改。',
   },
+  {
+    seal: '捌',
+    title: '开放式连载',
+    desc: '长篇不必开局交结局:架构只定长线引擎与本批次收束点,铺满一键续订下一卷,卷纲带着前情与伏笔重出——写到哪,续到哪。',
+  },
 ]
 
 const ideas = [
@@ -193,7 +198,7 @@ const ideas = [
           <FlavorDemo />
         </div>
         <p class="band-note" data-reveal>
-          还可以正向喂文风:余华、鲁迅、汪曾祺、金庸、王小波、海明威任选,也可喂自己的范文——均标注「风格参考 · 非原作节选」。
+          还可以正向喂文风:余华、鲁迅、汪曾祺、金庸、王小波、海明威,或爽文快节奏、仙侠古风、悬疑冷硬等网文类型笔法,也可喂自己的范文——均标注「风格参考 · 非原作节选」。
         </p>
       </div>
     </section>
@@ -202,7 +207,7 @@ const ideas = [
     <section id="engines" class="band">
       <div class="lw-shell">
         <p class="kicker accent" data-reveal>核心能力</p>
-        <h2 class="band-title" data-reveal>让长篇全程可控的六个引擎。</h2>
+        <h2 class="band-title" data-reveal>让长篇全程可控的八个引擎。</h2>
         <div class="engines-grid">
           <article v-for="(it, i) in capabilities" :key="it.seal" class="engine" data-reveal :style="{ transitionDelay: `${(i % 3) * 70}ms` }">
             <span class="engine-seal" aria-hidden="true">{{ it.seal }}</span>
