@@ -12,6 +12,7 @@ import abc
 import asyncio
 import json
 import logging
+import random
 import re
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Literal
@@ -93,11 +94,19 @@ class UpstreamError(RuntimeError):
     """
 
     def __init__(
-        self, message: str, *, status: int | None = None, retryable: bool = False
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        retryable: bool = False,
+        retry_after: float | None = None,
     ) -> None:
         super().__init__(message)
         self.status = status
         self.retryable = retryable
+        # 上游显式要求的等待秒数(429/503 的 Retry-After 头)。有就听它的,
+        # 比自己指数猜准——限流窗口多长只有上游知道。
+        self.retry_after = retry_after
 
 
 class EmptyContentError(UpstreamError):
@@ -121,6 +130,25 @@ class EmptyContentError(UpstreamError):
         self.budget_bound = budget_bound
         # 机器可读的现场:finish_reason / 思考字数 / token 数,汇进最终报错
         self.diagnosis = diagnosis
+
+
+def _parse_retry_after(resp: httpx.Response) -> float | None:
+    """读上游的 Retry-After 头(秒);只认数字形态,认不出就交回退避策略自己猜。
+
+    上限 60 秒是刻意的:等太久用户以为卡死,不如失败让用户自己决定要不要重来。
+    """
+    try:
+        raw = resp.headers.get("retry-after") or ""
+    except Exception:  # noqa: BLE001 — 假响应对象可能没有 headers
+        return None
+    raw = raw.strip()
+    if not raw:
+        return None
+    try:
+        return max(0.0, min(float(raw), 60.0))
+    except ValueError:
+        # HTTP-date 形态(RFC 7231 允许):不值得为它引入日期解析,忽略即可
+        return None
 
 
 def check_upstream(resp: httpx.Response, *, hint: str = "") -> dict:
@@ -164,6 +192,7 @@ def check_upstream(resp: httpx.Response, *, hint: str = "") -> dict:
             msg,
             status=resp.status_code,
             retryable=resp.status_code in RETRYABLE_STATUSES,
+            retry_after=_parse_retry_after(resp),
         )
     try:
         data = resp.json()
@@ -207,18 +236,99 @@ def _describe_exc(exc: Exception) -> str:
     return type(exc).__name__
 
 
+def _backoff_delay(exc: Exception, attempt: int, base_delay: float) -> float:
+    """按错误类型决定重试前等多久 —— 不同错误的最佳对策差着一个量级。
+
+    - 限流/过载(429/529):上游在喊「慢点」。等 2 秒再去只会再吃一次拒绝,
+      这里按下探 4s→8s→12s 递增,并优先服从上游给的 Retry-After。
+    - 网络超时/连接被重置:多半是换一条连接就能好的瞬时抖动,久等没有意义,
+      快速重试(1 秒内);这也是「被网关掐断」最常见的表现形态。
+    - 其它 5xx/瞬时态:标准指数退避。
+
+    末尾统一加抖动(0~25%):批量任务并发重试时,若大家同时醒来会一起把刚
+    恢复的渠道再打垮,错开一点能显著提高整体成功率。
+    """
+    retry_after = getattr(exc, "retry_after", None)
+    if isinstance(retry_after, (int, float)) and retry_after > 0:
+        delay = min(float(retry_after), 60.0)
+    elif isinstance(exc, TRANSIENT_NET_ERRORS):
+        delay = min(base_delay, 1.0)
+    elif getattr(exc, "status", None) in (429, 529):
+        delay = max(base_delay * (2**attempt), 4.0 * (attempt + 1))
+    else:
+        delay = base_delay * (2**attempt)
+    return min(delay + random.uniform(0, delay * 0.25), 60.0)
+
+
+def _retry_reason(exc: Exception) -> str:
+    """给用户看的重试原因短句(说人话,不甩状态码)。"""
+    status = getattr(exc, "status", None)
+    if status == 429:
+        return "上游限流"
+    if status == 529:
+        return "上游过载"
+    if isinstance(status, int) and 520 <= status <= 527:
+        return "网关掐断了连接"
+    if isinstance(exc, TRANSIENT_NET_ERRORS):
+        return "连接被掐断"
+    if isinstance(status, int) and 500 <= status < 600:
+        return "服务端抖动"
+    return "瞬时故障"
+
+
+# job → 重试前的原步骤文案(重试成功后按原文案还原)
+_RETRY_STEPS: dict[str, str] = {}
+
+
+def _notice_retry(exc: Exception, no: int, total: int) -> None:
+    """把重试现场推到前端:「一致性检查 · 重试中 2/3(上游限流)」。
+
+    为什么非得显式出来:AI 编程工具会明说「重试中 1/10」,我们此前是静默重试,
+    用户只看到最后的结果——失败时显得毫无征兆,重试中又以为卡死。
+    """
+    try:
+        jid = live.current_job_id.get()
+        if not jid:
+            return  # 前台请求/脚本:没人看,别占内存
+        current = live.peek_step(jid)
+        base_step = _RETRY_STEPS.get(jid) or current
+        if base_step and "重试中" not in base_step:
+            _RETRY_STEPS[jid] = base_step
+        tip = f"重试中 {no}/{total}({_retry_reason(exc)})"
+        live.label_step(jid, f"{_RETRY_STEPS.get(jid, base_step)} · {tip}" if base_step else tip)
+    except Exception:  # noqa: BLE001 — 提示决不能拖垮主流程
+        logger.debug("重试提示下发失败", exc_info=True)
+
+
+def _clear_retry_notice() -> None:
+    """重试成功了 → 把「重试中 x/y」的临时文案撤掉,还原真正的步骤名。"""
+    try:
+        jid = live.current_job_id.get()
+        if not jid:
+            return
+        original = _RETRY_STEPS.pop(jid, None)
+        if original is not None:
+            live.label_step(jid, original)
+    except Exception:  # noqa: BLE001
+        logger.debug("重试提示还原失败", exc_info=True)
+
+
 async def with_retries(call, *, attempts: int = 3, base_delay: float = 2.0, on_retry=None):
     """瞬时错误退避重试:retryable 的 UpstreamError / 网络超时连接错误。
 
     - call(attempt): 第几次尝试(0 起),返回 awaitable;
     - on_retry(exc): 每次重试前回调,调用方可借此调整下一次尝试的方式
       (如被 CDN 掐断后改走流式聚合);
-    - 非 retryable 的错误(鉴权/参数/Base URL 错)立即抛出,不浪费重试。
+    - 非 retryable 的错误(鉴权/参数/Base URL 错)立即抛出,不浪费重试;
+    - 等待时长按错误类型分流(见 `_backoff_delay`),不再一律 2s→4s。
     """
     last: Exception | None = None
     for attempt in range(attempts):
         try:
-            return await call(attempt)
+            result = await call(attempt)
+            if attempt > 0:
+                _clear_retry_notice()
+            return result
         except UpstreamError as exc:
             if not exc.retryable:
                 raise
@@ -228,7 +338,8 @@ async def with_retries(call, *, attempts: int = 3, base_delay: float = 2.0, on_r
         if attempt < attempts - 1:
             if on_retry is not None:
                 on_retry(last)
-            await asyncio.sleep(base_delay * (2**attempt))
+            _notice_retry(last, attempt + 1, attempts)
+            await asyncio.sleep(_backoff_delay(last, attempt, base_delay))
     raise UpstreamError(
         f"上游连续 {attempts} 次调用失败,最后错误: {_describe_exc(last)}",
         retryable=True,
@@ -297,6 +408,10 @@ class LLMResponse:
     # 收尾原因:stop/length/content_filter…(Anthropic 的 stop_reason、
     # Gemini 的 finishReason 都归一到这里)。空正文归因全靠它。
     finish_reason: str = ""
+    # 流式中途断流:既没等到 [DONE] 也没拿到 finish_reason,正文可能停在半途。
+    # 与 finish_reason=length 是两回事——后者是预算用尽(加预算即可),
+    # 前者是网关/CDN 静默掐断(加预算没用,要续写或换渠道),必须分开记。
+    truncated: bool = False
     # 推理模型的思考内容(reasoning_content / thinking block),只用于诊断
     # 与兜底,正常路径绝不当正文
     reasoning: str = ""
@@ -356,6 +471,12 @@ class LLMAdapter(abc.ABC):
         self.max_concurrency = max_concurrency
         self.rpm = rpm
         # 瞬时错误重试:次数与退避基数(秒)。置 1 即关闭重试。
+        #
+        # 次数分级(2026-09-09):这里保持 3 次,因为整章生成**不幂等且贵**
+        # ——重来一次是 6~7 万 token 的重生成,内容还会变,重试多了纯属浪费。
+        # AI 编程工具敢重试 10 次是因为它们的单次请求便宜且结果幂等。
+        # JSON 校验类(幂等、输出短)的额外机会放在 engines.common.ask_llm_json
+        # 的「续写」里补,不在这里加注。
         self.retry_attempts = 3
         self.retry_base_delay = 2.0
         # 本次请求是否下发了「思考关闭」参数(由子类 _payload 如实回填)。
@@ -505,6 +626,7 @@ class LLMAdapter(abc.ABC):
             prompt_tokens=sink.get("prompt_tokens", 0),
             completion_tokens=sink.get("completion_tokens", 0),
             finish_reason=sink.get("finish_reason", "") or "",
+            truncated=bool(sink.get("truncated")),
             reasoning=sink.get("reasoning", "") or "",
             reasoning_tokens=sink.get("reasoning_tokens", 0),
         )
@@ -636,6 +758,8 @@ class LLMAdapter(abc.ABC):
                         model=resp.model,
                         prompt_tokens=resp.prompt_tokens,
                         completion_tokens=resp.completion_tokens,
+                        finish_reason=resp.finish_reason,
+                        truncated=resp.truncated,
                     )
                 )
         except Exception:  # noqa: BLE001

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin
@@ -19,6 +19,12 @@ class LlmUsage(Base, TimestampMixin):
     model: Mapped[str] = mapped_column(String(100), index=True)
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
     completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    # 收尾原因(stop/length/…):空正文归因与渠道体检都靠它。
+    # 留痕的意义:事后能分清「输出预算用尽」和「被网关掐断」——两者表象一样
+    # (半截内容),但对策完全不同(加预算 vs 换渠道/续写)。
+    finish_reason: Mapped[str] = mapped_column(String(20), default="")
+    # 流式中途断流(没等到 [DONE] 也没 finish_reason):中转网关/CDN 静默掐断
+    truncated: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class FeatureUsage(Base):

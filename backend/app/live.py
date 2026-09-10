@@ -187,6 +187,36 @@ def snapshot(job_id: str) -> dict[str, Any] | None:
         }
 
 
+def peek_step(job_id: str) -> str:
+    """读当前步骤文案(不改变任何状态)。
+
+    给重试提示拼前缀用:「一致性检查」→「一致性检查 · 重试中 2/3(上游限流)」,
+    用户才知道是哪一步在重试。
+    """
+    if not job_id:
+        return ""
+    with _LOCK:
+        stream = _STREAMS.get(job_id)
+        return stream.step if stream is not None else ""
+
+
+def label_step(job_id: str, step: str) -> None:
+    """只换步骤文案,**不清屏**(对应 SSE 的 label 帧)。
+
+    与 set_step 的差别:set_step 表示「进入新步骤」,会 epoch+1 并清掉上一屏;
+    这里只是给同一步换个标题(如挂上「重试中 2/3」再摘掉),已经吐给用户看的
+    正文必须原封不动。渐进计数(蓝图「已生成 N/M 章」)也走这条。
+    """
+    if not job_id:
+        return
+    with _LOCK:
+        stream = _STREAMS.get(job_id)
+        if stream is None or stream.step == step:
+            return
+        stream.step = step
+        stream.touched = time.monotonic()
+
+
 def drop(job_id: str) -> None:
     """彻底丢掉某任务的流(测试/主动清理用)。"""
     with _LOCK:

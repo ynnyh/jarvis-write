@@ -254,6 +254,9 @@ class OpenAICompatibleAdapter(LLMAdapter):
                         # 拿到的可能是半截正文。不改判成功失败(改判会误伤那些
                         # 既不发 [DONE] 也不给 finish_reason 的渠道),但要留痕。
                         if not sink.get("finish_reason"):
+                            # 留痕到用量记录:事后能统计某个渠道的断流率,
+                            # 也能把「被掐断」和「预算用尽(length)」区分开
+                            sink["truncated"] = True
                             logger.warning(
                                 "流式结束但既无 [DONE] 也无 finish_reason"
                                 "(model=%s),正文可能被中途掐断",

@@ -225,6 +225,14 @@
   color: var(--text-2);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* 重试中要看得出来:系统在自救,不是卡死(后端译为「原步骤 · 重试中 x/y(原因)」) */
+.live-step.retrying {
+  color: var(--warn);
+  background: var(--warn-weak);
+  border-radius: var(--r-sm);
+  padding: 0 6px;
+  flex-shrink: 0;
+}
 .live-nth { color: var(--text-2); }
 .live-btn {
   border: 1px solid var(--line-strong);

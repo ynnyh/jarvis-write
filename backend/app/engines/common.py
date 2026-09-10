@@ -66,18 +66,60 @@ def parse_llm_json_checked(text: str) -> tuple[dict, str | None]:
     return data, None
 
 
+_CONTINUE_TAIL = 800
+# 续写指令:不重发原 prompt——原 prompt 往往上万字,而断点之后该写什么,
+# 前缀里的结构已经说清楚了(LLM 最擅长的就是模式补全)。输入短 + 输出短,
+# 正好绕开「输出越长越容易被网关掐断」这个死循环。
+_CONTINUE_INSTRUCTION = (
+    "下面是一段 JSON 输出,它在生成到一半时被网络中断,停在半途。"
+    "请只输出它**缺失的后半部分**,与你看到的内容首尾相接拼成完整 JSON。\n"
+    "要求:直接接着写,不要重复已给出的内容,不要加任何解释或 markdown 围栏。\n\n"
+    "被中断的输出:\n"
+)
+
+
+def _strip_fence(text: str) -> str:
+    """剥掉 markdown 围栏(续写片段可能整段被模型包进 ```json)。"""
+    s = (text or "").strip()
+    m = re.search(r"```(?:json)?\s*(.*?)```", s, re.DOTALL)
+    return (m.group(1).strip() if m else s)
+
+
+def _can_continue(raw: str) -> bool:
+    """半截输出值得续写吗(空/纯废话就直接整篇重发,别浪费一轮)。"""
+    s = _strip_fence(raw)
+    return "{" in s and len(s) >= 8
+
+
+def _continuation_prompt(raw: str) -> str:
+    tail = _strip_fence(raw)
+    if len(tail) > _CONTINUE_TAIL:
+        tail = tail[-_CONTINUE_TAIL:]
+    return _CONTINUE_INSTRUCTION + tail
+
+
+def _stitch(raw: str, cont: str) -> str:
+    """把续写片段接到半截输出后面(两者都先剥围栏)。"""
+    return _strip_fence(raw) + _strip_fence(cont)
+
+
 async def ask_llm_json(
-    adapter, prompt: str, *, label: str = "JSON 任务", attempts: int = 2
+    adapter, prompt: str, *, label: str = "JSON 任务", attempts: int = 2,
+    continue_attempts: int = 2,
 ) -> tuple[dict, str | None]:
-    """LLM JSON 任务统一调用 + 重试保险:解析失败自动原样重打一次。
+    """LLM JSON 任务统一调用 + 两级保险:先「续写补完」,再「整篇重发」。
 
     背景(2026-09-08 50 章压测):中转渠道会把响应尾巴随机截断——连
     `{"issues": []`(16 字符)都被截在半途,官方渠道同构调用零失败。
-    截断是随机的,重打一次大概率就好,没必要让整章为此进隔离。这里统一兜:
-    第一次解析失败就重问,仍失败才把错误交回调用方走显式降级。
+
+    为什么续写优先于整篇重发:输出越长越容易被掐。原样重发一次,输出长度
+    一字不差,等于再撞一次同样的概率——实测 9 章隔离章重跑只救回 2 章,
+    还白烧 87.8 万 token。改成把已收到的半截前缀回传、让模型只补剩余部分,
+    单次输出大幅变短,既省钱又真正提高成功率。救不回来才整篇重发。
 
     LLM 调用本身的异常不吞,原样上抛——调用方各自有「调用失败」的降级分支,
-    与「解析失败」是两种不同的现场。
+    与「解析失败」是两种不同的现场。但**续写调用**的异常要吞:它只是抢救
+    动作,不该让一次本来能靠重发救回的任务就此失败。
     """
     data, err = {}, "模型返回空内容"
     for attempt in range(1, attempts + 1):
@@ -87,6 +129,20 @@ async def ask_llm_json(
             if attempt > 1:
                 logger.warning("%s:第 %d 次解析成功(首次疑似响应被截断)", label, attempt)
             return data, None
+        for cont_no in range(1, continue_attempts + 1):
+            if not _can_continue(raw):
+                break
+            try:
+                cont = await adapter.ask(_continuation_prompt(raw))
+            except Exception as exc:  # noqa: BLE001 — 抢救动作失败不致命
+                logger.warning("%s:续写第 %d 次调用失败(%s),改走整篇重发", label, cont_no, exc)
+                break
+            stitched = _stitch(raw, cont)
+            data, err = parse_llm_json_checked(stitched)
+            if not err:
+                logger.warning("%s:第 %d 次尝试续写第 %d 轮后拼成完整 JSON", label, attempt, cont_no)
+                return data, None
+            raw = stitched
         logger.warning("%s:第 %d/%d 次输出解析失败:%s", label, attempt, attempts, err)
     return {}, err
 

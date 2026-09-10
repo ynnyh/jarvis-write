@@ -90,7 +90,10 @@ export function LiveDock() {
         <span className="live-title" title={target.kind}>{jobLabel(target.kind)}</span>
         {!compactHead && (
           <>
-            <span className="live-step" title={step || jobStage}>{step || jobStage}</span>
+            <span
+              className={"live-step" + (/重试中/.test(step) ? " retrying" : "")}
+              title={step || jobStage}
+            >{step || jobStage}</span>
             <div className="grow" />
             {running.length > 1 && (
               <>

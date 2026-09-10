@@ -145,6 +145,66 @@ def _normalize_issue(raw: dict, chapter_text: str) -> dict:
     }
 
 
+# ---------- 降爆:超长事实清单分批 ----------
+# 长篇写到后期,圣经事实会累积到几百条,一次全喂会让请求体量与模型输出一起
+# 膨胀——这恰恰是中转网关掐连接的温床(输出越长越容易停在半途)。超过阈值
+# 就按批检查再合并。
+#
+# 阈值 6000 字符是保守取的上界:黄金样本《破封纪》10 章的事实清单远不到
+# 这条线,正常路径仍是 1 批,行为与分批前完全一致(评测基线不受影响)。
+_FACT_BATCH_CHARS = 6000
+_MAX_FACT_BATCHES = 3
+
+
+def _split_fact_block(active_facts: str) -> list[str]:
+    """事实清单分批:按整行切,保证一条事实不被拦腰截断。
+
+    只剩一批是常态(返回原文本身,连换行格式都不变);批次用尽时把剩余的全部
+    塞进最后一批——宁可这一批偏长,也不能悄悄丢掉事实造成漏检。
+    """
+    block = active_facts or ""
+    if len(block) <= _FACT_BATCH_CHARS or block.startswith("("):
+        # "(暂无…)" 这类占位文案不是事实清单,不参与分批
+        return [block]
+    lines = [ln for ln in block.splitlines() if ln.strip()]
+    batches: list[str] = []
+    cur: list[str] = []
+    cur_len = 0
+    for line in lines:
+        if (
+            cur
+            and cur_len + len(line) + 1 > _FACT_BATCH_CHARS
+            and len(batches) < _MAX_FACT_BATCHES - 1
+        ):
+            batches.append("\n".join(cur))
+            cur, cur_len = [], 0
+        cur.append(line)
+        cur_len += len(line) + 1
+    if cur:
+        batches.append("\n".join(cur))
+    return batches or [block]
+
+
+def _dedup(issues: list[dict]) -> list[dict]:
+    """分批检查合并后去重:同一条矛盾在不同批里被重复点到是正常的。
+
+    判重键取「描述 + 证据」:跨批重复时报的是同一处,两条都留只会让门禁
+    blocker 计数虚高、回炉次数虚增。
+    """
+    seen: set[tuple[str, str]] = set()
+    out: list[dict] = []
+    for issue in issues:
+        key = (
+            str(issue.get("description") or "").strip(),
+            str(issue.get("evidence") or "").strip(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(issue)
+    return out
+
+
 async def check_chapter(
     db: Session,
     project_id: int,
@@ -186,41 +246,52 @@ async def check_chapter(
     constitution = (constitution_block(project).strip() if project else "") \
         or "(本书未设定额外世界观硬规则/故事宪法)"
 
-    prompt = CONSISTENCY_CHECK_PROMPT.format(
-        active_facts=active_facts,
-        known_roster=bible.known_roster_block(chapter_number),
-        resource_ledger=resource_ledger,
-        constitution=constitution,
-        prev_contract=prev_contract or "(无上一章契约——未提取或正文已改动失效)",
-        prev_tail=prev_tail or "(无上一章结尾原文,本章可能是第一章)",
-        rolling_summary=rolling_summary or "(无)",
-        timeline_block=timeline_block(db, project_id, chapter_number),
-        chapter_number=chapter_number,
-        chapter_text=chapter_text[:12000],
-    )
-    try:
-        data, parse_err = await ask_llm_json(
-            get_adapter_for(Task.CONSISTENCY),
-            prompt,
-            label=f"第 {chapter_number} 章一致性检查",
+    batches = _split_fact_block(active_facts)
+    batch_total = len(batches)
+    all_issues: list[dict] = []
+    for batch_no, facts in enumerate(batches, start=1):
+        # 分批原因见 _split_fact_block:事实清单长到一定程度,单次请求体量与
+        # 输出都膨胀,正是中转网关掐连接的温床。默认仍是 1 批,行为不变。
+        label = f"第 {chapter_number} 章一致性检查"
+        if batch_total > 1:
+            label += f"(事实 {batch_no}/{batch_total} 批)"
+        prompt = CONSISTENCY_CHECK_PROMPT.format(
+            active_facts=facts,
+            known_roster=bible.known_roster_block(chapter_number),
+            resource_ledger=resource_ledger,
+            constitution=constitution,
+            prev_contract=prev_contract or "(无上一章契约——未提取或正文已改动失效)",
+            prev_tail=prev_tail or "(无上一章结尾原文,本章可能是第一章)",
+            rolling_summary=rolling_summary or "(无)",
+            timeline_block=timeline_block(db, project_id, chapter_number),
+            chapter_number=chapter_number,
+            chapter_text=chapter_text[:12000],
         )
-    except Exception as exc:  # noqa: BLE001
-        # 显式降级:过去这里 return [] —— 下游分不清「查过没矛盾」与「根本没跑成」,
-        # 于是模型一超时/429,门禁就自动放行,「不崩」在最需要它的时候失效。
-        # 现在返回哨兵,由门禁走「隔离待人工复核」(不冒充干净,也不卡死流程)。
-        logger.error("一致性检查调用失败: %s", exc)
-        return [degraded_issue(SCOPE_CONSISTENCY, f"LLM 调用失败:{exc}")]
+        try:
+            data, parse_err = await ask_llm_json(
+                get_adapter_for(Task.CONSISTENCY),
+                prompt,
+                label=label,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # 显式降级:过去这里 return [] —— 下游分不清「查过没矛盾」与「根本没跑成」,
+            # 于是模型一超时/429,门禁就自动放行,「不崩」在最需要它的时候失效。
+            # 现在返回哨兵,由门禁走「隔离待人工复核」(不冒充干净,也不卡死流程)。
+            logger.error("一致性检查调用失败: %s", exc)
+            return [degraded_issue(SCOPE_CONSISTENCY, f"LLM 调用失败:{exc}")]
 
-    if parse_err:
-        # 模型说了话但没解析出来 ≠ 没有矛盾,同样降级。
-        # (ask_llm_json 已内置一次重试,走到这里说明重试后仍截断/坏输出)
-        logger.error("一致性检查输出解析失败: %s", parse_err)
-        return [degraded_issue(SCOPE_CONSISTENCY, parse_err)]
-    issues = [
-        _normalize_issue(i, chapter_text)
-        for i in (data.get("issues") or [])
-        if isinstance(i, dict)
-    ]
+        if parse_err:
+            # 模型说了话但没解析出来 ≠ 没有矛盾,同样降级。
+            # (ask_llm_json 已内置续写 + 重试,走到这里说明都救不回来)
+            logger.error("一致性检查输出解析失败: %s", parse_err)
+            return [degraded_issue(SCOPE_CONSISTENCY, parse_err)]
+        all_issues.extend(
+            _normalize_issue(i, chapter_text)
+            for i in (data.get("issues") or [])
+            if isinstance(i, dict)
+        )
+
+    issues = _dedup(all_issues)
     # 没有问题点描述的条目没有落库/展示价值
     issues = [i for i in issues if i["description"]]
     if issues:
