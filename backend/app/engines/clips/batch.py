@@ -65,8 +65,8 @@ class ClipBatchError(ValueError):
 
 # =============== 小说素材拼装 ===============
 
-def _novel_context(db: Session, project: Project) -> tuple[str, str]:
-    """返回 (正文节选块, 角色锚块)。节选取最新定稿章;角色锚优先用漫剧角色卡。"""
+def _novel_context(db: Session, project: Project) -> tuple[str, str, str]:
+    """返回 (正文节选块, 角色锚块, 既有事实块)。节选取最新定稿章;角色锚优先用漫剧角色卡。"""
     rows = (
         db.query(Chapter.chapter_number, Chapter.final_content)
         .filter(Chapter.project_id == project.id, Chapter.status == "approved")
@@ -76,6 +76,7 @@ def _novel_context(db: Session, project: Project) -> tuple[str, str]:
     )
     if not rows:
         raise ClipBatchError("这本书还没有已定稿章节——先写几章再来出投流短视频。")
+    nums = [n for n, _ in rows]
     parts = []
     for n, content in sorted(rows):
         text = (content or "").strip()
@@ -96,7 +97,12 @@ def _novel_context(db: Session, project: Project) -> tuple[str, str]:
         if c.appearance_cn
     ]
     characters = "\n".join(char_lines) if char_lines else "(无角色卡,按节选中人物自行合理设计并保持一致)"
-    return excerpts, characters
+    # §5.1:补「节选里读不出来的此刻状态」——节选是原文片段,断章取义时最容易
+    # 把「左臂已断」写成「左臂完好」。事实块按最新定稿章的时刻取(见 adapt.chapter_facts)。
+    from app.engines.adapt import facts_block
+
+    facts = facts_block(db, project.id, nums)
+    return excerpts, characters, facts
 
 
 def _concept_line(project: Project) -> str:
@@ -318,12 +324,13 @@ def _build_context(db: Session, clip: MoodClip) -> tuple[str, str, str]:
         project = db.get(Project, clip.source_project_id)
         if project is None:
             raise ClipBatchError("源项目不存在(可能已删除)。")
-        excerpts, characters = _novel_context(db, project)
+        excerpts, characters, facts = _novel_context(db, project)
         context = CLIPS_NOVEL_CONTEXT.format(
             title=project.title,
             genre=project.genre or "不限",
             topic=(project.topic or "").strip() or "(未定)",
             concept_block=_concept_line(project),
+            facts_block=facts,
             excerpts_block=excerpts,
             characters_block=characters,
             duration_s=clip.duration_s,

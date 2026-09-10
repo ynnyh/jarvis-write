@@ -74,6 +74,17 @@ def _banned_block(db: Session, project_id: int) -> str:
     return banned_block(db, project_id)
 
 
+def _facts_block(db: Session, project_id: int, from_ch: int, to_ch: int) -> str:
+    """既有事实块(§5.1):改编/切集时补「正文里读不出来的此刻状态」。
+
+    实现收在 app/engines/adapt.py,与剧本改编共用——两条改编线的事实口径
+    只此一份,不再各自漂移(与 _banned_block / _chapter_threads 同一范式)。
+    """
+    from app.engines.adapt import facts_block
+
+    return facts_block(db, project_id, list(range(from_ch, to_ch + 1)))
+
+
 def _chapter_threads(db: Session, project_id: int, n: int) -> list[str]:
     """第 n 章章末契约的未决线索(open_threads);无契约 → 空表。
 
@@ -154,9 +165,14 @@ async def plan_episodes(
         mode_desc=MODE_DESC.get(mode, MODE_DESC["dialogue"]),
         title=project.title,
         genre=project.genre.strip() or "不限",
-        # 书级资产(本书基因/创作偏好)与作者雷区并入 concept_block 收口:零模板改动
+        # 书级资产(本书基因/创作偏好)、作者雷区、既有事实并入 concept_block 收口:
+        # 零模板改动。事实块(§5.1)补的是正文/蓝图里读不出来的「此刻状态」——
+        # 切集与写钩子时,主角断没断臂、关键物在谁手上会直接决定钩子成不成立。
         concept_block=(
-            concept_block(project) + book_block(project) + _banned_block(db, project.id)
+            concept_block(project)
+            + book_block(project)
+            + _banned_block(db, project.id)
+            + _facts_block(db, project.id, from_ch, to_ch)
         ),
         chapters_block=chapters_block,
         # 目标集数:0=AI 按素材密度自定(与旧行为一致);给了就约束在 ±10%

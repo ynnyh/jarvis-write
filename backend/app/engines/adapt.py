@@ -73,6 +73,83 @@ def book_assets_block(project: Project) -> str:
     return dna_block(project) + profile_block(project)
 
 
+# 改编时注入的关键事实条数上限。改编素材本身已有正文(token 大头),事实块只
+# 补「正文里读不出来的此刻状态」——给太多反而稀释注意力(与检索层同一取向)。
+_MAX_FACTS = 14
+# 关键事实的内容截断:事实内容通常一句话,截断只为防抽取异常产生的超长条目
+_FACT_CHARS = 120
+
+
+def chapter_facts(
+    db: Session, project_id: int, chapter_numbers: list[int], *, limit: int = _MAX_FACTS
+) -> list[dict]:
+    """这些章时刻**仍然有效**的关键事实(改编线的事实层,§5.1)。
+
+    与小说线的检索层口径一致(都走 `BibleService.query_facts_at` 的时序过滤),
+    但**不依赖场景卡**:改编是按章取材,没有"这一场"这个概念,若强行走
+    `retrieve_for_scene` 就得先造一个假场景——那是本末倒置。
+
+    取哪一章的时刻:改编吃的是「这几章合起来的剧情」,取并集的**最后一章**——
+    那是最新的状态;若取最早的章,后续章里已经作废的事实(如"左臂还完好")
+    会被当成硬约束喂进去,改编必错。
+
+    排序 critical → major → minor,超限时先砍 minor(与检索层同序)。
+    """
+    nums = sorted({int(n) for n in (chapter_numbers or [])})
+    if not nums:
+        return []
+    from app.engines.consistency import BibleService
+
+    bible = BibleService(db, project_id)
+    try:
+        facts = bible.query_facts_at(nums[-1])
+    except Exception:  # noqa: BLE001 — 事实层是增强,取不到不能拖垮改编
+        return []
+    retired = bible.retired_entity_ids()
+    if retired:
+        facts = [f for f in facts if f.entity_id not in retired]
+
+    rank = {"critical": 0, "major": 1, "minor": 2}
+    facts.sort(key=lambda f: rank.get(f.importance, 1))
+    out: list[dict] = []
+    for f in facts[:limit]:
+        out.append({
+            "fact_id": f.id,
+            "content": (f.content or "")[:_FACT_CHARS],
+            "entity_name": bible.entity_name(f.entity_id),
+            "importance": f.importance or "major",
+            "from_chapter": f.valid_from,
+            "fact_type": f.fact_type or "",
+        })
+    return out
+
+
+def facts_block(
+    db: Session, project_id: int, chapter_numbers: list[int], *, limit: int = _MAX_FACTS
+) -> str:
+    """关键事实块(改编 prompt 用)。无事实 → 空串(整块省略)。
+
+    **明确"保真"与"可再创作"的边界**:critical 必须一字不差地体现,major/minor
+    允许按改编形态重组。这是 §5.1 待决项的落地口径——不区分的话,模型要么
+    把细节当铁律(改编僵硬),要么把关键设定当细节(改编失真)。
+    """
+    facts = chapter_facts(db, project_id, chapter_numbers, limit=limit)
+    if not facts:
+        return ""
+    lines: list[str] = []
+    for f in facts:
+        who = f"{f['entity_name']}:" if f.get("entity_name") else ""
+        mark = "❗必须保真" if f["importance"] == "critical" else "·可再创作"
+        since = f"(自第{f['from_chapter']}章起)" if f.get("from_chapter") else ""
+        lines.append(f"  {mark} {who}{f['content']}{since}")
+    return (
+        "【改编时的既有事实(截至这几章的原始设定)】\n"
+        "说明:❗标记的必须保真——改错读者会发现;其余允许按改编形态重组,\n"
+        "但不得与之矛盾。这些是正文里读不出来的「此刻状态」,是改编的依据。\n"
+        + "\n".join(lines) + "\n"
+    )
+
+
 def banned_block(db: Session, project_id: int) -> str:
     """作者雷区块(再创作口径)。
 

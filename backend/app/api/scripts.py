@@ -26,6 +26,7 @@ from app.engines.adapt import (
     DEFAULT_SOURCE_BUDGET,
     banned_block,
     book_assets_block,
+    facts_block,
     open_threads_block,
     source_text as adapt_source_text,
 )
@@ -414,6 +415,9 @@ async def adapt_to_script(
         assets_block=book_assets_block(project),
         banned_block=banned_block(db, project_id),
         threads_block=open_threads_block(db, project_id, used or chapter_numbers),
+        # §5.1:改编继承事实层。正文里读不出来的「此刻状态」(主角断没断臂、
+        # 剑在谁手上)由事实块补齐,否则改编只能靠猜。
+        facts_block=facts_block(db, project_id, used or chapter_numbers),
     )
     adapter = get_adapter_for(Task.SUMMARY, max_tokens=4000, timeout=300)
     try:

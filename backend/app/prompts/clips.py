@@ -127,7 +127,7 @@ CLIPS_NOVEL_CONTEXT = """\
 【书名】{title}
 【类型】{genre}
 【一句话主题】{topic}
-{concept_block}
+{concept_block}{facts_block}
 【正文节选(金句与名场面只可从这里选/轻改,不得编造)】
 {excerpts_block}
 【角色锚(出场角色的外貌以此为准,逐字嵌入提示词)】

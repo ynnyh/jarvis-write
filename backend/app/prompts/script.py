@@ -74,7 +74,7 @@ SCRIPT_END_STATE_PROMPT = """你是剧本统筹。阅读下面这一集剧本的
 SCRIPT_ADAPT_PROMPT = """你是资深电视剧编剧兼改编顾问。把下面的小说原文改编成 {target_episodes} 集的剧本分集大纲。
 
 【原著】{title}({chapter_count} 章)
-{assets_block}{banned_block}{threads_block}
+{assets_block}{banned_block}{threads_block}{facts_block}
 【原著正文(改编素材)】
 {source_text}
 
@@ -83,8 +83,10 @@ SCRIPT_ADAPT_PROMPT = """你是资深电视剧编剧兼改编顾问。把下面�
 2. 上面的【本书基因】是作者给这本书定的味,改编后味道不能丢;【创作偏好档案】里的禁忌避雷同样适用于本剧
 3. 【作者雷区】里的桥段/意象,新写的内容一律不得使用(源正文里已有的按正文忠实改编,不受此限)
 4. 【章末未决线索】是原书在此处欠着的悬念,能兑现的就在对应集里兑现,不要凭空另起炉灶
-5. 恰好 {target_episodes} 集,每集:集名/梗概(60-120字)/开场钩子/结尾钩子
-6. "logline" 用一句话概括整部剧
+5. 【改编时的既有事实】里 ❗标记的必须保真(主角此刻的身体状态、关键物在谁手上这类,
+   正文片段里不一定写得清楚,但观众会发现改错),其余可再创作但不得矛盾
+6. 恰好 {target_episodes} 集,每集:集名/梗概(60-120字)/开场钩子/结尾钩子
+7. "logline" 用一句话概括整部剧
 
 严格输出 JSON(不要 markdown 围栏):
 {{"logline": "一句话", "adapt_note": "取舍说明", "episodes": [{{"episode_number": 1, "title": "集名", "synopsis": "梗概", "opening_hook": "钩子", "ending_hook": "钩子"}}]}}

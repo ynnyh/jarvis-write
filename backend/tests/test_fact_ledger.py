@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import asyncio
 
-from sqlalchemy import text  # noqa: F401 — 保持与其它测试一致的导入面
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from app.db.base import Base
 import app.db.models  # noqa: F401 — 注册全部表
@@ -28,31 +29,25 @@ from app.db.models import (
     Project,
     Scene,
 )
-from app.db.session import SessionLocal, engine
 from app.engines.consistency import fact_ledger as fl
 
 
-def _fresh_db() -> None:
-    """清空所有业务表的行,但**不 drop 表**。
+def _fresh_db():
+    """每次一套干净的**内存库**(与 test_bible_resolve 同范式)。
 
-    为什么不能 drop_all:这套用例直接查 ``FactUsage.count()`` 与 ``project_id``
-    (每套用例的 project_id 都从 1 开始),如果沿用共享库里的上一条用例数据,
-    断言会看到别人的行,必须清干净。
-
-    但也不能 ``drop_all``:测试库里的 FTS5 虚表(fts_chapters 等)是
-    ``test_retrieval.py`` 用原生 SQL 建的,不在 ``Base.metadata`` 里;一旦
-    drop_all 会把它们连同影子表一起抹掉,而后续模块(如 test_search_api)的
-    全文检索用例正依赖它们存在——表现为「单独跑绿、全量跑红」。所以这里只
-    按依赖倒序 DELETE 行,让虚表与触发器原样留着(触发器会自动清掉索引行)。
+    为什么不用共享库(conftest 的临时文件库):
+      ① 这套用例直接查 ``FactUsage.count()`` 与 ``project_id``,每套用例的
+         project_id 都从 1 开始,共享库会看到上一条用例的数据,断言必错;
+      ② 更要命的是版本链——在共享库上 ``create_all`` 却不 stamp
+         ``alembic_version``,会让后续 app 启动迁移把库当成「遗留库」stamp 到
+         基线 ``fe553853d66d``,**跳过 0008 的 FTS5 建表**,于是别的模块
+         (test_search_api)整片报 ``no such table: fts_chapters``。
+         症状是「单独跑绿、全量跑红」——踩过一次,别再回共享库。
+      ③ 本模块不测 FTS,内存库最干净。
     """
-    Base.metadata.create_all(engine)  # checkfirst=True:已存在则不动(更不碰 FTS 虚表)
-    db = SessionLocal()
-    try:
-        for table in reversed(Base.metadata.sorted_tables):
-            db.execute(table.delete())
-        db.commit()
-    finally:
-        db.close()
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine, expire_on_commit=False)()
 
 
 def _mk_project(db, title: str = "fact-ledger-test") -> tuple[int, int]:
@@ -70,8 +65,7 @@ def _mk_project(db, title: str = "fact-ledger-test") -> tuple[int, int]:
 
 
 def test_record_usages_is_idempotent_and_accumulates():
-    _fresh_db()
-    db = SessionLocal()
+    db = _fresh_db()
     try:
         pid, eid = _mk_project(db)
         f1 = Fact(project_id=pid, entity_id=eid, fact_type="state", content="左臂受伤", valid_from=1)
@@ -106,8 +100,7 @@ def test_record_usages_is_idempotent_and_accumulates():
 
 def test_record_usages_distinguishes_scene_and_source():
     """同一章同一事实,不同场/不同来源 → 是不同行(不互相覆盖)。"""
-    _fresh_db()
-    db = SessionLocal()
+    db = _fresh_db()
     try:
         pid, eid = _mk_project(db)
         f = Fact(
@@ -171,8 +164,7 @@ def test_probe_phrase_rejects_low_ratio():
 
 def test_record_extract_hits_only_long_facts():
     """抽取路:字面命中长事实记一笔,短事实(如「重伤」)不记。"""
-    _fresh_db()
-    db = SessionLocal()
+    db = _fresh_db()
     try:
         pid, eid = _mk_project(db)
         long_fact = Fact(
@@ -204,8 +196,7 @@ def test_record_extract_hits_only_long_facts():
 
 
 def test_forget_chapter_only_clears_one_chapter():
-    _fresh_db()
-    db = SessionLocal()
+    db = _fresh_db()
     try:
         pid, eid = _mk_project(db)
         f = Fact(project_id=pid, entity_id=eid, fact_type="state", content="带着旧伤", valid_from=1)
@@ -228,8 +219,7 @@ def test_forget_chapter_only_clears_one_chapter():
 
 
 def test_usages_of_sorted_by_chapter_then_source_rank():
-    _fresh_db()
-    db = SessionLocal()
+    db = _fresh_db()
     try:
         pid, eid = _mk_project(db)
         f = Fact(project_id=pid, entity_id=eid, fact_type="state", content="身上有伤", valid_from=1)
@@ -255,8 +245,7 @@ def test_usages_of_sorted_by_chapter_then_source_rank():
 
 
 def test_writeback_map_lists_facts_of_chapter():
-    _fresh_db()
-    db = SessionLocal()
+    db = _fresh_db()
     try:
         pid, eid = _mk_project(db)
         crit = Fact(
@@ -327,8 +316,7 @@ def _seed_invalidation_case(db) -> tuple[int, int, int]:
 
 
 def test_invalidate_fact_dry_run_does_not_write():
-    _fresh_db()
-    db = SessionLocal()
+    db = _fresh_db()
     try:
         pid, fid, _ = _seed_invalidation_case(db)
         report = fl.invalidate_fact(db, pid, fid, valid_until=3, dry_run=True)
@@ -349,8 +337,7 @@ def test_invalidate_fact_dry_run_does_not_write():
 
 
 def test_invalidate_fact_commit_writes_valid_until():
-    _fresh_db()
-    db = SessionLocal()
+    db = _fresh_db()
     try:
         pid, fid, _ = _seed_invalidation_case(db)
         report = fl.invalidate_fact(db, pid, fid, valid_until=3)
@@ -362,8 +349,7 @@ def test_invalidate_fact_commit_writes_valid_until():
 
 
 def test_invalidate_fact_no_usage_says_nothing_to_review():
-    _fresh_db()
-    db = SessionLocal()
+    db = _fresh_db()
     try:
         pid, eid = _mk_project(db, "no-usage")
         f = Fact(project_id=pid, entity_id=eid, fact_type="state", content="无人引用的事实", valid_from=1)
@@ -380,8 +366,7 @@ def test_invalidate_fact_no_usage_says_nothing_to_review():
 
 
 def test_invalidate_fact_missing_raises():
-    _fresh_db()
-    db = SessionLocal()
+    db = _fresh_db()
     try:
         pid, _ = _mk_project(db, "missing-fact")
         try:
@@ -396,8 +381,7 @@ def test_invalidate_fact_missing_raises():
 
 def test_unwritten_only_chapters_says_no_manual_review():
     """只在未写章里被引用 → 提示「生成时自然读到新事实」,不做人工复核。"""
-    _fresh_db()
-    db = SessionLocal()
+    db = _fresh_db()
     try:
         pid, eid = _mk_project(db, "unwritten-only")
         f = Fact(project_id=pid, entity_id=eid, fact_type="state", content="尚未落笔的事实", valid_from=1)
@@ -415,8 +399,7 @@ def test_unwritten_only_chapters_says_no_manual_review():
 
 
 def test_render_invalidation_report_lists_chapters():
-    _fresh_db()
-    db = SessionLocal()
+    db = _fresh_db()
     try:
         pid, fid, _ = _seed_invalidation_case(db)
         report = fl.invalidate_fact(db, pid, fid, valid_until=3)
@@ -467,8 +450,7 @@ def _seed_scene_case(db):
 
 def test_write_scene_records_retrieval_usage():
     """生成路径:write_scene 把检索到的事实记进消费日志。"""
-    _fresh_db()
-    db = SessionLocal()
+    db = _fresh_db()
     try:
         proj, scene, fact = _seed_scene_case(db)
         pid = proj.id
@@ -519,8 +501,7 @@ def test_write_scene_records_retrieval_usage():
 
 def test_rewrite_path_does_not_record_retrieval_usage():
     """重写路径不记日志:那条 prompt 里没有 facts_block,模型没看到这些事实。"""
-    _fresh_db()
-    db = SessionLocal()
+    db = _fresh_db()
     try:
         proj, scene, fact = _seed_scene_case(db)
         pid = proj.id
@@ -568,8 +549,7 @@ def test_rewrite_path_does_not_record_retrieval_usage():
 
 def test_cascade_regenerate_forgets_chapter_usage():
     """大纲重生成 → 该章旧引用日志作废(否则下次失效传播会误报)。"""
-    _fresh_db()
-    db = SessionLocal()
+    db = _fresh_db()
     try:
         proj, scene, fact = _seed_scene_case(db)
         pid = proj.id
@@ -629,8 +609,7 @@ def test_cascade_regenerate_forgets_chapter_usage():
 
 
 def test_audit_report_fact_usage_section():
-    _fresh_db()
-    db = SessionLocal()
+    db = _fresh_db()
     try:
         pid, fid, eid = _seed_invalidation_case(db)
         # 再造一条从没被引用过的 critical 事实(悬空)
@@ -677,8 +656,7 @@ def test_audit_report_endpoint_includes_fact_usage():
 
     from app.main import app
 
-    _fresh_db()
-    db = SessionLocal()
+    db = _fresh_db()
     try:
         pid, _fid, _ = _seed_invalidation_case(db)
         db.commit()
