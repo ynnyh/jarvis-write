@@ -152,7 +152,7 @@ function DnaCard({
               {(options?.patterns ?? []).map((p: PatternChoice) => (
                 <button key={p.key} type="button"
                   className={"title-chip sm" + (dna.pattern_key === p.key ? " on" : "")}
-                  onClick={() => set({ pattern_key: dna.pattern_key === p.key ? "" : p.key, pattern_custom: dna.pattern_key === p.key ? dna.pattern_custom : "" })}>{p.name}</button>
+                  onClick={() => set({ pattern_key: dna.pattern_key === p.key ? "" : p.key })}>{p.name}</button>
               ))}
               <button type="button"
                 className={"title-chip sm" + (!dna.pattern_key && dna.pattern_custom ? " on" : "")}

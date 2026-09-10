@@ -139,8 +139,8 @@ class PlanIn(BaseModel):
     to_chapter: int = Field(ge=1)
     mode: str = "dialogue"
     duration_s: int = Field(default=90, ge=30, le=180)
-    target_episodes: int = Field(default=0, ge=0, le=300,
-                                 description="目标集数;0=AI 按素材密度自定")
+    target_episodes: int = Field(default=0, ge=0, le=120,
+                                 description="目标集数;0=AI 按素材密度自定;单次规划上限 120(输出预算匹配)")
 
 
 class FilmPromptIn(BaseModel):

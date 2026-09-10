@@ -107,6 +107,17 @@ def test_plan_in_target_episodes():
     assert body.target_episodes == 0
     body = PlanIn(from_chapter=1, to_chapter=10, target_episodes=80)
     assert body.target_episodes == 80
-    # 越界被拦
+    # 越界被拦(单次规划硬顶 120,与输出预算/解析帽同步)
     with pytest.raises(Exception):
-        PlanIn(from_chapter=1, to_chapter=10, target_episodes=301)
+        PlanIn(from_chapter=1, to_chapter=10, target_episodes=121)
+
+
+def test_episode_cap_follows_target():
+    from app.engines.drama.planner import _EPISODE_CAP_MAX, _MAX_EPISODES, _episode_cap
+
+    # 无目标:维持旧的 40 帽(防模型跑飞)
+    assert _episode_cap(0) == _MAX_EPISODES
+    # 有目标:盖住 ±10% 浮动上限(80 目标 → 模型最多 ~88 集,帽 90)
+    assert _episode_cap(80) == 90
+    assert _episode_cap(120) == _EPISODE_CAP_MAX
+    assert _episode_cap(200) == _EPISODE_CAP_MAX

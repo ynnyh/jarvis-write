@@ -38,6 +38,20 @@ from app.prompts.drama import EPISODE_PLAN_PROMPT
 
 # 单次规划上限:防一次切出几百集
 _MAX_EPISODES = 40
+# 目标集数放开时的单次硬顶:输出预算 16384 token ÷ ~150 token/集 ≈ 120 集,
+# 再大就该分批切范围了
+_EPISODE_CAP_MAX = 130
+
+
+def _episode_cap(target_episodes: int) -> int:
+    """解析阶段的有效集数帽。
+
+    默认 40(防模型不设目标时跑飞);给了目标集数则按「目标 +10」放开——
+    硬约束允许 ±10% 浮动,帽必须盖得住上限,否则目标 80 集会被静默砍半。
+    """
+    if target_episodes <= 0:
+        return _MAX_EPISODES
+    return min(target_episodes + 10, _EPISODE_CAP_MAX)
 # 无蓝图兜底时,每章正文喂开头多少字(情节开局足够,控窗)
 _FALLBACK_HEAD_CHARS = 300
 # 每章最多带几条章末未决线索(钩子/卡点原料,多了变流水账)
@@ -150,6 +164,7 @@ async def plan_episodes(
         )
 
     progress(f"AI 正在把 {material_count} 章切成漫剧集(钩子/卡点)…")
+    ep_cap = _episode_cap(target_episodes)
     adapter = get_adapter_for(Task.DRAMA_PLAN, timeout=300)
     prompt = EPISODE_PLAN_PROMPT.format(
         duration_target_s=duration_s,
@@ -191,7 +206,7 @@ async def plan_episodes(
                 "cliffhanger": clip(item.get("cliffhanger"), 200),
             }
         )
-        if len(eps) >= _MAX_EPISODES:
+        if len(eps) >= ep_cap:
             break
     if not eps:
         raise DramaPlanError("规划结果为空,请重试或换一个章节范围。")

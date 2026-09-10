@@ -99,9 +99,9 @@ export function PlanSection({ pid, approved, episodes, onChanged, selectedId, on
             onChange={(e) => setDuration(Number(e.target.value) || 90)} />
         </div>
         <div className="field">
-          <label className="fl" htmlFor="dp-eps">目标集数<span className="hint">0=AI 自定</span></label>
-          <input id="dp-eps" type="number" min={0} max={300} value={targetEp}
-            onChange={(e) => setTargetEp(Math.max(0, Number(e.target.value) || 0))} />
+          <label className="fl" htmlFor="dp-eps">目标集数<span className="hint">0=AI 自定·上限 120</span></label>
+          <input id="dp-eps" type="number" min={0} max={120} value={targetEp}
+            onChange={(e) => setTargetEp(Math.min(120, Math.max(0, Number(e.target.value) || 0)))} />
         </div>
       </div>
       <div className="card-desc mt-1">

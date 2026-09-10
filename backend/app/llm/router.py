@@ -168,7 +168,9 @@ _TASK_MAX_TOKENS: dict[Task, int] = {
     Task.DRAMA_SCRIPT: 8192,
     Task.DRAMA_STORYBOARD: 8192,
     Task.DRAMA_PROMPT: 8192,
-    Task.DRAMA_PLAN: 6000,
+    # 集规划:每集钩子/卡点约 100-150 字 ≈ 150 token/集;目标集数放开后一次最多
+    # 120 集 ≈ 1.8 万 token——6000 的旧预算只够 40 集,目标 80 集会被截断成半截 JSON
+    Task.DRAMA_PLAN: 16384,
     # 资产卡(风格/角色/场景/定妆照)按批出,每条 100-160 字;推理模型的思考
     # 还要再吃一大截,5000 实测会把定妆照 JSON 砍在半句话上(Unterminated string)
     Task.DRAMA_ASSET: 8192,
