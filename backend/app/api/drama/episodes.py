@@ -45,6 +45,8 @@ from app.api.drama._common import (
     write_episode_script,
 )
 
+from app.engines.drama.quality import find_version, push_version, version_list
+
 router = make_sub_router()
 
 
@@ -123,6 +125,38 @@ async def patch_episode(
     """
     ep = _get_episode(db, project_id, episode_id)
     ep.focus = body.focus.strip()
+    db.commit()
+    return {"episode": episode_dict(ep)}
+
+
+# ---------- 剧本版本快照(§5.2)----------
+# 与剧本线同名同语义:重写/手改前自动存一版,改坏了能退回去。
+
+
+@router.get("/episodes/{episode_id}/versions")
+async def list_episode_versions(project_id: int, episode_id: int, db: Session = Depends(get_db)):
+    """本集历史剧本版本(最新在前)。生成与手改前都会自动存一版。"""
+    ep = _get_episode(db, project_id, episode_id)
+    return {"versions": version_list(ep)}
+
+
+@router.post("/episodes/{episode_id}/versions/{version}/restore")
+async def restore_episode_version(
+    project_id: int, episode_id: int, version: int, db: Session = Depends(get_db)
+):
+    """回退到某一历史版本;当前剧本会先存成一版,回退本身也可再退。"""
+    ep = _get_episode(db, project_id, episode_id)
+    target = find_version(ep, version)
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"第 {version} 版不存在")
+    push_version(ep, source=f"before-restore-v{version}")
+    script = dict(ep.script) if isinstance(ep.script, dict) else {}
+    script["lines"] = target["lines"]
+    if target.get("synopsis"):
+        script["synopsis"] = target["synopsis"]
+    ep.script = script
+    if ep.status == "planned":
+        ep.status = "scripted"
     db.commit()
     return {"episode": episode_dict(ep)}
 

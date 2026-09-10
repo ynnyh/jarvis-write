@@ -10,7 +10,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.db.models import DramaCharacterCard, DramaEpisode, Project
-from app.engines.consistency.extractor import parse_llm_json
+from app.engines.common import ask_llm_json, parse_llm_json_checked
 from app.engines.drama.common import (
     MODE_DESC,
     chapters_final_text,
@@ -19,14 +19,22 @@ from app.engines.drama.common import (
     episode_source_chapters,
     source_chapter_label,
 )
+from app.engines.drama.quality import (
+    end_state_block,
+    push_version,
+    store_end_state,
+    tail_lines_text,
+    validate_drama_script,
+)
 from app.llm.router import Task, get_adapter_for
-from app.prompts.drama import EPISODE_SCRIPT_PROMPT
+from app.prompts.drama import DRAMA_END_STATE_PROMPT, EPISODE_SCRIPT_PROMPT
 
 # 源章节正文注入上限(字符):剧本只需要主体情节,超长正文截断防提示词爆炸。
 # 数章并一集时这是「总预算」,按章平分;超预算的章保头尾去中段(见
 # common.chapters_final_text——章尾是卡点素材的来源,不能砍)
 _MAX_CHAPTER_CHARS = 9000
 _MAX_LINES = 40
+_ATTEMPTS = 2  # 输出崩坏(空壳/截断/说话人全空)时整发重试一次
 
 
 class DramaScriptError(ValueError):
@@ -63,6 +71,24 @@ def _prev_block(db: Session, project_id: int, ep_index: int) -> str:
     if prev and prev.cliffhanger:
         return f"【上一集结尾卡点(开场要承接)】{prev.cliffhanger}\n"
     return ""
+
+
+def _prev_state_block(db: Session, project_id: int, ep_index: int) -> str:
+    """上一集集末状态契约(§5.2):时间/地点/在场/未了线索的硬约束块。
+
+    与 `_prev_block` 各司其职:那个给的是「卡在哪」的一句话氛围,这个给的是
+    「此刻是什么局面」的事实。此前漫剧线只有前者——时间和在场人物全靠模型
+    自己从前文悟,悟错无兜底(小说侧 handoff / 剧本线都有契约,漫剧是缺口)。
+    """
+    prev = (
+        db.query(DramaEpisode)
+        .filter(
+            DramaEpisode.project_id == project_id,
+            DramaEpisode.ep_index == ep_index - 1,
+        )
+        .first()
+    )
+    return end_state_block(prev)
 
 
 def _focus_block(episode: DramaEpisode) -> str:
@@ -108,38 +134,100 @@ async def write_episode_script(
         recap=episode.recap,
         cliffhanger=episode.cliffhanger or "(规划未给,自行设计卡点结尾)",
         prev_block=_prev_block(db, project.id, episode.ep_index),
+        prev_state_block=_prev_state_block(db, project.id, episode.ep_index),
         focus_block=_focus_block(episode),
         characters_block=_characters_block(db, project.id),
         source_label=used_label,
         chapter_text=body,
     )
-    raw = await adapter.ask(prompt)
-    data = parse_llm_json(raw)
 
+    # 格式门禁 + 整发重试:只挡「没写成」(空壳/JSON 崩/台词被截断/说话人全空),
+    # 不评判文笔。中转网关截断尾巴是常态不是意外,一次不成重试一次再报错。
     lines_out: list[dict] = []
-    for item in (data.get("lines") or []):
+    last_err = "模型返回空内容"
+    for attempt in range(1, _ATTEMPTS + 1):
+        try:
+            raw = await adapter.ask(prompt)
+        except Exception as exc:  # noqa: BLE001
+            last_err = str(exc)
+            progress(f"第 {episode.ep_index} 集剧本第 {attempt}/{_ATTEMPTS} 次调用失败,重试中…")
+            continue
+        data, err = parse_llm_json_checked(raw)
+        ok, why = validate_drama_script(data)
+        if not ok:
+            last_err = why or err or "输出不可用"
+            progress(f"第 {episode.ep_index} 集剧本第 {attempt}/{_ATTEMPTS} 次输出不可用({last_err}),重试中…")
+            continue
+        lines_out = _clean_lines(data.get("lines"))
+        if not lines_out:
+            last_err = "台词清洗后为空"
+            continue
+        last_err = ""
+        break
+    if not lines_out:
+        raise DramaScriptError(f"剧本生成失败:{last_err}")
+
+    # 覆盖前存一版(手改/重写可回溯)。**必须在写新剧本之前**——顺序反了就
+    # 把旧版存成了新版内容,快照彻底失效。
+    push_version(episode, source="generated")
+    script = dict(episode.script) if isinstance(episode.script, dict) else {}
+    script["mode"] = episode.mode
+    script["synopsis"] = clip(data.get("synopsis"), 300)
+    script["lines"] = lines_out
+    episode.script = script
+    episode.status = "scripted"
+
+    # 集末契约:给下一集用的衔接锚。**必须在 lines 落进 episode.script 之后**——
+    # 提取读的是本集结尾台词(tail_lines_text),排在前头只会读到空剧本。
+    # 失败只降级(标 failed),不推翻已经写好的正本。
+    await _store_end_state(episode, adapter)
+
+    db.commit()
+    return episode_dict(episode)
+
+
+def _clean_lines(raw_lines) -> list[dict]:
+    """原始 lines → 干净台词行(丢空 text、截长、封顶 _MAX_LINES)。
+
+    与门禁分离:门禁判「能不能用」,这里负责「怎么落库」——判据可被单测
+    直接喂数据验证,不必经 LLM。
+    """
+    out: list[dict] = []
+    for item in (raw_lines or []):
         if not isinstance(item, dict):
             continue
         text_line = clip(item.get("text"), 300)
         if not text_line:
             continue
-        lines_out.append(
+        out.append(
             {
                 "speaker": clip(item.get("speaker"), 60) or "旁白",
                 "text": text_line,
                 "action": clip(item.get("action"), 120),
             }
         )
-        if len(lines_out) >= _MAX_LINES:
+        if len(out) >= _MAX_LINES:
             break
-    if not lines_out:
-        raise DramaScriptError("剧本结果为空,请重试。")
+    return out
 
-    episode.script = {
-        "mode": episode.mode,
-        "synopsis": clip(data.get("synopsis"), 300),
-        "lines": lines_out,
-    }
-    episode.status = "scripted"
-    db.commit()
-    return episode_dict(episode)
+
+async def _store_end_state(episode: DramaEpisode, adapter) -> None:
+    """提取并落集末契约;失败记 failed(界面可提示重提),不影响本集剧本。"""
+    n = episode.ep_index
+    tail = tail_lines_text(episode)
+    if not tail:
+        store_end_state(episode, None, "本集没有可提取的台词")
+        return
+    prompt = DRAMA_END_STATE_PROMPT.format(n=n, tail=tail)
+    # 契约是衔接增强,不值得为它烧满重试预算:整发重发 1 次 + 续写抢救 1 次封顶。
+    try:
+        data, err = await ask_llm_json(
+            adapter, prompt, label=f"第 {n} 集集末契约",
+            attempts=1, continue_attempts=1,
+        )
+    except Exception as exc:  # noqa: BLE001 — 契约是衔接增强,不该拖垮正文
+        err, data = str(exc), {}
+    if err or not data:
+        store_end_state(episode, None, err or "模型返回空内容")
+        return
+    store_end_state(episode, data)

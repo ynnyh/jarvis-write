@@ -183,6 +183,10 @@ _SCRIPT_REPLY = {
     "lines": [
         {"speaker": "沈砚", "text": "走镖不看路,看人。", "action": "擦拭刀鞘,眼皮不抬"},
         {"speaker": "旁白", "text": "雪夜,荒山,镖队扎营。", "action": "火堆明灭,风雪扑面"},
+        # 格式门禁(§5.2)要求 ≥ MIN_LINES(4)条:截断的短输出会被挡下重试。
+        # 桩数据必须给出够长的剧本,否则测的是门禁而不是下游管线。
+        {"speaker": "沈砚", "text": "箱子不对,谁动过?", "action": "指尖敲箱盖"},
+        {"speaker": "旁白", "text": "箱底,一道新鲜的撬痕。", "action": "镜头推近木箱"},
     ],
 }
 
@@ -777,3 +781,121 @@ def test_style_direction_and_recommend(client):
     assert [x["key"] for x in recs] == ["ink_wash", "comic_cn", "cyber"]
     assert [x["priority"] for x in recs] == [1, 2, 3]
     assert recs[0]["label"] == "水墨国风"
+
+
+# ---------- 剧本版本快照(§5.2)----------
+
+def test_episode_script_versions_and_restore(client):
+    """重写剧本前存一版 → 列表可查 → 回退能退回旧版,且回退本身也先存一版。"""
+    headers = _auth(client, "drama_versions")
+    p = _create_project(client, headers, "版本漫剧书")
+    pid = p["id"]
+    _seed_novel(pid)
+    _seed_assets(pid)
+
+    with patch("app.engines.drama.planner.get_adapter_for",
+               return_value=_JsonAdapter(_PLAN_REPLY)):
+        r = client.post(f"/api/projects/{pid}/drama/episodes/plan", headers=headers,
+                        json={"from_chapter": 1, "to_chapter": 2, "mode": "dialogue", "duration_s": 90})
+        eps = _wait_job(client, headers, r.json()["job_id"])["result"]
+    ep_id = eps[0]["id"]
+
+    # 第一次生成:没有旧剧本 → 无快照
+    with patch("app.engines.drama.script.get_adapter_for",
+               return_value=_JsonAdapter(_SCRIPT_REPLY)):
+        r = client.post(f"/api/projects/{pid}/drama/episodes/{ep_id}/script", headers=headers)
+        _wait_job(client, headers, r.json()["job_id"])
+    r = client.get(f"/api/projects/{pid}/drama/episodes/{ep_id}/versions", headers=headers)
+    assert r.status_code == 200
+    assert r.json()["versions"] == []
+
+    # 第二次生成:旧版进快照
+    second = dict(_SCRIPT_REPLY)
+    second["synopsis"] = "第二版梗概"
+    with patch("app.engines.drama.script.get_adapter_for",
+               return_value=_JsonAdapter(second)):
+        r = client.post(f"/api/projects/{pid}/drama/episodes/{ep_id}/script", headers=headers)
+        _wait_job(client, headers, r.json()["job_id"])
+    versions = client.get(
+        f"/api/projects/{pid}/drama/episodes/{ep_id}/versions", headers=headers).json()["versions"]
+    assert len(versions) == 1
+    assert versions[0]["source"] == "generated"
+    assert versions[0]["line_count"] == 4
+    assert versions[0]["lines"][0]["speaker"] == "沈砚"
+
+    # 回退到第 1 版:当前(第二版)先存成新一版
+    r = client.post(
+        f"/api/projects/{pid}/drama/episodes/{ep_id}/versions/1/restore", headers=headers)
+    assert r.status_code == 200, r.text
+    ep = r.json()["episode"]
+    assert ep["script"]["lines"][0]["speaker"] == "沈砚"
+    versions = client.get(
+        f"/api/projects/{pid}/drama/episodes/{ep_id}/versions", headers=headers).json()["versions"]
+    assert len(versions) == 2  # 旧版1 + 回退前存的第二版
+    assert versions[0]["source"] == "before-restore-v1"
+
+    # 不存在的版本 → 404
+    assert client.post(
+        f"/api/projects/{pid}/drama/episodes/{ep_id}/versions/99/restore",
+        headers=headers).status_code == 404
+
+    # 归属隔离
+    other = _auth(client, "drama_versions_other")
+    assert client.get(
+        f"/api/projects/{pid}/drama/episodes/{ep_id}/versions", headers=other).status_code == 404
+
+
+def test_end_state_extracted_and_returned(client):
+    """写剧本后自动提取集末状态,经 episode 载荷回传(前端据此显示衔接信息)。"""
+    headers = _auth(client, "drama_endstate")
+    p = _create_project(client, headers, "集末态漫剧书")
+    pid = p["id"]
+    _seed_novel(pid)
+    _seed_assets(pid)
+
+    with patch("app.engines.drama.planner.get_adapter_for",
+               return_value=_JsonAdapter(_PLAN_REPLY)):
+        r = client.post(f"/api/projects/{pid}/drama/episodes/plan", headers=headers,
+                        json={"from_chapter": 1, "to_chapter": 2, "mode": "dialogue", "duration_s": 90})
+        eps = _wait_job(client, headers, r.json()["job_id"])["result"]
+    ep_id = eps[0]["id"]
+
+    class _ScriptThenState:
+        """第 1 次给剧本,第 2 次给集末契约(同一适配器两次调用)。"""
+
+        def __init__(self):
+            self.n = 0
+
+        async def ask(self, prompt, system=None):
+            self.n += 1
+            if self.n == 1:
+                return json.dumps(_SCRIPT_REPLY, ensure_ascii=False)
+            return json.dumps({"location": "荒山破庙", "open_threads": ["箱底的撬痕"]},
+                              ensure_ascii=False)
+
+    with patch("app.engines.drama.script.get_adapter_for",
+               return_value=_ScriptThenState()):
+        r = client.post(f"/api/projects/{pid}/drama/episodes/{ep_id}/script", headers=headers)
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    holder = job["result"]["script"]["_end_state"]
+    assert holder["status"] == "ok"
+    assert holder["state"]["location"] == "荒山破庙"
+    assert holder["state"]["open_threads"] == ["箱底的撬痕"]
+
+    # 第 2 集写剧本:上一集的集末态进 prompt
+    class _Capture:
+        def __init__(self):
+            self.prompts = []
+
+        async def ask(self, prompt, system=None):
+            self.prompts.append(prompt)
+            return json.dumps(_SCRIPT_REPLY, ensure_ascii=False)
+
+    cap = _Capture()
+    with patch("app.engines.drama.script.get_adapter_for", return_value=cap):
+        r = client.post(f"/api/projects/{pid}/drama/episodes/{eps[1]['id']}/script",
+                        headers=headers)
+        _wait_job(client, headers, r.json()["job_id"])
+    assert "荒山破庙" in cap.prompts[0]
+    assert "箱底的撬痕" in cap.prompts[0]

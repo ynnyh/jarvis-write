@@ -306,8 +306,13 @@ def test_focus_block_injected_into_script_prompt():
     db.add(ep)
     db.commit()
 
+    # 格式门禁(§5.2)要求 ≥ MIN_LINES(4)条台词:桩数据必须够长,
+    # 否则测的是门禁重试而不是 focus 注入。首条仍是原断言要的那句。
     reply = json.dumps({"synopsis": "s", "lines": [
         {"speaker": "旁白", "text": "城门开处", "action": "他勒马回望"},
+        {"speaker": "沈砚", "text": "把我的人放回来。", "action": "翻身下马"},
+        {"speaker": "守将", "text": "拿文书来。", "action": "横戟拦门"},
+        {"speaker": "旁白", "text": "对峙,从正午到日斜。", "action": "影子渐渐拉长"},
     ]}, ensure_ascii=False)
     adapter = _Adapter(reply)
     with patch("app.engines.drama.script.get_adapter_for", return_value=adapter):

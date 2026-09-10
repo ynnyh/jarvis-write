@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { DramaBoardResult, DramaEpisode, DramaProductionPack, DramaShot } from "../../dramaApi";
+import type { DramaBoardResult, DramaEpisode, DramaEpisodeVersion, DramaProductionPack, DramaShot } from "../../dramaApi";
 import { DRAMA_STATUS_CN, dramaApi } from "../../dramaApi";
 import type { PrevFrameInfo } from "../../renderApi";
 import { renderApi } from "../../renderApi";
@@ -8,6 +8,7 @@ import { toast } from "../../ui/Toaster";
 import { errMsg } from "../../pollJob";
 import Banner from "../../ui/Banner";
 import { CopyBtn } from "../../ui/copy";
+import { confirmDialog } from "../../ui/ConfirmDialog";
 import { FilmPromptCard } from "../../ui/FilmPromptCard";
 import { nextEpisodeTodo } from "./dramaShared";
 import { PromptRow } from "./PromptRow";
@@ -193,6 +194,10 @@ export function EpisodeDetail({ pid, eid, hasStyle, ratio, renderMode, onEpisode
               {l.action && <span className="muted">(画面:{l.action})</span>}
             </div>
           ))}
+          {/* 集末交接契约(§5.2):写剧本时自动提取,下一集开场据此接住 */}
+          <EndStateNote episode={episode} />
+          {/* 历史版本:重写/手改前自动存一版,改坏了能退回去 */}
+          <ScriptVersions pid={pid} eid={eid} onRestored={reload} />
         </div>
       ) : (
         <p className="hint">先「写剧本」:按开场钩子开场、结尾卡点收束,台词口语化、每句可拍。</p>
@@ -370,5 +375,93 @@ function FilmPromptSection({ pid, eid }: { pid: number; eid: number }) {
         </select>
       }
     />
+  );
+}
+
+// ================= 集末交接契约(§5.2)=================
+// 写剧本后自动提取「落幕那一刻」的时间/地点/在场/未了线索,下一集开场据此
+// 硬约束接住。提取失败是降级(不阻塞本集),这里如实显示原因并提示可重写。
+function EndStateNote({ episode }: { episode: DramaEpisode }) {
+  const holder = episode.script?._end_state;
+  const state = holder?.state;
+  if (!holder) return null;
+  if (holder.status !== "ok" || !state) {
+    return (
+      <p className="hint" style={{ marginTop: 6 }}>
+        集末状态未提取({holder.error || "提取失败"}),下一集衔接只能靠结尾卡点。
+        可「重新写剧本」再试一次。
+      </p>
+    );
+  }
+  const bits: string[] = [];
+  if (state.location) bits.push("地点:" + state.location);
+  if (state.in_story_time) bits.push("时间:" + state.in_story_time);
+  if (state.on_stage?.length) bits.push("在场:" + state.on_stage.join("、"));
+  const threads = state.open_threads || [];
+  return (
+    <p className="muted" style={{ marginTop: 6 }}>
+      集末状态已提取{bits.length ? " —— " + bits.join(" · ") : ""}
+      {threads.length ? ";未了线索:" + threads.join(";") : ""}
+      <span className="muted">(下一集开场会据此接住)</span>
+    </p>
+  );
+}
+
+// ================= 剧本历史版本 =================
+// 重写剧本/回退前都会自动存一版,改坏了能退回去;回退本身也会先存当前版。
+function ScriptVersions({ pid, eid, onRestored }: {
+  pid: number; eid: number; onRestored: () => void | Promise<void>;
+}) {
+  const [versions, setVersions] = useState<DramaEpisodeVersion[] | null>(null);
+  const [open, setOpen] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => { setVersions(null); setErr(""); setOpen(false); }, [eid]);
+
+  const load = useCallback(async () => {
+    try { setVersions((await dramaApi.getEpisodeVersions(pid, eid)).versions); }
+    catch (e) { setErr(errMsg(e)); }
+  }, [pid, eid]);
+
+  async function restore(v: number) {
+    const ok = await confirmDialog({
+      title: `回退到第 ${v} 版?`,
+      body: "当前剧本会先存成一版(回退本身也能再退)。",
+    });
+    if (!ok) return;
+    try {
+      await dramaApi.restoreEpisodeVersion(pid, eid, v);
+      toast.ok(`已回退到第 ${v} 版`);
+      await load();
+      await onRestored();
+    } catch (e) { toast.err("回退失败", errMsg(e)); }
+  }
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button className="btn-sm" onClick={() => {
+        const next = !open; setOpen(next); if (next && versions === null) void load();
+      }}>
+        {open ? "收起历史版本" : "历史版本"}
+      </button>
+      {open && (
+        <div style={{ marginTop: 6 }}>
+          {err && <p className="hint">历史版本读取失败:{err}</p>}
+          {versions === null && !err && <p className="hint">加载中…</p>}
+          {versions !== null && versions.length === 0 && (
+            <p className="hint">还没有历史版本。重写或回退时会自动存一版。</p>
+          )}
+          {versions?.map((v) => (
+            <div key={v.version} className="script-line">
+              <b>第 {v.version} 版</b> · {v.line_count} 条
+              <span className="muted"> · {v.source || "generated"} · {v.saved_at}</span>
+              <button className="btn-sm" style={{ marginLeft: 8 }} onClick={() => void restore(v.version)}>
+                回退
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

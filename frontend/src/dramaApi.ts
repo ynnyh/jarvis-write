@@ -101,6 +101,16 @@ export interface DramaSceneCard {
 }
 
 export interface DramaScriptLine { speaker: string; text: string; action?: string }
+// 集末交接契约(§5.2):写剧本后自动提取「落幕那一刻」的状态,下一集 prompt 会
+// 硬约束注入(时间/地点/在场/未了线索)。status=failed 时 state 为空,只降级不阻塞。
+export interface DramaEndState {
+  in_story_time?: string;
+  location?: string;
+  on_stage?: string[];
+  character_states?: { name: string; state?: string; doing?: string }[];
+  resolved?: string[];
+  open_threads?: string[];
+}
 export interface DramaEpisode {
   id: number;
   ep_index: number;
@@ -114,8 +124,25 @@ export interface DramaEpisode {
   focus: string; // 本集重点(作者改编意图,可空;写剧本时高优先级注入)
   mode: "dialogue" | "narration";
   duration_target_s: number;
-  script: { mode?: string; synopsis?: string; lines?: DramaScriptLine[] };
+  script: {
+    mode?: string;
+    synopsis?: string;
+    lines?: DramaScriptLine[];
+    // 后端内部状态(快照/契约):前端只读展示,不参与编辑
+    _end_state?: { status?: string; state?: DramaEndState | null; error?: string };
+    _versions?: unknown[];
+  };
   status: "planned" | "scripted" | "storyboarded" | "ready";
+}
+
+// 剧本历史版本(重写/手改前自动存一版;可在界面上回溯)
+export interface DramaEpisodeVersion {
+  version: number;
+  line_count: number;
+  source: string;
+  saved_at: string;
+  synopsis: string;
+  lines: DramaScriptLine[];
 }
 
 export interface DramaShot {
@@ -330,6 +357,13 @@ export const dramaApi = {
       "GET", `/api/projects/${pid}/drama/episodes/${eid}`),
   writeScript: (pid: number, eid: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/episodes/${eid}/script`, undefined, LLM_TIMEOUT),
+  // 剧本版本快照(§5.2):重写/手改前自动存一版,改坏了能退回去
+  getEpisodeVersions: (pid: number, eid: number) =>
+    req<{ versions: DramaEpisodeVersion[] }>(
+      "GET", `/api/projects/${pid}/drama/episodes/${eid}/versions`),
+  restoreEpisodeVersion: (pid: number, eid: number, version: number) =>
+    req<{ episode: DramaEpisode }>(
+      "POST", `/api/projects/${pid}/drama/episodes/${eid}/versions/${version}/restore`),
   storyboard: (pid: number, eid: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/drama/episodes/${eid}/storyboard`, undefined, LLM_TIMEOUT),
   prompts: (pid: number, eid: number) =>
