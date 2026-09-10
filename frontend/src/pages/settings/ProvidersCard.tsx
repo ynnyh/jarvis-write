@@ -1,10 +1,53 @@
 // 模型设置卡(cc-switch 风格):每用户多套命名配置,可增删改、一键切换默认/快档(各全用户唯一)。
 // 拆自 SettingsPage.tsx。
 import { useEffect, useState } from "react";
-import { api, ProviderConfigOut } from "../../api";
+import { api, ModelRoles, ProviderConfigOut } from "../../api";
 import { ProviderForm } from "./ProviderForm";
 import { ProviderRow } from "./ProviderRow";
 import { errMsg } from "../../pollJob";
+
+// 角色分配现状条(D7):把「钱花在哪一刀上」摊开给用户看。
+// 三个角色各自的档位与模型名,写手/审校没分开时给可操作的提示。
+function ModelRolesStrip() {
+  const [roles, setRoles] = useState<ModelRoles | null>(null);
+  useEffect(() => {
+    api.modelRoles().then(setRoles).catch(() => undefined);
+  }, []);
+  if (!roles || !roles.available) return null;
+
+  const items: { key: string; label: string; hint: string; cfg: ModelRoles["writer"] }[] = [
+    { key: "writer", label: "创作", hint: "草稿/定稿/逐场生成——钱该花在这里", cfg: roles.writer },
+    { key: "auditor", label: "审校", hint: "主审/一致性/场景验收——与创作分模型才有客观性", cfg: roles.auditor },
+    { key: "worker", label: "杂活", hint: "摘要/抽取/去味——不该占强档", cfg: roles.worker },
+  ];
+
+  return (
+    <div style={{ marginTop: 12, paddingTop: 12, borderTop: "0.5px solid var(--color-border-tertiary)" }}>
+      <div className="hint" style={{ marginBottom: 6 }}>当前模型角色分配</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+        {items.map((it) => (
+          <div key={it.key} style={{
+            background: "var(--color-background-secondary)",
+            borderRadius: "var(--border-radius-md)", padding: "8px 10px",
+          }}>
+            <div style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>{it.label}</div>
+            <div style={{ fontSize: 13, fontWeight: 500, marginTop: 2, overflow: "hidden",
+              textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+              title={`${it.cfg.name}${it.cfg.model ? " · " + it.cfg.model : ""}`}>
+              {it.cfg.name}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>{it.hint}</div>
+          </div>
+        ))}
+      </div>
+      {roles.advice && (
+        <div className="hint" style={{ marginTop: 8, color: "var(--color-text-warning, #BA7517)" }}>
+          {roles.advice}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function ProvidersCard() {
   const [list, setList] = useState<ProviderConfigOut[] | null>(null);
@@ -81,6 +124,8 @@ export function ProvidersCard() {
           )
         ))}
       </div>
+
+      <ModelRolesStrip />
     </div>
   );
 }

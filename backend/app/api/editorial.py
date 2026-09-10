@@ -63,6 +63,60 @@ async def editorial_actions() -> dict:
     return _actions()
 
 
+@router.get("/api/editorial/model-roles")
+async def model_roles() -> dict:
+    """按「角色」汇报模型分配现状(D7:创作走贵模型,校验/抽取/去味走便宜模型)。
+
+    模型分级此前是按「任务类型」隐式决定的,用户看不到自己实际在花什么钱、
+    也看不到写手和审校是不是同一个模型。这里把它显式摊开:
+
+      · writer    创作刀口(草稿/定稿/场景生成)—— 钱该花在这里
+      · auditor   判定刀口(主审/一致性/场景验收)—— 与写手分模型才有客观性
+      · worker    廉价杂活(摘要/抽取/去味)—— 不该占强档
+
+    同时给出 self_review 标记:写手与审校指向同一套配置时为真,此时主审分数
+    是「模型给自己的作文打分」,乐观偏差会被放大一层。不硬改配置(分不分模型
+    是用户的成本选择),但要让这件事可见。
+    """
+    from app.llm.router import Tier, _tier_config, review_is_self_reviewing
+
+    def _brief(cfg: dict, tier: Tier) -> dict:
+        return {
+            "tier": tier.value,
+            "config_id": cfg.get("id"),
+            "name": str(cfg.get("name") or cfg.get("interface_format") or "(未配置)"),
+            "model": str(cfg.get("model") or ""),
+        }
+
+    try:
+        writer = _brief(_tier_config(Tier.QUALITY) or {}, Tier.QUALITY)
+        auditor = _brief(_tier_config(Tier.REVIEW) or {}, Tier.REVIEW)
+        worker = _brief(_tier_config(Tier.FAST) or {}, Tier.FAST)
+    except Exception as exc:  # noqa: BLE001 — 配置读取失败不该让前端报错
+        return {"available": False, "reason": str(exc)[:150]}
+
+    # 审校档未单独指定时会回落 quality 档:从 id 相同与否即可判断
+    auditor_separated = (
+        auditor.get("config_id") is not None
+        and writer.get("config_id") is not None
+        and auditor["config_id"] != writer["config_id"]
+    )
+    return {
+        "available": True,
+        "writer": writer,
+        "auditor": auditor,
+        "worker": worker,
+        "auditor_separated": auditor_separated,
+        "self_review": review_is_self_reviewing(),
+        "advice": (
+            ""
+            if auditor_separated
+            else "审校档与创作档指向同一套配置:主审是在给同一个模型自己的输出打分,"
+                 "乐观偏差会被放大。建议在设置页给「审校」单独配一个模型。"
+        ),
+    }
+
+
 def _chapter_with_content(db: Session, project_id: int, n: int) -> Chapter:
     ch = (
         db.query(Chapter)
@@ -281,6 +335,16 @@ async def audit_report(project_id: int, db: Session = Depends(get_db)):
     open_count = sum(1 for f in fores if f.status in ("planted", "reinforced"))
     resolved_count = sum(1 for f in fores if f.status == "paid_off")
 
+    # 伏笔债务(§1.3):活跃数 / 逾期数 / 平均悬空章数。以「已写到第几章」为基准,
+    # 因为问的是「相对于已经写出来的部分,作者欠读者多少笔」。
+    from app.engines.consistency.foreshadow_agenda import active_cap, book_debt
+
+    debt = book_debt(
+        [f for f in fores if f.status in ("planted", "reinforced")], max_written
+    )
+    debt["cap"] = active_cap(int(project.target_chapters or 0))
+    debt["over_capacity"] = debt["active"] > debt["cap"]
+
     # 大纲已生成但长期没写的章(跳章检查:前面留洞)
     outline_nums = [
         o.chapter_number
@@ -304,6 +368,8 @@ async def audit_report(project_id: int, db: Session = Depends(get_db)):
             "open": open_count,
             "resolved": resolved_count,
             "overdue": overdue,
+            # 债务面:伏笔「爱埋不爱收」是全行业通病,这里给可量化的账
+            "debt": debt,
         },
     }
 

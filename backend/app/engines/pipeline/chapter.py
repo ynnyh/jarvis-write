@@ -28,6 +28,7 @@ from app.engines.consistency import (
     ForeshadowScheduler,
     ledger_block,
 )
+from app.engines.consistency.foreshadow_agenda import build_agenda, render_agenda_block
 from app.engines.common import degraded_of, is_degraded
 from app.engines.consistency.checker import (
     blockers_of,
@@ -455,7 +456,17 @@ async def generate_chapter(
     # 名册列全书已登场的人;草稿/定稿注入约束生成,同一份也喂给门禁(checker)比对。
     known_roster = bible.known_roster_block(chapter_number)
     scheduler = ForeshadowScheduler(db, project.id)
-    foreshadow_reminders = scheduler.reminder_block(chapter_number)
+    # 伏笔日程(§1.3):把「到期提醒」升级为硬性任务 + 准入控制。
+    # 旧提醒是模型可以无视的一行字;日程是「本章必须兑现 X」的清单——
+    # 模型爱埋伏笔不爱收,这是全行业通病,得靠排程而不是靠自觉。
+    foreshadow_agenda = build_agenda(
+        db, project.id, chapter_number,
+        target_chapters=int(project.target_chapters or 0),
+    )
+    foreshadow_reminders = render_agenda_block(foreshadow_agenda, chapter_number)
+    if not foreshadow_reminders:
+        # 没有排程任务时回到旧的提醒语义(临近但未到期的伏笔也值得提一句)
+        foreshadow_reminders = scheduler.reminder_block(chapter_number)
     # 常驻装置催场(Phase 3):宪法里登记的金手指/信物断档到阈值就点名催场,治
     # 「女主有系统却多章消失」。无 canon 装置 / 老书契约无 devices_present → 空串零影响。
     device_reminders = devices_reminder_block(db, project.id, chapter_number)

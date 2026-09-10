@@ -785,6 +785,24 @@ export interface ProviderConfigOut {  id: number;
   default_model: string;
   cloudflare: boolean; // base_url 套了 CF CDN,国内直连常见间歇性失败(黄条提醒用)
 }
+
+/** 模型角色分配现状(D7):创作走贵模型、校验/抽取走便宜模型,这件事要可见 */
+export interface ModelRoleBrief {
+  tier: string;           // quality | review | fast
+  config_id: number | null;
+  name: string;
+  model: string;
+}
+export interface ModelRoles {
+  available: boolean;
+  reason?: string;        // available=false 时的原因(配置读不到)
+  writer: ModelRoleBrief;   // 创作刀口:草稿/定稿/逐场生成
+  auditor: ModelRoleBrief;  // 判定刀口:主审/一致性/场景验收
+  worker: ModelRoleBrief;   // 廉价杂活:摘要/抽取/去味
+  auditor_separated: boolean; // 审校是否真的与创作分模型
+  self_review: boolean;       // True = 模型在给自己的输出打分
+  advice: string;             // 未分离时的可操作提示
+}
 // 渠道体检的一项:连通 ≠ 能干活。warning=true 只提醒,不参与「是否适配」判定。
 export interface ProviderProbeCheck {
   name: string;      // 中文输出 / JSON 结构 / 响应速度
@@ -1061,6 +1079,16 @@ export interface AuditReport {
   foreshadow: {
     total: number; open: number; resolved: number;
     overdue: { description: string; planted: number; expected: number | null; status: string }[];
+    // 伏笔债务(§1.3):模型爱埋伏笔不爱收,这里给可量化的账
+    debt?: {
+      active: number;        // 当前未回收
+      overdue: number;       // 已过预期回收章
+      serious: number;       // 逾期超过 5 章(严重拖欠)
+      avg_hanging: number;   // 平均悬空章数
+      longest_hanging: number;
+      cap: number;           // 按体量算的活跃数上限
+      over_capacity: boolean;
+    };
   };
 }
 
@@ -1078,6 +1106,10 @@ export const api = {
   // ---- 模型设置(设置页「模型设置」分区,对齐 backend/app/api/settings.py)----
   listProviders: () =>
     req<ProviderConfigOut[]>("GET", "/api/settings/providers"),
+  // 模型角色分配现状:写手/审校/杂活各用哪套配置,以及写手与审校是否分离。
+  // 用途是把「主审分数是不是客观的」变成可见事实(同模型自审会放大乐观偏差)。
+  modelRoles: () =>
+    req<ModelRoles>("GET", "/api/editorial/model-roles"),
   // 新增一套配置:用户首套配置后端自动设为默认
   createProvider: (body: ProviderConfigIn) =>
     req<ProviderConfigOut>("POST", "/api/settings/providers", body),
