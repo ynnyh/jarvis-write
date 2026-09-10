@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api, AuditReport, Project } from "../api";
 import { errMsg } from "../pollJob";
 import { useJob } from "../ui/useJob";
+import SceneBoardPanel from "./write/SceneBoardPanel";
 
 interface Props { pid: number; project: Project; }
 
@@ -24,6 +25,8 @@ export default function AuditPanel({ pid, project }: Props) {
   const [scanResult, setScanResult] = useState<{
     scanned: number; with_issues: number[]; total_issues: number; total_blockers: number;
   } | null>(null);
+  // 场景看板(§2.6)选中的章:默认落在已写到的下一章(作者最可能要接手的那一章)
+  const [sceneChapter, setSceneChapter] = useState<number | null>(null);
 
   // 世界观硬规则在 settings 区维护;这里只读判断有没有配(规则扫描的前置)
   const hasWorldRules = !!project.world_rules?.trim();
@@ -130,6 +133,30 @@ export default function AuditPanel({ pid, project }: Props) {
           </div>
         )}
       </div>
+      {/* 场景看板(§2.6):只在开了场景级生成时出现——没开的话本章根本没有场景卡,
+          摆一个空面板只会让人困惑「我的场景去哪了」。 */}
+      {project.scene_level_enabled && (
+        <>
+          <div className="card mb-3" style={{ padding: "10px 12px" }}>
+            <div className="row" style={{ alignItems: "center", gap: 8 }}>
+              <label className="fl" style={{ margin: 0 }}>场景看板 · 选章</label>
+              <input
+                className="input" type="number" min={1} style={{ width: 90 }}
+                value={sceneChapter ?? (audit?.written_chapters ?? 0) + 1}
+                onChange={(e) => setSceneChapter(Math.max(1, Number(e.target.value) || 1))}
+              />
+              <span className="muted">
+                作者可在生成过程中接手:改场景卡(卡是 prompt 的输入,改卡最有效)、
+                改这一场的正文、或只重生成这一场。
+              </span>
+            </div>
+          </div>
+          <SceneBoardPanel
+            pid={pid}
+            chapterNumber={sceneChapter ?? (audit?.written_chapters ?? 0) + 1}
+          />
+        </>
+      )}
       <div className="card">
         <div className="card-head">
           <h3 className="grow">审核报告(一致性引擎聚合,随写作实时更新)</h3>

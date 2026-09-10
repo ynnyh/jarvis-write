@@ -43,6 +43,7 @@ from app.api.motifs import router as motifs_router
 from app.api.project_io import router as project_io_router
 from app.api.outline import router as outline_router
 from app.api.overview import router as overview_router
+from app.api.scenes import router as scenes_router
 from app.api.polish import router as polish_router
 from app.api.projects import router as projects_router
 from app.api.refresh import router as refresh_router
@@ -235,6 +236,7 @@ def create_app() -> FastAPI:
     app.include_router(writing_cards_router)
     app.include_router(settings_router)
     app.include_router(chapters_router)
+    app.include_router(scenes_router)
     app.include_router(consistency_router)
     app.include_router(motifs_router)
     app.include_router(marks_router)

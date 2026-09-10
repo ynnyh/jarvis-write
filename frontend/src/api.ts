@@ -445,6 +445,51 @@ export interface TensionCurve {
   roles: string[];
   report: TensionReport;
 }
+// ---------- 场景(§2.6 可干预性) ----------
+// 场景卡 = 生成单元。改卡比改正文划算:卡是 prompt 的输入,卡准了正文才对。
+export interface SceneCard {
+  id: number;
+  chapter_number: number;
+  seq: number;
+  title: string;
+  summary: string;
+  location: string;
+  characters: string[];
+  goal: string;
+  conflict: string;
+  emotion_target: string;
+  tension_level: number;     // 1-5
+  target_words: number;
+  fact_hints: string[];
+  status: string;            // planned | drafting | drafted | accepted | rejected | discarded
+  word_count: number;
+  rewrite_count: number;
+  version: number;
+  accept_note: string;
+  accept_scores: Record<string, unknown>;
+  anchor_start: number;
+  anchor_end: number;
+  joins_previous: boolean;
+  content?: string;          // 仅详情端点返回;列表端点不带(看板只要卡片)
+}
+// PATCH 只接受可编辑的场景卡字段(tension_level 1-5,后端校验)
+export interface SceneCardPatch {
+  title: string;
+  summary: string;
+  location: string;
+  characters: string[];
+  goal: string;
+  conflict: string;
+  emotion_target: string;
+  tension_level: number;
+  target_words: number;
+  fact_hints: string[];
+}
+export interface SceneList {
+  chapter_number: number;
+  scene_count: number;
+  scenes: SceneCard[];
+}
 export interface ChapterBrief {
   chapter_number: number; status: string; word_count: number; is_stale: boolean;
 }
@@ -1272,6 +1317,23 @@ export const api = {
   // 确定性计算,不花 LLM;前端用来画节奏曲线,治「全书一条平线」。
   tensionCurve: (id: number) =>
     req<TensionCurve>("GET", `/api/projects/${id}/outlines/tension-curve`),
+
+  // 场景级干预(§2.6):列场景卡 / 改卡 / 改正文 / 定点重生成。
+  // 场景是生成的最小单元,这几个端点让作者能落到那个面上接手,
+  // 而不必为了一场写歪就重写整章。
+  scenes: (pid: number, chapter: number) =>
+    req<SceneList>("GET", `/api/projects/${pid}/scenes/${chapter}`),
+  sceneDetail: (pid: number, sceneId: number) =>
+    req<SceneCard>("GET", `/api/projects/${pid}/scenes/detail/${sceneId}`),
+  updateSceneCard: (pid: number, sceneId: number, patch: Partial<SceneCardPatch>) =>
+    req<{ changed: string[]; scene: SceneCard }>(
+      "PATCH", `/api/projects/${pid}/scenes/${sceneId}`, patch),
+  updateSceneText: (pid: number, sceneId: number, content: string, note = "") =>
+    req<{ changed: boolean; scene: SceneCard }>(
+      "PUT", `/api/projects/${pid}/scenes/${sceneId}/text`, { content, note }, LLM_TIMEOUT),
+  regenerateScene: (pid: number, sceneId: number) =>
+    req<{ scene: SceneCard }>(
+      "POST", `/api/projects/${pid}/scenes/${sceneId}/regenerate`, {}, LLM_TIMEOUT),
 
   editOutline: (pid: number, n: number, updates: Partial<Outline>) =>
     req<EditResult>("PUT", `/api/projects/${pid}/outlines/${n}`, updates, LLM_TIMEOUT),
