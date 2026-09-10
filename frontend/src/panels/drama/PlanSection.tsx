@@ -64,12 +64,16 @@ export function PlanSection({ pid, approved, episodes, onChanged, selectedId, on
   return (
     <div className="card">
       <div className="card-head">
-        <h3 className="grow">③ 集数规划 <span className="muted">{episodes.length ? `${episodes.length} 集` : "尚未规划"}</span></h3>
+        <h3 className="grow">③ 集数规划 <span className="muted">{episodes.length ? `全剧已切 ${episodes.length} 集` : "尚未规划"}</span></h3>
       </div>
       <p className="card-desc">
         选已定稿的章节范围,按短剧节奏切成一集集(默认一集约 90 秒):每集独立小冲突 + 开场钩子 +
         结尾卡点。重新规划会替换所选范围内的旧集,范围外不动。
         素材来源:章节蓝图(概要/节拍/悬念) + 本书基因 + 作者雷区(设计钩子卡点时回避)。
+      </p>
+      <p className="card-desc">
+        集数上限只是<b>单次切集</b>的规模,全剧集数不限:切完一段再选下一段继续切,结果会累计——
+        整部 80-100 集的短剧分两三次切即可铺满。
       </p>
       <div className="form-grid">
         <div className="field">
@@ -99,7 +103,7 @@ export function PlanSection({ pid, approved, episodes, onChanged, selectedId, on
             onChange={(e) => setDuration(Number(e.target.value) || 90)} />
         </div>
         <div className="field">
-          <label className="fl" htmlFor="dp-eps">目标集数<span className="hint">0=AI 自定·上限 120</span></label>
+          <label className="fl" htmlFor="dp-eps">本次范围目标集数<span className="hint">0=AI 自定·单次上限 120</span></label>
           <input id="dp-eps" type="number" min={0} max={120} value={targetEp}
             onChange={(e) => setTargetEp(Math.min(120, Math.max(0, Number(e.target.value) || 0)))} />
         </div>
