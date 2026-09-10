@@ -1090,6 +1090,16 @@ export interface AuditReport {
       over_capacity: boolean;
     };
   };
+  // 读者认知(§1.4):披露节奏 + 压着的底牌。管「多久没给读者新东西了」。
+  reader?: {
+    disclosed_total: number;
+    per_chapter: Record<string, number>;
+    dry_runs: { start: number; length: number }[];
+    bursts: { chapter: number; count: number }[];
+    held_cards: number;       // 压着没翻的底牌数(未披露关键事实 + 信息差)
+    notes: string;            // 节奏提示(憋太久 / 一次爆太多),无问题为空串
+    next_is_twist: boolean;   // 下一章是不是转折章(会激活反转预备)
+  };
 }
 
 // ---------- 接口 ----------

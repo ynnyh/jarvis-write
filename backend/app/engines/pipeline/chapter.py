@@ -29,6 +29,7 @@ from app.engines.consistency import (
     ledger_block,
 )
 from app.engines.consistency.foreshadow_agenda import build_agenda, render_agenda_block
+from app.engines.consistency.reader_knowledge import build_reader_view, render_twist_block
 from app.engines.common import degraded_of, is_degraded
 from app.engines.consistency.checker import (
     blockers_of,
@@ -471,6 +472,13 @@ async def generate_chapter(
     # 「女主有系统却多章消失」。无 canon 装置 / 老书契约无 devices_present → 空串零影响。
     device_reminders = devices_reminder_block(db, project.id, chapter_number)
 
+    # 反转预备(§1.4):转折章才注入——把「读者此刻相信什么 / 还不知道什么」摆给模型,
+    # 它才知道要掀翻什么。非转折章查一次就空串(零 token、零行为变化)。
+    # advisory 语义:只喂素材,不设卡口(methodology 见 reader_knowledge 模块头)。
+    twist_prep = render_twist_block(
+        build_reader_view(db, project.id, chapter_number, outline=outline), db
+    )
+
     recent_full = [
         c.final_content
         for c in db.query(Chapter)
@@ -535,6 +543,7 @@ async def generate_chapter(
             outline_title=outline.title,
             scene_anchor=str(getattr(outline, "scene_anchor", "") or ""),
             threshold=project.review_pass_threshold,
+            outline=outline,
             report=_report,
             revision_directive=revision_block,
         )
@@ -597,6 +606,7 @@ async def generate_chapter(
             device_reminders=device_reminders,
             avoid_repetition=avoid_repetition,
             revision_block=rev_block,
+            twist_prep=twist_prep,
             chapter_role=outline.chapter_role,
             chapter_purpose=outline.chapter_purpose,
             suspense_level=outline.suspense_level,

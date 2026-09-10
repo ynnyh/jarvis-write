@@ -140,10 +140,26 @@ export default function AuditPanel({ pid, project }: Props) {
             <div className="stat-strip">
               <div className="stat">进度<b>{audit.written_chapters}/{audit.target_chapters} 章</b></div>
               <div className="stat">伏笔<b>{audit.foreshadow.resolved} 收 / {audit.foreshadow.open} 悬</b></div>
+              {audit.reader && (
+                <div className="stat">
+                  读者认知<b>{audit.reader.disclosed_total} 条已披露</b>
+                </div>
+              )}
               {audit.stale_chapters.length > 0 && (
                 <div className="stat">失配<b className="stat-alert">{audit.stale_chapters.length} 章</b></div>
               )}
             </div>
+            {audit.reader && audit.reader.notes && (
+              <div className="notice notice-warn mt-3">
+                {audit.reader.notes.split("\n").map((line, i) => <div key={i}>{line}</div>)}
+              </div>
+            )}
+            {audit.reader && audit.reader.held_cards > 0 && (
+              <div className="muted mt-2">
+                手上还压着 {audit.reader.held_cards} 张底牌(读者尚不知情的关键事实与信息差)
+                {audit.reader.next_is_twist && "——下一章是转折章,这些底牌会被纳入反转预备。"}
+              </div>
+            )}
             {audit.stale_chapters.length > 0 && (
               <div className="notice notice-err mt-3">
                 第 {audit.stale_chapters.join("、")} 章正文与新大纲失配——大纲改过之后这些章没重写,建议去「写作」处理。

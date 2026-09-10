@@ -86,6 +86,44 @@ def _word_target_line(project_target: int, scene: Scene) -> str:
     return f"本场目标 {target} 字(下限 {floor},上限 {ceil})"
 
 
+def _twist_prep(
+    db: Session,
+    project_id: int,
+    chapter_number: int,
+    *,
+    outline: Any = None,
+    scene: Scene | None = None,
+) -> str:
+    """反转预备块的取用(§1.4)。
+
+    只在**转折章**才去查读者认知地图——非转折章查了也是空串,但省掉两次库查询。
+    某个具体场景是否承接反转,由场景卡的 conflict 里是否含转折信号决定:
+    逐场下发能让反转落在「该掀翻的那一场」,而不是整章每场都收到同一段提示
+    (那等于把注意力预算又摊平了,与本模块的初衷相反)。
+    """
+    from app.engines.consistency.reader_knowledge import (
+        build_reader_view,
+        is_twist_chapter,
+        render_twist_block,
+    )
+
+    if outline is not None and not is_twist_chapter(outline):
+        return ""
+    view = build_reader_view(db, project_id, chapter_number, outline=outline)
+    if scene is not None and outline is not None:
+        # 逐场收窄:只有承接反转线索的那一场才注入。scene.conflict 是切分时
+        # 从蓝图里派生的「张力来源」,含转折词说明这一场就是掀翻点。
+        blob = f"{scene.conflict or ''}{scene.summary or ''}"
+        if not any(w in blob for w in _TWIST_ROLE_WORDS):
+            return ""
+    return render_twist_block(view, db)
+
+
+# 与 reader_knowledge._TWIST_ROLE_WORDS 同源:场景卡的 conflict/summary 里出现这些词,
+# 说明这一场就是反转的落点。此处只做「哪一场」的分流,判「是不是转折章」仍以蓝图为准。
+_TWIST_ROLE_WORDS = ("反转", "揭露", "真相", "颠覆", "转折", "揭晓", "败露")
+
+
 async def write_scene(
     db: Session,
     project: Project,
@@ -103,6 +141,7 @@ async def write_scene(
     chapter_title: str,
     previous_text: str = "",
     revision_directive: str = "",
+    outline: Any = None,
 ) -> str:
     """写一个场景,返回正文。
 
@@ -147,6 +186,9 @@ async def write_scene(
         scene_conflict=scene.conflict or "(未指定)",
         emotion_target=scene.emotion_target or "(未指定)",
         tension_directive=tension_directive(scene.tension_level),
+        twist_prep=_twist_prep(
+            db, project.id, chapter_number, outline=outline, scene=scene
+        ),
         scene_word_target=_word_target_line(int(project.target_words_per_chapter or 0), scene),
         scene_words=int(scene.target_words or 0) or 1500,
         scene_word_floor=max(600, (int(scene.target_words or 0) or 1500) * 2 // 3),

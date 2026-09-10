@@ -445,3 +445,143 @@ def test_join_scenes_strips_whitespace():
 def test_rewrite_cap_is_two():
     """D4 决策:重写封顶 2 次(第 3 次基本是同一份 prompt 再抽一次签)。"""
     assert sw.MAX_SCENE_REWRITES == 2
+
+
+# ---------- 反转预备接线(§1.4) ----------
+
+def _seed_twist(db, project):
+    """在库里放一份「转折章 + 有素材」的读者认知数据。"""
+    from app.db.models import Entity, Fact, KnowledgeState, Outline
+
+    lin = Entity(project_id=project.id, entity_type="character", name="林昭",
+                 aliases=[], base_profile={}, retired=False)
+    shen = Entity(project_id=project.id, entity_type="character", name="沈砚",
+                  aliases=[], base_profile={}, retired=False)
+    db.add_all([lin, shen])
+    db.flush()
+
+    f = Fact(project_id=project.id, entity_id=lin.id, fact_type="state",
+             content="山火是国师策划的", valid_from=3, valid_until=None,
+             importance="critical", source_chapter=3)
+    db.add(f)
+    db.flush()
+    # 沈砚知道、读者不知道 → 信息差;同时也构成「压着的底牌」
+    db.add(KnowledgeState(project_id=project.id, fact_id=f.id, knower=str(shen.id),
+                          known_from_chapter=4, knower_state="known"))
+    o = Outline(project_id=project.id, chapter_number=6, title="夜行",
+                plot_twist_level="★★★★★", chapter_role="真相揭露")
+    db.add(o)
+    db.commit()
+    return o
+
+
+def test_write_scene_injects_twist_prep_on_twist_scene(monkeypatch):
+    """转折章 + 场景卡含转折词 → prompt 里要有反转预备块。
+
+    这个用例是补网:此前 `names` 的作用域 bug 让 `write_scene` 走不对称分支时抛
+    UnboundLocalError,而全量测试**没有**任何用例把「转折章 + 有素材」这条路走通,
+    于是全绿却漏了。凡是有条件分支的注入路径,都得有一条走到它的用例。
+    """
+    db = _db()
+    from app.db.models import Scene, Project
+
+    p = Project(title="破封纪", topic="修仙", genre="仙侠",
+                target_chapters=10, target_words_per_chapter=3000)
+    db.add(p)
+    db.commit()
+    o = _seed_twist(db, p)
+
+    scene = Scene(project_id=p.id, outline_id=o.id, chapter_number=6, seq=1,
+                  title="旧疤", location="祠堂", characters=["林昭"],
+                  goal="撞破真相", conflict="真相揭露的那一刻",
+                  emotion_target="窒息", tension_level=5, target_words=1500)
+    db.add(scene)
+    db.commit()
+
+    adapter = _Adapter(["正文。"])
+    _patch(monkeypatch, adapter, sw)
+    asyncio.run(
+        sw.write_scene(
+            db, p, scene,
+            chapter_number=6, scene_total=3,
+            style_block="", deai_rules="", rolling_summary="", recent_tail="",
+            handoff_block="", scene_anchor="", chapter_summary="", chapter_title="夜行",
+            outline=o,
+        )
+    )
+    p_prompt = adapter.calls[0]
+    assert "反转预备" in p_prompt
+    assert "不要靠人物开口解释真相" in p_prompt
+    # 信息差的人名要解析出来,不能是「角色2」
+    assert "沈砚" in p_prompt
+    assert "角色" not in p_prompt.split("信息差")[1][:40]
+
+
+def test_write_scene_omits_twist_prep_for_plain_scene(monkeypatch):
+    """转折章的普通场次不注入:反转预备只落在承接反转的那一场。"""
+    db = _db()
+    from app.db.models import Scene, Project
+
+    p = Project(title="破封纪", topic="修仙", genre="仙侠",
+                target_chapters=10, target_words_per_chapter=3000)
+    db.add(p)
+    db.commit()
+    o = _seed_twist(db, p)
+
+    scene = Scene(project_id=p.id, outline_id=o.id, chapter_number=6, seq=2,
+                  title="赶路", location="官道", characters=["林昭"],
+                  goal="抵达", conflict="赶路中的沉默",   # 无转折词
+                  emotion_target="沉闷", tension_level=2, target_words=1500)
+    db.add(scene)
+    db.commit()
+
+    adapter = _Adapter(["正文。"])
+    _patch(monkeypatch, adapter, sw)
+    asyncio.run(
+        sw.write_scene(
+            db, p, scene,
+            chapter_number=6, scene_total=3,
+            style_block="", deai_rules="", rolling_summary="", recent_tail="",
+            handoff_block="", scene_anchor="", chapter_summary="", chapter_title="夜行",
+            outline=o,
+        )
+    )
+    assert "反转预备" not in adapter.calls[0]
+
+
+def test_write_scene_omits_twist_prep_for_non_twist_chapter(monkeypatch):
+    """非转折章:即使有素材也不注入(不该每章都做反转)。"""
+    db = _db()
+    from app.db.models import Outline, Scene, Project
+
+    p = Project(title="破封纪", topic="修仙", genre="仙侠",
+                target_chapters=10, target_words_per_chapter=3000)
+    db.add(p)
+    db.commit()
+    _seed_twist(db, p)
+    plain = (
+        db.query(Outline).filter(Outline.chapter_number == 6).first()
+    )
+    plain.plot_twist_level = "★☆☆☆☆"
+    plain.chapter_role = "过渡"
+    db.commit()
+
+    scene = Scene(project_id=p.id, outline_id=plain.id, chapter_number=6, seq=1,
+                  title="真相", location="客栈", characters=["林昭"],
+                  goal="落店", conflict="真相揭露的传闻",  # 有词但章不是转折章
+                  emotion_target="疲", tension_level=2, target_words=1500)
+    db.add(scene)
+    db.commit()
+
+    adapter = _Adapter(["正文。"])
+    _patch(monkeypatch, adapter, sw)
+    asyncio.run(
+        sw.write_scene(
+            db, p, scene,
+            chapter_number=6, scene_total=3,
+            style_block="", deai_rules="", rolling_summary="", recent_tail="",
+            handoff_block="", scene_anchor="", chapter_summary="", chapter_title="夜行",
+            outline=plain,
+        )
+    )
+    assert "反转预备" not in adapter.calls[0]

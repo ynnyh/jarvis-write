@@ -356,6 +356,33 @@ async def audit_report(project_id: int, db: Session = Depends(get_db)):
         num for num in outline_nums if num < max_written and num not in written
     ]
 
+    # 读者认知(§1.4):披露节奏 + 压着的底牌数。确定性派生,零 LLM。
+    # 与伏笔债务并列作为「读者体感」的两条量化线:一个管「欠了多少笔没交代」,
+    # 一个管「多久没给读者新东西了」。
+    from app.engines.consistency.reader_knowledge import (
+        build_reader_view,
+        disclosure_rhythm,
+        is_twist_chapter,
+        render_rhythm_note,
+    )
+
+    rhythm = disclosure_rhythm(db, project_id, up_to_chapter=max_written)
+    latest_outline = (
+        db.query(Outline)
+        .filter(Outline.project_id == project_id, Outline.chapter_number == max_written + 1)
+        .first()
+    )
+    reader_view = build_reader_view(db, project_id, max_written)
+    reader = {
+        "disclosed_total": rhythm.total,
+        "per_chapter": {str(k): v for k, v in sorted(rhythm.per_chapter.items())},
+        "dry_runs": [{"start": s, "length": n} for s, n in rhythm.dry_runs],
+        "bursts": [{"chapter": c, "count": n} for c, n in rhythm.bursts],
+        "held_cards": len(reader_view.held) + len(reader_view.asymmetries),
+        "notes": render_rhythm_note(rhythm, max_written),
+        "next_is_twist": is_twist_chapter(latest_outline),
+    }
+
     return {
         "written_chapters": len(chapters),
         "target_chapters": project.target_chapters,
@@ -371,6 +398,7 @@ async def audit_report(project_id: int, db: Session = Depends(get_db)):
             # 债务面:伏笔「爱埋不爱收」是全行业通病,这里给可量化的账
             "debt": debt,
         },
+        "reader": reader,
     }
 
 

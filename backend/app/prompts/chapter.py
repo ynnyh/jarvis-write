@@ -124,6 +124,7 @@ CHAPTER_DRAFT_PROMPT = """\
 {avoid_repetition}
 {revision_block}
 {tension_bus_block}
+{twist_prep}
 【本章蓝图】
 第{chapter_number}章《{chapter_title}》
 - 本章定位:{chapter_role}

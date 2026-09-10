@@ -54,6 +54,7 @@ async def compose_by_scenes(
     outline_title: str,
     scene_anchor: str,
     threshold: int,
+    outline=None,
     report=None,
     revision_directive: str = "",
     replan: bool = False,
@@ -63,9 +64,15 @@ async def compose_by_scenes(
     revision_directive:章级重写意见(来自门禁/主审回炉)。有值时不做逐场验收——
     这一轮的目标是「按意见改对」而不是「重新判定合格」,把预算花在改上。
     replan:强制重切场景(蓝图改过时用)。
+    outline:本章大纲(用于判断是否转折章、是否注入反转预备;缺省则自行查)。
 
     返回 SceneWriteResult(text + scenes + anchors + verdicts + stats)。
     """
+    if outline is None:
+        try:
+            outline = _outline_of(db, project, chapter_number)
+        except ValueError:
+            outline = None  # 无大纲极罕见(调用方已校验),反转预备缺失不等于生成失败
 
     def _report(stage: str) -> None:
         if report:
@@ -109,6 +116,7 @@ async def compose_by_scenes(
                 chapter_summary=outline_summary,
                 chapter_title=outline_title,
                 previous_text=previous_text,
+                outline=outline,
                 # 章级重写意见只在第一场带一次,后续场靠「上一场尾部」自然接住
                 revision_directive=revision_directive if i == 1 else "",
             )
@@ -168,6 +176,7 @@ async def compose_by_scenes(
                     scene_anchor=scene_anchor,
                     chapter_summary=outline_summary,
                     chapter_title=outline_title,
+                    outline=outline,
                     revision_directive=_build_scene_directive(verdict),
                 )
             except Exception as exc:  # noqa: BLE001
