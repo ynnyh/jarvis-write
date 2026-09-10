@@ -755,6 +755,14 @@ export interface ProviderConfigOut {  id: number;
   default_model: string;
   cloudflare: boolean; // base_url 套了 CF CDN,国内直连常见间歇性失败(黄条提醒用)
 }
+// 渠道体检的一项:连通 ≠ 能干活。warning=true 只提醒,不参与「是否适配」判定。
+export interface ProviderProbeCheck {
+  name: string;      // 中文输出 / JSON 结构 / 响应速度
+  passed: boolean;
+  detail: string;    // 失败原因(如「中文字符占比仅 0%——回复不像中文」)
+  sample: string;    // 模型原样回复的前 80 字,便于一眼看出问题
+  warning: boolean;
+}
 // 新增/更新配置:api_key 留空/不传 = 不改动已存 key(仅更新);
 // is_default/is_default_fast/is_default_review 传 true 时后端会清掉该用户其他配置的同名标记(全用户唯一)
 export interface ProviderConfigIn {
@@ -1037,9 +1045,12 @@ export const api = {
   deleteProvider: (id: number, confirmed = false) =>
     req<{ deleted: boolean; needs_confirm?: boolean; reason?: string }>(
       "DELETE", `/api/settings/providers/${id}${confirmed ? "?confirmed=true" : ""}`),
-  // CF 渠道测试通过后会追加 2 次稳定性快测(间隔 2s),最多约 3 分钟,超时给足
+  // 连通后自动跑一轮渠道体检(中文输出 / JSON 结构 / 响应速度),最多约 3 分钟
   testProvider: (id: number) =>
-    req<{ ok: boolean; provider: string; model?: string; reply?: string; error?: string; warnings?: string[] }>(
+    req<{
+      ok: boolean; provider: string; model?: string; reply?: string; error?: string;
+      warnings?: string[]; checks?: ProviderProbeCheck[]; suitable?: boolean | null;
+    }>(
       "POST", `/api/settings/providers/${id}/test`, undefined, 200000),
   // AI 起名走后台任务:返回 job_id,调用方用 pollJob 取 { titles }。
   // 同步版(/title-suggestion)还在后端留着给旧客户端,但前端不再用它——一轮起名

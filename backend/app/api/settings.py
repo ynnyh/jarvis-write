@@ -24,6 +24,7 @@ from app.db.session import get_db
 from app.jobs import normalize_job_error
 from app.net_guard import assert_public_base_url, is_cloudflare_hosted
 from app.llm.base import EmptyContentError
+from app.llm.probe import probe_channel
 from app.llm.factory import (
     _REGISTRY,
     available_providers,
@@ -208,6 +209,16 @@ async def provider_status(user: User = Depends(get_current_user)):
     return ProviderStatus(configured=any(providers.values()), providers=providers)
 
 
+class ProbeCheck(BaseModel):
+    """渠道体检的一项。warning=True 只提醒,不参与「是否适配」判定。"""
+
+    name: str
+    passed: bool
+    detail: str = ""
+    sample: str = ""
+    warning: bool = False
+
+
 class TestResult(BaseModel):
     ok: bool
     provider: str
@@ -216,6 +227,10 @@ class TestResult(BaseModel):
     error: str = ""
     # 风险提示(不改变 ok):如"渠道套了 Cloudflare CDN""探测到间歇性连接失败"
     warnings: list[str] = Field(default_factory=list)
+    # 渠道体检(连通后自动跑):中文输出 / JSON 结构 / 响应速度
+    checks: list[ProbeCheck] = Field(default_factory=list)
+    # None = 没体检(连通性都没过);False = 通但不适配中文长篇写作
+    suitable: bool | None = None
 
 
 @router.get("/providers", response_model=list[ProviderConfigOut])
@@ -412,6 +427,29 @@ async def test_provider_config(
             ok=False, provider=row.interface_format, error=normalize_job_error(exc)[:500]
         )
 
+    # 连通了不代表能干活:再跑一轮渠道体检(中文输出 / JSON 结构 / 响应速度)。
+    # 真实案例:某中转「测试连接」秒过,真写小说却把英文思维链吐进正文,
+    # JSON 环节全线解析失败——ping 式测试看不见,体检能看见。
+    checks: list[ProbeCheck] = []
+    suitable: bool | None = None
+    if resp is not None:
+        probe = await probe_channel(adapter)
+        checks = [
+            ProbeCheck(
+                name=c.name, passed=c.passed, detail=c.detail,
+                sample=c.sample, warning=c.warning,
+            )
+            for c in probe.checks
+        ]
+        suitable = probe.suitable
+        if not suitable:
+            warnings.append(
+                "该渠道不适合中文长篇写作(体检未通过:"
+                + "、".join(probe.failed_names())
+                + "):正式生成会出现 JSON 解析失败或正文混入非中文内容,"
+                "建议换一个渠道再生成"
+            )
+
     if await asyncio.to_thread(is_cloudflare_hosted, row.base_url):
         warnings.append(
             "该渠道套了 Cloudflare CDN,国内网络直连可能出现间歇性连接失败;"
@@ -438,6 +476,8 @@ async def test_provider_config(
         model=resp.model if resp else row.model,
         reply=(resp.content[:200] if resp else ""),
         warnings=warnings,
+        checks=checks,
+        suitable=suitable,
     )
 
 

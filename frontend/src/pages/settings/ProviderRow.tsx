@@ -1,7 +1,7 @@
 // 单套配置的展示卡片:名称 + 协议/默认/快档徽标 + 打码 key + base_url/model + 操作按钮。
 // 拆自 SettingsPage.tsx。
 import { useState } from "react";
-import { api, ProviderConfigOut } from "../../api";
+import { api, ProviderConfigOut, ProviderProbeCheck } from "../../api";
 import { toast } from "../../ui/Toaster";
 import { confirmDialog } from "../../ui/ConfirmDialog";
 import { CATEGORY_BY_KEY, FORMAT_LABEL, normalizeCategory } from "./providerCatalog";
@@ -11,7 +11,10 @@ export function ProviderRow({ p, onChanged, onEdit }: {
   p: ProviderConfigOut; onChanged: () => void; onEdit: () => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const [testMsg, setTestMsg] = useState<{ ok: boolean; warn?: string[]; text: string } | null>(null);
+  const [testMsg, setTestMsg] = useState<{
+    ok: boolean; warn?: string[]; text: string;
+    checks?: ProviderProbeCheck[]; suitable?: boolean | null;
+  } | null>(null);
   // 余额(仅 deepseek 官方支持;点「查余额」现查,不自动轮询)
   const [balance, setBalance] = useState<string | null>(null);
   const [balanceErr, setBalanceErr] = useState("");
@@ -35,7 +38,13 @@ export function ProviderRow({ p, onChanged, onEdit }: {
     setBusy(true); setTestMsg(null);
     try {
       const r = await api.testProvider(p.id);
-      if (r.ok) setTestMsg({ ok: true, warn: r.warnings, text: `✓ 连通(${r.model}):${r.reply}` });
+      if (r.ok) setTestMsg({
+        ok: true, warn: r.warnings, checks: r.checks, suitable: r.suitable,
+        // 通但不适配时,标题直接说清,别只留一句「✓ 连通」误导
+        text: r.suitable === false
+          ? `△ 已连通(${r.model})但不适合中文长篇写作`
+          : `✓ 连通(${r.model}):${r.reply}`,
+      });
       else setTestMsg({ ok: false, text: `✗ 连接失败:${r.error}` });
     } catch (e) {
       setTestMsg({ ok: false, text: `✗ ${errMsg(e)}` });
@@ -153,7 +162,26 @@ export function ProviderRow({ p, onChanged, onEdit }: {
 
       {testMsg && (
         <>
-          <div className={`test-line ${testMsg.ok ? "ok" : "err"}`}>{testMsg.text}</div>
+          <div className={`test-line ${testMsg.ok ? (testMsg.suitable === false ? "warn" : "ok") : "err"}`}>
+            {testMsg.text}
+          </div>
+          {testMsg.checks && testMsg.checks.length > 0 && (
+            <div className="probe-checks">
+              {testMsg.checks.map((c) => (
+                <div key={c.name} className={`probe-check ${c.passed ? "ok" : c.warning ? "warn" : "err"}`}>
+                  <span className="probe-name">
+                    {c.passed ? "✓" : c.warning ? "⚠" : "✗"} {c.name}
+                  </span>
+                  <span className="probe-detail">
+                    {c.detail}
+                    {!c.passed && c.sample && (
+                      <span className="probe-sample">模型原样回复:{c.sample}</span>
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
           {testMsg.warn?.map((w) => (
             <div key={w} className="test-line warn">⚠ {w}</div>
           ))}

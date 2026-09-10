@@ -110,6 +110,20 @@
 .test-line.err { background: var(--err-weak); color: var(--err); }
 .test-line.warn { background: var(--warn-weak); color: var(--warn); }
 
+/* 渠道体检清单(测试连接后自动跑):连通 ≠ 能干中文长篇的活 */
+.probe-checks {
+  margin-top: var(--sp-2); display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 12px; border-radius: var(--r-sm);
+  background: var(--surface-2); border: 1px solid var(--line);
+}
+.probe-check { display: flex; gap: var(--sp-2); font-size: var(--fs-xs); line-height: 1.6; }
+.probe-name { flex: 0 0 auto; font-weight: 600; color: var(--text-2); }
+.probe-check.ok .probe-name { color: var(--ok); }
+.probe-check.err .probe-name { color: var(--err); }
+.probe-check.warn .probe-name { color: var(--warn); }
+.probe-detail { color: var(--text-3); word-break: break-all; }
+.probe-sample { display: block; margin-top: 2px; font-family: ui-monospace, Consolas, monospace; opacity: .8; }
+
 /* CF CDN 渠道的风险提醒条(配置卡片内,只提醒不阻断) */
 .cf-warn {
   margin: 0 0 var(--sp-3); padding: 8px 12px; border-radius: var(--r-sm);
