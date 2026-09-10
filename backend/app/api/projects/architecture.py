@@ -67,6 +67,7 @@ async def generate_project_architecture(
         global_tendency=project.global_tendency,
         dna=project.dna,
         directive=req.directive,
+        open_ended=project.open_ended,
     )
     arch = save_architecture(db, project, result)
     db.commit()
@@ -102,6 +103,7 @@ async def generate_project_architecture_async(
                 global_tendency=project.global_tendency,
         dna=project.dna,
                 directive=req.directive,
+                open_ended=project.open_ended,
                 progress=lambda s: update_stage(job_id, s),
             )
             update_stage(job_id, "落库中")

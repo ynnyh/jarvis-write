@@ -133,6 +133,8 @@ async def generate_project_blueprint_async(
 # 每卷章数与启用阈值:目标超过阈值的书走滚动规划(先出卷纲,首铺一卷,写到卷尾再展开)。\n# 150 以内一次铺完体验更好(量不大);超过才分卷——超长篇的章级细节一次铺既贵又质量差
 SEGMENT_SIZE = 30
 ROLLING_THRESHOLD = 150
+# 开放式连载自动续订步长:铺满当前批次后再「展开下一卷」,体量顺延这么多章继续写
+_SERIAL_EXTEND_CHAPTERS = 30
 
 
 def _arch_text(p: Project) -> str:
@@ -148,8 +150,14 @@ def _arch_text(p: Project) -> str:
     ).full_text + constitution_block(p)
 
 
-async def _ensure_macro_plan(session, p: Project, style_block: str) -> list[dict]:
-    """卷纲缺失时生成一次(指南针,全书方向锚点)。幂等。"""
+async def _ensure_macro_plan(
+    session, p: Project, style_block: str, planned_upto: int = 0
+) -> list[dict]:
+    """卷纲缺失时生成一次(指南针,全书方向锚点)。幂等。
+
+    planned_upto:已规划到的章号(续订场景用)——开放式连载重出卷纲时,让前段
+    卷目标与已成文蓝图相容,模型重点规划新段。
+    """
     import math
 
     from app.engines.consistency.extractor import parse_llm_json
@@ -158,10 +166,24 @@ async def _ensure_macro_plan(session, p: Project, style_block: str) -> list[dict
     if p.macro_plan:
         return p.macro_plan
     segment_count = math.ceil(p.target_chapters / SEGMENT_SIZE)
-    hard_note = (
-        f"\n注意:全书共 {p.target_chapters} 章是作者拍板的体量承诺,"
-        "分卷与节奏必须按这个总章数规划,不得擅自压缩或膨胀总章数。"
-    )
+    # 模板本体是评测基线指纹(rolling.MACRO_PLAN_PROMPT),连载式的差异全走
+    # style_directives 里的 hard_note 注入,模板一字不动。
+    if p.open_ended:
+        hard_note = (
+            f"\n注意:本书为开放式连载(全书结局未定),卷纲只规划当前批次的 "
+            f"{p.target_chapters} 章;模板里「最后一卷完成架构中的终局」对本书不适用,"
+            "最后一段的卷目标写成「本批次收束点:悬念半解、留最大钩子」,不是全书结局。"
+        )
+        if planned_upto > 0:
+            hard_note += (
+                f"\n注意:第 1-{planned_upto} 章蓝图已成文,前段卷目标必须与已定走向相容,"
+                f"重点规划第 {planned_upto + 1} 章到当前批次结尾。"
+            )
+    else:
+        hard_note = (
+            f"\n注意:全书共 {p.target_chapters} 章是作者拍板的体量承诺,"
+            "分卷与节奏必须按这个总章数规划,不得擅自压缩或膨胀总章数。"
+        )
     prompt = MACRO_PLAN_PROMPT.format(
         number_of_chapters=p.target_chapters,
         novel_architecture=_arch_text(p),
@@ -185,7 +207,11 @@ async def _ensure_macro_plan(session, p: Project, style_block: str) -> list[dict
     if cursor <= p.target_chapters:
         segments.append({
             "start": cursor, "end": p.target_chapters,
-            "goal": "收束全部主线与伏笔,完成架构中的终局。",
+            "goal": (
+                "本批次收束:悬念半解、留最大钩子(非全书结局,连载式)。"
+                if p.open_ended
+                else "收束全部主线与伏笔,完成架构中的终局。"
+            ),
         })
     if not segments:
         raise RuntimeError("卷纲生成失败(模型输出无法解析),请重试。")
@@ -263,8 +289,16 @@ async def extend_blueprint_async(project_id: int, db: Session = Depends(get_db))
     planned_upto = max_outline[0] if max_outline else 0
     if planned_upto == 0:
         raise HTTPException(status_code=400, detail="还没有首卷蓝图,请先「生成蓝图」")
+    renewed_to: int | None = None
     if planned_upto >= project.target_chapters:
-        raise HTTPException(status_code=400, detail="全书蓝图已铺满,无需展开")
+        if not project.open_ended:
+            raise HTTPException(status_code=400, detail="全书蓝图已铺满,无需展开")
+        # 开放式连载:铺满当前批次 → 自动续订(体量顺延,旧卷纲按新体量+前情重出)。
+        # 「写到哪续到哪」的正路:不需要用户去设置里手动改章数。
+        project.target_chapters += _SERIAL_EXTEND_CHAPTERS
+        project.macro_plan = None
+        db.commit()
+        renewed_to = project.target_chapters
     for jid, _job in list_running(f"blueprint-{project_id}"):
         if _job["kind"] == f"blueprint-{project_id}":
             return {"job_id": jid}
@@ -278,7 +312,7 @@ async def extend_blueprint_async(project_id: int, db: Session = Depends(get_db))
                 assemble_tendency("outline", {}, p.global_tendency)
             ) + dna_block_of(p.dna)
             update_stage(job_id, "读取卷纲与前情状态")
-            segments = await _ensure_macro_plan(session, p, style_block)
+            segments = await _ensure_macro_plan(session, p, style_block, planned_upto)
             start = planned_upto + 1
             seg, next_seg = _segment_for(segments, start)
             end = min(seg["end"], p.target_chapters)
@@ -312,6 +346,8 @@ async def extend_blueprint_async(project_id: int, db: Session = Depends(get_db))
                 "outlines": [OutlineOut.model_validate(o).model_dump() for o in outlines],
                 "warnings": warnings,
                 "planned_range": [start, end],
+                # 非空 = 本次触发了连载续订(体量已顺延到这个章数)
+                "renewed_to": renewed_to,
             })
         except Exception as exc:  # noqa: BLE001
             session.rollback()

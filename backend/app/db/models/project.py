@@ -26,6 +26,10 @@ class Project(Base, TimestampMixin):
     genre: Mapped[str] = mapped_column(String(100), default="")
     target_chapters: Mapped[int] = mapped_column(Integer, default=30)
     target_words_per_chapter: Mapped[int] = mapped_column(Integer, default=3000)
+    # 开放式连载(结局未定):True=架构不规划全书终局,只定「长线引擎 + 首批方向」;
+    # 蓝图铺满当前批次后「展开下一卷」自动续订(体量顺延 +30,卷纲带着前情重出),
+    # 写到哪续到哪。False(默认)= 契约式:开局定结局,写完目标章数完本,行为与旧版一致。
+    open_ended: Mapped[bool] = mapped_column(default=False)
     # 字数守卫:finalize 后检查字数,超标则压缩/拆章。默认关闭(用户反馈约束太严),
     # 由写作页开关控制;存量项目由迁移统一关掉。
     word_guard_enabled: Mapped[bool] = mapped_column(default=False)

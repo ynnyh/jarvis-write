@@ -22,6 +22,7 @@ from app.prompts import (
     ARCH_DISTILL_PROMPT,
     CHARACTER_DYNAMICS_PROMPT,
     CORE_SEED_PROMPT,
+    PLOT_ARCHITECTURE_OPEN_PROMPT,
     PLOT_ARCHITECTURE_PROMPT,
     WORLD_BUILDING_PROMPT,
 )
@@ -87,6 +88,7 @@ async def generate_architecture(
     global_tendency: Tendency | None = None,
     directive: str | None = None,
     dna: object | None = None,
+    open_ended: bool = False,
     progress=None,
 ) -> ArchitectureResult:
     """执行雪花四步,返回完整架构。纯生成,不落库。
@@ -166,12 +168,13 @@ async def generate_architecture(
         )
     ).strip()
 
-    # Step 4: 情节架构
-    logger.info("架构生成 4/4:情节架构...")
+    # Step 4: 情节架构(契约式=三幕+全书终局;连载式=长线引擎+首批方向,结局留白)
+    logger.info("架构生成 4/4:情节架构(open_ended=%s)...", open_ended)
     _report("4/4 情节架构")
+    plot_prompt = PLOT_ARCHITECTURE_OPEN_PROMPT if open_ended else PLOT_ARCHITECTURE_PROMPT
     plot_architecture = (
         await adapter.ask(
-            PLOT_ARCHITECTURE_PROMPT.format(
+            plot_prompt.format(
                 core_seed=core_seed,
                 character_dynamics=character_dynamics,
                 world_building=world_building,

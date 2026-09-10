@@ -132,14 +132,17 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
     setBusy("展开下一卷:排队中…"); setErr("");
     try {
       const { job_id } = await api.extendBlueprintAsync(pid);
-      const r = await pollJob<{ outlines: Outline[]; planned_range: [number, number] }>(job_id, {
+      const r = await pollJob<{ outlines: Outline[]; planned_range: [number, number]; renewed_to?: number | null }>(job_id, {
         signal: ctrl.signal,
         onStage: (stage) => setBusy(`展开下一卷:${stage}`),
       });
       if (ctrl.signal.aborted) return;
       await onChanged();
       setGenDone(r.outlines.length);
-      setFlash(`已展开第 ${r.planned_range[0]}-${r.planned_range[1]} 章蓝图。`);
+      setFlash(
+        (r.renewed_to ? `已续订体量至 ${r.renewed_to} 章;` : "") +
+        `已展开第 ${r.planned_range[0]}-${r.planned_range[1]} 章蓝图。`
+      );
     } catch (e) {
       if (!ctrl.signal.aborted) setErr(errMsg(e));
     } finally { if (!ctrl.signal.aborted) setBusy(""); }
@@ -271,10 +274,17 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
 
   // 滚动规划:已规划边界与"下一卷"区间(有卷纲按卷纲,没有按 30 章一卷)
   const target = project?.target_chapters ?? 0;
+  const openEnded = !!project?.open_ended;
   const plannedUpto = outlines.length ? Math.max(...outlines.map((o) => o.chapter_number)) : 0;
-  const canExtend = plannedUpto > 0 && target > plannedUpto;
+  // 开放式连载:铺满当前批次也不封笔——按钮仍在,点了后端自动续订 +30 章
+  const canExtend = plannedUpto > 0 && (target > plannedUpto || openEnded);
+  const batchFull = openEnded && target <= plannedUpto;
   const nextSeg = (() => {
     if (!canExtend) return null;
+    if (batchFull) {
+      // 已铺满当前批次:下一次展开会自动续订,先按估的区间展示(后端以卷纲为准)
+      return { start: plannedUpto + 1, end: plannedUpto + 30 };
+    }
     const seg = project?.macro_plan?.find((s) => s.start <= plannedUpto + 1 && plannedUpto + 1 <= s.end);
     return { start: plannedUpto + 1, end: Math.min(seg?.end ?? plannedUpto + 30, target) };
   })();
@@ -296,7 +306,7 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
             <button className="primary btn-sm" disabled={!!busy} onClick={extendBlueprint}
               title="按卷纲和已写正文的实际走向,展开下一段章节蓝图">
               {busy.startsWith("展开") && <span className="spin" />}
-              展开下一卷(第 {nextSeg.start}-{nextSeg.end} 章)
+              {batchFull ? "续订下一卷" : "展开下一卷"}(第 {nextSeg.start}-{nextSeg.end} 章)
             </button>
           )}
           {outlines.length > 0 && (

@@ -363,6 +363,8 @@ export interface WritingCard {
 export interface Project {
   id: number; title: string; topic: string; genre: string;
   target_chapters: number; target_words_per_chapter: number;
+  // 开放式连载(结局未定):架构只定长线引擎+首批方向;蓝图铺满后「展开下一卷」自动续订
+  open_ended?: boolean;
   // 字数守卫:超标自动压缩/拆章,默认关闭(写作页开关控制)
   word_guard_enabled?: boolean;
   auto_split_enabled?: boolean;

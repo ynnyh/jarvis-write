@@ -419,6 +419,12 @@ export function useOnboarding() {
     await goto("confirm");
   }
 
+  // 开放式连载开关(篇幅屏勾选):True=结局未定,架构只定长线引擎+首批方向,铺满可续订
+  const openEnded = !!project?.open_ended;
+  async function toggleOpenEnded(v: boolean) {
+    await patch({ open_ended: v });
+  }
+
   // ---------- 第 8 屏:点火流水线 ----------
   function reattach(kind: "arch" | "bp", jobId: string, stage: string) {
     const set = kind === "arch" ? setArch : setBp;
@@ -537,7 +543,7 @@ export function useOnboarding() {
     engineCards, enginePicked, genrePath,
     inferBusy, customGenre,
     titleIdeas, titleSig, titleBusy, titleInput,
-    chapters, words, advOpen,
+    chapters, words, advOpen, openEnded,
     fly, pickedKey, dirty, arch, bp,
     // 渲染需要的 setter
     setSpark, setEntry, setPickedGenreCard, setChatInput,
@@ -551,7 +557,7 @@ export function useOnboarding() {
     submitSpark, pickGenreBrainstorm, sendChat,
     brainstorm, regenWithFeedback, pickConcept, saveCustomConcept,
     fetchEngines, pickEngine, developConcept,
-    setGenre, setDim, fetchTitles, pickTitle, pickScale, confirmScale,
+    setGenre, setDim, fetchTitles, pickTitle, pickScale, confirmScale, toggleOpenEnded,
     runArch, runBp, enterWorkbench, abandon, goto, editFrom, markDirtyOk,
   };
 }

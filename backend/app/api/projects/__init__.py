@@ -85,6 +85,7 @@ async def create_project(req: ProjectCreate, db: Session = Depends(get_db)) -> P
         genre=req.genre,
         target_chapters=req.target_chapters,
         target_words_per_chapter=req.target_words_per_chapter,
+        open_ended=req.open_ended,
         global_tendency=req.global_tendency,
     )
     db.add(project)
@@ -139,6 +140,8 @@ class ProjectPatch(BaseModel):
     genre: str | None = None
     target_chapters: int | None = None
     target_words_per_chapter: int | None = None
+    # 开放式连载开关:创建后仍可切换(切回 False 即回到契约式,铺满即止)
+    open_ended: bool | None = None
     # 字数守卫开关(写作页):超标自动压缩/拆章,默认关闭
     word_guard_enabled: bool | None = None
     auto_split_enabled: bool | None = None

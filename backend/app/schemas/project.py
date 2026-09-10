@@ -19,6 +19,8 @@ class ProjectCreate(BaseModel):
     genre: str = ""
     target_chapters: int = Field(default=30, ge=1, le=5000)
     target_words_per_chapter: int = Field(default=3000, ge=200, le=20000)
+    # 开放式连载(结局未定):架构只定长线引擎+首批方向,蓝图铺满后自动续订续写
+    open_ended: bool = False
     global_tendency: Tendency = Field(default_factory=dict)
     # 新建向导第一步选定的结构化概念(可空;传入则落库并把 topic 同步为 logline)
     concept: Concept | None = None
@@ -35,6 +37,8 @@ class ProjectOut(BaseModel):
     genre: str
     target_chapters: int
     target_words_per_chapter: int
+    # 开放式连载(结局未定):前端据此显示「续订」入口与连载式文案
+    open_ended: bool = False
     # 字数守卫开关(写作页):超标自动压缩/拆章,默认关闭
     word_guard_enabled: bool = False
     auto_split_enabled: bool = False

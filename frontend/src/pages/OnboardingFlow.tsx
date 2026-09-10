@@ -71,6 +71,7 @@ export default function OnboardingFlow() {
     setPrefTone, setPrefElements, setPrefProta, setPrefAvoid,
     setGenreSuggests, setSuggestPage, setCustomGenre,
     setTitleSig, setTitleInput, setChapters, setWords, setDirty,
+    openEnded, toggleOpenEnded,
     // ref
     stepsRef, chatEndRef, sparkRef, titleInputRef,
     // handler
@@ -743,6 +744,18 @@ export default function OnboardingFlow() {
                         </div>
                       </div>
                     )}
+
+                    <label className="row mt-3" style={{ gap: 8, alignItems: "flex-start", cursor: "pointer" }}>
+                      <input type="checkbox" checked={openEnded}
+                        onChange={(e) => toggleOpenEnded(e.target.checked)} style={{ marginTop: 3 }} />
+                      <span>
+                        <b>开放式连载(结局未定)</b>
+                        <span className="hint" style={{ display: "block" }}>
+                          勾上后架构不预设全书终局,只定「长线引擎 + 首批方向」;上面的章数是本批次体量,
+                          写满后蓝图页一键「续订」顺延 30 章接着写——写到哪续到哪。
+                        </span>
+                      </span>
+                    </label>
 
                     <div className="actions mt-4 onboard-nav">
                       <button onClick={() => nav(`/new/${pid}/idea`)}>← 上一步</button>
