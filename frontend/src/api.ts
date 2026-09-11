@@ -851,6 +851,22 @@ export interface FeatureUsageStat {
   uses: number;
   last_used_at: string | null;
 }
+export interface QualityOverview {
+  days: number;
+  llm: {
+    total_calls: number; truncated_calls: number; truncated_ratio: number;
+    finish_length_calls: number; finish_length_ratio: number;
+    prompt_tokens: number; completion_tokens: number;
+    by_model: { model: string; calls: number; truncated: number; truncated_ratio: number }[];
+  };
+  rework: {
+    chapters_reviewed: number; passed: number; pass_ratio: number;
+    avg_revision_rounds: number; gate_degraded_count: number;
+    stalled_hint_chapters: number; trigger_counts: Record<string, number>;
+  };
+  issues: { open_count: number; by_type: Record<string, number>; by_severity: Record<string, number> };
+  volume: { chapters: number; avg_word_count: number };
+}
 export interface InviteCodeItem {
   id: number; code: string; note: string | null;
   max_uses: number | null; used_count: number; is_active: boolean; created_at: string;
@@ -1458,6 +1474,8 @@ export const api = {
   adminListUsers: () => req<AdminUser[]>("GET", "/api/admin/users"),
   adminUsageStats: () =>
     req<{ usage: FeatureUsageStat[] }>("GET", "/api/admin/usage"),
+  adminQualityOverview: (days = 30) =>
+    req<QualityOverview>("GET", `/api/admin/quality-overview?days=${days}`),
   adminResetPassword: (id: number, password: string) =>
     req<{ ok: boolean }>("POST", `/api/admin/users/${id}/reset-password`, { password }),
   adminSetActive: (id: number, is_active: boolean) =>

@@ -1,6 +1,6 @@
 // 后台管理页(仅管理员):用户列表 + 多邀请码管理 + AI 味检测调参
 import { useCallback, useEffect, useState } from "react";
-import { api, AdminUser, AiFlavorConfig, FeatureUsageStat, InviteCodeItem } from "../api";
+import { api, AdminUser, AiFlavorConfig, FeatureUsageStat, InviteCodeItem, QualityOverview } from "../api";
 import { errMsg } from "../pollJob";
 import { CopyBtn } from "../ui/copy";
 
@@ -288,6 +288,8 @@ export default function AdminPage() {
 
       <UsageStatsCard />
 
+      <QualityOverviewCard />
+
       {msg && <div className="msg-ok page-flash">{msg}</div>}
       {err && <div className="msg-err page-flash">{err}</div>}
     </>
@@ -346,6 +348,124 @@ function UsageStatsCard() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 生成质量观测:截断率 / 回炉画像 / 问题分布 / 章节体量。
+// 全部来自既有落库(llm_usage / review_snapshot / chapter_issues),零额外成本。
+// 回答「差评出在哪一类信号上」,与上面的功能使用账互补。
+const TRIGGER_CN: Record<string, string> = {
+  gate: "门禁回炉",
+  review: "主审回炉",
+  gate_degraded: "门禁降级隔离",
+};
+const ISSUE_TYPE_CN: Record<string, string> = {
+  state: "状态/伤情",
+  knowledge: "认知信息",
+  timeline: "时间线",
+  worldrule: "世界规则",
+  ambient: "环境连续性",
+  cast: "人物在场",
+};
+
+function QualityOverviewCard() {
+  const [data, setData] = useState<QualityOverview | null>(null);
+  const [err, setErr] = useState("");
+  const [days, setDays] = useState(30);
+
+  useEffect(() => {
+    setData(null);
+    api.adminQualityOverview(days)
+      .then((r) => setData(r))
+      .catch((e) => setErr(errMsg(e)));
+  }, [days]);
+
+  const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
+  return (
+    <div className="card">
+      <div className="card-head">
+        <h2>生成质量观测</h2>
+        <label className="muted" style={{ fontSize: "0.85em" }}>
+          窗口{" "}
+          <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
+            <option value={7}>近 7 天</option>
+            <option value={30}>近 30 天</option>
+            <option value={90}>近 90 天</option>
+          </select>
+        </label>
+      </div>
+      <p className="card-desc">
+        生成侧四路信号聚合(截断/回炉/问题/体量),只读既有落库,零额外调用。
+        差评集中时先看这里:截断率高是输出预算问题,降级隔离多是模型稳定性问题。
+      </p>
+      {err && <div className="msg-err">{err}</div>}
+      {data === null ? (
+        !err && <p className="muted">加载中…</p>
+      ) : (
+        <div className="mt-2">
+          <div className="tbl-wrap">
+            <table className="tbl">
+              <thead>
+                <tr><th>信号</th><th>数值</th><th>说明</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>LLM 调用</td>
+                  <td>{data.llm.total_calls} 次</td>
+                  <td className="muted">窗口内全部调用</td>
+                </tr>
+                <tr>
+                  <td>截断率</td>
+                  <td className={data.llm.truncated_ratio > 0.05 ? "msg-err" : ""}>
+                    {pct(data.llm.truncated_ratio)}
+                  </td>
+                  <td className="muted">流式中途断流,读感为「内容戛然而止」</td>
+                </tr>
+                <tr>
+                  <td>预算用尽</td>
+                  <td>{pct(data.llm.finish_length_ratio)}</td>
+                  <td className="muted">finish_reason=length,半截内容需续写</td>
+                </tr>
+                <tr>
+                  <td>审校通过率</td>
+                  <td>{data.rework.chapters_reviewed === 0 ? "—"
+                    : pct(data.rework.pass_ratio)}</td>
+                  <td className="muted">主审通过章 / 有快照章({data.rework.chapters_reviewed} 章)</td>
+                </tr>
+                <tr>
+                  <td>平均回炉轮数</td>
+                  <td>{data.rework.avg_revision_rounds}</td>
+                  <td className="muted">
+                    {Object.entries(data.rework.trigger_counts)
+                      .map(([t, n]) => `${TRIGGER_CN[t] ?? t} ${n}`).join(" · ") || "无回炉"}
+                  </td>
+                </tr>
+                <tr>
+                  <td>门禁降级隔离</td>
+                  <td className={data.rework.gate_degraded_count > 0 ? "msg-err" : ""}>
+                    {data.rework.gate_degraded_count} 章
+                  </td>
+                  <td className="muted">LLM 失败/解析失败被隔离待人工,不是「写得差」</td>
+                </tr>
+                <tr>
+                  <td>问题挂起</td>
+                  <td>{data.issues.open_count}</td>
+                  <td className="muted">
+                    {Object.entries(data.issues.by_type)
+                      .map(([t, n]) => `${ISSUE_TYPE_CN[t] ?? t} ${n}`).join(" · ") || "无记录"}
+                  </td>
+                </tr>
+                <tr>
+                  <td>章节体量</td>
+                  <td>{data.volume.chapters} 章 · 均 {data.volume.avg_word_count} 字</td>
+                  <td className="muted">窗口内有更新的章节</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

@@ -10,13 +10,15 @@ GET    /api/admin/invite-codes                邀请码列表(附旧单码回落
 POST   /api/admin/invite-codes                新建邀请码(可备注 / 限次)
 PATCH  /api/admin/invite-codes/{id}           停用 / 启用某个邀请码
 DELETE /api/admin/invite-codes/{id}           删除邀请码
+GET    /api/admin/quality-overview            生成质量聚合(截断率/回炉画像/问题分布/体量)
 """
 from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -26,6 +28,8 @@ from app.auth import get_current_user, hash_password
 from app.config import get_settings
 from app.db.models import (
     AppSetting,
+    Chapter,
+    ChapterIssue,
     FeatureUsage,
     InviteCode,
     LlmUsage,
@@ -469,3 +473,183 @@ async def feature_usage_stats(
             for feature, users, total, last in rows
         ]
     }
+
+
+# ---------- 生成质量观测(线上归因闭环的聚合半环) ----------
+
+
+def _ratio(part: int, total: int) -> float:
+    return round(part / total, 4) if total else 0.0
+
+
+def _iter_review_snapshots(db: Session, since):
+    """逐章解析 review_snapshot;损坏/空快照跳过,不让一条脏数据拖垮整体。"""
+    chapters = (
+        db.query(Chapter)
+        .filter(Chapter.review_snapshot.isnot(None), Chapter.review_snapshot != "")
+        .filter(Chapter.updated_at >= since)
+        .all()
+    )
+    for ch in chapters:
+        try:
+            snap = json.loads(ch.review_snapshot)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(snap, dict):
+            yield ch, snap
+
+
+def quality_overview(db: Session, days: int) -> dict:
+    """生成质量聚合:只读既有落库信号,不做任何 LLM 调用。
+
+    四路信号(口径见 docs/17):
+    - llm:截断率与 finish_reason=length 占比 —— 「以为是模型能力,其实是截断」的判据
+    - rework:review_snapshot.rework_log 的 trigger 分布(含 gate_degraded 静默降级隔离)
+    - issues:chapter_issues 按 issue_type × severity,open 挂起数
+    - volume:章节字数体量(供与差评交叉时对照)
+    """
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    # 1) LLM 调用:截断 / 输出预算用尽 / 按模型分布
+    total_calls = (
+        db.query(func.count(LlmUsage.id)).filter(LlmUsage.created_at >= since).scalar() or 0
+    )
+    truncated_calls = (
+        db.query(func.count(LlmUsage.id))
+        .filter(LlmUsage.created_at >= since, LlmUsage.truncated.is_(True))
+        .scalar() or 0
+    )
+    finish_length = (
+        db.query(func.count(LlmUsage.id))
+        .filter(LlmUsage.created_at >= since, LlmUsage.finish_reason == "length")
+        .scalar() or 0
+    )
+    prompt_tokens = (
+        db.query(func.coalesce(func.sum(LlmUsage.prompt_tokens), 0))
+        .filter(LlmUsage.created_at >= since)
+        .scalar()
+    )
+    completion_tokens = (
+        db.query(func.coalesce(func.sum(LlmUsage.completion_tokens), 0))
+        .filter(LlmUsage.created_at >= since)
+        .scalar()
+    )
+    by_model_rows = (
+        db.query(
+            LlmUsage.model,
+            func.count(LlmUsage.id),
+            func.sum(LlmUsage.truncated),
+        )
+        .filter(LlmUsage.created_at >= since)
+        .group_by(LlmUsage.model)
+        .order_by(func.count(LlmUsage.id).desc())
+        .all()
+    )
+
+    # 2) 回炉画像:解析各章 review_snapshot
+    reviewed = passed = gate_degraded = stalled_hint = 0
+    revision_rounds_total = 0
+    trigger_counts: dict[str, int] = {}
+    for _ch, snap in _iter_review_snapshots(db, since):
+        reviewed += 1
+        if snap.get("passed"):
+            passed += 1
+        rounds = snap.get("revision_rounds") or 0
+        revision_rounds_total += int(rounds if isinstance(rounds, (int, float)) else 0)
+        if snap.get("hints"):
+            stalled_hint += 1
+        for entry in snap.get("rework_log") or []:
+            if not isinstance(entry, dict):
+                continue
+            trigger = str(entry.get("trigger") or "unknown")
+            trigger_counts[trigger] = trigger_counts.get(trigger, 0) + 1
+            if trigger == "gate_degraded":
+                gate_degraded += 1
+
+    # 3) 质量问题:按类型 × 严重度,open 挂起数
+    issue_rows = (
+        db.query(ChapterIssue.issue_type, ChapterIssue.severity, func.count(ChapterIssue.id))
+        .filter(ChapterIssue.created_at >= since)
+        .group_by(ChapterIssue.issue_type, ChapterIssue.severity)
+        .all()
+    )
+    by_type: dict[str, int] = {}
+    by_severity: dict[str, int] = {}
+    for issue_type, severity, count in issue_rows:
+        by_type[issue_type] = by_type.get(issue_type, 0) + int(count)
+        by_severity[severity] = by_severity.get(severity, 0) + int(count)
+    open_issues = (
+        db.query(func.count(ChapterIssue.id))
+        .filter(ChapterIssue.created_at >= since, ChapterIssue.status == "open")
+        .scalar() or 0
+    )
+
+    # 4) 章节体量
+    vol_rows = db.query(func.count(Chapter.id), func.coalesce(func.avg(Chapter.word_count), 0)).filter(
+        Chapter.updated_at >= since
+    ).one()
+
+    return {
+        "days": days,
+        "llm": {
+            "total_calls": int(total_calls),
+            "truncated_calls": int(truncated_calls),
+            "truncated_ratio": _ratio(int(truncated_calls), int(total_calls)),
+            "finish_length_calls": int(finish_length),
+            "finish_length_ratio": _ratio(int(finish_length), int(total_calls)),
+            "prompt_tokens": int(prompt_tokens or 0),
+            "completion_tokens": int(completion_tokens or 0),
+            "by_model": [
+                {
+                    "model": model,
+                    "calls": int(calls),
+                    "truncated": int(truncated or 0),
+                    "truncated_ratio": _ratio(int(truncated or 0), int(calls)),
+                }
+                for model, calls, truncated in by_model_rows
+            ],
+        },
+        "rework": {
+            "chapters_reviewed": reviewed,
+            "passed": passed,
+            "pass_ratio": _ratio(passed, reviewed),
+            "avg_revision_rounds": (
+                round(revision_rounds_total / reviewed, 2) if reviewed else 0.0
+            ),
+            "gate_degraded_count": gate_degraded,
+            "stalled_hint_chapters": stalled_hint,
+            "trigger_counts": trigger_counts,
+        },
+        "issues": {
+            "open_count": int(open_issues),
+            "by_type": by_type,
+            "by_severity": by_severity,
+        },
+        "volume": {
+            "chapters": int(vol_rows[0] or 0),
+            "avg_word_count": round(float(vol_rows[1] or 0), 1),
+        },
+    }
+
+
+class QualityOverviewOut(BaseModel):
+    days: int
+    llm: dict
+    rework: dict
+    issues: dict
+    volume: dict
+
+
+@router.get("/quality-overview", response_model=QualityOverviewOut)
+async def get_quality_overview(
+    days: int = Query(default=30, ge=1, le=365),
+    db: Session = Depends(get_db),
+    _admin: User = Depends(get_current_admin),
+):
+    """生成质量聚合(只读):截断率 / 回炉画像 / 问题分布 / 章节体量。
+
+    数据全部来自既有落库(llm_usage / review_snapshot / chapter_issues / chapters),
+    零 LLM 成本。与 /usage(功能使用账)互补:那边回答「谁在用哪条线」,
+    这里回答「生成质量哪里在出问题」。
+    """
+    return quality_overview(db, days)
