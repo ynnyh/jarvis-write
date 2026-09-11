@@ -1,6 +1,10 @@
 # app/engines/clips/exporter.py
 # -*- coding: utf-8 -*-
-"""情绪短片导出:手卡 Markdown / SRT 字幕 / JSON。时间轴走 media 的 SRT 内核。"""
+"""情绪短片导出:手卡 Markdown / SRT 字幕 / JSON。时间轴走 media 的 SRT 内核。
+
+手卡的装配骨架(标题/表格/台词/三轨提示词/切段)由 `media.markdown` 统一提供,
+这里只写「这份手卡有哪些块、每块写什么」。
+"""
 from __future__ import annotations
 
 import json
@@ -8,6 +12,7 @@ import json
 from app.db.models import MoodClip
 from app.engines.clips.common import clip_dict, theme_display
 from app.engines.media.audio import audio_track_note
+from app.engines.media.markdown import Md
 from app.engines.media.subtitles import srt_from_rows
 
 
@@ -19,94 +24,67 @@ def export_srt(row: MoodClip) -> str:
 def export_markdown(row: MoodClip) -> str:
     clip = row.clip or {}
     shots = clip.get("shots") or []
+    chunks = clip.get("chunks") or []
     name = f"{row.custom_theme or theme_display(row)} · {clip.get('take', '')}"
-    L: list[str] = []
-    L.append(f"# 情绪短片手卡 · {name}")
-    L.append("")
-    L.append(
-        f"- 主题:{theme_display(row)} | 时长:{row.duration_s}s | 画风:{row.style_name or row.direction}"
+
+    md = Md()
+    md.h1(f"情绪短片手卡 · {name}")
+    md.bullet(
+        f"主题:{theme_display(row)} | 时长:{row.duration_s}s | 画风:{row.style_name or row.direction}"
         f" | 分镜 {len(shots)} 格 · {sum(int(s.get('duration_s') or 0) for s in shots)}s"
     )
     if clip.get("logline"):
-        L.append(f"- 本子:{clip['logline']}")
+        md.bullet(f"本子:{clip['logline']}")
     if clip.get("emotion_curve"):
-        L.append(f"- 情绪曲线:{clip['emotion_curve']}")
+        md.bullet(f"情绪曲线:{clip['emotion_curve']}")
     if clip.get("hook_text"):
-        L.append(f"- 投流钩子:{clip['hook_text']}")
+        md.bullet(f"投流钩子:{clip['hook_text']}")
     if clip.get("punchline"):
-        L.append(f"- **金句字幕卡:{clip['punchline']}**")
+        md.bullet(f"**金句字幕卡:{clip['punchline']}**")
     if clip.get("quote_source"):
-        L.append(f"- 金句原句(正文):{clip['quote_source']}")
-    L.append("")
+        md.bullet(f"金句原句(正文):{clip['quote_source']}")
+    md.add("")
+
     if clip.get("cautions"):
-        L.append(f"> ⚠ 需核实:{';'.join(clip['cautions'])}")
-        L.append("")
+        md.quote(f"⚠ 需核实:{';'.join(clip['cautions'])}", blank=True)
     if clip.get("style_cn"):
-        L.append("## 画风锚")
-        L.append("")
-        L.append(f"- {row.style_cn}")
-        L.append(f"- EN: {row.style_en}")
-        L.append(f"- 负面基座:{row.negative}")
-        L.append("")
+        md.style_anchor(row.style_cn, row.style_en, row.negative)
+
     lines = clip.get("lines") or []
     if lines:
-        L.append("## 台词")
-        L.append("")
-        for l in lines:
-            L.append(f"- **{l.get('speaker', '')}**:{l.get('text', '')}")
-        L.append("")
+        md.h2("台词")
+        md.speech(lines)
+
     cards = clip.get("character_cards") or []
     if cards:
-        L.append("## 角色定妆卡(参考图用)")
-        L.append("")
-        L.append("> 复制每张卡的描述去文生图出定妆图,再上传作参考图,人物才不会漂。")
-        L.append("")
+        md.h2("角色定妆卡(参考图用)")
+        md.quote("复制每张卡的描述去文生图出定妆图,再上传作参考图,人物才不会漂。",
+                 blank=True)
         for c in cards:
-            L.append(f"- **{c.get('name', '')}**:{c.get('desc', '')}")
-        L.append("")
+            md.bullet(f"**{c.get('name', '')}**:{c.get('desc', '')}")
+        md.add("")
+
     if shots:
-        L.append("## 分镜")
-        L.append("")
-        L.append("| # | 场景 | 景别 | 运镜 | 秒 | 画面 | 台词 |")
-        L.append("|---|---|---|---|---|---|---|")
+        md.h2("分镜")
+        md.table(
+            ["#", "场景", "景别", "运镜", "秒", "画面", "台词"],
+            [
+                [s.get("seq"), s.get("scene_name"), s.get("shot_type"), s.get("camera"),
+                 f"{s.get('duration_s')}s", s.get("action_desc"), s.get("dialogue")]
+                for s in shots
+            ],
+        )
+        md.h2("三轨提示词")
         for s in shots:
-            dia = str(s.get("dialogue") or "").replace("|", "/")
-            act = str(s.get("action_desc") or "").replace("|", "/")
-            L.append(
-                f"| {s.get('seq')} | {s.get('scene_name') or ''} | {s.get('shot_type')} "
-                f"| {s.get('camera')} | {s.get('duration_s')}s | {act} | {dia} |"
-            )
-        L.append("")
-        L.append("## 三轨提示词")
-        L.append("")
-        for s in shots:
-            L.append(f"### 镜头 {s.get('seq')}({s.get('shot_type')}/{s.get('camera')}/{s.get('duration_s')}s)")
-            L.append(f"**中文(即梦/可灵)**")
-            L.append("")
-            L.append(s.get("prompt_cn") or "(未生成)")
-            L.append("")
-            L.append(f"**英文(MJ)**")
-            L.append("")
-            L.append(s.get("prompt_en") or "(未生成)")
-            L.append("")
-            L.append(f"**负面**:{s.get('negative') or '(无)'}")
-            L.append("")
-        chunks = clip.get("chunks") or []
+            md.shot_tracks(s.get("seq"), s.get("shot_type"), s.get("camera"),
+                           s.get("duration_s"), s.get("prompt_cn"), s.get("prompt_en"),
+                           s.get("negative"))
         if chunks:
-            L.append("## 生成切段(一段一次生成,画布拼接)")
-            L.append("")
-            for c in chunks:
-                over = " ⚠超限" if c.get("over_limit") else ""
-                L.append(
-                    f"- **段 {c.get('index')}**({c.get('start_s')}-{c.get('end_s')}s,"
-                    f"镜头 {('、'.join(str(q) for q in c.get('shot_seqs') or []))}){over}"
-                )
-            L.append("")
-        L.append("> 出片:按段生成 → 画布拼接 → 压 SRT → 末格加金句字幕卡。")
-        L.append("")
+            md.segments(chunks)
+        md.quote("出片:按段生成 → 画布拼接 → 压 SRT → 末格加金句字幕卡。", blank=True)
         # 音频口径:15s 短片常常一段就出完,这时模型自带音频直接可用(口径见 media.audio)
-        L.extend(audio_track_note(single_segment=len(chunks) <= 1))
-    return "\n".join(L)
+        md.extend(audio_track_note(single_segment=len(chunks) <= 1))
+    return md.text()
 
 
 def export_json(row: MoodClip) -> str:

@@ -3,6 +3,8 @@
 """拍摄手册导出:Markdown(人读)/ CSV(表格导入)/ JSON(程序消费)。
 
 纯格式化,不碰 LLM/DB(数据由 API 层查好传入),方便单测。
+Markdown 的装配骨架(GFM 表格 / 三轨提示词块 / 小节空行)由 `media.markdown`
+统一提供,和宣传片、情绪短片、生日祝福走同一份口径。
 """
 from __future__ import annotations
 
@@ -28,6 +30,7 @@ from app.engines.drama.common import (
 from app.engines.drama.paste import ref_sheet_paste, shot_paste
 from app.engines.drama.video import CLIP_LIMIT_DEFAULT, clips_payload, motion_tracks
 from app.engines.media.audio import audio_track_note
+from app.engines.media.markdown import Md
 from app.engines.media.subtitles import srt_blocks, srt_from_rows
 from app.engines.media.text import csv_text
 
@@ -37,6 +40,11 @@ _STATUS_CN = {
     "storyboarded": "已有分镜",
     "ready": "提示词就绪",
 }
+
+# 三轨提示词的漫剧文案(预告片那节与宣传片同款长标签)
+_CN_LABEL = "**中文提示词(即梦/可灵)**"
+_EN_LABEL = "**英文提示词(Midjourney)**"
+_NEG_LABEL = "**负面提示词**"
 
 
 def _shot_scenes(shots: list[DramaShot]) -> set[str]:
@@ -76,197 +84,180 @@ def export_markdown(
     """整集拍摄手册(Markdown):拿去出图/剪辑照着走。"""
     used_chars = _shot_characters(shots)
     used_scenes = _shot_scenes(shots)
-    L: list[str] = []
-    L.append(f"# 《{project.title}》漫剧拍摄手册 · 第 {episode.ep_index} 集《{episode.title}》")
-    L.append("")
-    L.append(
-        f"- 模式:{MODE_DESC.get(episode.mode, episode.mode)} | 目标时长:{episode.duration_target_s} 秒"
-        f" | 源章节:{source_chapter_label(episode)} | 状态:{_STATUS_CN.get(episode.status, episode.status)}"
-    )
-    L.append(f"- 开场钩子:{episode.hook}")
-    L.append(f"- 结尾卡点:{episode.cliffhanger}")
+
+    md = Md()
+    md.h1(f"《{project.title}》漫剧拍摄手册 · 第 {episode.ep_index} 集《{episode.title}》")
+    md.kv([
+        ("模式", MODE_DESC.get(episode.mode, episode.mode)),
+        ("目标时长", f"{episode.duration_target_s} 秒"),
+        ("源章节", source_chapter_label(episode)),
+        ("状态", _STATUS_CN.get(episode.status, episode.status)),
+    ], blank=False)
+    md.bullet(f"开场钩子:{episode.hook}")
+    md.bullet(f"结尾卡点:{episode.cliffhanger}")
     if shots:
         # 施工进度:导出的手册常被当进度表用,做到哪儿一开头就得看见
         prog = shot_progress(shots)
-        L.append(
-            f"- 施工进度:静帧 {prog['stills_done']}/{prog['shots']} 格"
+        md.bullet(
+            f"施工进度:静帧 {prog['stills_done']}/{prog['shots']} 格"
             f" | 视频 {prog['videos_done']}/{prog['shots']} 格"
             f" | 已挂素材 {prog['assets']} 张(在站内每格「挂静帧」处更新)"
         )
-    L.append("")
+    md.add("")
 
     if style is not None:
-        L.append("## 美术风格卡(全片统一)")
-        L.append(f"- 风格:{style.style_name} | 画幅:{style.ratio}")
-        L.append(f"- 画风锁定段(中文):{style.style_cn}")
-        L.append(f"- 画风锁定段(英文):{style.style_en}")
-        L.append(f"- 负面词基座:{style.negative}")
-        L.append("")
+        md.h2("美术风格卡(全片统一)", blank=False)
+        md.bullet(f"风格:{style.style_name} | 画幅:{style.ratio}")
+        md.bullet(f"画风锁定段(中文):{style.style_cn}")
+        md.bullet(f"画风锁定段(英文):{style.style_en}")
+        md.bullet(f"负面词基座:{style.negative}")
+        md.add("")
 
     if cards:
-        L.append("## 角色卡(本集出场)")
+        md.h2("角色卡(本集出场)", blank=False)
         for c in cards:
             if c.name not in used_chars:
                 continue
-            L.append(f"### {c.name}" + ("(已锁定)" if c.locked else ""))
-            L.append(f"- 锁定外貌:{c.appearance_cn}")
-            L.append(f"- 英文锚段:{c.appearance_en}")
+            md.h3(c.name + ("(已锁定)" if c.locked else ""))
+            md.bullet(f"锁定外貌:{c.appearance_cn}")
+            md.bullet(f"英文锚段:{c.appearance_en}")
             if c.outfit_cn:
-                L.append(f"- 标志服饰:{c.outfit_cn}")
+                md.bullet(f"标志服饰:{c.outfit_cn}")
             if c.voice_desc:
-                L.append(f"- 配音声线:{c.voice_desc}")
+                md.bullet(f"配音声线:{c.voice_desc}")
             imgs = ref_image_list(c)
             if c.ref_prompt_cn or imgs:
-                L.append("")
-                L.append("**定妆照(先出这张,再拿它当每格的参考图)**")
-                L.append("")
+                md.add("", "**定妆照(先出这张,再拿它当每格的参考图)**", "")
                 if imgs:
                     srcs = "、".join(
                         (i["src"] if i["kind"] == "url" else f"随手册目录 {i['src']}")
                         for i in imgs
                     )
-                    L.append(f"- 已有参考图 {len(imgs)} 张:{srcs}")
+                    md.bullet(f"已有参考图 {len(imgs)} 张:{srcs}")
                 else:
-                    L.append("- ⚠ 还没出参考图:先用下面这段生成一张,存好备用。")
+                    md.bullet("⚠ 还没出参考图:先用下面这段生成一张,存好备用。")
                 if c.ref_prompt_cn:
                     paste = ref_sheet_paste(c, style)
-                    L.append("- 单框站(GPT-image / 豆包 / 通义)整段粘这个:")
-                    L.append("")
-                    L.append(paste["oneframe"]["main"])
-                    L.append("")
+                    md.bullet("单框站(GPT-image / 豆包 / 通义)整段粘这个:")
+                    md.add("", paste["oneframe"]["main"], "")
                     if paste["mj"]["main"]:
-                        L.append(f"- Midjourney:`{paste['mj']['main']}`")
+                        md.bullet(f"Midjourney:`{paste['mj']['main']}`")
                 if c.ref_prompt_en and not c.ref_prompt_cn:
-                    L.append(f"- 英文定妆照提示词:{c.ref_prompt_en}")
-        L.append("")
+                    md.bullet(f"英文定妆照提示词:{c.ref_prompt_en}")
+        md.add("")
 
     if scenes:
-        L.append("## 场景卡(本集出场)")
+        md.h2("场景卡(本集出场)", blank=False)
         for sc in scenes:
             if sc.name not in used_scenes:
                 continue
-            L.append(f"### {sc.name}")
-            L.append(f"- 定调描述:{sc.appearance_cn}")
+            md.h3(sc.name)
+            md.bullet(f"定调描述:{sc.appearance_cn}")
             if sc.appearance_en:
-                L.append(f"- 英文锚段:{sc.appearance_en}")
-        L.append("")
+                md.bullet(f"英文锚段:{sc.appearance_en}")
+        md.add("")
 
-    script = episode.script or {}
-    lines = script.get("lines") or []
+    lines = (episode.script or {}).get("lines") or []
     if lines:
-        L.append("## 剧本")
-        for i, l in enumerate(lines, start=1):
-            if isinstance(l, dict):
-                L.append(f"{i}. **{l.get('speaker', '')}**:{l.get('text', '')}")
-        L.append("")
+        md.h2("剧本", blank=False)
+        md.speech(lines, numbered=True)
 
     if shots:
-        L.append("## 分镜表")
-        L.append("| # | 场景 | 角色 | 景别 | 运镜 | 时长(s) | 画面 | 台词 |")
-        L.append("|---|---|---|---|---|---|---|---|")
-        for s in shots:
-            who = "、".join(s.characters or [])
-            dia = (s.dialogue or "").replace("|", "/").replace("\n", " ")
-            act = (s.action_desc or "").replace("|", "/").replace("\n", " ")
-            L.append(
-                f"| {s.seq} | {s.scene_name} | {who} | {s.shot_type} | {s.camera} "
-                f"| {s.duration_s} | {act} | {dia} |"
-            )
-        L.append("")
-        L.append("## 分镜提示词(按你用的生图站选一版粘)")
-        L.append("")
-        L.append(
-            "> 生图站长相不一样:**只有一个描述框**的站(GPT-image / DALL·E / 豆包 / 通义)"
-            "要用 ① ——负面词已改写成「不要出现」并进正文,直接整段粘;"
-            "**有负面词框**的站(即梦 / 可灵 / SD)用 ②,正反分开粘;Midjourney 用 ③。"
+        md.h2("分镜表", blank=False)
+        md.table(
+            ["#", "场景", "角色", "景别", "运镜", "时长(s)", "画面", "台词"],
+            [
+                [s.seq, s.scene_name, "、".join(s.characters or []), s.shot_type,
+                 s.camera, s.duration_s, s.action_desc, s.dialogue]
+                for s in shots
+            ],
         )
-        L.append("")
+        md.h2("分镜提示词(按你用的生图站选一版粘)")
+        md.quote(
+            "生图站长相不一样:**只有一个描述框**的站(GPT-image / DALL·E / 豆包 / 通义)"
+            "要用 ① ——负面词已改写成「不要出现」并进正文,直接整段粘;"
+            "**有负面词框**的站(即梦 / 可灵 / SD)用 ②,正反分开粘;Midjourney 用 ③。",
+            blank=True,
+        )
         for s in shots:
             paste = shot_paste(s, style, _ref_names(s, cards))
-            L.append(f"### 镜头 {s.seq}({s.shot_type}/{s.camera}/{s.duration_s}s)")
-            L.append("")
-            L.append("**① 单框站:整段粘这个**")
-            L.append("")
-            L.append(paste["oneframe"]["main"] or "(未生成)")
-            L.append("")
-            L.append("**② 有负面词框的站**")
-            L.append("")
-            L.append(f"- 正文:{paste['dualbox']['main'] or '(未生成)'}")
-            L.append(f"- 负面词:{paste['dualbox']['negative'] or '(无)'}")
-            L.append("")
-            L.append("**③ Midjourney / Niji**")
-            L.append("")
-            L.append(paste["mj"]["main"] or "(没有英文轨,先出提示词)")
-            L.append("")
+            md.h3(f"镜头 {s.seq}({s.shot_type}/{s.camera}/{s.duration_s}s)", blank=True)
+            md.add("**① 单框站:整段粘这个**", "", paste["oneframe"]["main"] or "(未生成)", "")
+            md.add(
+                "**② 有负面词框的站**", "",
+                f"- 正文:{paste['dualbox']['main'] or '(未生成)'}",
+                f"- 负面词:{paste['dualbox']['negative'] or '(无)'}",
+                "",
+            )
+            md.add(
+                "**③ Midjourney / Niji**", "",
+                paste["mj"]["main"] or "(没有英文轨,先出提示词)", "",
+            )
 
-        L.extend(_video_section(shots, style, _refs_by_seq(shots, cards)))
+        _video_section(md, shots, style, _refs_by_seq(shots, cards))
 
-    return "\n".join(L)
+    return md.text()
 
 
 def _video_section(
-    shots: list[DramaShot], style: DramaStyleCard | None,
+    md: Md,
+    shots: list[DramaShot],
+    style: DramaStyleCard | None,
     refs_by_seq: dict[int, list[str]] | None = None,
-) -> list[str]:
+) -> None:
     """让静帧动起来那一步:视频段计划(按单次时长上限并段)+ 每段的视频提示词。
 
     单列一节而不是混进出图那节:生图与生视频吃的提示词根本不是一回事(i2v 不许
     带外貌词,见 engines/drama/video.py),而且视频站有单次时长上限,得先并段。
     """
     plan = clips_payload(shots, style, CLIP_LIMIT_DEFAULT, refs_by_seq=refs_by_seq)
-    L = ["## 让它动起来:视频段计划(按单次上限 %d 秒并段)" % plan["limit_s"], ""]
-    L.append(
-        "> 视频站单次只能出 5-15 秒,而分镜格是 2-8 秒——所以**一段生成一次,再在画布/"
+    md.h2(f"让它动起来:视频段计划(按单次上限 {plan['limit_s']} 秒并段)")
+    md.quote(
+        "视频站单次只能出 5-15 秒,而分镜格是 2-8 秒——所以**一段生成一次,再在画布/"
         "剪映里按段号首尾相接**。首帧图用该段第一格出好的静帧,人物长相全靠它锁住;"
-        "提示词里**刻意不写外貌**(写了模型会重画脸)。"
+        "提示词里**刻意不写外貌**(写了模型会重画脸)。",
+        blank=True,
     )
-    L.append("")
-    L.append(f"> {plan['note']}")
-    L.append("")
-    L.append("| 段 | 含分镜 | 场景 | 角色 | 秒 | 生成次数 | 首帧 | 首帧图 | 这一段怎么动 |")
-    L.append("|---|---|---|---|---|---|---|---|---|")
-    for seg in plan["segments"]:
-        who = "、".join(seg["characters"]) or "(空镜)"
-        motion = seg["motion"].replace("|", "/").replace("\n", " ")
-        ready = "✓ 已挂" if seg["first_frame_ready"] else "待出图"
-        L.append(
-            f"| {seg['index']} | {'、'.join(map(str, seg['seqs']))} | {seg['scene_name']} "
-            f"| {who} | {seg['duration_s']} | {seg['runs']} | {seg['first_frame']} "
-            f"| {ready} | {motion} |"
-        )
-    L.append("")
+    md.quote(plan["note"], blank=True)
+    md.table(
+        ["段", "含分镜", "场景", "角色", "秒", "生成次数", "首帧", "首帧图", "这一段怎么动"],
+        [
+            [seg["index"], "、".join(map(str, seg["seqs"])), seg["scene_name"],
+             "、".join(seg["characters"]) or "(空镜)", seg["duration_s"], seg["runs"],
+             seg["first_frame"], "✓ 已挂" if seg["first_frame_ready"] else "待出图",
+             seg["motion"]]
+            for seg in plan["segments"]
+        ],
+    )
     for seg in plan["segments"]:
         paste = seg["paste"]
-        L.append(f"### 视频段 {seg['index']}(分镜 {'、'.join(map(str, seg['seqs']))},{seg['duration_s']}s)")
-        L.append("")
+        md.h3(
+            f"视频段 {seg['index']}(分镜 {'、'.join(map(str, seg['seqs']))},{seg['duration_s']}s)",
+            blank=True,
+        )
         if seg["split_hint"]:
-            L.append(f"> ⚠ {seg['split_hint']}")
-            L.append("")
-        L.append("**① 图生视频·中文站(即梦 / 可灵 / 海螺):传首帧图 + 整段粘**")
-        L.append("")
-        L.append(paste["i2v"]["main"])
-        L.append("")
-        L.append("**② 图生视频·英文站(Runway / Luma / Pika)**")
-        L.append("")
-        L.append(f"- 正文:{paste['i2v_en']['main']}")
-        L.append(f"- 负面词:{paste['i2v_en']['negative']}")
-        L.append("")
-        L.append("**③ 文生视频(没有首帧,慎用)**")
-        L.append("")
-        L.append(paste["t2v"]["main"] or "(这一格还没有出图提示词,先出提示词)")
-        L.append("")
-        L.append(f"> {paste['t2v']['hint']}")
-        L.append("")
-        L.append("**④ 参考生视频·多图主体绑定(Vidu / PixStag / 可灵多图):按序传定妆照**")
-        L.append("")
-        L.append(paste["r2v"]["main"])
-        L.append("")
-        L.append(f"> {paste['r2v']['hint']}")
-        L.append("")
+            md.quote(f"⚠ {seg['split_hint']}", blank=True)
+        md.add(
+            "**① 图生视频·中文站(即梦 / 可灵 / 海螺):传首帧图 + 整段粘**", "",
+            paste["i2v"]["main"], "",
+        )
+        md.add(
+            "**② 图生视频·英文站(Runway / Luma / Pika)**", "",
+            f"- 正文:{paste['i2v_en']['main']}",
+            f"- 负面词:{paste['i2v_en']['negative']}", "",
+        )
+        md.add(
+            "**③ 文生视频(没有首帧,慎用)**", "",
+            paste["t2v"]["main"] or "(这一格还没有出图提示词,先出提示词)", "",
+        )
+        md.quote(paste["t2v"]["hint"], blank=True)
+        md.add(
+            "**④ 参考生视频·多图主体绑定(Vidu / PixStag / 可灵多图):按序传定妆照**", "",
+            paste["r2v"]["main"], "",
+        )
+        md.quote(paste["r2v"]["hint"], blank=True)
         if seg["dialogue"]:
-            L.append(f"> 这一段的字幕/配音:{seg['dialogue']}")
-            L.append("")
-    return L
+            md.quote(f"这一段的字幕/配音:{seg['dialogue']}", blank=True)
 
 
 def export_csv(
@@ -372,117 +363,99 @@ def export_trailer_srt(shots: list[dict]) -> str:
 
 def export_trailer_markdown(project: Project, trailer: dict) -> str:
     """预告片拍摄手册:文案骨架 + 混剪分镜 + 三轨提示词。"""
-    L: list[str] = []
     totals = trailer.get("totals") or {}
-    L.append(f"# 《{project.title}》漫剧预告片 · {trailer.get('title') or ''}")
-    L.append("")
-    L.append(
-        f"- 目标时长:{trailer.get('target_s', '?')} 秒 | 镜头:{totals.get('shots', '?')} 格 "
-        f"| 分镜总时长:{totals.get('duration_s', '?')}s | 取材:第 {totals.get('from_ep', '?')}-{totals.get('to_ep', '?')} 集"
-    )
-    L.append("")
+    md = Md()
+    md.h1(f"《{project.title}》漫剧预告片 · {trailer.get('title') or ''}")
+    md.kv([
+        ("目标时长", f"{trailer.get('target_s', '?')} 秒"),
+        ("镜头", f"{totals.get('shots', '?')} 格"),
+        ("分镜总时长", f"{totals.get('duration_s', '?')}s"),
+        ("取材", f"第 {totals.get('from_ep', '?')}-{totals.get('to_ep', '?')} 集"),
+    ])
+
     lines = trailer.get("lines") or []
     if lines:
-        L.append("## 文案骨架(旁白 + 金句)")
-        L.append("")
-        for l in lines:
-            if isinstance(l, dict):
-                L.append(f"- **{l.get('speaker', '')}**:{l.get('text', '')}")
-        L.append("")
+        md.h2("文案骨架(旁白 + 金句)")
+        md.speech(lines)
+
     shots = trailer.get("shots") or []
     if shots:
-        L.append("## 混剪分镜")
-        L.append("")
-        L.append("| # | 取材 | 场景 | 角色 | 景别 | 运镜 | 秒 | 画面 | 台词 |")
-        L.append("|---|---|---|---|---|---|---|---|---|")
+        md.h2("混剪分镜")
+        md.table(
+            ["#", "取材", "场景", "角色", "景别", "运镜", "秒", "画面", "台词"],
+            [
+                [s.get("seq"),
+                 "新创" if not s.get("source_ep") else f"第{s.get('source_ep')}集",
+                 s.get("scene_name"), "、".join(s.get("characters") or []),
+                 s.get("shot_type"), s.get("camera"), s.get("duration_s"),
+                 s.get("action_desc"), s.get("dialogue")]
+                for s in shots
+            ],
+        )
+        md.h2("三轨提示词(即拿即用)")
         for s in shots:
-            src = s.get("source_ep") or 0
-            src_cn = "新创" if not src else f"第{src}集"
-            dia = str(s.get("dialogue") or "").replace("|", "/").replace("\n", " ")
-            act = str(s.get("action_desc") or "").replace("|", "/").replace("\n", " ")
-            L.append(
-                f"| {s.get('seq')} | {src_cn} | {s.get('scene_name') or ''} "
-                f"| {'、'.join(s.get('characters') or [])} | {s.get('shot_type')} | {s.get('camera')} "
-                f"| {s.get('duration_s')} | {act} | {dia} |"
-            )
-        L.append("")
-        L.append("## 三轨提示词(即拿即用)")
-        L.append("")
-        for s in shots:
-            L.append(f"### 镜头 {s.get('seq')}({s.get('shot_type')}/{s.get('camera')}/{s.get('duration_s')}s)")
-            L.append(f"**中文提示词(即梦/可灵)**")
-            L.append("")
-            L.append(s.get("prompt_cn") or "(未生成)")
-            L.append("")
-            L.append(f"**英文提示词(Midjourney)**")
-            L.append("")
-            L.append(s.get("prompt_en") or "(未生成)")
-            L.append("")
-            L.append(f"**负面提示词**:{s.get('negative') or '(无)'}")
-            L.append("")
-        L.append("> 混剪顺序:炸点开场 → 世界/人设速览 → 冲突升级连切 → 悬念定格 + 标题卡(后期加字)。")
-    return "\n".join(L)
+            md.shot_tracks(s.get("seq"), s.get("shot_type"), s.get("camera"),
+                           s.get("duration_s"), s.get("prompt_cn"), s.get("prompt_en"),
+                           s.get("negative"),
+                           cn_label=_CN_LABEL, en_label=_EN_LABEL, neg_label=_NEG_LABEL)
+        md.quote("混剪顺序:炸点开场 → 世界/人设速览 → 冲突升级连切 → 悬念定格 + 标题卡(后期加字)。")
+    return md.text()
 
 
 def export_pack_markdown(
     project: Project, episode: DramaEpisode, pack: dict
 ) -> str:
     """成片包 Markdown:配音稿 + 剪辑清单(TTS + 剪映照着走完出片)。"""
-    L: list[str] = []
-    L.append(f"# 《{project.title}》漫剧成片包 · 第 {episode.ep_index} 集《{episode.title}》")
     totals = pack.get("totals") or {}
-    L.append("")
-    L.append(
-        f"- 模式:{MODE_DESC.get(episode.mode, episode.mode)} | 镜头:{totals.get('shots', '?')} 格"
-        f" | 分镜总时长:{totals.get('storyboard_s', '?')}s(目标 {totals.get('target_s', '?')}s)"
-        f" | 配音总估时:{totals.get('voice_s', '?')}s"
-    )
+    md = Md()
+    md.h1(f"《{project.title}》漫剧成片包 · 第 {episode.ep_index} 集《{episode.title}》")
+    md.kv([
+        ("模式", MODE_DESC.get(episode.mode, episode.mode)),
+        ("镜头", f"{totals.get('shots', '?')} 格"),
+        ("分镜总时长", f"{totals.get('storyboard_s', '?')}s(目标 {totals.get('target_s', '?')}s)"),
+        ("配音总估时", f"{totals.get('voice_s', '?')}s"),
+    ], blank=False)
     if pack.get("synopsis"):
-        L.append(f"- 本集梗概:{pack['synopsis']}")
-    L.append("")
+        md.bullet(f"本集梗概:{pack['synopsis']}")
+    md.add("")
 
     dubbing = pack.get("dubbing") or []
     if dubbing:
-        L.append("## 配音稿(按镜头顺序)")
-        L.append("")
-        L.append("| # | 说话人 | 声线 | 朗读文本 | 估时/画面 | 选型建议 |")
-        L.append("|---|---|---|---|---|---|")
-        for d in dubbing:
-            voice = str(d.get("voice") or "").replace("|", "/")
-            tts = str(d.get("tts_text") or "").replace("|", "/").replace("\n", " ")
-            L.append(
-                f"| {d.get('seq')} | {d.get('speaker')} | {voice} | {tts} "
-                f"| {d.get('est_s')}s/{d.get('shot_duration_s')}s | {str(d.get('tts_hint') or '').replace('|', '/')} |"
-            )
-        L.append("")
+        md.h2("配音稿(按镜头顺序)")
+        md.table(
+            ["#", "说话人", "声线", "朗读文本", "估时/画面", "选型建议"],
+            [
+                [d.get("seq"), d.get("speaker"), d.get("voice"), d.get("tts_text"),
+                 f"{d.get('est_s')}s/{d.get('shot_duration_s')}s", d.get("tts_hint")]
+                for d in dubbing
+            ],
+        )
         for d in dubbing:
             if d.get("reading_notes"):
-                L.append(f"- **{d.get('speaker')}** 朗读指示:{d['reading_notes']}")
-        L.append("")
+                md.bullet(f"**{d.get('speaker')}** 朗读指示:{d['reading_notes']}")
+        md.add("")
 
     narration = pack.get("narration_full")
     if narration:
-        L.append("## 整段口播(旁白一把梭版,粘给 TTS)")
-        L.append("")
-        L.append(narration)
-        L.append("")
+        md.h2("整段口播(旁白一把梭版,粘给 TTS)")
+        md.add(narration, "")
 
     checklist = pack.get("checklist") or []
     if checklist:
-        L.append("## 剪辑清单(按镜头顺序)")
-        L.append("")
-        L.append("| # | 场景 | 时长 | 字幕 | 转场 | 配乐 | 备注 |")
-        L.append("|---|---|---|---|---|---|---|")
-        for c in checklist:
-            sub = str(c.get("subtitle") or "").replace("|", "/").replace("\n", " ")
-            L.append(
-                f"| {c.get('seq')} | {c.get('scene') or ''} | {c.get('duration_s')}s "
-                f"| {sub} | {c.get('transition') or ''} | {c.get('bgm_tag') or ''} | {c.get('note') or ''} |"
-            )
-        L.append("")
-        L.append("> 出片顺序:先出角色定妆照(手册「角色卡」段) → 每格「定妆照当参考图 + 分镜提示词」出图"
-                 " → 图生视频/加轻动 → 按配音稿合成语音 → 按剪辑清单拼接 → 压 SRT 字幕 → 铺 BGM。")
-        L.append("")
+        md.h2("剪辑清单(按镜头顺序)")
+        md.table(
+            ["#", "场景", "时长", "字幕", "转场", "配乐", "备注"],
+            [
+                [c.get("seq"), c.get("scene"), f"{c.get('duration_s')}s", c.get("subtitle"),
+                 c.get("transition"), c.get("bgm_tag"), c.get("note")]
+                for c in checklist
+            ],
+        )
+        md.quote(
+            "出片顺序:先出角色定妆照(手册「角色卡」段) → 每格「定妆照当参考图 + 分镜提示词」出图"
+            " → 图生视频/加轻动 → 按配音稿合成语音 → 按剪辑清单拼接 → 压 SRT 字幕 → 铺 BGM。",
+            blank=True,
+        )
         # 音频三轨说明:视频提示词里那句「不要人声」是分轨,不是静音(口径见 media.audio)
-        L.extend(audio_track_note())
-    return "\n".join(L)
+        md.extend(audio_track_note())
+    return md.text()
