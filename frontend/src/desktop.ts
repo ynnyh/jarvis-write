@@ -45,11 +45,6 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
   return t.core.invoke<T>(cmd, args);
 }
 
-/** 桌面壳的应用版本(CARGO_PKG_VERSION)。也用于桥连通性探测。 */
-export function desktopPing(): Promise<string> {
-  return invoke<string>("desktop_ping");
-}
-
 /** check_update 的返回:是否有更新 + 版本/说明/当前版本。 */
 export interface UpdateInfo {
   available: boolean;

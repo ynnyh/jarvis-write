@@ -12,17 +12,6 @@ export function apiBase(): string {
   }
 }
 
-export function setServerBase(url: string): void {
-  try {
-    const v = url.trim().replace(/\/+$/, "");
-    if (v) localStorage.setItem(SERVER_KEY, v);
-    else localStorage.removeItem(SERVER_KEY);
-  } catch { /* 忽略 */ }
-}
-
-export function getServerBase(): string {
-  return apiBase();
-}
 const TOKEN_KEY = "jarvis_token";
 
 export const token = {

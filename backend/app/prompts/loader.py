@@ -79,9 +79,3 @@ def load_prompt(name: str, **kwargs) -> str:
     if not kwargs:
         return template
     return template.format(**kwargs)
-
-
-def clear_cache() -> None:
-    """清除模板缓存(开发时修改模板文件后调用,或测试时使用)。"""
-    _load_template_text.cache_clear()
-    logger.info("Prompt 模板缓存已清除")

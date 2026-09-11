@@ -178,7 +178,7 @@ The design docs are written in Chinese:
 
 ## Tech Stack
 
-- **Backend**: Python 3.12 + FastAPI (REST + SSE), SQLAlchemy 2.x + SQLite (Postgres-ready), Pydantic v2
+- **Backend**: Python 3.12 + FastAPI (REST + SSE), SQLAlchemy 2.x + SQLite, Pydantic v2
 - **LLM layer**: self-built adapter layer (DeepSeek / OpenAI / Gemini, no LangChain), task-level model routing (strong vs. fast tiers, each mapped to its own config), cc-switch-style multi-config management, automatic retry with streaming fallback for transient failures (survives CDN timeouts on long generations)
 - **Frontend**: React + TypeScript + Vite
 - **Deployment**: single-container Docker (multi-stage build; frontend assets served by FastAPI at `/app`)
@@ -191,6 +191,7 @@ Phases 0–8 are complete: the generation pipeline and tendency assembler, chapt
 Known remaining items:
 
 - **Token-level streaming**: AI chat (passage / whole-chapter discussion, rewrite dialogue) is now a true SSE token-by-token typewriter, and blueprint generation reports incremental "chapter-by-chapter" progress; only per-chapter prose generation still uses "async job + progress polling", since it chains multiple review steps (de-AI-flavor / consistency / word-count guard) and is better run as a task
+- **The database is currently bound to SQLite**: the ORM layer uses SQLAlchemy, but full-text search over the whole book is built on SQLite-specific syntax (FTS5 + trigram virtual tables, `MATCH` / `bm25()`, `json_each`), which has no native Postgres equivalent. **Switching to Postgres by changing `DATABASE_URL` is not possible today** — the search layer would have to be rewritten first. An earlier "Postgres-ready" claim in this README was inaccurate and has been corrected
 
 ## Testing
 

@@ -45,9 +45,12 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-cov
 
-      - name: 运行 pytest(带覆盖率)
+      # --cov-fail-under=80:把覆盖率从「观测值」变成「门槛」。
+      # 没有门槛的指标,半年后一定退化——尤其 api/chapters/extraction.py 这类
+      # 核心但覆盖低的模块,更容易在无人察觉时继续下滑。当前实测 84.2%,留 4 个点缓冲。
+      - name: 运行 pytest(带覆盖率门槛)
         run: |
-          python -m pytest --cov=app --cov-report=xml --cov-report=term-missing -q
+          python -m pytest --cov=app --cov-report=xml --cov-report=term-missing --cov-fail-under=80 -q
 
       - name: Schema 漂移门禁(models 与 Alembic 迁移必须一致)
         run: |

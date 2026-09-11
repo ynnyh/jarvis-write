@@ -106,30 +106,18 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
             request_id_var.reset(token)
 
 
-def set_job_id(job_id: str) -> contextvars.Token:
+def set_job_id(job_id: str) -> None:
     """设置当前任务的 job_id(后台异步任务调用)。
 
-    返回 token,任务结束后用 reset_job_id(token) 恢复。
-    用法:
-        token = set_job_id(job_id)
-        try:
-            ... 任务逻辑 ...
-        finally:
-            reset_job_id(token)
+    后台任务各自跑在独立 task 上下文里,互不串扰,任务结束即随上下文回收
+    ——不需要(也没有)显式的 reset。
     """
-    return job_id_var.set(job_id)
-
-
-def reset_job_id(token: contextvars.Token) -> None:
-    """恢复 job_id 上下文变量。"""
-    job_id_var.reset(token)
+    job_id_var.set(job_id)
 
 
 def set_user_id(user_id: int) -> contextvars.Token:
-    """设置当前请求的 user_id(鉴权后调用)。"""
+    """设置当前请求的 user_id(鉴权后调用)。
+
+    请求级 task 上下文,无需 reset(auth.py 亦如此注释)。
+    """
     return user_id_var.set(user_id)
-
-
-def reset_user_id(token: contextvars.Token) -> None:
-    """恢复 user_id 上下文变量。"""
-    user_id_var.reset(token)
