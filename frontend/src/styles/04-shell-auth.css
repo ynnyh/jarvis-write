@@ -38,6 +38,25 @@
 .side-link.on { background: var(--brand-weak); color: var(--brand); font-weight: 600; }
 .side-ico { width: 22px; text-align: center; flex-shrink: 0; }
 .side-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 导航分组(2026-09-11):主线独占,创作辅助/制片工坊归组折叠——
+   8 个一级平铺把小说主线稀释得没分量;分组只动壳,不动路由。 */
+.side-group { margin-top: 4px; }
+.side-group-head {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  background: none; border: none; cursor: pointer; text-align: left;
+  padding: 6px 10px 4px; color: var(--text-3); font-size: var(--fs-xs);
+}
+.side-group-head:hover { color: var(--text-2); }
+.side-group.active .side-group-head { color: var(--text-2); }
+.side-group-title { font-weight: 600; letter-spacing: 0.04em; }
+.side-group-n {
+  background: var(--surface-2); color: var(--text-3);
+  border-radius: 999px; padding: 0 6px; font-size: var(--fs-xs); line-height: 16px;
+}
+.side-group-arrow { margin-left: auto; font-size: 10px; }
+.side-group-body { display: flex; flex-direction: column; gap: 2px; }
+.side-group-body .side-link { padding-left: 18px; } /* 组内缩进一级,与主线区隔 */
+.side-sep { border-top: 1px solid var(--line); margin: 8px 10px; }
 .side-tasks { padding: 0 10px; }
 .side-foot {
   margin-top: auto; display: flex; flex-direction: column; align-items: flex-start;
