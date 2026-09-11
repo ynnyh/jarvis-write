@@ -17,8 +17,9 @@ setup("登录并保存会话", async ({ page }) => {
   await page.locator('input[type="password"]').fill(PASSWORD);
   // 「登录」tab 和提交按钮同名,scope 到表单里那颗
   await page.locator("form").getByRole("button", { name: "登录", exact: true }).click();
-  // 登录成功的标志:App 壳渲染,侧栏一级入口出现
-  await expect(page.getByRole("link", { name: /系列短片/ })).toBeVisible({
+  // 登录成功的标志:App 壳渲染。断言主线入口「我的小说」——它是侧栏首位且
+  // 永远可见(制片各线已收进默认折叠的「制片工坊」组,不能拿它们当标志)
+  await expect(page.getByRole("link", { name: /我的小说/ })).toBeVisible({
     timeout: 15_000,
   });
   await page.context().storageState({ path: STATE_FILE });
