@@ -11,11 +11,11 @@ from app.api.deps import get_project_or_404
 from app.db.models import Chapter, Outline, Project
 from app.db.session import SessionLocal, get_db
 from app.engines.pipeline.chapter import generate_chapter
-from app.engines.pipeline.handoff import handoff_payload
-from app.jobs import create_job, fail_job, finish_job, fire_and_track, list_running, normalize_job_error, update_stage
+from app.jobs import create_job, finish_job, fire_and_track, list_running, normalize_job_error, update_stage
 from app.schemas.tendency import Tendency
 
 from ._common import ChapterDetail, _fill_handoff, _flavor_dict, _gate_payload
+from ._job import run_chapter_job
 
 router = APIRouter()
 
@@ -103,47 +103,14 @@ async def generate_async(
             detail=f"第 {running_num} 章的任务还在进行中({job['stage']}),请等它完成再发起新的生成。",
         )
     job_id = create_job(f"chapter-{project_id}-{chapter_number}")
-
-    async def runner() -> None:
-        session = SessionLocal()
-        try:
-            project = session.get(Project, project_id)
-            chapter, issues, stats, guard_result, review_result, preflight = (
-                await generate_chapter(
-                    session, project, chapter_number, req.tendency,
-                    progress=lambda s: update_stage(job_id, s),
-                    revision=req.revision.strip(),
-                )
-            )
-            session.commit()
-            handoff = handoff_payload(session, chapter)
-            finish_job(job_id, {
-                "chapter_number": chapter.chapter_number,
-                "word_count": chapter.word_count,
-                "status": chapter.status,
-                "final_content": chapter.final_content,
-                "draft_content": chapter.draft_content,
-                "is_stale": chapter.is_stale,
-                "outline_version_used": chapter.outline_version_used,
-                "consistency_issues": issues,
-                "extraction_stats": stats,
-                "ai_flavor": _flavor_dict(chapter.final_content),
-                "word_guard_action": guard_result.action,
-                "split_info": guard_result.split_info,
-                "review": review_result,
-                "gate": _gate_payload(chapter, issues),
-                "preflight": {"warnings": preflight},
-                "handoff_contract": handoff["contract"],
-                "handoff_extract_status": handoff["status"],
-                "handoff_extract_error": handoff["error"],
-            })
-        except Exception as exc:  # noqa: BLE001 — 任务失败进 job 状态
-            session.rollback()
-            fail_job(job_id, normalize_job_error(exc)[:500])
-        finally:
-            session.close()
-
-    fire_and_track(runner())
+    # 任务体与「按问题修订」共用一份(见 _job.py),此处只声明本路径的差异项
+    fire_and_track(run_chapter_job(
+        job_id=job_id,
+        project_id=project_id,
+        chapter_number=chapter_number,
+        tendency=req.tendency,
+        revision=req.revision.strip(),
+    ))
     return {"job_id": job_id}
 
 
