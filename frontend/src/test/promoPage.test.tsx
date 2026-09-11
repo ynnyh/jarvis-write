@@ -24,7 +24,8 @@ const META = {
 function plan(over: Record<string, unknown> = {}) {
   return {
     id: 1, subject: "西安", title: "", angles: ["food"], duration_s: 90,
-    direction: "live", direction_label: "实拍风", status: "draft", ...over,
+    direction: "live", direction_label: "实拍风", status: "draft", brief_locked: false,
+    ...over,
   };
 }
 
@@ -72,7 +73,7 @@ describe("PromoPage 列表", () => {
   });
 
   it("新建成功:create 带上表单值并跳工作台", async () => {
-    vi.mocked(promoApi.create).mockResolvedValue({ plan: plan({ id: 5 }) });
+    vi.mocked(promoApi.create).mockResolvedValue({ plan: plan({ id: 5 }) as never });
     renderPage();
 
     fireEvent.change(await screen.findByLabelText(/主题/), { target: { value: "  西安  " } });

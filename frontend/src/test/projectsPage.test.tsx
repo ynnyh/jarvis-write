@@ -105,11 +105,11 @@ describe("ProjectsPage", () => {
   it("删除:确认后调 deleteProject 并从列表移除", async () => {
     vi.mocked(api.listProjects).mockResolvedValue([proj()]);
     vi.mocked(api.listChapters).mockResolvedValue([
-      { chapter_number: 1, title: "一", status: "approved" },
-      { chapter_number: 2, title: "二", status: "approved" },
+      { chapter_number: 1, status: "approved", word_count: 3000, is_stale: false },
+      { chapter_number: 2, status: "approved", word_count: 2800, is_stale: false },
     ]);
     vi.mocked(confirmDialog).mockResolvedValue(true);
-    vi.mocked(api.deleteProject).mockResolvedValue({ deleted: true });
+    vi.mocked(api.deleteProject).mockResolvedValue({ ok: true, deleted_chapters: 2 });
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "删除" }));
