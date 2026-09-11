@@ -25,6 +25,9 @@ class LlmUsage(Base, TimestampMixin):
     finish_reason: Mapped[str] = mapped_column(String(20), default="")
     # 流式中途断流(没等到 [DONE] 也没 finish_reason):中转网关/CDN 静默掐断
     truncated: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 单次调用耗时(毫秒,含网络+生成):质量观测的响应时间维度。
+    # 0 = 旧记录或异常路径没量到,聚合时按缺席处理。
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class FeatureUsage(Base):

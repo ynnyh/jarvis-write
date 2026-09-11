@@ -14,6 +14,7 @@ import json
 import logging
 import random
 import re
+import time
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Literal
 
@@ -744,7 +745,7 @@ class LLMAdapter(abc.ABC):
         )
 
     @staticmethod
-    def _record_usage(resp: "LLMResponse") -> None:
+    def _record_usage(resp: "LLMResponse", duration_ms: int = 0) -> None:
         """用量记账(静默失败,绝不影响生成)。"""
         try:
             from app.auth import current_user_id
@@ -760,6 +761,7 @@ class LLMAdapter(abc.ABC):
                         completion_tokens=resp.completion_tokens,
                         finish_reason=resp.finish_reason,
                         truncated=resp.truncated,
+                        duration_ms=duration_ms,
                     )
                 )
         except Exception:  # noqa: BLE001
@@ -815,7 +817,10 @@ async def complete_text_with_budget(adapter, messages: list[LLMMessage]) -> str:
     try:
         for attempt in range(3):
             try:
+                _t0 = time.perf_counter()
                 resp = await adapter.complete(messages)
+                # 单次调用耗时(毫秒,含网络+生成);量不到不影响主流程
+                _duration_ms = int((time.perf_counter() - _t0) * 1000)
             except EmptyContentError as exc:
                 diag = exc.diagnosis or str(exc)
                 logger.warning(
@@ -826,7 +831,7 @@ async def complete_text_with_budget(adapter, messages: list[LLMMessage]) -> str:
                     raise
                 adapter.max_tokens = min(adapter.max_tokens * 2, 32768)
                 continue
-            LLMAdapter._record_usage(resp)
+            LLMAdapter._record_usage(resp, duration_ms=_duration_ms)
             content = (resp.content or "").strip()
             # getattr:鸭子类型的假适配器(测试/自定义)可能没有这两个字段,
             # 而本函数的契约是只依赖 complete() 与 max_tokens,不许因此炸掉

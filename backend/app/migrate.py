@@ -970,6 +970,25 @@ def _add_fact_usage_table() -> None:
     logger.info("迁移:补齐事实消费日志表(fact_usages)")
 
 
+def _add_llm_usage_duration_column() -> None:
+    """llm_usage 补 duration_ms 列(单次调用毫秒耗时,幂等)。
+
+    生成质量观测的响应时间维度;旧记录默认 0(没量到),聚合按缺席处理。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "llm_usage" not in insp.get_table_names():
+            return  # create_all 会按新模型建表,无需补列
+        if not _column_exists("llm_usage", "duration_ms"):
+            conn.execute(
+                text(
+                    "ALTER TABLE llm_usage ADD COLUMN duration_ms INTEGER "
+                    "NOT NULL DEFAULT 0"
+                )
+            )
+            logger.info("迁移:llm_usage 补 duration_ms 列")
+
+
 def run_migrations() -> None:
     """启动时调用。幂等。"""
     _add_user_id_columns()
@@ -1012,6 +1031,7 @@ def run_migrations() -> None:
     _add_clips_promo_film_prompt_columns()
     _add_scene_tables()
     _add_scene_level_column()
+    _add_llm_usage_duration_column()
     _add_fact_usage_table()
     _disable_word_guard_default()
     _migrate_finalized_to_approved()
