@@ -27,6 +27,9 @@ async def re_extract_async(
 ):
     """手改正文后:重抽取(幂等,先清旧账)→ 重建下游摘要。"""
     get_project_or_404(db, project_id)
+    # 先挡掉不存在的章:否则任务会在后台以 'NoneType' has no attribute 'final_content'
+    # 失败,用户只看到一句「任务失败」,而 contract-reextract 那条路早就是 404 了。
+    _get_chapter_or_404(db, project_id, chapter_number)
     # 同章同步任务已在跑 → 复用,不重复起
     for jid, job in list_running(f"re-extract-{project_id}-"):
         if job["kind"] == f"re-extract-{project_id}-{chapter_number}":
