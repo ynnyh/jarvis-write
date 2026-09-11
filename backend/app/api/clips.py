@@ -218,7 +218,7 @@ def _clean_shoot(units) -> list[dict]:
             continue
         try:
             index = int(u.get("index", 0) or 0)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError):  # 下标非数字:该条不入清单,不影响其余条目
             continue
         cleaned.append({
             "index": index,

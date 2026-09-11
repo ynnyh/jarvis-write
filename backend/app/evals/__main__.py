@@ -37,7 +37,7 @@ def _utf8_console() -> None:
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
-        except (AttributeError, ValueError):
+        except (AttributeError, ValueError):  # 该流不支持 reconfigure(非 TTY):保持默认编码即可
             pass
 
 

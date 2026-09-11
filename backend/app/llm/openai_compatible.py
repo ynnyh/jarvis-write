@@ -216,7 +216,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
                             break
                         try:
                             chunk = json.loads(payload)
-                        except json.JSONDecodeError:
+                        except json.JSONDecodeError:  # 流中非 JSON 片段(注释/心跳):跳过
                             continue
                         # 流中夹的软错误(中转站"无可用渠道"常这么回)
                         if isinstance(chunk, dict) and chunk.get("error"):

@@ -70,7 +70,7 @@ async def render_shot_prompts(db: Session, plan: PromoPlan, progress=lambda s: N
             if isinstance(item, dict) and item.get("seq") is not None:
                 try:
                     by_seq[int(item["seq"])] = item
-                except (TypeError, ValueError):
+                except (TypeError, ValueError):  # seq 非数字:该条标注跳过
                     continue
         for shot in chunk:
             item = by_seq.get(shot.seq) or {}

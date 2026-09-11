@@ -44,7 +44,7 @@ async def build_pack(db: Session, plan: PromoPlan, progress=lambda s: None) -> d
         if isinstance(item, dict) and item.get("seq") is not None:
             try:
                 ann[int(item["seq"])] = item
-            except (TypeError, ValueError):
+            except (TypeError, ValueError):  # seq 非数字:该条标注跳过
                 continue
 
     # ---- 配音稿(确定性:解说词逐镜对位 + 估时) ----

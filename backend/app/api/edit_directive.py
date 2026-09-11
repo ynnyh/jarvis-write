@@ -172,7 +172,7 @@ def _build_preview(data: dict, valid_numbers: set[int]) -> DirectivePreview:
             continue
         try:
             n = int(i.get("chapter_number"))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError):  # 章号非数字:该条改动跳过,不误伤其它章
             continue
         new_summary = str(i.get("new_summary") or "").strip()
         if n not in valid_numbers or not new_summary:

@@ -56,7 +56,7 @@ def _stable_text(value) -> str | None:
     if isinstance(value, (dict, list, tuple)):
         try:
             return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError):  # 无法稳定序列化 → None,调用方按「不可指纹」处理
             return None
     return None
 

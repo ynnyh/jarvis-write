@@ -49,7 +49,7 @@ def _int_or_none(value) -> int | None:
     """
     try:
         n = int(float(str(value).strip()))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError):  # 不是数字按缺失处理(负值同样判缺失)
         return None
     return n if n >= 0 else None
 
@@ -197,7 +197,7 @@ def _fresh_contract(row: ChapterState | None, chapter: Chapter) -> dict | None:
         return None
     try:
         contract = json.loads(row.contract)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError):  # 契约不是合法 JSON:按「无契约」处理,由调用方补跑
         return None
     return contract if isinstance(contract, dict) else None
 

@@ -179,7 +179,7 @@ async def update_scene_card(
         if name in _INT_FIELDS:
             try:
                 value = int(value)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError):  # 该字段非整数:跳过不写,保留原值
                 continue
         if name in _LIST_FIELDS:
             value = [str(v).strip() for v in value if str(v).strip()]

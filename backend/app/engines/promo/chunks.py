@@ -80,7 +80,7 @@ async def build_chunks(
         if isinstance(item, dict) and item.get("index") is not None:
             try:
                 ann[int(item["index"])] = item
-            except (TypeError, ValueError):
+            except (TypeError, ValueError):  # index 非数字:该条标注跳过
                 continue
 
     items = []

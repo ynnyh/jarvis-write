@@ -121,7 +121,7 @@ def record_retrieval(
             if v is not None:
                 try:
                     return int(v)
-                except (TypeError, ValueError):
+                except (TypeError, ValueError):  # 取不到整数按缺失处理(调用方以 None 过滤)
                     return None
         return None
 

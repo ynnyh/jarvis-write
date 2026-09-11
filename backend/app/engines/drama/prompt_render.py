@@ -142,7 +142,7 @@ def _by_seq(data: dict) -> dict[int, dict]:
         if isinstance(item, dict) and item.get("seq") is not None:
             try:
                 out[int(item["seq"])] = item
-            except (TypeError, ValueError):
+            except (TypeError, ValueError):  # seq 非数字:该条标注跳过
                 continue
     return out
 

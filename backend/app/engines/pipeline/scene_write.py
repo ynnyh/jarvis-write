@@ -375,7 +375,7 @@ async def accept_scene(
 def _as_int(v: Any) -> int | None:
     try:
         return int(v)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError):  # 转不成整数返回 None,调用方按缺失处理
         return None
 
 

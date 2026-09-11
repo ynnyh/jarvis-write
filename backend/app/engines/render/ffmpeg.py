@@ -89,7 +89,7 @@ def probe_clip(path: Path) -> dict | None:
             "width": int(video.get("width") or 0),
             "height": int(video.get("height") or 0),
         }
-    except (subprocess.TimeoutExpired, OSError, ValueError):
+    except (subprocess.TimeoutExpired, OSError, ValueError):  # 探测失败(超时/无 ffprobe/输出不可解析)按「读不到」处理
         return None
 
 

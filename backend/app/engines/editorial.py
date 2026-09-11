@@ -287,7 +287,7 @@ def load_review_snapshot(chapter) -> dict | None:
         return None
     try:
         snapshot = json.loads(raw)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError):  # 快照不是合法 JSON:按「没有快照」处理,不抛给调用方
         return None
     if snapshot.get("content_hash") != content_hash(chapter.final_content or ""):
         return None
@@ -322,7 +322,7 @@ def load_proofread_snapshot(chapter) -> dict | None:
         return None
     try:
         snapshot = json.loads(raw)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError):  # 同 load_review_snapshot:按「没有快照」处理
         return None
     if snapshot.get("content_hash") != content_hash(chapter.final_content or ""):
         return None

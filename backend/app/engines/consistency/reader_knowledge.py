@@ -244,7 +244,7 @@ def _knower_ids(rows: list[KnowledgeState]) -> set[int]:
     for ks in rows:
         try:
             ids.add(int(ks.knower))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError):  # knower 非数字:该行跳过
             continue
     return ids
 

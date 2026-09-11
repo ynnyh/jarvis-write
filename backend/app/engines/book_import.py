@@ -58,7 +58,7 @@ def decode_text(raw: bytes) -> str:
     for enc in ("utf-8", "gb18030"):
         try:
             return raw.decode(enc)
-        except UnicodeDecodeError:
+        except UnicodeDecodeError:  # 该编码解不开:试下一种;末次 errors=replace 兜底不抛
             continue
     return raw.decode("utf-8", errors="replace")
 

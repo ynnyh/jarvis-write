@@ -24,7 +24,7 @@ def _shot_rows(mood_clip) -> dict[int, dict]:
         if isinstance(s, dict) and s.get("seq") is not None:
             try:
                 rows[int(s["seq"])] = s
-            except (TypeError, ValueError):
+            except (TypeError, ValueError):  # seq 非数字:该条标注跳过
                 continue
     return rows
 

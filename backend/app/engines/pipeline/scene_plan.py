@@ -178,7 +178,7 @@ def _extract_json(raw: str) -> list[dict[str, Any]]:
     for cand in candidates:
         try:
             data = json.loads(cand)
-        except (json.JSONDecodeError, ValueError):
+        except (json.JSONDecodeError, ValueError):  # 该候选不是合法 JSON:试下一个候选
             continue
         if isinstance(data, dict):
             for key in ("scenes", "场景", "scene_list"):

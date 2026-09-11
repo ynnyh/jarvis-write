@@ -102,7 +102,7 @@ async def build_production_pack(
         if isinstance(item, dict) and item.get("seq") is not None:
             try:
                 ann[int(item["seq"])] = item
-            except (TypeError, ValueError):
+            except (TypeError, ValueError):  # seq 非数字:该条标注跳过
                 continue
 
     char_by_name, char_by_alias = character_anchor_maps(db, project.id)

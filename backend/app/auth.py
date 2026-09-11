@@ -63,7 +63,7 @@ def _decode_token(token: str) -> int | None:
             token, get_settings().jwt_secret, algorithms=[_ALGO]
         )
         return int(payload["sub"])
-    except (jwt.PyJWTError, KeyError, ValueError):
+    except (jwt.PyJWTError, KeyError, ValueError):  # token 无效/过期/缺 sub 一律按未登录处理,由调用方回 401
         return None
 
 

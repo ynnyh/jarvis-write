@@ -382,7 +382,7 @@ async def read_episode_bgm(
         rel = prefix + ext
         try:
             path = storage.resolve(rel)
-        except storage.UploadError:
+        except storage.UploadError:  # 该后缀配不出可用路径:继续试下一个,属探测而非错误
             continue
         if path.is_file():
             return Response(
@@ -405,7 +405,7 @@ async def delete_episode_bgm(
         rel = f"drama/{project_id}/bgm{episode_id}.{ext}"
         try:
             path = storage.resolve(rel)
-        except storage.UploadError:
+        except storage.UploadError:  # 同上:依次探测 BGM 可能的后缀
             continue
         if path.is_file():
             path.unlink()
@@ -443,7 +443,7 @@ async def adapt_fidelity(project_id: int, db: Session = Depends(get_db)):
         for n in (getattr(ep, "source_chapters", None) or []):
             try:
                 n = int(n)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError):  # 章号非数字:该条来源标记跳过
                 continue
             if n > 0 and n not in covered:
                 covered.append(n)

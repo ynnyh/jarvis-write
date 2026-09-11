@@ -77,7 +77,7 @@ def salvage_json_objects(text: str) -> list[dict]:
                 continue  # 不是叶子:里头的条目已经单独收了
             try:
                 obj = json.loads(s[start : i + 1])
-            except json.JSONDecodeError:
+            except json.JSONDecodeError:  # 不是合法 JSON 片段:继续找下一个候选
                 continue
             if isinstance(obj, dict):
                 out.append(obj)

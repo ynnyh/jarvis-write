@@ -166,7 +166,7 @@ class AnthropicAdapter(LLMAdapter):
                         payload = line[len("data:"):].strip()
                         try:
                             chunk = json.loads(payload)
-                        except json.JSONDecodeError:
+                        except json.JSONDecodeError:  # 流中非 JSON 片段(注释/心跳):跳过
                             continue
                         kind = chunk.get("type")
                         if kind == "error":

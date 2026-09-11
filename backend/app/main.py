@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 for _stream in (sys.stdout, sys.stderr):
     try:
         _stream.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    except (AttributeError, ValueError):
+    except (AttributeError, ValueError):  # 该流不支持 reconfigure(非 TTY):保持默认编码即可
         pass
 
 from app.api.auth import router as auth_router
