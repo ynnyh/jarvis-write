@@ -1,37 +1,10 @@
 // src/promoApi.ts — 宣传片工坊 API 客户端(对齐 backend/app/api/promo.py)。
-// 独立模块(与 dramaApi 同理由:api.ts 并行开发占用);SSE 研讨流复用 api.ts 的导出
-// (token/createSseDecoder/ApiError),api.ts 稳定后可并入。
-import { ApiError, apiBase, createSseDecoder, token } from "./api";
+// 独立模块(与 dramaApi 同理由)。传输层已统一到 ./http;SSE 研讨流仍复用
+// api.ts 的 createSseDecoder 解帧。
+import { createSseDecoder } from "./api";
+import { ApiError, apiBase, req, token } from "./http";
 
 const LLM_TIMEOUT = 900_000;
-
-async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 30000): Promise<T> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const headers: Record<string, string> = {};
-    if (body !== undefined) headers["Content-Type"] = "application/json";
-    const tk = token.get();
-    if (tk) headers["Authorization"] = `Bearer ${tk}`;
-    const res = await fetch(path, {
-      method,
-      headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal: ctrl.signal,
-    });
-    if (!res.ok) {
-      let detail = `HTTP ${res.status}`;
-      try {
-        const j = await res.json();
-        detail = j.detail ?? JSON.stringify(j);
-      } catch { /* ignore */ }
-      throw new ApiError(res.status, detail);
-    }
-    return (await res.json()) as T;
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 // ---------- 类型 ----------
 

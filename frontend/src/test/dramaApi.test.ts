@@ -7,14 +7,19 @@
 //   哪天有人图省事改回 <img src={url}>,这条测试要拦下来;
 // - 定妆照挂在角色卡上、静帧挂在分镜格上,两条路径长得很像(characters/{id}/reference
 //   vs shots/{id}/asset),拼错了照样 200(打到别的资源上),所以路径也钉住。
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 import { dramaApi } from "../dramaApi";
-import { token } from "../api";
+import { setUnauthorizedHandler, token } from "../api";
 
 beforeEach(() => {
   localStorage.clear();
   vi.restoreAllMocks();
+});
+
+afterEach(() => {
+  // setUnauthorizedHandler 是模块级单例,用完复位,免得漏给后面的用例
+  setUnauthorizedHandler(() => {});
 });
 
 function okFetch(payload: unknown = { shot: { id: 9 } }) {
@@ -91,5 +96,33 @@ describe("视频段计划", () => {
     await dramaApi.getClips(7, 3, 15);
     expect(mockFetch.mock.calls[0][0])
       .toBe("/api/projects/7/drama/episodes/3/clips?limit_s=15");
+  });
+});
+
+// 下面两条钉的是「各写各的 req」留下的两处真实差异(技术债第 1 档 D):
+// 漫剧/宣传片等 4 个模块原自写 req 用裸 path,不认 apiBase();8 个模块没有一份处理 401。
+// 统一到 http.ts 后两者自动对齐——所以测试也从「模块自己的行为」变成「共享层的契约」。
+describe("工坊模块复用统一传输层", () => {
+  it("带服务器前缀时请求打到 apiBase 上(原自写 req 只认裸 path)", async () => {
+    localStorage.setItem("jarvis_server", "https://api.example.com/");
+    const mockFetch = okFetch({ plan: { limit_s: 15, segments: [] } });
+
+    await dramaApi.getClips(7, 3, 15);
+
+    expect(mockFetch.mock.calls[0][0])
+      .toBe("https://api.example.com/api/projects/7/drama/episodes/3/clips?limit_s=15");
+  });
+
+  it("401 清 token 并触发跳登录(原自写 req 什么都不做)", async () => {
+    token.set("tk");
+    const onUnauth = vi.fn();
+    setUnauthorizedHandler(onUnauth);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false, status: 401, json: async () => ({ detail: "登录已过期" }),
+    }));
+
+    await expect(dramaApi.getClips(7, 3)).rejects.toThrow("登录已过期");
+    expect(token.get()).toBe("");
+    expect(onUnauth).toHaveBeenCalledTimes(1);
   });
 });

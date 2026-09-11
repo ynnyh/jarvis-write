@@ -1,131 +1,14 @@
 // src/api.ts — 后端 API 客户端(对齐 backend/app/api/*)
-// 服务器地址:默认空 = 同源。安卓壳(Capacitor)为热更新模式——WebView 直接加载
-// 官方服务器上的界面(server.url),页面与 API 天然同源;浏览器/桌面亦同源。
-// 若未来出现「本地壳 + 远程 API」形态,再恢复从 localStorage 读取服务器前缀。
-const SERVER_KEY = "jarvis_server";
+//
+// 传输原语(apiBase / token / 401 处置 / 超时 / 错误翻译 / req)已抽到 ./http。
+// 此前 8 个工坊模块各自复刻了一份 req,行为互不一致(详见 http.ts 顶部注释);
+// 本文件与各模块现在共用同一份,不再各写各的。
+//
+// 兼容说明:下面 re-export 的符号,既有 `from "./api"` 的导入方无需改路径
+// (约 100 个文件);新代码请直接 `from "./http"`。
+import { apiBase, ApiError, authHeaders, notifyUnauthorized, req, reqForm, token } from "./http";
 
-export function apiBase(): string {
-  try {
-    return (localStorage.getItem(SERVER_KEY) || "").trim().replace(/\/+$/, "");
-  } catch {
-    return "";
-  }
-}
-
-const TOKEN_KEY = "jarvis_token";
-
-export const token = {
-  get: () => localStorage.getItem(TOKEN_KEY) || "",
-  set: (t: string) => localStorage.setItem(TOKEN_KEY, t),
-  clear: () => localStorage.removeItem(TOKEN_KEY),
-};
-
-// 收到 401 时的回调:由 App 注册,统一跳登录
-let onUnauthorized: (() => void) | null = null;
-export function setUnauthorizedHandler(fn: () => void) { onUnauthorized = fn; }
-
-/** 带 HTTP 状态码的 API 错误:调用方可据 status 分流(如 409 冲突需显性处理,而非当普通报错)。
- *  仍是 Error 子类——errMsg 照常取 message,现有 `e instanceof Error` 判断不受影响。 */
-export class ApiError extends Error {
-  status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.name = "ApiError";
-    this.status = status;
-  }
-}
-
-/** 把 fetch 的网络层失败翻成人话。
- *  fetch 对「连不上 / 被中途掐断 / 请求超时」一律只给一句 `TypeError: Failed to fetch`,
- *  原样上屏用户没法判断是自己断网、是等太久,还是服务挂了——线上就吃过这个:起名的
- *  同步长请求被链路掐断,页面只显示 "Failed to fetch",后端日志里连这条请求都没有。
- *  status 用 0 表示「压根没拿到 HTTP 状态」,调用方按 status 分流的逻辑(如 409)不受影响。 */
-function netError(timedOut: boolean, timeoutMs: number): ApiError {
-  return new ApiError(
-    0,
-    timedOut
-      ? `请求超时:等了 ${Math.round(timeoutMs / 1000)} 秒没有响应。服务可能正忙,请稍后重试。`
-      : "网络请求失败:连不上服务器,或连接被中途掐断。请检查网络后重试。",
-  );
-}
-
-/** multipart 上传(文件导入等):不设 Content-Type(浏览器自动带 boundary),大文件放宽超时。 */
-async function reqForm<T>(path: string, form: FormData, timeoutMs = 120000): Promise<T> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const headers: Record<string, string> = {};
-    const tk = token.get();
-    if (tk) headers["Authorization"] = `Bearer ${tk}`;
-    let res: Response;
-    try {
-      res = await fetch(apiBase() + path, { method: "POST", headers, body: form, signal: ctrl.signal });
-    } catch {
-      throw netError(ctrl.signal.aborted, timeoutMs);
-    }
-    if (!res.ok) {
-      if (res.status === 401) {
-        token.clear();
-        onUnauthorized?.();
-      }
-      let detail = `HTTP ${res.status}`;
-      try {
-        const j = await res.json();
-        detail = j.detail ?? JSON.stringify(j);
-      } catch { /* ignore */ }
-      throw new ApiError(res.status, detail);
-    }
-    return (await res.json()) as T;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 30000): Promise<T> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const headers: Record<string, string> = {};
-    if (body) headers["Content-Type"] = "application/json";
-    const tk = token.get();
-    if (tk) headers["Authorization"] = `Bearer ${tk}`;
-    let res: Response;
-    try {
-      res = await fetch(apiBase() + path, {
-        method,
-        headers,
-        body: body ? JSON.stringify(body) : undefined,
-        signal: ctrl.signal,
-      });
-    } catch {
-      // 连 HTTP 状态都没拿到:自己 abort 的(超时)/ 断网 / 连接被掐
-      throw netError(ctrl.signal.aborted, timeoutMs);
-    }
-    if (!res.ok) {
-      if (res.status === 401) {
-        token.clear();
-        onUnauthorized?.();
-      }
-      let detail = `HTTP ${res.status}`;
-      try {
-        const j = await res.json();
-        detail = j.detail ?? JSON.stringify(j);
-      } catch { /* ignore */ }
-      throw new ApiError(res.status, detail);
-    }
-    try {
-      return (await res.json()) as T;
-    } catch (e) {
-      // 响应头到了但正文没读完:仍是连接层断的;SyntaxError 例外(服务端返了非 JSON)
-      if (e instanceof SyntaxError) {
-        throw new ApiError(res.status, "服务返回了无法解析的内容,请重试。");
-      }
-      throw netError(ctrl.signal.aborted, timeoutMs);
-    }
-  } finally {
-    clearTimeout(timer);
-  }
-}
+export { apiBase, token, setUnauthorizedHandler, ApiError, postImage, imageBlobUrl, downloadFile } from "./http";
 
 // ---------- SSE 流式(真流式打字机)----------
 // EventSource 不能带 Authorization 头,故用 fetch + ReadableStream 手工解帧。
@@ -162,46 +45,6 @@ export function createSseDecoder(): (chunk: string) => SseFrame[] {
   };
 }
 
-// ---------- 图片上传 / 鉴权读取(drama/clips/birthday/series 四个制片工坊共用) ----------
-
-function authHeaders(): Record<string, string> {
-  const tk = token.get();
-  return tk ? { Authorization: `Bearer ${tk}` } : {};
-}
-
-/** multipart 上传一张图(note 随表单走)。不能手设 Content-Type——浏览器要自己带 boundary。
- *  401 与 req 同口径:清 token 并触发统一跳登录。 */
-export async function postImage<T>(path: string, file: File, note = ""): Promise<T> {
-  const fd = new FormData();
-  fd.append("file", file);
-  fd.append("note", note);
-  const res = await fetch(apiBase() + path, { method: "POST", headers: authHeaders(), body: fd });
-  if (!res.ok) {
-    if (res.status === 401) {
-      token.clear();
-      onUnauthorized?.();
-    }
-    let detail = `HTTP ${res.status}`;
-    try { const j = await res.json(); detail = j.detail ?? detail; } catch { /* ignore */ }
-    throw new ApiError(res.status, detail);
-  }
-  return (await res.json()) as T;
-}
-
-/** 读一张鉴权图 → 本地 blob URL:读取端点要 Authorization 头,<img src> 带不了。
- *  调用方负责 URL.revokeObjectURL 释放(共享 RefThumb 组件已带释放逻辑)。 */
-export async function imageBlobUrl(path: string): Promise<string> {
-  const res = await fetch(apiBase() + path, { headers: authHeaders() });
-  if (!res.ok) {
-    if (res.status === 401) {
-      token.clear();
-      onUnauthorized?.();
-    }
-    throw new ApiError(res.status, `HTTP ${res.status}`);
-  }
-  return URL.createObjectURL(await res.blob());
-}
-
 /** 发起一条 SSE 流,逐帧回调 onFrame。鉴权/401 与 req 对齐;非 2xx(流还没开始)抛 ApiError。
  *  GET/POST 都走这里:POST 用于对话流,GET 用于订阅任务的实时正文。 */
 async function sseStream(
@@ -215,10 +58,7 @@ async function sseStream(
   if (tk) headers["Authorization"] = `Bearer ${tk}`;
   const res = await fetch(apiBase() + path, { ...init, headers, signal });
   if (!res.ok || !res.body) {
-    if (res.status === 401) {
-      token.clear();
-      onUnauthorized?.();
-    }
+    if (res.status === 401) notifyUnauthorized();
     let detail = `HTTP ${res.status}`;
     try {
       const j = await res.json();
@@ -276,43 +116,6 @@ async function runDiscussStream<T>(
   if (errDetail !== null) throw new ApiError(502, errDetail);
   if (done === null) throw new ApiError(0, "对话意外中断,请重试");
   return done;
-}
-
-// 鉴权下载:导出接口需要 Bearer token,普通 <a href> 不会带 Authorization 头,
-// 所以用 fetch 拿 blob 再触发浏览器下载。filename 优先取 Content-Disposition。
-export async function downloadFile(path: string, fallbackName: string): Promise<void> {
-  const headers: Record<string, string> = {};
-  const tk = token.get();
-  if (tk) headers["Authorization"] = `Bearer ${tk}`;
-  const res = await fetch(apiBase() + path, { headers });
-  if (!res.ok) {
-    if (res.status === 401) {
-      token.clear();
-      onUnauthorized?.();
-    }
-    let detail = `HTTP ${res.status}`;
-    try {
-      const j = await res.json();
-      detail = j.detail ?? JSON.stringify(j);
-    } catch { /* ignore */ }
-    throw new Error(detail);
-  }
-  let name = fallbackName;
-  const disp = res.headers.get("Content-Disposition") || "";
-  // 兼容 filename*=UTF-8''xxx 与 filename="xxx" 两种写法
-  const star = /filename\*=UTF-8''([^;]+)/i.exec(disp);
-  const plain = /filename="?([^";]+)"?/i.exec(disp);
-  if (star) name = decodeURIComponent(star[1]);
-  else if (plain) name = plain[1].trim();
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
 }
 
 // LLM 长任务统一超时:章节生成/架构生成可能 3-10 分钟

@@ -1,31 +1,9 @@
 // src/seriesApi.ts — 角色系列短片工坊 API 客户端(对齐 backend/app/api/series.py)。
-// 独立模块(同 clipsApi/birthdayApi 的理由);导出用鉴权 fetch(复用 api.ts 的 token)。
-import { ApiError, imageBlobUrl, postImage, token } from "./api";
+// 独立模块(同 clipsApi/birthdayApi 的理由);传输层已统一到 ./http。
+import { imageBlobUrl, postImage, req } from "./http";
 
 // AI 代写定妆是同步 LLM 调用(单发),给长超时
 const LLM_TIMEOUT = 300_000;
-
-async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 30000): Promise<T> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const headers: Record<string, string> = {};
-    if (body !== undefined) headers["Content-Type"] = "application/json";
-    const tk = token.get();
-    if (tk) headers["Authorization"] = `Bearer ${tk}`;
-    const res = await fetch(path, {
-      method, headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal: ctrl.signal,
-    });
-    if (!res.ok) {
-      let detail = `HTTP ${res.status}`;
-      try { const j = await res.json(); detail = j.detail ?? JSON.stringify(j); } catch { /* ignore */ }
-      throw new ApiError(res.status, detail);
-    }
-    return (await res.json()) as T;
-  } finally { clearTimeout(timer); }
-}
 
 export interface SeriesDirection { key: string; label: string; tip: string }
 

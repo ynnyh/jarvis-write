@@ -1,38 +1,9 @@
 // src/renderApi.ts — 出片引擎 API 客户端(对齐 backend/app/api/render.py)。
 // 轻量档:文+图 → 视频,生成外包给 autodl.art 托管的 ComfyUI 工作流;
 // 这里只管「配置读写 / 提交出片 / 版本历史 / 采用某版 / 读草片」。
-// 独立成模块的理由与 dramaApi 相同:api.ts 被主线占用,避免同文件编辑冲突。
-import { apiBase, ApiError, token } from "./api";
+// 独立成模块的理由与 dramaApi 相同;传输层(含共享 authHeaders)已统一到 ./http。
+import { ApiError, apiBase, authHeaders, req } from "./http";
 import type { DramaShot } from "./dramaApi";
-
-async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 30000): Promise<T> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const headers: Record<string, string> = {};
-    if (body) headers["Content-Type"] = "application/json";
-    const tk = token.get();
-    if (tk) headers["Authorization"] = `Bearer ${tk}`;
-    const res = await fetch(apiBase() + path, {
-      method, headers,
-      body: body ? JSON.stringify(body) : undefined,
-      signal: ctrl.signal,
-    });
-    if (!res.ok) {
-      let detail = `HTTP ${res.status}`;
-      try { const j = await res.json(); detail = j.detail ?? JSON.stringify(j); } catch { /* ignore */ }
-      throw new ApiError(res.status, detail);
-    }
-    return (await res.json()) as T;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function authHeaders(): Record<string, string> {
-  const tk = token.get();
-  return tk ? { Authorization: `Bearer ${tk}` } : {};
-}
 
 /** 出片配置(token 打码回显;token 留空提交 = 不改动已存)。 */
 export interface RenderConfigOut {

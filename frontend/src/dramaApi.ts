@@ -1,36 +1,7 @@
 // src/dramaApi.ts — 漫剧工坊 API 客户端(对齐 backend/app/api/drama.py)。
-// 独立模块说明:api.ts 正被并行开发占用,为避免同文件编辑冲突,漫剧接口自成
-// 模块并复用 api.ts 的既有导出(token/ApiError/downloadFile);api.ts 稳定后可并入。
-import { ApiError, downloadFile, imageBlobUrl, postImage, token } from "./api";
-
-// 复刻 api.ts 的 req 行为(401 统一跳登录由 ApiError 抛出方处理,这里保持一致简化)
-async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 30000): Promise<T> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const headers: Record<string, string> = {};
-    if (body) headers["Content-Type"] = "application/json";
-    const tk = token.get();
-    if (tk) headers["Authorization"] = `Bearer ${tk}`;
-    const res = await fetch(path, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-      signal: ctrl.signal,
-    });
-    if (!res.ok) {
-      let detail = `HTTP ${res.status}`;
-      try {
-        const j = await res.json();
-        detail = j.detail ?? JSON.stringify(j);
-      } catch { /* ignore */ }
-      throw new ApiError(res.status, detail);
-    }
-    return (await res.json()) as T;
-  } finally {
-    clearTimeout(timer);
-  }
-}
+// 独立模块:api.ts 曾被并行开发占用,漫剧接口自成模块。传输层(超时 / 鉴权 / 401 处置 /
+// 错误翻译 / req)已统一到 ./http,这里不再自写 req。
+import { downloadFile, imageBlobUrl, postImage, req } from "./http";
 
 // LLM 长任务(规划/剧本/分镜/提示词)统一超时:与 api.ts 的章节生成对齐
 const LLM_TIMEOUT = 900_000;

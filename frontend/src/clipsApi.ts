@@ -1,30 +1,8 @@
 // src/clipsApi.ts — 情绪短片工坊 API 客户端(对齐 backend/app/api/clips.py)。
-// 独立模块(同 dramaApi/promoApi 的理由);导出用鉴权 fetch(复用 api.ts 的 token)。
-import { ApiError, apiBase, imageBlobUrl, postImage, token } from "./api";
+// 独立模块(同 dramaApi/promoApi 的理由);传输层已统一到 ./http。
+import { apiBase, imageBlobUrl, postImage, req, token } from "./http";
 
 const LLM_TIMEOUT = 900_000;
-
-async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 30000): Promise<T> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const headers: Record<string, string> = {};
-    if (body !== undefined) headers["Content-Type"] = "application/json";
-    const tk = token.get();
-    if (tk) headers["Authorization"] = `Bearer ${tk}`;
-    const res = await fetch(apiBase() + path, {
-      method, headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal: ctrl.signal,
-    });
-    if (!res.ok) {
-      let detail = `HTTP ${res.status}`;
-      try { const j = await res.json(); detail = j.detail ?? JSON.stringify(j); } catch { /* ignore */ }
-      throw new ApiError(res.status, detail);
-    }
-    return (await res.json()) as T;
-  } finally { clearTimeout(timer); }
-}
 
 export interface ClipTheme { key: string; label: string; directive: string; group?: string }
 export interface PlayGroup { key: string; label: string; desc: string }
