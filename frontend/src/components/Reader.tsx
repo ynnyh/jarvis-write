@@ -3,7 +3,10 @@
 // 传入 toc 时变为全书模式 —— PC 左侧目录栏,窄屏(≤640px)收成「目录」抽屉;
 // 传入 polishCtx 时开启段落点选润色(选段 → 输方向 → 对照 → 替换并同步一致性引擎);
 // 传入 restoreScroll / onScrollPos 时支持全书阅读位置记忆(恢复与上报)。
-import { ChapterDetail } from "../api";
+import { useEffect, useState } from "react";
+import { ChapterDetail, ChapterFeedbackOut } from "../api";
+import { api } from "../api";
+import { errMsg } from "../pollJob";
 import { Paragraphs } from "./reader/paragraphs";
 import { STATUS_BADGE, STATUS_CN } from "./reader/status";
 import { DIRECTION_CHIPS, FONT_OPTIONS, SIZE_OPTIONS, THEME_OPTIONS } from "./reader/prefs";
@@ -22,6 +25,7 @@ interface Props {
   loading: boolean;            // 翻章/加载中:禁用翻页按钮;chapter 为空时显示加载态
   chapter: ChapterDetail | null;
   title?: string;              // 章节标题(来自大纲)
+  projectId?: number;          // 传入即开启章末反馈(👍/👎,docs/17 M2)
   hasPrev: boolean;
   hasNext: boolean;
   onPrev: () => void;
@@ -40,7 +44,7 @@ interface Props {
 }
 
 export default function Reader({
-  loading, chapter, title, hasPrev, hasNext, onPrev, onNext, onClose, toc,
+  loading, chapter, title, projectId, hasPrev, hasNext, onPrev, onNext, onClose, toc,
   restoreScroll, onScrollPos, polishCtx,
 }: Props) {
   const {
@@ -241,6 +245,13 @@ export default function Reader({
                 </div>
               )}
             </div>
+            {projectId != null && chapter != null && (
+              <FeedbackBar
+                pid={projectId}
+                num={chapter.chapter_number}
+                disabled={loading}
+              />
+            )}
             <div className="reader-nav">
               <button disabled={!hasPrev || loading} onClick={onPrev}>
                 ← 上一章
@@ -400,6 +411,100 @@ export default function Reader({
           <div className="reader-content muted"><span className="spin" />加载正文…</div>
         )}
       </div>
+    </div>
+  );
+}
+
+// 章末反馈(docs/17 M2):👍/👎 + 差评四桶。观测数据不是门禁,
+// 不参与任何卡口;归因在 admin 质量卡做交叉。挂在用户「读完的地方」。
+const FB_CATEGORIES: { key: string; label: string }[] = [
+  { key: "style_flavor", label: "文风 AI 味" },
+  { key: "fact_error", label: "事实/设定错误" },
+  { key: "pacing", label: "节奏平淡/失控" },
+  { key: "format_trunc", label: "格式/截断" },
+];
+
+function FeedbackBar({ pid, num, disabled }: { pid: number; num: number; disabled: boolean }) {
+  const [fb, setFb] = useState<ChapterFeedbackOut | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [comment, setComment] = useState("");
+  const [sending, setSending] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    // 翻章重置本地态,拉当前章的已有反馈
+    setFb(null); setExpanded(false); setPicked([]); setComment(""); setErr("");
+    api.getMyChapterFeedback(pid, num)
+      .then((r) => r && setFb(r))
+      .catch(() => { /* 观测数据拉不到就当没有,别打扰阅读 */ });
+  }, [pid, num]);
+
+  const submit = async (rating: "good" | "bad", categories: string[], commentText: string) => {
+    setSending(true); setErr("");
+    try {
+      const saved = await api.setChapterFeedback(pid, num, {
+        rating, categories, comment: commentText,
+      });
+      setFb(saved);
+      setExpanded(false);
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const togglePick = (key: string) =>
+    setPicked((v) => (v.includes(key) ? v.filter((k) => k !== key) : [...v, key]));
+
+  const isBad = fb?.rating === "bad";
+  return (
+    <div className="reader-fb">
+      <div className="reader-fb-row">
+        <span className="muted reader-fb-ask">这一章读下来感觉如何?</span>
+        <button
+          className={"btn-sm" + (fb?.rating === "good" ? " primary" : "")}
+          disabled={disabled || sending}
+          onClick={() => void submit("good", [], "")}
+        >👍</button>
+        <button
+          className={"btn-sm" + (isBad ? " primary" : "")}
+          disabled={disabled || sending}
+          onClick={() => { setExpanded((v) => !v); setPicked(fb?.categories ?? []); setComment(fb?.comment ?? ""); }}
+        >👎</button>
+        {fb?.stale && <span className="muted reader-fb-stale">(改稿后旧反馈已过期)</span>}
+      </div>
+      {expanded && (
+        <div className="reader-fb-detail">
+          <div className="reader-fb-chips">
+            {FB_CATEGORIES.map((c) => (
+              <button
+                key={c.key}
+                className={"btn-sm chip" + (picked.includes(c.key) ? " on" : "")}
+                disabled={sending}
+                onClick={() => togglePick(c.key)}
+              >{c.label}</button>
+            ))}
+          </div>
+          <input
+            className="reader-fb-comment"
+            placeholder="选填:一句话说明问题"
+            value={comment}
+            maxLength={2000}
+            onChange={(e) => setComment(e.target.value)}
+          />
+          <div className="reader-fb-actions">
+            <button
+              className="btn-sm primary"
+              disabled={sending}
+              onClick={() => void submit("bad", picked, comment)}
+            >{sending ? "提交中…" : "提交反馈"}</button>
+            <button className="btn-sm" disabled={sending} onClick={() => setExpanded(false)}>取消</button>
+          </div>
+          {err && <div className="msg-err">{err}</div>}
+        </div>
+      )}
     </div>
   );
 }

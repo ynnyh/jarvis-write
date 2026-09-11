@@ -23,6 +23,7 @@ from app.db.models.setting import ProviderConfig, ProviderSetting
 from app.db.models.summary import ChapterSummary
 from app.db.models.chapter_state import ChapterState
 from app.db.models.chapter_issue import ChapterIssue
+from app.db.models.chapter_feedback import ChapterFeedback
 from app.db.models.motif import WritingMotif
 from app.db.models.mark import ChapterMark
 from app.db.models.writing_card import WritingCard
@@ -74,6 +75,7 @@ __all__ = [
     "ChapterSummary",
     "ChapterState",
     "ChapterIssue",
+    "ChapterFeedback",
     "WritingMotif",
     "ChapterMark",
     "LlmUsage",

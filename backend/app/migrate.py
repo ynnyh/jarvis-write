@@ -970,6 +970,22 @@ def _add_fact_usage_table() -> None:
     logger.info("迁移:补齐事实消费日志表(fact_usages)")
 
 
+def _add_chapter_feedback_table() -> None:
+    """建章节反馈表(幂等,docs/17 M2)。
+
+    与 _add_fact_usage_table 同一套兜底策略:Alembic 正常时不做事,
+    「Alembic 未接入/迁移失败」时靠 create_all 补表。
+    """
+    insp = inspect(engine)
+    if "chapter_feedback" in insp.get_table_names():
+        return
+    from app.db.base import Base
+    import app.db.models  # noqa: F401 — 注册全部模型
+
+    Base.metadata.create_all(bind=engine)
+    logger.info("迁移:补齐章节反馈表(chapter_feedback)")
+
+
 def _add_llm_usage_duration_column() -> None:
     """llm_usage 补 duration_ms 列(单次调用毫秒耗时,幂等)。
 
@@ -1032,6 +1048,7 @@ def run_migrations() -> None:
     _add_scene_tables()
     _add_scene_level_column()
     _add_llm_usage_duration_column()
+    _add_chapter_feedback_table()
     _add_fact_usage_table()
     _disable_word_guard_default()
     _migrate_finalized_to_approved()

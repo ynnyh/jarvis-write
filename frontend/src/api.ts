@@ -285,6 +285,15 @@ export interface SceneList {
 export interface ChapterBrief {
   chapter_number: number; status: string; word_count: number; is_stale: boolean;
 }
+/** 章节反馈(docs/17 M2):差评四桶 style_flavor/fact_error/pacing/format_trunc */
+export interface ChapterFeedbackOut {
+  rating: "good" | "bad";
+  categories: string[];
+  comment: string;
+  stale: boolean;
+  created_at: string;
+  updated_at: string;
+}
 export interface ChapterDetail extends ChapterBrief {
   draft_content: string; final_content: string; outline_version_used: number;
   // 章末交接契约(docs/08 §5.2):approve 等接口回显;none=从未提取 / ok / failed
@@ -866,6 +875,14 @@ export interface QualityOverview {
   };
   issues: { open_count: number; by_type: Record<string, number>; by_severity: Record<string, number> };
   volume: { chapters: number; avg_word_count: number };
+  feedback: {
+    total: number; good: number; bad: number; bad_ratio: number;
+    by_category: Record<string, number>;
+    cross: {
+      bad_chapters: { count: number; degraded_ratio: number };
+      baseline: { degraded_ratio: number };
+    };
+  };
 }
 export interface InviteCodeItem {
   id: number; code: string; note: string | null;
@@ -1205,6 +1222,10 @@ export const api = {
 
   listChapters: (pid: number) => req<ChapterBrief[]>("GET", `/api/projects/${pid}/chapters`),
   getChapter: (pid: number, n: number) => req<ChapterDetail>("GET", `/api/projects/${pid}/chapters/${n}`),
+  getMyChapterFeedback: (pid: number, n: number) =>
+    req<ChapterFeedbackOut | null>("GET", `/api/projects/${pid}/chapters/${n}/feedback`),
+  setChapterFeedback: (pid: number, n: number, body: { rating: "good" | "bad"; categories?: string[]; comment?: string }) =>
+    req<ChapterFeedbackOut>("POST", `/api/projects/${pid}/chapters/${n}/feedback`, body),
   generateChapter: (pid: number, n: number, tendency: Tendency) =>
     req<GenerateChapterResponse>("POST", `/api/projects/${pid}/chapters/${n}/generate`, { tendency }, LLM_TIMEOUT),
   generateChapterAsync: (pid: number, n: number, tendency: Tendency, revision = "") =>

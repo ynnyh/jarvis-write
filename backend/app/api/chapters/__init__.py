@@ -9,6 +9,7 @@
 - issues      一致性问题清单、状态流转、按问题修订
 - release     人工审核通过、quarantined 放行
 - versions    历史版本列表/详情/回退
+- feedback    章节反馈(👍/👎 + 差评四桶,docs/17 M2)
 
 本文件除聚合上述子 router 外,自持两个「根级读取」端点(章节列表 / 单章详情):
 列表端点是空 path,FastAPI 要求它挂在带 prefix 的 router 上(bare 子 router 无
@@ -28,7 +29,7 @@ from app.auth import get_current_user
 from app.db.models import Chapter
 from app.db.session import get_db
 
-from . import extraction, generation, issues, release, revision, versions
+from . import extraction, feedback, generation, issues, release, revision, versions
 
 # 向后兼容 re-export:外部按 `from app.api.chapters import _flavor_dict` 引用
 # (tests/test_ai_flavor.py);列入 __all__ 表明是有意导出。
@@ -55,6 +56,7 @@ router.include_router(extraction.router)
 router.include_router(issues.router)
 router.include_router(release.router)
 router.include_router(versions.router)
+router.include_router(feedback.router)
 
 
 # —— 根级读取端点 ——

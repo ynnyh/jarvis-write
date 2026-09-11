@@ -20,10 +20,10 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.api.admin import get_current_admin
-from app.auth import hash_password
+from app.auth import get_current_user, hash_password
 from app.db.base import Base
 import app.db.models  # noqa: F401 — 注册全部模型
-from app.db.models import Chapter, ChapterIssue, LlmUsage, Project, User
+from app.db.models import Chapter, ChapterFeedback, ChapterIssue, LlmUsage, Project, User
 from app.db.session import get_db
 from app.main import app
 
@@ -204,3 +204,95 @@ def test_days_param_validated(env):
     assert client.get("/api/admin/quality-overview?days=0").status_code == 422
     assert client.get("/api/admin/quality-overview?days=366").status_code == 422
     assert client.get("/api/admin/quality-overview?days=7").status_code == 200
+
+
+# =============== 反馈闭环(docs/17 M2) ===============
+
+def _as_user(client: TestClient, user: User) -> None:
+    """把鉴权依赖指到隔离库用户:不走真实注册(注册流程有它自己的测试)。"""
+    app.dependency_overrides[get_current_user] = lambda: user
+
+
+def _mk_user(db) -> User:
+    u = User(username=f"fb_{uuid.uuid4().hex[:8]}", password_hash=hash_password("pass12345"))
+    db.add(u)
+    db.commit()
+    db.refresh(u)
+    return u
+
+
+def test_feedback_upsert_get_and_validation(env):
+    client, db = env
+    ch = _mk_chapter(db)
+    db.commit()
+    base = f"/api/projects/{ch.project_id}/chapters/{ch.chapter_number}"
+    user = _mk_user(db)
+    _as_user(client, user)
+    # 未登录(清掉 user override)→ 401
+    app.dependency_overrides.pop(get_current_user, None)
+    assert client.post(f"{base}/feedback", json={"rating": "good"}).status_code == 401
+
+    _as_user(client, user)
+
+    # 差评零分类零备注 → 422(必须给一个归因线索)
+    r = client.post(f"{base}/feedback", json={"rating": "bad", "categories": [], "comment": ""})
+    assert r.status_code == 422
+
+    # 非法分类 → 422
+    r = client.post(f"{base}/feedback", json={"rating": "bad", "categories": ["made_up_bucket"]})
+    assert r.status_code == 422
+
+    # 好评:categories 被清空(好评分桶无意义)
+    r = client.post(f"{base}/feedback", json={"rating": "good", "categories": ["pacing"]})
+    assert r.status_code == 200 and r.json()["categories"] == []
+
+    # 改判为差评:upsert 同一条,四桶去重保序
+    r = client.post(f"{base}/feedback",
+                    json={"rating": "bad",
+                          "categories": ["pacing", "style_flavor", "pacing"],
+                          "comment": "中段拖沓"})
+    out = r.json()
+    assert out["rating"] == "bad"
+    assert out["categories"] == ["pacing", "style_flavor"]
+    assert out["stale"] is False  # 正文没动过,指纹一致
+
+    # GET 回显自己的反馈
+    r = client.get(f"{base}/feedback")
+    assert r.status_code == 200 and r.json()["rating"] == "bad"
+
+    # 一人一条:另一用户独立计数
+    user2 = _mk_user(db)
+    _as_user(client, user2)
+    r = client.post(f"{base}/feedback", json={"rating": "good"})
+    assert r.status_code == 200
+    assert db.query(ChapterFeedback).filter(ChapterFeedback.chapter_id == ch.id).count() == 2
+
+    app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_feedback_cross_attribution(env):
+    """差评章的降级隔离率 vs 全体基线:归因半环的最小验证。"""
+    client, db = env
+    # 章 A:快照带 gate_degraded,差评
+    a = _mk_chapter(db, snapshot=_snapshot(passed=False, rounds=1,
+                                           triggers=("gate_degraded",)))
+    # 章 B:干净通过,无人反馈
+    _mk_chapter(db, snapshot=_snapshot(passed=True, rounds=0, triggers=()), number=2)
+    db.commit()
+
+    user = _mk_user(db)
+    _as_user(client, user)
+    base = f"/api/projects/{a.project_id}/chapters/{a.chapter_number}"
+    r = client.post(f"{base}/feedback",
+                    json={"rating": "bad", "categories": ["fact_error"]})
+    assert r.status_code == 200
+
+    out = _get(client)
+    fb = out["feedback"]
+    assert fb["total"] == 1 and fb["bad"] == 1 and fb["good"] == 0
+    assert fb["by_category"] == {"fact_error": 1}
+    # 差评章(1 章,带降级)降级率 1.0;全体有快照基线 1/2 = 0.5
+    assert fb["cross"]["bad_chapters"]["count"] == 1
+    assert fb["cross"]["bad_chapters"]["degraded_ratio"] == 1.0
+    assert fb["cross"]["baseline"]["degraded_ratio"] == 0.5
+    app.dependency_overrides.pop(get_current_user, None)

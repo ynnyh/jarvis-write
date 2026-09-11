@@ -29,6 +29,7 @@ from app.config import get_settings
 from app.db.models import (
     AppSetting,
     Chapter,
+    ChapterFeedback,
     ChapterIssue,
     FeatureUsage,
     InviteCode,
@@ -589,6 +590,37 @@ def quality_overview(db: Session, days: int) -> dict:
         Chapter.updated_at >= since
     ).one()
 
+    # 5) 用户反馈 + 交叉归因:差评章的截断率/降级率 vs 全体均值。
+    #    「没监控以为是模型能力问题,有监控发现是截断」——这一步就是归因。
+    fb_rows = (
+        db.query(ChapterFeedback.rating, ChapterFeedback.categories, ChapterFeedback.chapter_id)
+        .filter(ChapterFeedback.created_at >= since)
+        .all()
+    )
+    good = sum(1 for r, _c, _cid in fb_rows if r == "good")
+    bad = len(fb_rows) - good
+    cat_counts: dict[str, int] = {}
+    bad_chapter_ids: set[int] = set()
+    for rating, categories, chapter_id in fb_rows:
+        if rating != "bad":
+            continue
+        bad_chapter_ids.add(chapter_id)
+        for cat in categories or []:
+            cat_counts[cat] = cat_counts.get(cat, 0) + 1
+
+    def _degraded_ratio(chapter_ids: set[int]) -> float:
+        """一组章节里出现过门禁降级隔离的占比(llm_usage 无章节关联,
+        截断率做不了按章交叉——那是按调用计的口径,别假装能算)。"""
+        if not chapter_ids:
+            return 0.0
+        snaps = (
+            db.query(Chapter.review_snapshot)
+            .filter(Chapter.id.in_(chapter_ids))
+            .all()
+        )
+        degraded = sum(1 for (snap,) in snaps if _snap_has_trigger(snap, "gate_degraded"))
+        return _ratio(degraded, len(snaps))
+
     return {
         "days": days,
         "llm": {
@@ -629,7 +661,41 @@ def quality_overview(db: Session, days: int) -> dict:
             "chapters": int(vol_rows[0] or 0),
             "avg_word_count": round(float(vol_rows[1] or 0), 1),
         },
+        "feedback": {
+            "total": len(fb_rows),
+            "good": good,
+            "bad": bad,
+            "bad_ratio": _ratio(bad, len(fb_rows)),
+            "by_category": cat_counts,
+            "cross": {
+                "bad_chapters": {
+                    "count": len(bad_chapter_ids),
+                    "degraded_ratio": _degraded_ratio(bad_chapter_ids),
+                },
+                # 全体基线:差评章降级率显著高于它 → 差评主因在模型稳定性,
+                # 接近它 → 差评主因在内容本身(文风/节奏),与降级无关
+                "baseline": {
+                    "degraded_ratio": _ratio(gate_degraded, reviewed),
+                },
+            },
+        },
     }
+
+
+def _snap_has_trigger(snapshot_raw: str | None, trigger: str) -> bool:
+    """review_snapshot 里是否出现过指定 trigger(降级隔离等)。脏快照按 False。"""
+    if not snapshot_raw:
+        return False
+    try:
+        snap = json.loads(snapshot_raw)
+    except (ValueError, TypeError):
+        return False
+    if not isinstance(snap, dict):
+        return False
+    return any(
+        isinstance(e, dict) and e.get("trigger") == trigger
+        for e in (snap.get("rework_log") or [])
+    )
 
 
 class QualityOverviewOut(BaseModel):
@@ -638,6 +704,7 @@ class QualityOverviewOut(BaseModel):
     rework: dict
     issues: dict
     volume: dict
+    feedback: dict
 
 
 @router.get("/quality-overview", response_model=QualityOverviewOut)

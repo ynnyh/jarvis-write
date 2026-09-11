@@ -370,6 +370,12 @@ const ISSUE_TYPE_CN: Record<string, string> = {
   ambient: "环境连续性",
   cast: "人物在场",
 };
+const FB_CAT_CN: Record<string, string> = {
+  style_flavor: "文风 AI 味",
+  fact_error: "事实/设定错误",
+  pacing: "节奏",
+  format_trunc: "格式/截断",
+};
 
 function QualityOverviewCard() {
   const [data, setData] = useState<QualityOverview | null>(null);
@@ -462,6 +468,23 @@ function QualityOverviewCard() {
                   <td>章节体量</td>
                   <td>{data.volume.chapters} 章 · 均 {data.volume.avg_word_count} 字</td>
                   <td className="muted">窗口内有更新的章节</td>
+                </tr>
+                <tr>
+                  <td>用户反馈</td>
+                  <td>{data.feedback.total === 0 ? "暂无"
+                    : `👍 ${data.feedback.good} · 👎 ${data.feedback.bad}`}</td>
+                  <td className="muted">
+                    {Object.entries(data.feedback.by_category)
+                      .map(([k, n]) => `${FB_CAT_CN[k] ?? k} ${n}`).join(" · ") || "差评四桶见左侧"}
+                  </td>
+                </tr>
+                <tr>
+                  <td>交叉归因</td>
+                  <td>{data.feedback.cross.bad_chapters.count === 0 ? "—"
+                    : `${pct(data.feedback.cross.bad_chapters.degraded_ratio)} vs ${pct(data.feedback.cross.baseline.degraded_ratio)}`}</td>
+                  <td className="muted">
+                    差评章降级隔离率 vs 全体基线;显著更高 → 差评主因在模型稳定性,接近 → 在内容本身
+                  </td>
                 </tr>
               </tbody>
             </table>

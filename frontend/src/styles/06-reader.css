@@ -165,6 +165,28 @@
 }
 .reader-nav button { margin-left: 0; }
 
+/* ---- 章末反馈(docs/17 M2):👍/👎 + 差评四桶,观测数据不打扰阅读 ---- */
+.reader-fb {
+  flex-shrink: 0;
+  padding: 8px 20px;
+  border-top: 1px dashed var(--line);
+  font-size: 0.92em;
+}
+.reader-fb-row { display: flex; align-items: center; gap: 8px; }
+.reader-fb-ask { flex: 1; }
+.reader-fb-stale { font-size: 0.9em; }
+.reader-fb-detail { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.reader-fb-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.reader-fb-chips .chip.on { outline: 2px solid currentColor; }
+.reader-fb-comment {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+}
+.reader-fb-actions { display: flex; gap: 8px; }
+
 /* ---- 全书阅读:更宽版面 + 左侧章节目录(窄屏收为抽屉,见底部媒体查询) ---- */
 .reader-book { max-width: 1080px; }
 .reader-body { flex: 1; display: flex; min-height: 0; position: relative; }

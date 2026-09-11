@@ -538,6 +538,7 @@ export default function WritePanel({ pid, outlines }: Props) {
           loading={readerLoading}
           chapter={reader}
           title={readerOutline?.title}
+          projectId={pid}
           hasPrev={prevNum != null}
           hasNext={nextNum != null}
           onPrev={() => prevNum != null && openReader(prevNum)}
