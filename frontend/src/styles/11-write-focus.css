@@ -555,3 +555,9 @@
 .plotmap-fs-cell.payoff { background: var(--ok); }
 .plotmap-fs-cell.overdue { background: var(--err); }
 .plotmap-fs-desc { flex-shrink: 0; font-size: var(--fs-xs); }
+
+/* 梗健康度曲线:绿=已兑现,红=未兑现(一眼看出断档在哪几章) */
+.bh-bars.premise-curve { gap: 3px; height: 28px; }
+.bh-bars.premise-curve i { height: 100% !important; border-radius: 2px; }
+.bh-bars.premise-curve i.ok { background: var(--ok); }
+.bh-bars.premise-curve i.bad { background: var(--err); }
