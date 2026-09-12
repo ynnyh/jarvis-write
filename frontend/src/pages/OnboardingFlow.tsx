@@ -42,6 +42,15 @@ function ToneAutoApply({ shapeSug, setDim }: {
     appliedRef.current = true;
   }, [shapeSug, setDim]);
   if (!shapeSug) return null;
+  // 两个数组都空 = 模型给的标签全被目录过滤掉了:说实话,别让用户对着空芯片找「预选」
+  if (!shapeSug.tone.length && !shapeSug.elements.length) {
+    return (
+      <div className="card card-info mt-2">
+        <b>🎴 这次没给出合适的预选标签</b>
+        <div className="card-desc mt-1">{shapeSug.tone_reason} 想加就手动点标签,不选也行。</div>
+      </div>
+    );
+  }
   return (
     <div className="card card-info mt-2">
       <b>🎴 AI 已按概念预选了阅读手感</b>
@@ -619,7 +628,6 @@ export default function OnboardingFlow() {
                     <div className="card-desc">
                       节奏 / 结构 / 基调,可不选,AI 会均衡处理;想叠加的剧情元素(暗恋、双向奔赴、逆袭…)也可在这里勾选。进了工作台也能随时调。
                     </div>
-                    <ToneAutoApply shapeSug={shapeSug} setDim={setDim} />
                     {genreDim ? (
                       <div className="mt-2"><ToneDims tendency={tendency} onSet={setDim} /></div>
                     ) : (

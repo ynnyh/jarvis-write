@@ -145,8 +145,9 @@ export default function WritePanel({ pid, outlines }: Props) {
         </div>
       )}
 
-      {/* 首次进入的 3 步引导(点「知道了」后 localStorage 记住,不再出现) */}
-      <WriteGuide />
+      {/* 首次进入的 3 步引导(点「知道了」后 localStorage 记住,不再出现)——
+          渲染在 .write-main 里:它 max-width 800 居中,和正文卡同一容器;
+          放外层会以整个 write-zone(含 AI 窄栏)居中,宽屏上歪向右栏,视觉上「歪一截」 */}
 
       {/* ---- 移动端顶栏:←返回项目列表 + 当前章(点击开目录抽屉)+ 阅读入口 ---- */}
       {isMobile && (
@@ -171,6 +172,7 @@ export default function WritePanel({ pid, outlines }: Props) {
       <div className="write-body">
       {/* ---- 主场正文列:状态卡 + 蓝图卡 + 正文(段落气泡)+ 章尾下一章卡(移动端支持左右滑切章) ---- */}
       <div className="write-main" onTouchStart={onMainTouchStart} onTouchEnd={onMainTouchEnd}>
+        <WriteGuide />
         {versionsFor !== null && versions !== null && (
           <div ref={versionRef}>
             <VersionCompare

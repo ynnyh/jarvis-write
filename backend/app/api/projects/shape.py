@@ -70,6 +70,26 @@ def _dim_labels(node_data: dict, dim_key: str) -> list[str]:
     return []
 
 
+def _match_labels(raw_items: list, pool: list[str], cap: int) -> list[str]:
+    """模型输出 → 目录标签:先精确匹配,再包含匹配(「悬疑烧脑」→「悬疑」)。
+
+    模型总爱在池子标签上添字(实测「诙谐甜宠」「浪漫张力」),严格等值会把
+    预选全过滤空,界面上「已预选」却一个芯片都没亮。按「池标签与模型串互为
+    子串」回收;一个模型串可同时命中多个池标签(诙谐甜宠 → 诙谐 + 甜宠,
+    分别落在基调池和元素池),仍只从池子里回收,不发明新标签。
+    """
+    picked: list[str] = []
+    for item in raw_items:
+        s = str(item).strip()
+        if not s:
+            continue
+        hits = [s] if s in pool else [lab for lab in pool if lab in s or s in lab]
+        for lab in sorted(hits, key=len, reverse=True):
+            if lab not in picked:
+                picked.append(lab)
+    return picked[:cap]
+
+
 @router.post("/{project_id}/suggest-shape", response_model=ShapeSuggestion)
 async def suggest_shape(
     project_id: int,
@@ -100,8 +120,8 @@ async def suggest_shape(
         raise HTTPException(status_code=502, detail=f"推荐生成失败: {exc}") from exc
 
     data = parse_llm_json(raw) or {}
-    tone = [str(t) for t in (data.get("tone") or []) if str(t) in tone_labels][:3]
-    elements = [str(t) for t in (data.get("elements") or []) if str(t) in elements_labels][:3]
+    tone = _match_labels(data.get("tone") or [], tone_labels, 3)
+    elements = _match_labels(data.get("elements") or [], elements_labels, 3)
     scale = data.get("scale") if data.get("scale") in _SCALES else "mid"
     return ShapeSuggestion(
         tone=tone,

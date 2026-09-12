@@ -81,3 +81,25 @@ def test_suggest_shape_llm_failure_is_502(client):
     # 空回复不炸:返回空推荐(前端不预填即可)
     assert r.status_code == 200
     assert r.json()["tone"] == []
+
+
+def test_suggest_shape_recovers_compound_labels(client):
+    """模型爱在池标签上添字(「悬疑烧脑」「诙谐甜宠」):包含匹配回收,不再全军覆没。"""
+    from app.api.projects import shape as shape_mod
+
+    headers = _auth(client, f"shape_fuzzy_{uuid.uuid4().hex[:6]}")
+    r = client.post("/api/projects", headers=headers,
+                    json={"title": "复合标签书", "target_chapters": 5, "genre": "都市"})
+    pid = r.json()["id"]
+
+    fake = _FakeAdapter(
+        '{"tone": ["悬疑烧脑", "诙谐甜宠", "浪漫张力"], "elements": ["穿越错位"], "scale": "mid",'
+        ' "tone_reason": "复合味", "scale_reason": "单线"}'
+    )
+    with patch.object(shape_mod, "get_adapter_for", return_value=fake):
+        r = client.post(f"/api/projects/{pid}/suggest-shape", headers=headers)
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["tone"] == ["悬疑", "诙谐", "浪漫"]
+    assert body["elements"] == ["穿越"]      # 「穿越错位」→ 穿越;身份错位不在串里,不硬凑
