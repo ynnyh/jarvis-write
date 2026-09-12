@@ -502,7 +502,10 @@ export function useOnboarding() {
   async function enterWorkbench() {
     if (pid === null) return;
     try { await patch({ setup_state: "" }); } catch { /* 不阻塞进台 */ }
-    nav(`/project/${pid}/setup?step=arch`);
+    // P1-5:刚点完火的心智是「开始写」——落写作区第 1 章,而不是开书区(架构卡)。
+    // 蓝图已铺好的书直接 ch=1;「先不生成,直接进工作台」的空书也会被 write 区
+    // 的空态引导到目录/生成,不会白屏。
+    nav(`/project/${pid}/write?ch=1`);
   }
 
   async function abandon() {

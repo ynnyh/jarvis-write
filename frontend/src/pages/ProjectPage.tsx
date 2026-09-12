@@ -12,7 +12,7 @@ import CommandPalette from "../ui/CommandPalette";
 import SearchDialog from "../ui/SearchDialog";
 import { setThemePref } from "../theme";
 import { isDesktop, onMenuAction, openReadWindow } from "../desktop";
-import { api, apiBase, downloadFile } from "../api";
+import { api, apiBase, conceptIsEmpty, downloadFile } from "../api";
 import ShareDialog from "../ui/ShareDialog";
 import { toast } from "../ui/Toaster";
 import { errMsg } from "../pollJob";
@@ -377,7 +377,10 @@ export default function ProjectPage() {
   // 智能下一步建议:按项目状态只提示一件最该做的事(to 为新区路径)
   const plannedUpto = outlines.length ? Math.max(...outlines.map((o) => o.chapter_number)) : 0;
   const suggestion: { text: string; zone: Zone; path: string; btn: string } | null = (() => {
-    if (!project.topic) return { text: "先把故事概念定下来——整本书的地基。", zone: "setup", path: `/project/${pid}/setup?step=inspire`, btn: "去定概念" };
+    // 口径对齐(P1-3):向导确认过的概念存在 concept(结构化),topic 只是旧字段的
+    // 一句话摘要——只看 topic 会对着「✓概念已定」卡喊「先去定概念」。两者都空才算未定。
+    const conceptSet = !!project.concept && !conceptIsEmpty(project.concept);
+    if (!project.topic && !conceptSet) return { text: "先把故事概念定下来——整本书的地基。", zone: "setup", path: `/project/${pid}/setup?step=inspire`, btn: "去定概念" };
     if (!arch) return { text: "概念已定,让 AI 生成全书架构(核心种子/角色/世界观/情节)。", zone: "setup", path: `/project/${pid}/setup?step=arch`, btn: "去生成架构" };
     if (!outlines.length) return { text: "架构就绪,下一步把它展开成逐章蓝图。", zone: "setup", path: `/project/${pid}/setup?step=outline`, btn: "去生成大纲" };
     if (staleCount > 0) return { text: `有 ${staleCount} 章正文与新大纲失配,建议优先处理。`, zone: "write", path: `/project/${pid}/write`, btn: "去查看" };

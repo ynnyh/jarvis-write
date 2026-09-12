@@ -561,3 +561,6 @@
 .bh-bars.premise-curve i { height: 100% !important; border-radius: 2px; }
 .bh-bars.premise-curve i.ok { background: var(--ok); }
 .bh-bars.premise-curve i.bad { background: var(--err); }
+
+/* 对账区一句话解释 */
+.recon-hint { font-weight: 400; margin-left: 4px; }

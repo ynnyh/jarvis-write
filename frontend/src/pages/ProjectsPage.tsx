@@ -240,7 +240,9 @@ export default function ProjectsPage() {
       </div>
       {!projects.length && (
         <EmptyState>
-          还没有项目。点右上角「新建小说」开始;第一次用可先看 <Link to="/help">「使用指南」</Link>。
+          还没有项目。点右上角「新建小说」,一句话灵感开始:
+          定概念 → 铺蓝图 → 写第一章,全程 AI 铺路、你拍板。
+          第一次用可先看 <Link to="/help">「使用指南」</Link>。
         </EmptyState>
       )}
       {err && <div className="msg-err">{err}</div>}

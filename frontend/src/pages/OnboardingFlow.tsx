@@ -7,7 +7,7 @@
 // localStorage 缓存候选内容,刷新后回到当前屏接着选。
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, MotionConfig, motion } from "motion/react";
-import { api, conceptIsEmpty, CONCEPT_FIELDS, ShapeSuggestion } from "../api";
+import { api, conceptIsEmpty, CONCEPT_FIELDS, Premise, ShapeSuggestion } from "../api";
 import PremiseCard from "../ui/PremiseCard";
 import { CandidateCards } from "../ui/CandidateCards";
 import { ThinkingText } from "../ui/ThinkingText";
@@ -99,6 +99,9 @@ export default function OnboardingFlow() {
   const [scaleMode, setScaleMode] = useState<"" | "auto" | "manual">("");
   // 方案轮廓推荐:概念确认后自动请求一次;tone/scale 步进到时预填(可改)
   const [shapeSug, setShapeSug] = useState<ShapeSuggestion | null>(null);
+  // 核心梗卡的未保存草稿(P0-1):编辑中每次变化上报到这里,点火前兜底落库,
+  // 保证「向导里确认过的梗卡」一定进数据库——否则蓝图/对账/体检全部失锚
+  const premiseDraftRef = useRef<Premise | null>(null);
   const [scaleApplied, setScaleApplied] = useState(false);
 
   // 题材页「随机换一张」:全池重抽题材卡 + 顺带抽口味(与随机开一本同一体验语言)
@@ -786,7 +789,12 @@ export default function OnboardingFlow() {
                         梗是全书的纲:AI 已按概念与题材提炼,点字段可改;蓝图逐章标「梗兑现」、
                         交稿对账、体检健康度都以它为轴。点火后仍可在「本书设置」修改。
                       </div>
-                      {pid != null && <PremiseCard pid={pid} initial={null} autoSuggest />}
+                      {pid != null && (
+                        <PremiseCard
+                          pid={pid} initial={null} autoSuggest
+                          onDraftChange={(d) => { premiseDraftRef.current = d; }}
+                        />
+                      )}
                     </div>
                     <div className="wiz-wall mt-3">
                       {([
@@ -849,7 +857,16 @@ export default function OnboardingFlow() {
                     </div>
                     <div className="actions mt-4 onboard-nav">
                       <button onClick={() => nav(`/new/${pid}/scale`)}>← 上一步</button>
-                      <button className="primary" onClick={() => {
+                      <button className="primary" onClick={async () => {
+                        // P0-1:向导里看过的梗卡必须落库。优先保存编辑中的草稿;
+                        // 用户没进编辑框时草稿 ref 为空——此时把 AI 预填的那份直接保存
+                        // (展示即所得,不能让「确认过」的梗卡停在展示层)
+                        try {
+                          if (premiseDraftRef.current) {
+                            await api.savePremise(pid!, premiseDraftRef.current);
+                            premiseDraftRef.current = null;  // 已落库,重复点火不重写
+                          }
+                        } catch { /* 保存失败不拦点火:进工作台后可在本书设置补 */ }
                         setDirty(null);
                         localStorage.removeItem(`wiz-dirty:${pid}`);
                         void goto("launch");
@@ -866,6 +883,12 @@ export default function OnboardingFlow() {
                     <h2>《{project.title}》点火</h2>
                     <div className="card-desc">
                       AI 按确认好的设定,先生成全书架构,再展开分章蓝图;都在后台跑,切走也继续。
+                      {arch.status === "run" || bp.status === "run" ? (
+                        <span className="muted">
+                          {" "}真实渠道约需几分钟——趁这个空档,可以去右侧检查梗卡与设定,
+                          或翻翻 <a href="#/help">使用指南</a> 的「写作区五分钟上手」。
+                        </span>
+                      ) : null}
                     </div>
                     <div className="wiz-pipe mt-3">
                       {([

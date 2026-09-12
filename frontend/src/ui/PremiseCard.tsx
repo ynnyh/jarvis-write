@@ -17,6 +17,9 @@ interface Props {
   onSaved?: (p: Premise) => void;
   /** 只读紧凑态(作战图顶行):只出一行,不带编辑 */
   compact?: boolean;
+  /** 展示中的梗卡变化上报(向导点火前据此落库):AI 预填就绪、编辑中每次变更都会
+      触发;保存成功后报 null(= 已落库,无未保存内容) */
+  onDraftChange?: (draft: Premise | null) => void;
 }
 
 const EMPTY: Premise = {
@@ -24,25 +27,28 @@ const EMPTY: Premise = {
   hook_plan: {}, source: "ai",
 };
 
-export default function PremiseCard({ pid, initial, autoSuggest = false, onSaved, compact = false }: Props) {
+export default function PremiseCard({ pid, initial, autoSuggest = false, onSaved, compact = false, onDraftChange }: Props) {
   const [premise, setPremise] = useState<Premise | null>(initial);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  // initial 变化(异步查询加载完成)→ 同步内部态;编辑中不打断
+  // initial 变化(异步查询加载完成)→ 同步内部态;编辑中不打断。
+  // initial=null 不回写:保存成功后本地态就是真值,回写 null 会把保存态抹掉、
+  // 还会触发 autoSuggest 重拉草稿(向导里表现为「保存完又变回待确认」)。
   useEffect(() => {
-    if (editing) return;
+    if (editing || initial === null) return;
     setPremise(initial);
-  }, [initial]);
+  }, [initial, editing]);
 
   // 无梗卡且允许自动建议:拉一次 AI 草稿(失败静默,编辑框仍可手填)
   useEffect(() => {
     if (!autoSuggest || initial || premise) return;
     let alive = true;
     api.suggestPremise(pid)
-      .then((p) => { if (alive && p) setPremise({ ...p }); })
+      .then((p) => { if (alive && p) { setPremise({ ...p }); onDraftChange?.({ ...p }); } })
       .catch(() => { /* 提炼失败:留空白卡手填,不打断开书 */ });
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在自动预取这一次触发
   }, [autoSuggest, initial, pid, premise]);
 
   async function save(p: PremiseInput) {
@@ -53,6 +59,7 @@ export default function PremiseCard({ pid, initial, autoSuggest = false, onSaved
       setPremise(saved);
       setEditing(false);
       toast.ok("核心梗卡已保存", "蓝图与正文生成会以它为纲");
+      onDraftChange?.(null);
       onSaved?.(saved);
     } catch (e) { toast.err("梗卡保存失败", errMsg(e)); }
     finally { setBusy(false); }
@@ -88,7 +95,14 @@ export default function PremiseCard({ pid, initial, autoSuggest = false, onSaved
   }
 
   if (editing && premise) {
-    return <PremiseEditor draft={premise} busy={busy} onSave={save} onCancel={() => { setEditing(false); if (!initial) setPremise(initial); }} />;
+    return (
+      <PremiseEditor
+        draft={premise} busy={busy}
+        onSave={save}
+        onCancel={() => { setEditing(false); if (!initial) setPremise(initial); }}
+        onDraftChange={onDraftChange}
+      />
+    );
   }
 
   if (!premise) return null;
@@ -125,9 +139,10 @@ export default function PremiseCard({ pid, initial, autoSuggest = false, onSaved
 }
 
 /** 编辑表单:字段全部可改;节拍/禁忌走可增删行 */
-function PremiseEditor({ draft, busy, onSave, onCancel }: {
+function PremiseEditor({ draft, busy, onSave, onCancel, onDraftChange }: {
   draft: Premise; busy: boolean;
   onSave: (p: PremiseInput) => void; onCancel: () => void;
+  onDraftChange?: (draft: Premise | null) => void;
 }) {
   const [high, setHigh] = useState(draft.high_concept);
   const [payoff, setPayoff] = useState(draft.payoff);
@@ -138,6 +153,19 @@ function PremiseEditor({ draft, busy, onSave, onCancel }: {
   const [climax, setClimax] = useState(draft.hook_plan?.climax ?? "");
 
   const cleaned = (arr: string[]) => arr.map((s) => s.trim()).filter(Boolean);
+
+  // 草稿变化即上报(向导点火前用它兜底落库):统一出口,任何字段变了都走这里
+  function report(next: {
+    high: string; payoff: string; beats: string[]; bounds: string[];
+    opening: string; mid: string; climax: string;
+  }) {
+    onDraftChange?.({
+      high_concept: next.high, payoff: next.payoff,
+      beats: cleaned(next.beats), boundaries: cleaned(next.bounds),
+      hook_plan: { opening: next.opening, mid: next.mid, climax: next.climax },
+      source: draft.source,
+    });
+  }
   const val = (s: string, set: (v: string) => void) => (
     <input value={s} onChange={(e) => set(e.target.value)} className="premise-input" />
   );
@@ -145,34 +173,58 @@ function PremiseEditor({ draft, busy, onSave, onCancel }: {
   return (
     <div className="premise-edit" data-testid="premise-editor">
       <div className="field"><div className="fl">高概念(50 字内,一句话说清这本书的梗)</div>
-        {val(high, setHigh)}
+        {val(high, (v) => { setHigh(v); report({ high: v, payoff, beats, bounds, opening, mid, climax }); })}
       </div>
       <div className="field"><div className="fl">兑现机制(这个梗为什么能反复产生冲突与满足)</div>
-        <textarea value={payoff} onChange={(e) => setPayoff(e.target.value)} rows={2} />
+        <textarea value={payoff} onChange={(e) => { setPayoff(e.target.value); report({ high, payoff: e.target.value, beats, bounds, opening, mid, climax }); }} rows={2} />
       </div>
       <div className="field"><div className="fl">兑现节拍(3-6 拍,蓝图逐章对拍;留空的行保存时忽略)</div>
         {beats.map((b, i) => (
           <div className="premise-line" key={i}>
             <span className="muted">第{i + 1}拍</span>
-            <input value={b} onChange={(e) => setBeats((v) => v.map((x, j) => (j === i ? e.target.value : x)))} />
-            <button className="btn-sm" title="删掉这一拍" onClick={() => setBeats((v) => v.filter((_, j) => j !== i))}>✕</button>
+            <input value={b} onChange={(e) => {
+              const nb = beats.map((x, j) => (j === i ? e.target.value : x));
+              setBeats(nb);
+              report({ high, payoff, beats: nb, bounds, opening, mid, climax });
+            }} />
+            <button className="btn-sm" title="删掉这一拍" onClick={() => {
+              const nb = beats.filter((_, j) => j !== i);
+              setBeats(nb);
+              report({ high, payoff, beats: nb, bounds, opening, mid, climax });
+            }}>✕</button>
           </div>
         ))}
-        {beats.length < 6 && <button className="btn-sm" onClick={() => setBeats((v) => [...v, ""])}>+ 加一拍</button>}
+        {beats.length < 6 && <button className="btn-sm" onClick={() => {
+          const nb = [...beats, ""];
+          setBeats(nb);
+          report({ high, payoff, beats: nb, bounds, opening, mid, climax });
+        }}>+ 加一拍</button>}
       </div>
       <div className="field"><div className="fl">边界禁忌(写什么会把梗写崩)</div>
         {bounds.map((b, i) => (
           <div className="premise-line" key={i}>
-            <input value={b} onChange={(e) => setBounds((v) => v.map((x, j) => (j === i ? e.target.value : x)))} />
-            <button className="btn-sm" onClick={() => setBounds((v) => v.filter((_, j) => j !== i))}>✕</button>
+            <input value={b} onChange={(e) => {
+              const nb = bounds.map((x, j) => (j === i ? e.target.value : x));
+              setBounds(nb);
+              report({ high, payoff, beats, bounds: nb, opening, mid, climax });
+            }} />
+            <button className="btn-sm" onClick={() => {
+              const nb = bounds.filter((_, j) => j !== i);
+              setBounds(nb);
+              report({ high, payoff, beats, bounds: nb, opening, mid, climax });
+            }}>✕</button>
           </div>
         ))}
-        <button className="btn-sm" onClick={() => setBounds((v) => [...v, ""])}>+ 加一条</button>
+        <button className="btn-sm" onClick={() => {
+          const nb = [...bounds, ""];
+          setBounds(nb);
+          report({ high, payoff, beats, bounds: nb, opening, mid, climax });
+        }}>+ 加一条</button>
       </div>
       <div className="field"><div className="fl">钩子计划</div>
-        <div className="premise-line"><span className="muted">开局钩</span>{val(opening, setOpening)}</div>
-        <div className="premise-line"><span className="muted">中反转</span>{val(mid, setMid)}</div>
-        <div className="premise-line"><span className="muted">大高潮</span>{val(climax, setClimax)}</div>
+        <div className="premise-line"><span className="muted">开局钩</span>{val(opening, (v) => { setOpening(v); report({ high, payoff, beats, bounds, opening: v, mid, climax }); })}</div>
+        <div className="premise-line"><span className="muted">中反转</span>{val(mid, (v) => { setMid(v); report({ high, payoff, beats, bounds, opening, mid: v, climax }); })}</div>
+        <div className="premise-line"><span className="muted">大高潮</span>{val(climax, (v) => { setClimax(v); report({ high, payoff, beats, bounds, opening, mid, climax: v }); })}</div>
       </div>
       <div className="form-actions">
         <button className="primary" disabled={busy}

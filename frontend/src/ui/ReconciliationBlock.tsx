@@ -43,7 +43,10 @@ export default function ReconciliationBlock({ pid, n }: { pid: number; n: number
 
   return (
     <div className="recon-block" data-testid="reconciliation">
-      <div className="dossier-block-title">本章对账{d.pending_relations.length ? ` · ${d.pending_relations.length} 条待确认` : " · 无待确认项"}</div>
+      <div className="dossier-block-title">
+        本章对账{d.pending_relations.length ? ` · ${d.pending_relations.length} 条待确认` : " · 无待确认项"}
+        <span className="muted recon-hint">——系统读完这章自动登记的账:AI 替你记,你说了算</span>
+      </div>
 
       {d.ledger && (
         <div className="recon-line">
@@ -75,8 +78,10 @@ export default function ReconciliationBlock({ pid, n }: { pid: number; n: number
           </span>
           <span className="recon-actions">
             <button className="btn-sm primary" disabled={busy}
+              title="确认后这条关系进入故事圣经,后续生成会遵守它"
               onClick={() => void decide([r.id], [])}>确认</button>
             <button className="btn-sm" disabled={busy}
+              title="否决=这条关系不算数:删掉边,支撑它的本章事实一并作废,后续生成不再遵守"
               onClick={() => void decide([], [r.id])}>否决</button>
           </span>
         </div>
@@ -85,6 +90,7 @@ export default function ReconciliationBlock({ pid, n }: { pid: number; n: number
       {d.pending_relations.length > 0 && (
         <div className="mt-1">
           <button className="btn-sm" disabled={busy}
+            title="全部转入故事圣经;拿不准就逐条过,否决的不会进后续生成"
             onClick={() => void decide(
               d.pending_relations.map((r) => r.id), [],
             )}>

@@ -88,6 +88,7 @@ export default function BookReader({ pid, project, outlines, chapters, onClose }
   return (
     <>
       <Reader
+        projectId={pid}
         loading={loading}
         chapter={chapter}
         title={chapter

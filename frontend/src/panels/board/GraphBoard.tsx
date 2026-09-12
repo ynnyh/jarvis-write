@@ -83,7 +83,8 @@ export default function GraphBoard({ pid, onGotoChapter }: {
 
       {data.characters.length < 2 ? (
         <div className="muted mt-2">
-          圣经人物不足两个,还没有可画的图谱。先在「人物」或正文抽取里积累人物。
+          圣经人物不足两个,还没有可画的图谱。每写完一章,抽取会自动登记人物与关系——
+          写到第 3 章左右,这里会长出第一批连线。
         </div>
       ) : (
         <>

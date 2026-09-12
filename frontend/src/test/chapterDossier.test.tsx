@@ -96,3 +96,45 @@ describe("ChapterDossier 本章作战图", () => {
     expect(screen.getByText(/本章作战图/)).toBeTruthy();  // mini 折叠钮
   });
 });
+
+describe("ChapterDossier 让位折叠(P0-2)", () => {
+  afterEach(() => {
+    cleanup();
+    localStorage.removeItem("dossier-hidden");
+  });
+
+  it("结果卡出现(yieldTo 变真)→ 自动收起为 mini;信号消失恢复展开", async () => {
+    vi.mocked(api.getChapterDossier).mockResolvedValue(DOSSIER);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { rerender } = render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <ChapterDossier pid={1} chapterNumber={1} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText("🎯 本章作战图")).toBeTruthy();  // 展开态头
+
+    // 结果卡出现 → 让位折叠(mini 行;不写 localStorage)
+    rerender(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <ChapterDossier pid={1} chapterNumber={1} yieldTo={{ chapter_number: 1 }} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(screen.queryByText("🎯 本章作战图")).toBeTruthy();      // mini 仍是这个文案
+    expect(screen.queryByText(/梗兑现|改梗卡/)).toBeNull();          // 展开体没了
+    expect(localStorage.getItem("dossier-hidden")).toBeNull();      // 不覆盖用户偏好
+
+    // 关掉结果卡 → 恢复展开
+    rerender(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <ChapterDossier pid={1} chapterNumber={1} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText("改梗卡")).toBeTruthy();
+  });
+});

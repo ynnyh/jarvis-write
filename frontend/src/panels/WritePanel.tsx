@@ -174,7 +174,7 @@ export default function WritePanel({ pid, outlines }: Props) {
       {/* ---- 主场正文列:状态卡 + 蓝图卡 + 正文(段落气泡)+ 章尾下一章卡(移动端支持左右滑切章) ---- */}
       <div className="write-main" onTouchStart={onMainTouchStart} onTouchEnd={onMainTouchEnd}>
         <WriteGuide />
-        {chapterNum !== null && <ChapterDossier pid={pid} chapterNumber={chapterNum} />}
+        {chapterNum !== null && <ChapterDossier pid={pid} chapterNumber={chapterNum} yieldTo={genResult} />}
         {versionsFor !== null && versions !== null && (
           <div ref={versionRef}>
             <VersionCompare

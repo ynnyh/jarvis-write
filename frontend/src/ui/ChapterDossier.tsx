@@ -2,7 +2,7 @@
 // 纯读投影:梗兑现拍(顶部)/章纲/出场人物(带本章有效关系)/伏笔账(埋收强化逾期)/
 // 场景条/承上钩子。缺数据如实缺省(梗未建、人物未入圣经、未做场景切分),
 // 不填 0 冒充「没问题」。可折叠,折叠状态记 localStorage(每书独立)。
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
@@ -10,9 +10,20 @@ import { qk } from "../hooks/queries";
 
 const HIDDEN_KEY = "dossier-hidden";
 
-export default function ChapterDossier({ pid, chapterNumber }: { pid: number; chapterNumber: number }) {
+export default function ChapterDossier({ pid, chapterNumber, yieldTo }: { pid: number; chapterNumber: number; yieldTo?: unknown }) {
   const navigate = useNavigate();
-  const [hidden, setHidden] = useState(() => localStorage.getItem(HIDDEN_KEY) === "1");
+  // 折叠有两层:用户手动收起(记 localStorage,尊重偏好)与「让位折叠」——
+  // 生成结果卡出现时(yieldTo 变真)临时收起,写后第一眼应是验收不是写前情报;
+  // 让位态不写 localStorage,下次进章自动恢复展开。
+  const [manualHidden, setManualHidden] = useState(() => localStorage.getItem(HIDDEN_KEY) === "1");
+  const [yielded, setYielded] = useState(false);
+  const prevYield = useRef(yieldTo);
+  useEffect(() => {
+    if (yieldTo && !prevYield.current) setYielded(true);
+    if (!yieldTo) setYielded(false);
+    prevYield.current = yieldTo;
+  }, [yieldTo]);
+  const hidden = manualHidden || yielded;
   const dossier = useQuery({
     queryKey: qk.dossier(pid, chapterNumber),
     queryFn: () => api.getChapterDossier(pid, chapterNumber),
@@ -22,7 +33,7 @@ export default function ChapterDossier({ pid, chapterNumber }: { pid: number; ch
   if (hidden) {
     return (
       <button type="button" className="guide-mini muted dossier-mini"
-        onClick={() => { localStorage.removeItem(HIDDEN_KEY); setHidden(false); }}>
+        onClick={() => { localStorage.removeItem(HIDDEN_KEY); setManualHidden(false); setYielded(false); }}>
         🎯 本章作战图
       </button>
     );
@@ -32,7 +43,7 @@ export default function ChapterDossier({ pid, chapterNumber }: { pid: number; ch
 
   function collapse() {
     localStorage.setItem(HIDDEN_KEY, "1");
-    setHidden(true);
+    setManualHidden(true);
   }
 
   return (
