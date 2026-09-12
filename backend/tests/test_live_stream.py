@@ -505,3 +505,49 @@ def test_live_endpoint_cursor_resumes_without_replay(client):
     r = client.get(f"/api/jobs/{job_id}/live?cursor=7", headers=headers)
     assert r.status_code == 200
     assert "event: token" not in r.text     # 换屏快照之后没有多余的增量帧
+
+
+# ---------- 4. 渠道异常累计(note_retry):卡住的用户得知道是渠道在抽风 ----------
+
+def test_note_retry_accumulates_and_briefs_error():
+    """重试记账进 snapshot:次数累计、错误压成一行并截断;成功不消零。"""
+    live.set_step("j-retry", "4/6 审校把关")
+    live.note_retry("j-retry", "上游返回 HTTP 503:\n  分组 Lite 下模型 X 无可用渠道\n(request id: abc)")
+    live.note_retry("j-retry", "服务端抖动")
+    snap = live.snapshot("j-retry")
+    assert snap["retries"] == 2                    # 累计,不是覆盖
+    assert snap["lastErr"] == "服务端抖动"          # 留最近一次
+    live.note_retry("j-retry", "很长" * 200)        # 多行/超长压成一行截断
+    snap = live.snapshot("j-retry")
+    assert len(snap["lastErr"]) == 100
+    assert "\n" not in snap["lastErr"]
+
+
+def test_follow_carries_retry_count_in_label_frames():
+    """重试计数变了就实时推 label 帧(哪怕步骤没变),前端警示不用等换屏。"""
+
+    async def scenario():
+        job_id = jobs.create_job("live-stall")
+        jobs.update_stage(job_id, "4/6 审校把关")
+        frames: list[tuple[str, dict]] = []
+
+        async def reader():
+            async for frame in live.follow(job_id):
+                frames.append(frame)
+                if frame[0] == "done":
+                    return
+
+        task = asyncio.create_task(reader())
+        await asyncio.sleep(0.05)
+        live.note_retry(job_id, "上游返回 HTTP 503: 分组 Lite 下模型 X 无可用渠道")
+        await asyncio.sleep(0.3)
+        jobs.finish_job(job_id, None)
+        await asyncio.wait_for(task, 5)
+        return frames
+
+    frames = asyncio.run(scenario())
+    step_frames = [d for k, d in frames if k == "step"]
+    label_frames = [d for k, d in frames if k == "label"]
+    assert step_frames[0]["retries"] == 0          # 首屏时还没重试过
+    assert label_frames and label_frames[-1]["retries"] == 1
+    assert "无可用渠道" in label_frames[-1]["lastErr"]

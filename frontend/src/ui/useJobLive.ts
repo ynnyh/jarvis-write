@@ -17,9 +17,13 @@ export interface JobLiveState {
   streaming: boolean;
   /** 已收到 done:任务结束,不再有新字 */
   ended: boolean;
+  /** 本任务累计的上游重试次数(渠道抽风的持续信号;成功不清零) */
+  retries: number;
+  /** 最近一次上游错误的可读摘要 */
+  lastErr: string;
 }
 
-const EMPTY: JobLiveState = { text: "", step: "", streaming: false, ended: false };
+const EMPTY: JobLiveState = { text: "", step: "", streaming: false, ended: false, retries: 0, lastErr: "" };
 
 /** 订阅任务实时正文。jobId 为空或 enabled=false 时不连接。 */
 export function useJobLive(jobId: string | null, enabled = true): JobLiveState {
@@ -39,14 +43,21 @@ export function useJobLive(jobId: string | null, enabled = true): JobLiveState {
     const onFrame = (frame: SseFrame) => {
       const d = (frame.data ?? {}) as {
         text?: string; step?: string; seq?: number; status?: string;
+        retries?: number; lastErr?: string;
       };
       if (typeof d.seq === "number") cursorRef.current = d.seq;
       switch (frame.event) {
         case "step":  // 换屏(首帧也走这):整屏替换
-          setState((s) => ({ ...s, step: d.step ?? "", text: d.text ?? "", streaming: true }));
+          setState((s) => ({
+            ...s, step: d.step ?? "", text: d.text ?? "", streaming: true,
+            retries: d.retries ?? s.retries, lastErr: d.lastErr ?? s.lastErr,
+          }));
           break;
         case "label": // 同一步里的进度计数(如「已生成 3/40 章」):只换标签,正文照旧
-          setState((s) => ({ ...s, step: d.step ?? "" }));
+          setState((s) => ({
+            ...s, step: d.step ?? "",
+            retries: d.retries ?? s.retries, lastErr: d.lastErr ?? s.lastErr,
+          }));
           break;
         case "reset": // 落后太多、服务端缓冲已滚过:整屏重置,不假装连续
           setState((s) => ({ ...s, text: d.text ?? "", streaming: true }));

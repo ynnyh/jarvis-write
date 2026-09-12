@@ -36,7 +36,7 @@ export function LiveDock() {
     return picked ?? running[running.length - 1] ?? null;
   }, [liveJobId, running]);
 
-  const { text, step, streaming, ended } = useJobLive(target?.job_id ?? null, open);
+  const { text, step, streaming, ended, retries, lastErr } = useJobLive(target?.job_id ?? null, open);
 
   useEffect(() => {
     localStorage.setItem(OPEN_KEY, open ? "1" : "0");
@@ -141,6 +141,12 @@ export function LiveDock() {
               {text}
               {streaming && !ended && <span className="live-caret" />}
             </>
+          ) : retries > 0 ? (
+            /* 渠道在背后反复抽风:把重试账亮出来,别让用户把卡住当正常等待 */
+            <span className="live-stall">
+              上游已连续失败 {retries} 次{lastErr ? `(${lastErr})` : ""}。生成会自动重试继续;
+              若长时间没进展,建议到「设置」换一条渠道。
+            </span>
           ) : (
             <span className="muted">
               {ended

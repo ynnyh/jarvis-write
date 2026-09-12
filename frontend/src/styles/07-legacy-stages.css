@@ -265,6 +265,17 @@
 }
 @keyframes live-blink { 50% { opacity: 0; } }
 
+/* 渠道异常警示:任务累计重试 > 0 且暂无正文时替代「模型还没开口」,
+   黄底常驻——「渠道在抽风」要看得见,用户才知道该换渠道而不是干等 */
+.live-stall {
+  display: block;
+  color: var(--warn);
+  background: var(--warn-weak);
+  border-radius: var(--r-sm);
+  padding: 6px 8px;
+  line-height: 1.6;
+}
+
 /* 移动端 LiveDock 定位 + 高度。
    - 默认(非写区场景)贴底 8px:不再硬上抬 64px 浮在屏幕中间遮挡正文。
    - 写区场景(:has(.write-zone)):让出 .m-ai-bar(fixed,min-height 48px + 8px 边距

@@ -297,7 +297,10 @@ def _notice_retry(exc: Exception, no: int, total: int) -> None:
             _RETRY_STEPS[jid] = base_step
         tip = f"重试中 {no}/{total}({_retry_reason(exc)})"
         live.label_step(jid, f"{_RETRY_STEPS.get(jid, base_step)} · {tip}" if base_step else tip)
-    except Exception:  # noqa: BLE001 — 提示决不能拖垮主流程
+        # 累计到任务的渠道异常账上(成功不消零):前端据这条持续显示
+        # 「渠道不稳」警示——label 是瞬时的,累计数才治得住「卡住但不知道为啥」
+        live.note_retry(jid, _describe_exc(exc))
+    except Exception:  # noqa: BLE — 提示决不能拖垮主流程
         logger.debug("重试提示下发失败", exc_info=True)
 
 

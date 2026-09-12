@@ -45,6 +45,7 @@ class _Stream:
 
     __slots__ = (
         "chunks", "chars", "seq", "step", "epoch", "closed", "touched", "calls",
+        "retries", "last_err",
     )
 
     def __init__(self) -> None:
@@ -57,6 +58,10 @@ class _Stream:
         # 正在吐字的 LLM 调用数(决定换步骤要不要清屏)。用计数而非布尔:少数环节
         # 并发跑多路调用(如 inspire 的并发精筛),先结束的那路不能把窗口关掉。
         self.calls = 0
+        # 渠道异常累计:本任务至今的重试次数 + 最近一次上游错误摘要。成功不消零——
+        # 「渠道在背后反复抽风」要持续可见,用户才不会把卡住当成正常等待。
+        self.retries = 0
+        self.last_err = ""
         self.touched = time.monotonic()
 
     def tail(self) -> str:
@@ -184,6 +189,8 @@ def snapshot(job_id: str) -> dict[str, Any] | None:
             "step": stream.step,
             "epoch": stream.epoch,
             "closed": stream.closed,
+            "retries": stream.retries,
+            "lastErr": stream.last_err,
         }
 
 
@@ -214,6 +221,24 @@ def label_step(job_id: str, step: str) -> None:
         if stream is None or stream.step == step:
             return
         stream.step = step
+        stream.touched = time.monotonic()
+
+
+def note_retry(job_id: str, err: str) -> None:
+    """记一次上游重试:累计次数 + 最近错误摘要,随 snapshot/label 帧下发。
+
+    为什么不只靠 label_step 的「重试中 x/y」:那是瞬时文案,重试成功就摘掉,
+    而渠道抽风往往是**整个任务过程中反复发生**——累计数让前端能持续显示
+    「渠道不稳」的警示(卡住的用户才知道该去换渠道,而不是干等)。
+    """
+    if not job_id:
+        return
+    # 压成一行、截断:错误原文可能带换行/request id,警示条上只留可读摘要
+    brief = " ".join(str(err).split())[:100]
+    with _LOCK:
+        stream = _ensure_locked(job_id)
+        stream.retries += 1
+        stream.last_err = brief
         stream.touched = time.monotonic()
 
 
@@ -249,6 +274,7 @@ async def follow(
 
     epoch = -1
     step_shown = None
+    retries_shown = 0
     started = last_sent = time.monotonic()
     while True:
         snap = snapshot(job_id)
@@ -258,16 +284,29 @@ async def follow(
                 # 换屏(含首帧):整屏下发,游标对齐到当前
                 epoch = snap["epoch"]
                 step_shown = snap["step"]
+                retries_shown = snap["retries"]
                 cursor = snap["seq"]
                 yield ("step", {
                     "step": snap["step"], "epoch": epoch,
                     "text": snap["text"], "seq": cursor,
+                    "retries": snap["retries"], "lastErr": snap["lastErr"],
                 })
                 last_sent = time.monotonic()
             else:
                 if snap["step"] != step_shown:
                     step_shown = snap["step"]
-                    yield ("label", {"step": snap["step"], "seq": cursor})
+                    yield ("label", {
+                        "step": snap["step"], "seq": cursor,
+                        "retries": snap["retries"], "lastErr": snap["lastErr"],
+                    })
+                    last_sent = time.monotonic()
+                elif snap["retries"] != retries_shown:
+                    # 重试计数变了但步骤没变:单独推一帧 label,警示别等到下次换屏才可见
+                    retries_shown = snap["retries"]
+                    yield ("label", {
+                        "step": snap["step"], "seq": cursor,
+                        "retries": snap["retries"], "lastErr": snap["lastErr"],
+                    })
                     last_sent = time.monotonic()
                 if snap["seq"] > cursor:
                     text, start = snap["text"], snap["seq"] - len(snap["text"])
