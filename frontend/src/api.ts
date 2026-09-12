@@ -478,6 +478,53 @@ export interface ShapeSuggestion {
   tone_reason: string;
   scale_reason: string;
 }
+/** 核心梗卡(docs/19):高概念/兑现机制/边界禁忌/钩子计划——一本书的「纲」 */
+export interface Premise {
+  high_concept: string;
+  payoff: string;
+  beats: string[];
+  boundaries: string[];
+  hook_plan: { opening?: string; mid?: string; climax?: string };
+  source: "ai" | "human";
+}
+export interface PremiseInput {
+  high_concept: string;
+  payoff: string;
+  beats: string[];
+  boundaries: string[];
+  hook_plan: { opening?: string; mid?: string; climax?: string };
+}
+/** 本章作战图(写前一屏):纯确定性投影,缺数据如实缺省 */
+export interface DossierRelation { from_name: string; to_name: string; relation: string; }
+export interface DossierCharacter {
+  name: string; entity_id: number | null; matched: boolean;
+  relations: DossierRelation[];
+}
+export interface DossierForeshadowItem {
+  id: number; description: string; status: string; expected_payoff_chapter: number | null;
+}
+export interface DossierScene {
+  seq: number; title: string; location: string; emotion_target: string;
+  tension_level: number; status: string;
+}
+export interface ChapterDossier {
+  chapter_number: number;
+  outline: {
+    chapter_number: number; title: string; chapter_role: string; chapter_purpose: string;
+    suspense_level: string; emotional_tone: string; foreshadowing: string; summary: string;
+    scene_anchor: string; premise_beat: string;
+    characters_involved: string[]; beats: string[];
+  };
+  premise: Premise | null;
+  scenes: DossierScene[];
+  characters: DossierCharacter[];
+  foreshadows: {
+    planted: DossierForeshadowItem[]; paid_off: DossierForeshadowItem[];
+    reinforced: DossierForeshadowItem[]; overdue: DossierForeshadowItem[];
+  };
+  prev_threads: string[];
+  prev_location: string;
+}
 export interface FactSpan {
   content: string; fact_type: string; importance: string;
   valid_from: number; valid_until: number | null;
@@ -1044,6 +1091,19 @@ export const api = {
   // 方案轮廓推荐:概念确认后一次轻量调用,推荐阅读手感(tone/elements)与篇幅档位
   suggestShape: (pid: number) =>
     req<ShapeSuggestion>("POST", `/api/projects/${pid}/suggest-shape`),
+
+  // 核心梗卡:读(未建返回 null)/保存(作者保存即 human)/AI 提炼草稿(不落库)/存量章补标节拍
+  getPremise: (pid: number) =>
+    req<Premise | null>("GET", `/api/projects/${pid}/premise`),
+  savePremise: (pid: number, p: PremiseInput) =>
+    req<Premise>("PUT", `/api/projects/${pid}/premise`, p),
+  suggestPremise: (pid: number) =>
+    req<Premise>("POST", `/api/projects/${pid}/suggest-premise`),
+  backfillPremiseBeats: (pid: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/premise/backfill-beats`),
+  // 本章作战图:写前一屏聚合(梗/纲/人物/伏笔账/承上钩子)
+  getChapterDossier: (pid: number, n: number) =>
+    req<ChapterDossier>("GET", `/api/projects/${pid}/chapters/${n}/dossier`),
 
   suggestTitleAsync: (topic: string, genre: string, concept?: Concept | null) =>
     req<{ job_id: string }>("POST", "/api/projects/title-suggestion-async",

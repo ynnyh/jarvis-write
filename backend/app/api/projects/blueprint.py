@@ -25,6 +25,29 @@ from ._common import _get_project_or_404
 router = APIRouter()
 
 
+def _core_premise_text(db: Session, project_id: int) -> str:
+    """主梗卡 → 蓝图注入文本(无梗卡/梗卡为空返回空串,prompt 零变化)。"""
+    from app.db.models import Premise
+
+    row = (
+        db.query(Premise)
+        .filter(Premise.project_id == project_id, Premise.kind == "main")
+        .first()
+    )
+    if row is None or not (row.high_concept or "").strip():
+        return ""
+    lines = [f"高概念:{row.high_concept.strip()}"]
+    if (row.payoff or "").strip():
+        lines.append(f"兑现机制:{row.payoff.strip()}")
+    beats = [str(b).strip() for b in (row.beats or []) if str(b).strip()]
+    if beats:
+        lines.append("兑现节拍:" + "、".join(f"第{i + 1}拍·{b}" for i, b in enumerate(beats)))
+    bounds = [str(b).strip() for b in (row.boundaries or []) if str(b).strip()]
+    if bounds:
+        lines.append("边界禁忌(违反即崩梗,蓝图不得规划这些走向):" + "、".join(bounds))
+    return "\n".join(lines)
+
+
 @router.post("/{project_id}/blueprint", response_model=GenerateBlueprintResponse)
 async def generate_project_blueprint(
     project_id: int,
@@ -52,6 +75,7 @@ async def generate_project_blueprint(
 
     chapters, warnings = await generate_blueprint(
         novel_architecture=arch_text,
+        core_premise=_core_premise_text(db, project.id),
         number_of_chapters=project.target_chapters,
         tendency=req.tendency,
         global_tendency=project.global_tendency,
@@ -100,6 +124,7 @@ async def generate_project_blueprint_async(
                 end_chapter = min(segments[0]["end"], p.target_chapters)
 
             chapters, warnings = await generate_blueprint(
+                core_premise=_core_premise_text(session, p.id),
                 novel_architecture=arch_text,
                 number_of_chapters=p.target_chapters,
                 tendency=req.tendency,
@@ -346,6 +371,7 @@ async def extend_blueprint_async(project_id: int, db: Session = Depends(get_db))
                 for o in reversed(tail_outlines)
             )
             chapters, warnings = await generate_blueprint(
+                core_premise=_core_premise_text(session, p.id),
                 novel_architecture=_arch_text(p) + context,
                 number_of_chapters=p.target_chapters,
                 global_tendency=p.global_tendency,

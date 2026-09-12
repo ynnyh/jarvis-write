@@ -68,6 +68,8 @@ class ChapterContext:
     avoid_repetition: str
     twist_prep: str
     deai_rules: str
+    # 核心梗块(全书梗卡摘要 + 本章兑现拍):空串 = 无梗卡,prompt 零变化
+    premise_block: str = ""
     project: Any = None
     db: Session | None = None
 
@@ -101,6 +103,7 @@ class Composer:
             chapter_number=ctx.chapter_number,
             chapter_title=outline.title,
             drama_task=_drama_task_block(outline),
+            premise_block=ctx.premise_block,
             tension_bus_block=tension_bus_block(
                 ctx.chapter_number,
                 target_chapters=int(project.target_chapters or 0),
@@ -148,6 +151,7 @@ class Composer:
         flavor_hits = _flavor_hits_block(ai_flavor_report(draft))
         return CHAPTER_FINALIZE_PROMPT.format(
             chapter_number=ctx.chapter_number,
+            premise_block=ctx.premise_block,
             chapter_title=outline.title,
             chapter_purpose=outline.chapter_purpose,
             drama_task=_drama_task_block(outline),

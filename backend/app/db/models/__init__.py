@@ -26,6 +26,7 @@ from app.db.models.chapter_issue import ChapterIssue
 from app.db.models.chapter_feedback import ChapterFeedback
 from app.db.models.motif import WritingMotif
 from app.db.models.mark import ChapterMark
+from app.db.models.premise import Premise
 from app.db.models.writing_card import WritingCard
 from app.db.models.usage import FeatureUsage, LlmUsage
 from app.db.models.user import User

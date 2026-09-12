@@ -169,6 +169,8 @@ def _outline_block(o: Outline) -> str:
         lines.append(f"情绪基调:{o.emotional_tone}")
     if (o.scene_anchor or "").strip():
         lines.append(f"本章戏核:{o.scene_anchor}")
+    if (o.premise_beat or "").strip():
+        lines.append(f"梗兑现:{o.premise_beat}")
     beats = [str(b).strip() for b in (o.beats or []) if str(b).strip()]
     if beats:
         lines.append("场景节拍:" + ";".join(beats[:8]))

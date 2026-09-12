@@ -125,7 +125,7 @@ CHAPTER_DRAFT_PROMPT = """\
 {revision_block}
 {tension_bus_block}
 {twist_prep}
-【本章蓝图】
+{premise_block}【本章蓝图】
 第{chapter_number}章《{chapter_title}》
 - 本章定位:{chapter_role}
 - 核心作用:{chapter_purpose}
@@ -171,7 +171,7 @@ CHAPTER_FINALIZE_PROMPT = """\
 
 【本章戏剧任务(修订不得磨平)】
 {drama_task}
-
+{premise_block}
 {tension_bus_block}
 【前情摘要(检查一致性用)】
 {rolling_summary}

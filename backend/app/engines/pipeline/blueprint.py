@@ -82,6 +82,7 @@ def _outline_content_hash(data: dict[str, Any]) -> str:
             "plot_twist_level",
             "summary",
             "scene_anchor",
+            "premise_beat",
             "beats",
             "characters_involved",
             "key_items",
@@ -147,6 +148,7 @@ async def generate_blueprint(
     previous_tail: str = "",
     title_directive: str = "",
     word_number: int | None = None,
+    core_premise: str = "",
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """分块生成章节蓝图。返回 (章节 dict 列表, 警告列表)。纯生成,不落库。
 
@@ -159,6 +161,16 @@ async def generate_blueprint(
     与正文软约束打架导致每章超发;这里把字数盘子注入草稿,让节拍数量与字数匹配。
     """
     title_directive = (title_directive or "").strip() or DEFAULT_TITLE_DIRECTIVE
+
+    # 核心梗块:有梗卡才注入(蓝图逐章标「梗兑现」以此节拍表为准);
+    # 无梗卡(存量书/未建)给空串,prompt 零变化、行为向后兼容。
+    core_premise_block = (
+        "\n【全书核心梗】(每章「梗兑现」一栏必须按这里的节拍表标注,推进核心梗的章必标)\n"
+        + core_premise.strip()
+        + "\n"
+        if (core_premise or "").strip()
+        else ""
+    )
 
     # 字数盘子:换算总字数并约束节拍(每章约 N 字 → 3-4 节拍、每节拍 ≤1000 字),
     # 从大纲层就按目标字数分配用墨,而不是正文阶段才补救。
@@ -214,6 +226,7 @@ async def generate_blueprint(
                 # 一块装得下,用整书模板
                 prompt = CHAPTER_BLUEPRINT_PROMPT.format(
                     novel_architecture=novel_architecture,
+                    core_premise_block=core_premise_block,
                     number_of_chapters=number_of_chapters,
                     style_directives=style_block,
                     title_directive=title_directive,
@@ -222,6 +235,7 @@ async def generate_blueprint(
             else:
                 prompt = CHUNKED_BLUEPRINT_PROMPT.format(
                     novel_architecture=novel_architecture,
+                    core_premise_block=core_premise_block,
                     start_chapter=seg_start,
                     end_chapter=end,
                     previous_blueprint_tail=raw_accumulated[-_TAIL_CHARS:] or "(首块,无)",
@@ -340,6 +354,7 @@ def save_blueprint(
         outline.plot_twist_level = ch.get("plot_twist_level", "")
         outline.summary = ch.get("summary", "")
         outline.scene_anchor = ch.get("scene_anchor", "")
+        outline.premise_beat = ch.get("premise_beat", "")
         outline.beats = ch.get("beats", [])
         outline.characters_involved = ch.get("characters_involved", [])
         outline.key_items = ch.get("key_items", [])

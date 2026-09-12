@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -138,7 +138,8 @@ class PreparedContext:
     avoid_repetition: str
     twist_prep: str
     revision_block: str
-    preflight_issues: list[dict]
+    premise_block: str = ""
+    preflight_issues: list[dict] = field(default_factory=list)
 
     def compose_context(self, *, project) -> "ChapterContext":
         """转成 Composer 用的上下文(含运行时算出的 deai_rules)。"""
@@ -159,6 +160,7 @@ class PreparedContext:
             device_reminders=self.device_reminders,
             avoid_repetition=self.avoid_repetition,
             twist_prep=self.twist_prep,
+            premise_block=self.premise_block,
             deai_rules=_deai_rules_block(self.recent_full),
             project=project,
         )
@@ -314,6 +316,27 @@ async def _prepare_chapter_context(
         outline_changed=bool(existing and existing.is_stale),
     )
 
+
+    # 核心梗块:全书梗卡摘要 + 本章兑现拍。空串 = 无梗卡/未标拍,prompt 零变化。
+    from app.db.models import Premise as PremiseModel
+
+    premise_block = ""
+    premise_row = (
+        db.query(PremiseModel)
+        .filter(PremiseModel.project_id == project.id, PremiseModel.kind == "main")
+        .first()
+    )
+    if premise_row is not None and (premise_row.high_concept or "").strip():
+        lines = [f"【核心梗(全书的纲,本章正文必须守住并兑现)】"]
+        lines.append(f"高概念:{premise_row.high_concept.strip()}")
+        bounds = [str(b).strip() for b in (premise_row.boundaries or []) if str(b).strip()]
+        if bounds:
+            lines.append("边界禁忌(违反即崩梗,情节与对白不得越界):" + "、".join(bounds))
+        beat = (getattr(outline, "premise_beat", "") or "").strip()
+        if beat:
+            lines.append(f"本章兑现:{beat}——正文要让它真实发生,不要一笔带过")
+        premise_block = "\n".join(lines) + "\n\n"
+
     return PreparedContext(
         outline=outline,
         next_outline=next_outline,
@@ -330,6 +353,7 @@ async def _prepare_chapter_context(
         avoid_repetition=avoid_repetition,
         twist_prep=twist_prep,
         revision_block=revision_block,
+        premise_block=premise_block,
         preflight_issues=preflight_issues,
     )
 

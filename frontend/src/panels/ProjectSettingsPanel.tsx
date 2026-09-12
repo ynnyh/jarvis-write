@@ -1,13 +1,16 @@
 // settings 区:书级设置。每章目标字数 / 字数守卫 / 审校把关(达标线·回炉上限·连写要求)/ 世界观硬规则 / 故事宪法。
 // 字数守卫与审校把关两张卡从原 ChaptersPanel 侧栏搬来,世界观硬规则从原 EditorialPanel audit 页签搬来,功能文案不变。
 // 故事宪法(结构化 canon:刻意留白/常驻装置/倒计时)紧挨世界观硬规则——两者在后端合并成一张「宪法块」全程注入+门禁比对。
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, CanonDevice, EMPTY_CANON, IMPORTANCE_OPTIONS, Project, StoryCanon } from "../api";
 import { useInvalidateProject } from "../hooks/queries";
-import { errMsg } from "../pollJob";
+import { errMsg, pollJob } from "../pollJob";
 import { toast } from "../ui/Toaster";
 import { confirmDialog } from "../ui/ConfirmDialog";
 import SettingCascade from "./SettingCascade";
+import PremiseCard from "../ui/PremiseCard";
+import { useQueryClient } from "@tanstack/react-query";
 
 // 每章目标字数的合法区间(前端自校验,后端 ProjectPatch 不设上下界;区间来自交互改造计划)
 const TARGET_WORDS_MIN = 200;
@@ -17,6 +20,9 @@ interface Props { pid: number; project: Project; }
 
 export default function ProjectSettingsPanel({ pid, project }: Props) {
   const invalidateProject = useInvalidateProject(pid);
+  const qc = useQueryClient();
+  // 核心梗卡(docs/19):梗是纲——蓝图逐章标「梗兑现」、交稿对账、体检健康度都以它为轴
+  const premiseQ = useQuery({ queryKey: ["premise", pid], queryFn: () => api.getPremise(pid) });
   // 世界观硬规则编辑态(整段覆盖,空串清空);初始值取自项目(进入本区时 project 已就绪)
   const [worldRules, setWorldRules] = useState(project.world_rules ?? "");
   const [rulesSaving, setRulesSaving] = useState(false);
@@ -177,6 +183,31 @@ export default function ProjectSettingsPanel({ pid, project }: Props) {
 
   return (
     <>
+      {/* 核心梗卡(docs/19):梗是纲——蓝图逐章标「梗兑现」、交稿对账、体检健康度都以它为轴 */}
+      <div className="card card-compact">
+        <div className="card-head">
+          <h3>核心梗卡</h3>
+          <button
+            className="btn-sm"
+            disabled={premiseQ.isLoading}
+            title="给未标「梗兑现」的存量章节,后台按梗的节拍表补标(轻量模型)"
+            onClick={async () => {
+              try {
+                const { job_id } = await api.backfillPremiseBeats(pid);
+                toast.ok("补标任务已开始", "跑完可在各章作战图看到「梗兑现」");
+                void pollJob(job_id).catch(() => toast.err("补标未完成", "可稍后重试"));
+              } catch (e) { toast.err("补标启动失败", errMsg(e)); }
+            }}>
+            全书补标节拍
+          </button>
+        </div>
+        <PremiseCard
+          pid={pid}
+          initial={premiseQ.data ?? null}
+          onSaved={() => qc.invalidateQueries({ queryKey: ["premise", pid] })}
+        />
+      </div>
+
       {/* 出片模式(docs/adr/0003):轻量=文+图出片、逐镜人工筛;完整=对白配音链/
           首尾帧自动接力/一键合成。完整档模块分期点亮,未点亮时行为与轻量档一致,
           切换不丢数据——两档共用同一份镜头、草片与任务记录。 */}

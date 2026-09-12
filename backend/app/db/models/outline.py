@@ -38,6 +38,9 @@ class Outline(Base, TimestampMixin):
     # 本章戏核:这一章必须让读者记住的那一个瞬间(一句话)。
     # 没有戏核的章,写得再工整也是白水——正文围绕它铺,其余都是铺垫。
     scene_anchor: Mapped[str] = mapped_column(Text, default="")
+    # 梗兑现:本章兑现核心梗的哪一拍(如「第2拍·初次反转——读者第一次看到寿数账」)。
+    # 蓝图生成时由模型标注(存量书可后台补标);作战图顶行与交稿对账按它对账。
+    premise_beat: Mapped[str] = mapped_column(Text, default="")
     # 章内节拍:3-5 个场景 beat(list[str]),让正文有骨架、不靠模型即兴铺场景。
     # 存量章节为空 list;为空时 draft prompt 回落到只用 summary(向后兼容)。
     beats: Mapped[list[Any]] = mapped_column(JSON, default=list)

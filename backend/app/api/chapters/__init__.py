@@ -29,7 +29,7 @@ from app.auth import get_current_user
 from app.db.models import Chapter
 from app.db.session import get_db
 
-from . import extraction, feedback, generation, issues, release, revision, versions
+from . import dossier, extraction, feedback, generation, issues, release, revision, versions
 
 # 向后兼容 re-export:外部按 `from app.api.chapters import _flavor_dict` 引用
 # (tests/test_ai_flavor.py);列入 __all__ 表明是有意导出。
@@ -50,6 +50,7 @@ router = APIRouter(
 )
 
 # 细分子功能端点(均为 /{chapter_number}/... 多段,或 /generate-queue 字面单段)
+router.include_router(dossier.router)
 router.include_router(generation.router)
 router.include_router(revision.router)
 router.include_router(extraction.router)

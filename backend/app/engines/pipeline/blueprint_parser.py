@@ -40,6 +40,7 @@ _FIELD_MAP = {
     "场景地点": "scene_location",
     "本章简述": "summary",
     "本章戏核": "scene_anchor",
+    "梗兑现": "premise_beat",
     "本章节拍": "beats",
 }
 

@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, LayoutGroup, MotionConfig, motion } from "motion/react";
 import { api, conceptIsEmpty, CONCEPT_FIELDS, ShapeSuggestion } from "../api";
+import PremiseCard from "../ui/PremiseCard";
 import { CandidateCards } from "../ui/CandidateCards";
 import { ThinkingText } from "../ui/ThinkingText";
 import { conceptSig, conceptStaleText, isStale, titleSig as calcTitleSig, titleStaleText } from "./wizSig";
@@ -778,6 +779,14 @@ export default function OnboardingFlow() {
                     <h2>最后过一遍</h2>
                     <div className="card-desc">
                       都对就「开始创建」;哪张卡不对,点「改」跳回去调整,不强制重选。
+                    </div>
+                    <div className="card mt-3">
+                      <div className="card-head"><h3>核心梗卡</h3></div>
+                      <div className="card-desc">
+                        梗是全书的纲:AI 已按概念与题材提炼,点字段可改;蓝图逐章标「梗兑现」、
+                        交稿对账、体检健康度都以它为轴。点火后仍可在「本书设置」修改。
+                      </div>
+                      {pid != null && <PremiseCard pid={pid} initial={null} autoSuggest />}
                     </div>
                     <div className="wiz-wall mt-3">
                       {([

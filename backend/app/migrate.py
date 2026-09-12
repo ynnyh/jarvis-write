@@ -854,6 +854,7 @@ def _add_outline_drama_columns() -> None:
         for col, ddl in (
             ("emotional_tone", "VARCHAR(100) DEFAULT ''"),
             ("scene_anchor", "TEXT DEFAULT ''"),
+            ("premise_beat", "TEXT DEFAULT ''"),
         ):
             if not _column_exists("outlines", col):
                 conn.execute(
