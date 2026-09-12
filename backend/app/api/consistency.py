@@ -191,6 +191,8 @@ class RelationOut(BaseModel):
     other_name: str
     description: str
     valid_from: int
+    valid_until: int | None = None
+    status: str = "confirmed"  # pending = 抽取建联待作者确认(docs/19 M3)
     other_retired: bool
     evidence: list[RelationEvidence] = []
 
@@ -298,6 +300,8 @@ def _character_relations(db: Session, project_id: int, ent: Entity) -> list[Rela
                 other_name=other_name,
                 description=e.relation,
                 valid_from=e.valid_from,
+                valid_until=e.valid_until,
+                status=e.status,
                 other_retired=bool(other.retired) if other else False,
                 evidence=evidence,
             )

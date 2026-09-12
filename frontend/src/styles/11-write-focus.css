@@ -510,3 +510,48 @@
 }
 .recon-line .grow { flex: 1; min-width: 0; }
 .recon-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+/* 关系图谱(docs/19 M4) */
+.graph-slider { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-2); }
+.graph-slider input[type="range"] { flex: 1; }
+.graph-svg { width: 100%; max-width: 560px; margin: 0 auto; display: block; }
+.graph-edge { stroke: var(--line-strong); stroke-width: 1.5; }
+.graph-edge.pending { stroke: var(--warn); stroke-dasharray: 4 3; }
+.graph-node circle { fill: var(--brand-weak); stroke: var(--brand); cursor: pointer; }
+.graph-node circle.retired { fill: var(--surface-2); stroke: var(--line-strong); }
+.graph-node text { font-size: 12px; fill: var(--text); }
+
+/* 情节推进图(docs/19 M5) */
+.plotmap-scroll { overflow-x: auto; }
+.plotmap-grid { display: flex; gap: 6px; min-width: max-content; }
+.plotmap-col { display: flex; flex-direction: column; gap: 4px; width: 86px; flex-shrink: 0; }
+.plotmap-col-head {
+  display: flex; flex-direction: column; align-items: flex-start;
+  padding: 4px 6px; border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  background: var(--surface-2); cursor: pointer; text-align: left;
+}
+.plotmap-col-head.unwritten { opacity: 0.55; }
+.plotmap-scene {
+  padding: 4px 6px; border-radius: var(--r-sm);
+  display: flex; flex-direction: column; font-size: var(--fs-xs);
+  cursor: pointer; border: 1px solid var(--line);
+}
+.plotmap-scene.t1 { background: #e8f0f8; } .plotmap-scene.t2 { background: #e8f4e4; }
+.plotmap-scene.t3 { background: var(--surface-2); }
+.plotmap-scene.t4 { background: #fdf0dc; } .plotmap-scene.t5 { background: #f8ddd4; }
+.plotmap-scene.beats { background: var(--surface); }
+[data-theme="dark"] .plotmap-scene.t1 { background: #1d2a38; }
+[data-theme="dark"] .plotmap-scene.t2 { background: #1e3320; }
+[data-theme="dark"] .plotmap-scene.t4 { background: #3d2f1a; }
+[data-theme="dark"] .plotmap-scene.t5 { background: #3d201a; }
+
+/* 伏笔埋收带 */
+.plotmap-fs-row { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: 4px; }
+.plotmap-fs-label { flex-shrink: 0; width: 120px; font-size: var(--fs-xs); }
+.plotmap-fs-track { display: flex; gap: 2px; flex: 1; }
+.plotmap-fs-cell { flex: 1; height: 8px; border-radius: 2px; background: var(--surface-2); }
+.plotmap-fs-cell.on { background: var(--brand-weak); }
+.plotmap-fs-cell.plant { background: var(--brand); }
+.plotmap-fs-cell.payoff { background: var(--ok); }
+.plotmap-fs-cell.overdue { background: var(--err); }
+.plotmap-fs-desc { flex-shrink: 0; font-size: var(--fs-xs); }

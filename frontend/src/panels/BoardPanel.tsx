@@ -10,12 +10,16 @@ import TimelineBoard from "./board/TimelineBoard";
 import ForeshadowBoard from "./board/ForeshadowBoard";
 import MotifBoard from "./board/MotifBoard";
 import HealthBoard from "./board/HealthBoard";
+import GraphBoard from "./board/GraphBoard";
+import PlotMapBoard from "./board/PlotMapBoard";
 
 export type { BoardTab };
 
 // 看板五 tab 的内容分发(tab 栏在 book 区统一渲染,此处不再自带 chips)
 export default function BoardPanel({ pid, outlines, tab, onGotoChapter }: Props & { tab: BoardTab }) {
   if (tab === "characters") return <CharactersBoard pid={pid} />;
+  if (tab === "graph") return <GraphBoard pid={pid} onGotoChapter={onGotoChapter} />;
+  if (tab === "plotmap") return <PlotMapBoard pid={pid} onGotoChapter={onGotoChapter} />;
   if (tab === "bible") return <BibleBoard pid={pid} outlines={outlines} />;
   if (tab === "timeline") return <TimelineBoard pid={pid} onGotoChapter={onGotoChapter} />;
   if (tab === "foreshadow") return <ForeshadowBoard pid={pid} outlines={outlines} />;

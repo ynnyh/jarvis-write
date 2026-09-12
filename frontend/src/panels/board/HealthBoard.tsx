@@ -198,6 +198,56 @@ export default function HealthBoard({ pid, onGotoChapter }: {
         </div>
       </div>
 
+      {/* ---- 核心梗健康度(docs/19 M4)---- */}
+      <div className="card">
+        <div className="card-head">
+          <h2>核心梗健康度</h2>
+          <span className="muted">梗是全书的纲:兑现断了就是文扑前兆</span>
+        </div>
+        <div className="mt-2">
+          {!data.premise_defined ? (
+            <div className="muted">未建核心梗卡(本书设置里可补建)。</div>
+          ) : !data.premise_ledger_curve.length ? (
+            <div className="muted">已写章节暂无对账账(章后抽取自动记账;老书可用「全书补标节拍」)。</div>
+          ) : (
+            <>
+              <div className="fact-line">
+                高概念:<b>{data.premise_high_concept}</b>
+              </div>
+              <div className="fact-line">
+                有账章节兑现占比 <b><Pct value={data.premise_fulfilled_ratio ?? 0} /></b>
+                ,最近连续未兑现 <b className={data.premise_unfulfilled_streak >= 3 ? "text-err" : ""}>
+                  {data.premise_unfulfilled_streak}</b> 章,全书最长 {data.premise_max_streak} 章
+              </div>
+              <div className="bh-bars premise-curve" title="每章兑现(上=已兑现,下=未兑现)">
+                {data.premise_ledger_curve.map((p) => (
+                  <i key={p.chapter}
+                    className={p.fulfilled ? "ok" : "bad"}
+                    style={{ height: "100%" }}
+                    title={`第${p.chapter}章:${p.fulfilled ? "✓" : "✗"}${p.beat} ${p.note}`} />
+                ))}
+              </div>
+              {!!data.premise_uncovered_chapters.length && (
+                <div className="fact-line">
+                  <span className="badge warn">无对账账</span>
+                  已写但无账:
+                  {data.premise_uncovered_chapters.slice(0, 20).map((n) => (
+                    <button key={n} type="button" className="bh-link ml-2"
+                      onClick={() => onGotoChapter?.(n)}>第{n}章</button>
+                  ))}
+                </div>
+              )}
+              {data.premise_unfulfilled_streak >= 3 && (
+                <div className="fact-line">
+                  <span className="badge err">文扑预警</span> 连续 {data.premise_unfulfilled_streak} 章未兑现核心梗,
+                  建议回读梗卡调整后续走向。
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
       {/* ---- 成本 ---- */}
       <div className="card">
         <div className="card-head">

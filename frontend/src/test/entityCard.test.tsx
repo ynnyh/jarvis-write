@@ -11,7 +11,7 @@ const CARD: CharacterCard = {
   appearance_chapters: [1, 2, 5],
   relations: [
     {
-      other_name: "顾衍", description: "师徒", valid_from: 2, other_retired: false,
+      other_name: "顾衍", description: "师徒", valid_from: 2, valid_until: null, status: "confirmed", other_retired: false,
       evidence: [{ chapter: 2, content: "顾衍把听诊器放进林夏手里:以后这就是你的武器" }],
     },
   ],

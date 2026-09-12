@@ -461,7 +461,8 @@ export interface CharacterFact {
 }
 export interface RelationEvidence { chapter: number; content: string; }
 export interface CharacterRelation {
-  other_name: string; description: string; valid_from: number; other_retired: boolean;
+  other_name: string; description: string; valid_from: number; valid_until: number | null;
+  status: "confirmed" | "pending"; other_retired: boolean;
   evidence: RelationEvidence[]; // 支撑这条边的原文事实(带章节引用),新→旧最多 3 条
 }
 export interface CharacterCard {
@@ -589,8 +590,30 @@ export interface HealthReportOut {
   open_issues: number; issues_by_type: Record<string, number>; issue_chapters: number[];
   foreshadow_total: number; foreshadow_by_status: Record<string, number>;
   overdue: HealthOverdue[]; debt_ratio: number;
+  // 核心梗健康度(docs/19 M4):梗兑现账的确定性聚合;未建梗卡时 defined=false
+  premise_defined: boolean; premise_high_concept: string; premise_beats: string[];
+  premise_ledger_curve: { chapter: number; fulfilled: boolean; beat: string;
+    strength: number; note: string }[];
+  premise_unfulfilled_streak: number; premise_max_streak: number;
+  premise_uncovered_chapters: number[]; premise_fulfilled_ratio: number | null;
   prompt_tokens: number; completion_tokens: number; tokens_per_chapter: number;
   notes: string[]; markdown: string;
+}
+/** 情节推进图(docs/19 M5):章×场景网格 + 伏笔埋收链,纯确定性投影 */
+export interface PlotMapScene {
+  seq: number; title: string; location: string; emotion_target: string;
+  tension_level: number; status: string;
+}
+export interface PlotMapChapter {
+  chapter_number: number; title: string; chapter_role: string; emotional_tone: string;
+  premise_beat: string; written: boolean; scenes: PlotMapScene[]; beats: string[];
+}
+export interface PlotMapForeshadow {
+  id: number; description: string; status: string;
+  planted: number; payoff: number | null; expected: number | null;
+}
+export interface PlotMap {
+  chapters: PlotMapChapter[]; foreshadows: PlotMapForeshadow[];
 }
 /** 剧情时间线一格:该章章末契约聚合(零 LLM);无契约的章断档不显示 */
 export interface TimelineItem {
@@ -1117,6 +1140,9 @@ export const api = {
     req<Premise>("POST", `/api/projects/${pid}/suggest-premise`),
   backfillPremiseBeats: (pid: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/premise/backfill-beats`),
+  // 情节推进图:全蓝图书的章×场景网格与伏笔埋收链(纯投影)
+  plotMap: (pid: number) =>
+    req<PlotMap>("GET", `/api/projects/${pid}/plot-map`),
   // 本章作战图:写前一屏聚合(梗/纲/人物/伏笔账/承上钩子)
   getChapterDossier: (pid: number, n: number) =>
     req<ChapterDossier>("GET", `/api/projects/${pid}/chapters/${n}/dossier`),

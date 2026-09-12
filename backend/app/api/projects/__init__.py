@@ -40,7 +40,7 @@ from app.schemas.concept import Concept
 from app.schemas.dna import StoryDNA
 from app.schemas.project import ProjectCreate, ProjectOut
 
-from . import architecture, blueprint, naming, premise, shape, style_profile
+from . import architecture, blueprint, naming, plot_map, premise, shape, style_profile
 from ._common import _get_project_or_404
 
 # 向后兼容 re-export:tests/test_style_profile.py 与其他外部按
@@ -60,6 +60,7 @@ router.include_router(style_profile.router)
 router.include_router(blueprint.router)
 router.include_router(shape.router)
 router.include_router(premise.router)
+router.include_router(plot_map.router)
 
 
 # —— 项目 CRUD ——

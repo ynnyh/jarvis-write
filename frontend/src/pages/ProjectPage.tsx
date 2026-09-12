@@ -51,8 +51,10 @@ const SETUP_STEPS: { key: SetupStep; label: string }[] = [
 const BOOK_TABS: { key: BookTab; label: string }[] = [
   { key: "overview", label: "概览" },
   { key: "characters", label: "人物" },
+  { key: "graph", label: "图谱" },
   { key: "bible", label: "故事圣经" },
   { key: "timeline", label: "时间线" },
+  { key: "plotmap", label: "推进图" },
   { key: "foreshadow", label: "伏笔" },
   { key: "motifs", label: "桥段" },
   { key: "health", label: "成书体检" },
@@ -542,8 +544,9 @@ export default function ProjectPage() {
 
             {zone === "book" && (
               <>
-                {(bookTab === "overview" || bookTab === "characters" || bookTab === "bible"
-                  || bookTab === "foreshadow" || bookTab === "motifs" || bookTab === "health") && (
+                {(bookTab === "overview" || bookTab === "characters" || bookTab === "graph"
+                  || bookTab === "bible" || bookTab === "plotmap" || bookTab === "foreshadow"
+                  || bookTab === "motifs" || bookTab === "health") && (
                   outlines.length
                     ? <BoardPanel pid={pid} outlines={outlines} tab={bookTab}
                         onGotoChapter={(n) => {

@@ -65,6 +65,15 @@ class HealthReport:
     foreshadow_by_status: dict[str, int] = field(default_factory=dict)
     overdue: list[dict[str, Any]] = field(default_factory=list)
     debt_ratio: float = 0.0
+    # ⑤+' 核心梗健康度(docs/19 M4):梗是纲,兑现断了就是文扑前兆
+    premise_defined: bool = False
+    premise_high_concept: str = ""
+    premise_beats: list[str] = field(default_factory=list)
+    premise_ledger_curve: list[dict[str, Any]] = field(default_factory=list)
+    premise_unfulfilled_streak: int = 0   # 最近连续未兑现章数(越靠后越危险)
+    premise_max_streak: int = 0           # 全书最长连续未兑现
+    premise_uncovered_chapters: list[int] = field(default_factory=list)  # 已写但无对账账的章
+    premise_fulfilled_ratio: float | None = None  # 有账章节中兑现占比
     # ⑥ 成本
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -102,6 +111,7 @@ def book_health(db: Session, project_id: int) -> HealthReport:
     _fill_tension(db, project_id, report)
     _fill_consistency(db, project_id, report)
     _fill_foreshadow(db, project_id, report)
+    _fill_premise(db, project_id, report)
     _fill_cost(db, report)
 
     report.markdown = render_health(report)
@@ -268,6 +278,69 @@ def _fill_foreshadow(db: Session, project_id: int, report: HealthReport) -> None
     report.debt_ratio = round(unresolved / len(rows), 3)
 
 
+def _fill_premise(db: Session, project_id: int, report: HealthReport) -> None:
+    """核心梗健康度(docs/19 M4):梗兑现账的确定性聚合。
+
+    - ledger 有账的章:按序出曲线(✓/✗/强度),算连续未兑现与兑现占比;
+    - 已写但无账的章如实列进 uncovered(抽取降级/老书未补标都会落这);
+    - 没建梗卡:premise_defined=False,一句话说明,不装样子。
+    """
+    from app.db.models import Chapter, Premise
+    from app.db.models.premise_ledger import PremiseLedger
+
+    premise = (
+        db.query(Premise)
+        .filter(Premise.project_id == project_id, Premise.kind == "main")
+        .first()
+    )
+    if premise is None or not (premise.high_concept or "").strip():
+        report.notes.append("未建核心梗卡:「梗健康度」无从谈起(本书设置里可补建)")
+        return
+    report.premise_defined = True
+    report.premise_high_concept = premise.high_concept
+    report.premise_beats = [str(b) for b in (premise.beats or [])]
+
+    written_numbers = [
+        c.chapter_number
+        for c in db.query(Chapter)
+        .filter(Chapter.project_id == project_id)
+        .order_by(Chapter.chapter_number)
+        .all()
+        if (c.final_content or "").strip()
+    ]
+    ledgers = {
+        l.chapter_number: l
+        for l in db.query(PremiseLedger)
+        .filter(PremiseLedger.project_id == project_id)
+        .order_by(PremiseLedger.chapter_number)
+        .all()
+    }
+
+    streak = 0
+    fulfilled = 0
+    for n in written_numbers:
+        row = ledgers.get(n)
+        if row is None:
+            report.premise_uncovered_chapters.append(n)
+            streak += 1  # 无账也视为「看不见兑现」,与未兑现同权重示警
+            continue
+        if row.fulfilled:
+            streak = 0
+            fulfilled += 1
+        else:
+            streak += 1
+        report.premise_ledger_curve.append({
+            "chapter": n, "fulfilled": row.fulfilled, "beat": row.beat,
+            "strength": row.strength, "note": row.note,
+        })
+        report.premise_max_streak = max(report.premise_max_streak, streak)
+    report.premise_unfulfilled_streak = streak
+    covered = len(report.premise_ledger_curve)
+    report.premise_fulfilled_ratio = (round(fulfilled / covered, 2) if covered else None)
+    if not report.premise_ledger_curve:
+        report.notes.append("梗健康度:已写章节暂无对账账(章后抽取自动记账;老书可用「全书补标节拍」)")
+
+
 def _fill_cost(db: Session, report: HealthReport) -> None:
     """token 用量(全库口径,不按项目——llm_usage 没有 project_id 字段)。
 
@@ -380,6 +453,28 @@ def render_health(report: HealthReport, *, limit: int = 10) -> str:
             lines.append(f"  - ⏰ 逾期未收(预期第{o['expected']}章):{o['content']}")
     else:
         lines.append("_暂无登记伏笔_")
+    lines.append("")
+
+    # ⑤+' 核心梗健康度
+    lines.append("## 核心梗健康度")
+    lines.append("")
+    if not report.premise_defined:
+        lines.append("_未建核心梗卡_(本书设置里可补建)")
+    elif not report.premise_ledger_curve:
+        lines.append("_已写章节暂无对账账(章后抽取自动记账;老书可用「全书补标节拍」)_")
+    else:
+        lines.append(f"- 高概念:**{report.premise_high_concept}**")
+        ratio = report.premise_fulfilled_ratio
+        lines.append(
+            f"- 有账章节兑现占比 **{round((ratio or 0) * 100)}%**,"
+            f"最近连续未兑现 **{report.premise_unfulfilled_streak}** 章,"
+            f"全书最长 **{report.premise_max_streak}** 章"
+        )
+        if report.premise_uncovered_chapters:
+            chs = "、".join(f"第{n}章" for n in report.premise_uncovered_chapters[:limit])
+            lines.append(f"- ⚠ 无对账账的已写章:{chs}")
+        if report.premise_unfulfilled_streak >= 3:
+            lines.append("⚠ **连续多章未兑现核心梗——这是文扑的前兆**,建议回读梗卡调整后续走向")
     lines.append("")
 
     # ⑥ 成本

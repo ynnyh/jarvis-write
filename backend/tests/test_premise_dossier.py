@@ -158,3 +158,58 @@ def test_blueprint_prompt_injects_premise_block():
     assert "{core_premise_block}" in CHAPTER_BLUEPRINT_PROMPT
     assert "{core_premise_block}" in CHUNKED_BLUEPRINT_PROMPT
     assert "梗兑现" in CHAPTER_BLUEPRINT_PROMPT  # 格式行里有字段说明
+
+
+def test_plot_map_and_premise_health(client):
+    """情节推进图数据 + 体检梗健康度:投影完整、缺数据如实缺省。"""
+    from app.db.models import Chapter, PremiseLedger
+    from app.db.session import SessionLocal
+
+    headers = _auth(client, f"pm_map_{uuid.uuid4().hex[:6]}")
+    pid = _mkproject(client, headers, "推进图书")
+    client.put(f"/api/projects/{pid}/premise", headers=headers, json=_PREMISE)
+
+    # 3 章大纲;其中 1、2 章已写;第 2 章有场景卡;第 1 章有兑现账、第 3 章无账
+    from app.db.session import SessionLocal as SL
+    with SL() as db:
+        from app.db.models import Outline, Project
+        p = db.query(Project).filter(Project.title == "推进图书").first()
+        for n in range(1, 4):
+            db.add(Outline(project_id=p.id, chapter_number=n, title=f"章{n}",
+                           summary=f"第{n}章", chapter_role="常规推进",
+                           emotional_tone="紧绷", premise_beat=f"第{n}拍" if n <= 2 else "",
+                           beats=[f"拍{n}"]))
+        db.add(Chapter(project_id=p.id, chapter_number=1,
+                       draft_content="正文一", final_content="正文一", word_count=3))
+        db.add(Chapter(project_id=p.id, chapter_number=2,
+                       draft_content="正文二", final_content="正文二", word_count=3))
+        db.add(Chapter(project_id=p.id, chapter_number=3,
+                       draft_content="正文三", final_content="正文三", word_count=3))
+        db.add(PremiseLedger(project_id=p.id, chapter_number=1,
+                             fulfilled=True, beat="代价显形", strength=4))
+        db.commit()
+
+    # 情节推进图
+    r = client.get(f"/api/projects/{pid}/plot-map", headers=headers)
+    assert r.status_code == 200, r.text
+    m = r.json()
+    assert [c["chapter_number"] for c in m["chapters"]] == [1, 2, 3]
+    assert m["chapters"][0]["written"] and m["chapters"][2]["written"] is True
+    assert m["chapters"][0]["premise_beat"] == "第1拍"
+    assert len(m["foreshadows"]) == 0
+
+    # 梗健康度:第 1 章有账兑现,第 2 章有账未兑现,第 3 章已写无账
+    client.post(f"/api/projects/{pid}/chapters/2/reconciliation/confirm",
+                headers=headers, json={"confirmed_relation_ids": [], "rejected_relation_ids": []})
+    db.add(PremiseLedger(project_id=p.id, chapter_number=2,
+                         fulfilled=False, beat="", strength=2))
+    db.commit()
+    r = client.get(f"/api/projects/{pid}/health-report", headers=headers)
+    assert r.status_code == 200, r.text
+    h = r.json()
+    assert h["premise_defined"] is True
+    assert h["premise_high_concept"] == "救人一次,寿命减一年"
+    assert h["premise_unfulfilled_streak"] >= 1          # 第 2 章未兑现计入连击
+    assert 3 in h["premise_uncovered_chapters"]          # 第 3 章已写无账
+    assert h["premise_fulfilled_ratio"] is not None
+    assert "核心梗健康度" in h["markdown"]
