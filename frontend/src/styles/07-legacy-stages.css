@@ -225,13 +225,13 @@
   color: var(--text-2);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-/* 重试中要看得出来:系统在自救,不是卡死(后端译为「原步骤 · 重试中 x/y(原因)」) */
+/* 重试中要看得出来:系统在自救,不是卡死(后端译为「原步骤 · 重试中 x/y(原因)」)。
+   桌面一行放得下就内联;手机窄屏在下方媒体查询里整条折到第二行,不截断。 */
 .live-step.retrying {
   color: var(--warn);
   background: var(--warn-weak);
   border-radius: var(--r-sm);
   padding: 0 6px;
-  flex-shrink: 0;
 }
 .live-nth { color: var(--text-2); }
 .live-btn {
@@ -278,6 +278,11 @@
     z-index: 55;
   }
   .live-body { max-height: 38vh; }
+  /* 手机窄屏:状态徽标(order 挪到最后 + 整行 basis)确定性折到第二行,
+     全文完整可读;■/▾ 等按钮永远留在第一行右侧,不会被长提示挤出屏幕。
+     flex-wrap 放在此处而非基础样式——桌面一行能装下,不引入贪心换行的混乱。 */
+  .live-head { flex-wrap: wrap; row-gap: 5px; }
+  .live-head > .live-step { order: 10; flex: 1 1 100%; }
   /* 写区有 .write-zone 时:让出 m-ai-bar 位置,层级也下沉到 50 以避开 */
   body:has(.write-zone) .live-dock {
     bottom: calc(64px + constant(safe-area-inset-bottom));
@@ -297,10 +302,14 @@
        比单纯 column 更紧凑、按钮仍能横向并排而不被挤窄。 */
 @media (max-width: 767px) {
   .tc-drawer {
-    right: auto;
+    /* absolute 的锚是 .tc-wrap(右上角按钮小容器),left:8px 会解析成
+       「按钮左侧 8px」,360px 宽直接伸出屏幕外——改 fixed 锚定视口 */
+    position: fixed;
+    top: 58px;                  /* m-shellbar(50px)之下 8px */
     left: 8px;
-    width: calc(100vw - 16px);
-    max-width: 360px;
+    right: 8px;
+    width: auto;
+    max-width: none;
     max-height: 70vh;
     padding: 8px;
     border-radius: var(--r-lg);
