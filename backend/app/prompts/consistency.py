@@ -24,7 +24,7 @@ EXTRACTION_PROMPT = """\
 【第{chapter_number}章正文】
 {chapter_text}
 
-请抽取以下内容,严格按 JSON 输出(不要 markdown 代码块,不要解释):
+{premise_block}请抽取以下内容,严格按 JSON 输出(不要 markdown 代码块,不要解释):
 {{
   "new_entities": [
     {{"name": "实体名", "entity_type": "character|location|item|faction", "aliases": ["别名"], "note": "一句话说明"}}
@@ -48,6 +48,7 @@ EXTRACTION_PROMPT = """\
   "motifs": [
     {{"label": "短标签(2-8字,如:铁锈玫瑰/扎胸膛/躺下等天亮)", "detail": "一句话说明这个桥段长什么样,不复述原句"}}
   ],
+  "premise_check": {{"fulfilled": true或false, "beat": "兑现的节拍名,照抄节拍表;未兑现填空串", "strength": 1到5, "note": "一句话:本章哪个情节兑现了这一拍/为什么算未兑现", "evidence": "佐证原句(可选)"}},
   "canon_suggestions": [
     {{"kind": "absence", "text": "刻意留白声明(如:大院里只有主人、保镖、女主三人,没有仆役)", "evidence": "本章正文里正面确立此留白的原句", "reason": "为何值得设为全书恒真"}},
     {{"kind": "device", "name": "装置名(如:系统)", "cadence": "复现节奏(如:每章都应有存在感)", "importance": "critical|major|minor", "evidence": "本章正文里该装置登场的原句", "reason": "为何是需长期复现的常驻装置"}},
@@ -73,7 +74,10 @@ EXTRACTION_PROMPT = """\
    label 用可检索的短标签;若与【桥段台账已有标签】是同一个东西,label 必须逐字照抄
    已有标签(标签漂移会让次数聚合失效)。每章最多 3 条,宁缺毋滥;推进剧情的
    一次性动作、只出现一次的普通描写都不算。本章没有够格的就给空数组
-8. 宁缺毋滥,每类最多 8 条,按重要性取舍
+8. premise_check(梗兑现对账):照【全书核心梗】的节拍表判断本章推进了哪一拍——
+   推进了就 fulfilled=true 并照抄节拍名;纯过渡章 fulfilled=false、beat 填空串,
+   note 说清为什么这章可以不兑现(铺垫/恢复),不许硬凑
+9. 宁缺毋滥,每类最多 8 条,按重要性取舍
 9. canon_suggestions(故事宪法建议,给作者过目、不自动生效):仅当本章正文【正面确立】了一条【全书恒真】的书级设定时才提议——
    - absence 刻意留白:文中明写"只有…三人/空无一人/别无他人/此处不通电"等把某类人或物排除在外的硬设定(不是"检测缺席"猜出来的,必须有正面原句支撑)
    - device 常驻装置/金手指:首次出现、设定为长期存在须反复现身的东西(系统/读心术/贴身信物),与一次性道具区分

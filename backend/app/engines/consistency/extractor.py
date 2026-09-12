@@ -263,11 +263,33 @@ async def extract_and_apply(
         open_fs += f"\n- …(另有 {len(_open) - _MAX_OPEN_FS} 条未回收伏笔未列出)"
     # 桥段台账已有标签(排除本章):供 LLM 同物同名,跨章聚合才数得准
     known_motifs = known_labels_block(db, project_id, exclude_chapter=chapter_number)
+    # 核心梗块(docs/19 M3):有梗卡才注入,抽取顺带做梗兑现对账;无梗卡零变化
+    from app.db.models.premise import Premise
+
+    premise_row = (
+        db.query(Premise)
+        .filter(Premise.project_id == project_id, Premise.kind == "main")
+        .first()
+    )
+    if premise_row is not None and (premise_row.high_concept or "").strip():
+        beats = "、".join(
+            f"第{i + 1}拍·{str(b).strip()}"
+            for i, b in enumerate(premise_row.beats or [])
+            if str(b).strip()
+        )
+        premise_block = (
+            "【全书核心梗(抽完本章后请顺带对账:premise_check)】\n"
+            f"高概念:{premise_row.high_concept.strip()}\n"
+            f"兑现节拍表:{beats or '(未列)'}\n\n"
+        )
+    else:
+        premise_block = ""
     prompt = EXTRACTION_PROMPT.format(
         known_entities=known_entities,
         active_facts=active_facts,
         open_foreshadowings=open_fs,
         known_motifs=known_motifs or "(暂无)",
+        premise_block=premise_block,
         chapter_number=chapter_number,
         chapter_text=chapter_text[:12000],  # 防超长
     )

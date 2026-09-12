@@ -84,6 +84,11 @@ class Relationship(Base):
     # 证据锚:抽取写边时指向同章双写的 fact 行(source_chapter + 完整描述),
     # 追溯从边直达原文事实,不再靠 other_name 字符串反查;手写边可为空。
     evidence_fact_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 确认流(docs/19 M3):抽取写的新边 = pending(不注入、不出现在作战图,
+    # 等作者在交稿对账里确认/否决);存量与作者认可的边 = confirmed。
+    status: Mapped[str] = mapped_column(
+        String(12), default="confirmed", server_default="confirmed", index=True
+    )
 
 
 class KnowledgeState(Base):

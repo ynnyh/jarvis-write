@@ -13,6 +13,7 @@ import GateRepairDetails from "../../ui/GateRepairDetails";
 import { useJob } from "../../ui/useJob";
 import { toast } from "../../ui/Toaster";
 import GateResolve from "./GateResolve";
+import ReconciliationBlock from "../../ui/ReconciliationBlock";
 import { useInvalidateProject } from "../../hooks/queries";
 
 // 审校五维分中文标签;旧快照无 continuity 键,Object.entries 遍历天然不渲染该行
@@ -410,6 +411,7 @@ export default function GenResultCard({ pid, result, durationSec, onChanged, onR
         {issues === null && !issuesErr && (
           <span className="muted"> 问题清单加载中…</span>
         )}
+        {!historical && <ReconciliationBlock pid={pid} n={n} />}
         {doneIssues.length > 0 && (
           <details className="issue-done-box mt-1">
             <summary className="muted">已处理 {doneIssues.length} 条(已解决/已忽略)</summary>

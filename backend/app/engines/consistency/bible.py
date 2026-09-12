@@ -15,6 +15,7 @@ from sqlalchemy import String, cast
 from sqlalchemy.orm import Session
 
 from app.db.models import Entity, Fact, KnowledgeState, Relationship
+from app.db.models.premise_ledger import PremiseLedger
 
 logger = logging.getLogger("jarvis-write.bible")
 
@@ -347,6 +348,12 @@ class BibleService:
         4. 关系边同理:删除 valid_from == n 的新边,重开 valid_until == n-1 的旧边
            (relationships 无 source_chapter 字段,以 valid_from 充当来源章标记)
         """
+        # 梗兑现账同属本章抽取产物:重抽取覆盖,撤销抽取时一并清掉
+        self.db.query(PremiseLedger).filter(
+            PremiseLedger.project_id == self.project_id,
+            PremiseLedger.chapter_number == chapter_number,
+        ).delete(synchronize_session=False)
+
         facts = (
             self.db.query(Fact)
             .filter(
@@ -465,7 +472,7 @@ class BibleService:
                     other = self.get_or_create_entity(other_name)
                     if self._upsert_relationship(
                         chapter_number, entity, other, short_relation_label(content),
-                        evidence_fact_id=fact.id,
+                        evidence_fact_id=fact.id, status="pending",
                     ):
                         stats["relationships"] += 1
 
@@ -486,13 +493,34 @@ class BibleService:
             )
             stats["knowledge"] += 1
 
+        # 梗兑现记账(docs/19 M3):抽取顺带判断本章对核心梗的兑现,写交稿对账账本
+        pc = extraction.get("premise_check")
+        if isinstance(pc, dict):
+            fulfilled = bool(pc.get("fulfilled"))
+            self.db.query(PremiseLedger).filter(
+                PremiseLedger.project_id == self.project_id,
+                PremiseLedger.chapter_number == chapter_number,
+            ).delete(synchronize_session=False)
+            self.db.add(
+                PremiseLedger(
+                    project_id=self.project_id,
+                    chapter_number=chapter_number,
+                    fulfilled=fulfilled,
+                    beat=str(pc.get("beat") or "").strip()[:100],
+                    note=str(pc.get("note") or "").strip()[:300],
+                    strength=max(1, min(5, int(pc.get("strength") or 3))),
+                    evidence=str(pc.get("evidence") or "").strip()[:300],
+                )
+            )
+            stats["premise_ledger"] = 1
+
         self.db.flush()
         logger.info("圣经写入(第%d章): %s", chapter_number, stats)
         return stats
 
     def _upsert_relationship(
         self, chapter_number: int, a: Entity, b: Entity, relation: str,
-        evidence_fact_id: int | None = None,
+        evidence_fact_id: int | None = None, status: str = "confirmed",
     ) -> bool:
         """写一条关系边,同实体对(不分方向)的时序更新语义与 facts 对齐:
 
@@ -528,6 +556,7 @@ class BibleService:
                 valid_from=chapter_number,
                 valid_until=None,
                 evidence_fact_id=evidence_fact_id,
+                status=status,
             )
         )
         return True

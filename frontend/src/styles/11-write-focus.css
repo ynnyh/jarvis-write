@@ -494,3 +494,19 @@
 .entity-card-rel-ev { font-size: var(--fs-xs); }
 .entity-card-jump { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .entity-card-jump:hover { color: var(--brand); }
+
+/* 交稿对账(docs/19 M3):结果卡内的「本章对账」区 */
+.recon-block {
+  margin-top: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface-2);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
+}
+.recon-line {
+  display: flex; align-items: center; gap: var(--sp-2);
+  margin-bottom: 4px; flex-wrap: wrap;
+}
+.recon-line .grow { flex: 1; min-width: 0; }
+.recon-actions { display: flex; gap: 4px; flex-shrink: 0; }

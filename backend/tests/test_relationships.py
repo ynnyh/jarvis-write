@@ -399,3 +399,68 @@ def test_relationship_evidence_anchor(client):
         assert "反目成仇" in fact.content
     finally:
         db.close()
+
+
+def test_reconciliation_confirm_and_reject(client):
+    """交稿对账(docs/19 M3):抽取边=pending;确认转正;否决删边并收口证据事实。"""
+    from app.db.models import Entity, Fact, Relationship
+    from app.db.session import SessionLocal
+    from app.engines.consistency import BibleService
+
+    headers = _auth(client, "rel_recon")
+    p = _create_project(client, headers, "对账书")
+
+    db = SessionLocal()
+    try:
+        BibleService(db, p["id"]).apply_extraction(
+            2,
+            {"fact_changes": [
+                _rel_change("张三", "李四", "结拜兄弟"),
+                _rel_change("张三", "王五", "不共戴天"),
+            ]},
+        )
+        db.commit()
+        pend = (
+            db.query(Relationship)
+            .filter(Relationship.project_id == p["id"], Relationship.status == "pending")
+            .all()
+        )
+        assert len(pend) == 2  # 抽取边默认待确认
+    finally:
+        db.close()
+
+    # 对账单能看到两条 pending(带证据)
+    r = client.get(f"/api/projects/{p['id']}/chapters/2/reconciliation", headers=headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["confirmed"] is False
+    assert len(body["pending_relations"]) == 2
+    assert all(pr["evidence_text"] for pr in body["pending_relations"])
+    ids = {pr["relation"] + pr["from_name"]: pr["id"] for pr in body["pending_relations"]}
+    # 键 = 关系名+主体名(如「结拜兄弟张三」)
+
+    # 确认「结拜兄弟」、否决「不共戴天」
+    r = client.post(
+        f"/api/projects/{p['id']}/chapters/2/reconciliation/confirm",
+        headers=headers,
+        json={
+            "confirmed_relation_ids": [ids["结拜兄弟张三"]],
+            "rejected_relation_ids": [ids["不共戴天张三"]],
+        },
+    )
+    assert r.status_code == 200, r.text
+
+    db = SessionLocal()
+    try:
+        rels = db.query(Relationship).filter(Relationship.project_id == p["id"]).all()
+        assert len(rels) == 1                      # 否决的边已删
+        assert rels[0].status == "confirmed"       # 确认的边已转正
+        # 否决边的证据事实已收口(删除):facts 里只剩结拜那条
+        facts = db.query(Fact).filter(Fact.project_id == p["id"]).all()
+        assert len(facts) == 1 and "结拜" in facts[0].content
+    finally:
+        db.close()
+
+    # 对账单清空:再无待确认
+    r = client.get(f"/api/projects/{p['id']}/chapters/2/reconciliation", headers=headers)
+    assert r.json()["confirmed"] is True

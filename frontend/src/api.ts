@@ -525,6 +525,22 @@ export interface ChapterDossier {
   prev_threads: string[];
   prev_location: string;
 }
+/** 交稿对账单(docs/19 M3):抽取在本章自动建联的东西,等作者裁决 */
+export interface PendingRelation {
+  id: number; from_name: string; to_name: string; relation: string;
+  evidence_chapter: number | null; evidence_text: string;
+}
+export interface ReconciliationLedger {
+  fulfilled: boolean; beat: string; note: string; strength: number; evidence: string;
+}
+export interface ReconciliationForeChange { description: string; op: "planted" | "reinforced" | "payoff"; }
+export interface ChapterReconciliation {
+  chapter_number: number;
+  pending_relations: PendingRelation[];
+  ledger: ReconciliationLedger | null;
+  foreshadow_changes: ReconciliationForeChange[];
+  confirmed: boolean;
+}
 export interface FactSpan {
   content: string; fact_type: string; importance: string;
   valid_from: number; valid_until: number | null;
@@ -1104,6 +1120,16 @@ export const api = {
   // 本章作战图:写前一屏聚合(梗/纲/人物/伏笔账/承上钩子)
   getChapterDossier: (pid: number, n: number) =>
     req<ChapterDossier>("GET", `/api/projects/${pid}/chapters/${n}/dossier`),
+
+  // 交稿对账(docs/19 M3):本章抽取建联的待确认关系边 + 梗兑现账 + 伏笔变动
+  getReconciliation: (pid: number, n: number) =>
+    req<ChapterReconciliation>("GET", `/api/projects/${pid}/chapters/${n}/reconciliation`),
+  confirmReconciliation: (
+    pid: number, n: number,
+    body: { confirmed_relation_ids: number[]; rejected_relation_ids: number[] },
+  ) =>
+    req<{ confirmed: number; rejected: number }>(
+      "POST", `/api/projects/${pid}/chapters/${n}/reconciliation/confirm`, body),
 
   suggestTitleAsync: (topic: string, genre: string, concept?: Concept | null) =>
     req<{ job_id: string }>("POST", "/api/projects/title-suggestion-async",

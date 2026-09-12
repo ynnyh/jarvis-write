@@ -306,10 +306,28 @@ def test_extraction_prompt_formats_with_known_motifs():
     text = EXTRACTION_PROMPT.format(
         known_entities="(暂无)", active_facts="(无)",
         open_foreshadowings="(暂无)", known_motifs="铁锈玫瑰、扎胸膛",
+        premise_block="",  # 无梗卡:块为空串,prompt 零变化
         chapter_number=3, chapter_text="正文",
     )
     assert "铁锈玫瑰、扎胸膛" in text
     assert "motifs" in text and "躺下去等天亮" in text  # JSON 契约与示例都在
+    assert "premise_check" in text                       # 梗兑现对账契约常驻
+
+
+def test_extraction_prompt_injects_premise_block():
+    """有梗卡时注入【全书核心梗】块与节拍表,抽取顺带做梗兑现对账。"""
+    from app.prompts.consistency import EXTRACTION_PROMPT
+
+    text = EXTRACTION_PROMPT.format(
+        known_entities="(暂无)", active_facts="(无)",
+        open_foreshadowings="(暂无)", known_motifs="(暂无)",
+        premise_block="【全书核心梗(抽完本章后请顺带对账:premise_check)】\n"
+                      "高概念:救人一次,寿命减一年\n兑现节拍表:第1拍·代价显形、第2拍·初次反转\n\n",
+        chapter_number=3, chapter_text="正文",
+    )
+    assert "premise_check" in text
+    assert "救人一次,寿命减一年" in text
+    assert "第2拍·初次反转" in text
 
 
 def test_extract_and_apply_writes_motifs():
