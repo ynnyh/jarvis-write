@@ -756,7 +756,14 @@ export default function Prose({
         <div className="entity-pop" style={{ top: entityPop.top, left: entityPop.left }}
           onMouseEnter={cancelHideEntity} onMouseLeave={scheduleHideEntity}
           onClick={(e) => e.stopPropagation()}>
-          <EntityCard c={entityPop.entity} />
+          <EntityCard
+            c={entityPop.entity}
+            onJumpChapter={(n) => {
+              if (n === chapter.chapter_number) return;
+              window.location.hash = `#/project/${pid}/write?ch=${n}`;
+              setEntityPop(null);
+            }}
+          />
         </div>
       )}
     </div>

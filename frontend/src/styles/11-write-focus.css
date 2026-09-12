@@ -488,3 +488,9 @@
 .premise-line { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: 4px; }
 .premise-line .muted { flex-shrink: 0; width: 52px; }
 .premise-input { width: 100%; }
+
+/* 实体浮卡的关系区(docs/19 M2):边 + 证据章引用,追溯在浮卡上闭环 */
+.entity-card-rel { display: flex; flex-direction: column; gap: 1px; margin-bottom: 4px; }
+.entity-card-rel-ev { font-size: var(--fs-xs); }
+.entity-card-jump { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.entity-card-jump:hover { color: var(--brand); }

@@ -373,3 +373,29 @@ def test_relations_not_owner_404(client):
         r["description"] == "仇敌"
         for c in body["characters"] for r in c["relations"]
     )
+
+
+def test_relationship_evidence_anchor(client):
+    """抽取写边带证据锚(evidence_fact_id → 同章双写 fact 行),边→证据直达。"""
+    from app.db.models import Fact, Relationship
+    from app.db.session import SessionLocal
+    from app.engines.consistency import BibleService
+
+    headers = _auth(client, "rel_evidence")
+    p = _create_project(client, headers, "证据书")
+
+    db = SessionLocal()
+    try:
+        BibleService(db, p["id"]).apply_extraction(
+            3, {"fact_changes": [_rel_change("王五", "赵六", "反目成仇")]}
+        )
+        db.commit()
+
+        rel = db.query(Relationship).filter(Relationship.project_id == p["id"]).one()
+        assert rel.evidence_fact_id is not None
+        fact = db.get(Fact, rel.evidence_fact_id)
+        assert fact is not None
+        assert fact.source_chapter == 3          # 证据事实 = 同章双写行
+        assert "反目成仇" in fact.content
+    finally:
+        db.close()

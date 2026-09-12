@@ -280,11 +280,19 @@ def _character_relations(db: Session, project_id: int, ent: Entity) -> list[Rela
         other_id = e.to_entity_id if e.from_entity_id == ent.id else e.from_entity_id
         other = db.get(Entity, other_id)
         other_name = other.name if other else f"实体{other_id}"
-        evidence = [
-            RelationEvidence(chapter=f.source_chapter, content=f.content)
-            for f in rel_facts
-            if other_name in f.content
-        ][:3]
+        # 证据组装:优先走边上的证据锚(evidence_fact_id,M2)直达事实行;
+        # 存量边无锚时回退 other_name 字符串匹配(历史行为)。
+        evidence: list[RelationEvidence] = []
+        if e.evidence_fact_id:
+            f = db.get(Fact, e.evidence_fact_id)
+            if f is not None:
+                evidence.append(RelationEvidence(chapter=f.source_chapter, content=f.content))
+        if not evidence:
+            evidence = [
+                RelationEvidence(chapter=f.source_chapter, content=f.content)
+                for f in rel_facts
+                if other_name in f.content
+            ][:3]
         out.append(
             RelationOut(
                 other_name=other_name,

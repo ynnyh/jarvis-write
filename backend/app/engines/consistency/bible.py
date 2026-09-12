@@ -464,7 +464,8 @@ class BibleService:
                 if other_name and other_name != ent_name:
                     other = self.get_or_create_entity(other_name)
                     if self._upsert_relationship(
-                        chapter_number, entity, other, short_relation_label(content)
+                        chapter_number, entity, other, short_relation_label(content),
+                        evidence_fact_id=fact.id,
                     ):
                         stats["relationships"] += 1
 
@@ -490,7 +491,8 @@ class BibleService:
         return stats
 
     def _upsert_relationship(
-        self, chapter_number: int, a: Entity, b: Entity, relation: str
+        self, chapter_number: int, a: Entity, b: Entity, relation: str,
+        evidence_fact_id: int | None = None,
     ) -> bool:
         """写一条关系边,同实体对(不分方向)的时序更新语义与 facts 对齐:
 
@@ -525,6 +527,7 @@ class BibleService:
                 relation=relation,
                 valid_from=chapter_number,
                 valid_until=None,
+                evidence_fact_id=evidence_fact_id,
             )
         )
         return True
