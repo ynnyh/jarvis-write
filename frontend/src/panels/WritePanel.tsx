@@ -34,6 +34,7 @@ import MarksReviseCards from "./write/MarksReviseCards";
 import ChapterTitleEdit from "./write/ChapterTitleEdit";
 import WriteGuide from "./write/WriteGuide";
 import ChapterDossier from "../ui/ChapterDossier";
+import NoviceChecklist from "../ui/NoviceChecklist";
 import { estimateText } from "./write/genDuration";
 import { useWritePanel, ACT_TITLE } from "./write/useWritePanel";
 import { useScrollOnAppear } from "./write/useScrollOnAppear";
@@ -176,6 +177,7 @@ export default function WritePanel({ pid, outlines }: Props) {
       <div className="write-body">
       {/* ---- 主场正文列:状态卡 + 蓝图卡 + 正文(段落气泡)+ 章尾下一章卡(移动端支持左右滑切章) ---- */}
       <div className="write-main" onTouchStart={onMainTouchStart} onTouchEnd={onMainTouchEnd}>
+        <NoviceChecklist pid={pid} onGoto={(path) => nav(path)} />
         <WriteGuide />
         {chapterNum !== null && <ChapterDossier pid={pid} chapterNumber={chapterNum} yieldTo={genResult} />}
         {versionsFor !== null && versions !== null && (

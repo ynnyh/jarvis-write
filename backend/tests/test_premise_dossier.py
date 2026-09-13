@@ -247,3 +247,49 @@ def test_epub_export_has_metadata_and_title_page(client):
     assert "元数据书" in title_page and "作者:" in title_page
     # 书名页在 spine 首位(先于第一章)
     assert opf.find('idref="titlepage"') < opf.find('idref="c1"')
+
+
+def test_dashboard_aggregates_todos(client):
+    """首页驾驶舱:待对账/文扑预警/建议按严重度取首个;全空闲不放假待办。"""
+    from app.db.models import Chapter, Entity, Outline, Project, Relationship
+    from app.db.session import SessionLocal as SL
+
+    headers = _auth(client, f"pm_dash_{uuid.uuid4().hex[:6]}")
+    pid = _mkproject(client, headers, "驾驶图书")
+    client.put(f"/api/projects/{pid}/premise", headers=headers, json=_PREMISE)
+    with SL() as db:
+        from app.db.models import User
+        u = db.query(User).filter(User.username.startswith("pm_dash_")).first()
+        p = db.query(Project).filter(Project.user_id == u.id, Project.title == "驾驶图书").first()
+        for n in range(1, 4):
+            db.add(Outline(project_id=p.id, chapter_number=n, title=f"章{n}"))
+            db.add(Chapter(project_id=p.id, chapter_number=n,
+                           draft_content="x", final_content=f"第{n}章。", word_count=3))
+        e1 = Entity(project_id=p.id, entity_type="character", name="林夏")
+        db.add(e1); db.flush()
+        e2 = Entity(project_id=p.id, entity_type="character", name="路人甲")
+        db.add(e2); db.flush()
+        # 第 2、3 章各挂一条 pending 边;第 1、2 章有兑现账(第 3 章无账 → 连击=1,不触发文扑预警)
+        from app.db.models.premise_ledger import PremiseLedger
+        db.add(PremiseLedger(project_id=p.id, chapter_number=1, fulfilled=True, beat="第1拍"))
+        db.add(PremiseLedger(project_id=p.id, chapter_number=2, fulfilled=True, beat="第2拍"))
+        db.add(Relationship(project_id=p.id, from_entity_id=e1.id, to_entity_id=e2.id,
+                            relation="测试", valid_from=2, status="pending"))
+        db.add(Relationship(project_id=p.id, from_entity_id=e1.id, to_entity_id=e2.id,
+                            relation="测试2", valid_from=3, status="pending"))
+        db.commit()
+
+    r = client.get("/api/projects/dashboard", headers=headers)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    me = next(x for x in d["projects"] if x["project_id"] == pid)
+    assert me["pending_reconciliation"] == 2
+    assert "有待确认的关系对账" in (me["suggestion"] or "")
+    assert me["path"] == "/project/1/write?ch=2" or "ch=2" in (me["path"] or "")
+    assert me["premise_missing"] is False  # 梗卡已建
+
+    # 全空闲:另开一本空书,suggestion 为 None(不放假待办)
+    pid2 = _mkproject(client, headers, "空闲书")
+    r = client.get("/api/projects/dashboard", headers=headers)
+    me2 = next(x for x in r.json()["projects"] if x["project_id"] == pid2)
+    assert me2["suggestion"] is None

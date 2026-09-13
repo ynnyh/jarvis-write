@@ -17,6 +17,7 @@ vi.mock("../api", () => ({
     renameProject: vi.fn(),
     deleteProject: vi.fn(),
     patchProject: vi.fn(),
+    dashboard: vi.fn().mockResolvedValue({ projects: [] }),  // 驾驶舱:测试聚焦列表本身
   },
 }));
 vi.mock("../ui/ConfirmDialog", () => ({ confirmDialog: vi.fn() }));

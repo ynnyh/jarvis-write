@@ -542,6 +542,15 @@ export interface ChapterReconciliation {
   foreshadow_changes: ReconciliationForeChange[];
   confirmed: boolean;
 }
+/** 首页驾驶舱单本书的待办信号(docs/19 中期) */
+export interface ProjectTodo {
+  project_id: number; title: string; written: number; planned: number;
+  pending_reconciliation: number; overdue_foreshadows: number;
+  premise_streak: number | null; premise_missing: boolean;
+  stale_chapters: number;
+  suggestion: string | null; path: string | null;
+}
+export interface ProjectDashboard { projects: ProjectTodo[]; }
 export interface FactSpan {
   content: string; fact_type: string; importance: string;
   valid_from: number; valid_until: number | null;
@@ -1143,6 +1152,10 @@ export const api = {
   // 情节推进图:全蓝图书的章×场景网格与伏笔埋收链(纯投影)
   plotMap: (pid: number) =>
     req<PlotMap>("GET", `/api/projects/${pid}/plot-map`),
+
+  // 首页驾驶舱:跨书聚合「今天该干什么」(待对账/逾期伏笔/文扑预警/失配章)
+  dashboard: () =>
+    req<ProjectDashboard>("GET", `/api/projects/dashboard`),
   // 本章作战图:写前一屏聚合(梗/纲/人物/伏笔账/承上钩子)
   getChapterDossier: (pid: number, n: number) =>
     req<ChapterDossier>("GET", `/api/projects/${pid}/chapters/${n}/dossier`),

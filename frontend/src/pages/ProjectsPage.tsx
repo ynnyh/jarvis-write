@@ -1,7 +1,7 @@
 // 项目列表;新建走 /new 创作起步流(建书即建草稿,五步走到点火)
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, Project } from "../api";
+import { api, Project, ProjectTodo } from "../api";
 import TitleSuggest from "../components/TitleSuggest";
 import { confirmDialog } from "../ui/ConfirmDialog";
 import EmptyState from "../ui/EmptyState";
@@ -15,6 +15,11 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  // 首页驾驶舱(docs/19 中期):跨书聚合「今天该干什么」;失败静默(卡片降级无待办行)
+  const [todos, setTodos] = useState<ProjectTodo[]>([]);
+  useEffect(() => {
+    api.dashboard().then((d) => setTodos(d.projects)).catch(() => undefined);
+  }, [projects.length]);
   const nav = useNavigate();
 
   // 整本导入(TXT/DOCX):选文件 + 可改书名,后端解析分卷/章节建为新项目
@@ -212,6 +217,16 @@ export default function ProjectsPage() {
                     {(p.total_words ?? 0) > 0 && ` · ${((p.total_words ?? 0) / 10000).toFixed(1)} 万字`}
                   </span>
                 </div>
+                {(() => {
+                  const todo = todos.find((t) => t.project_id === p.id);
+                  if (!todo?.suggestion) return null;
+                  return (
+                    <Link to={`/app#${todo.path ?? ""}`} className="proj-todo"
+                      onClick={(e) => { e.preventDefault(); nav(todo.path ?? `/project/${p.id}`); }}>
+                      <span className="badge warn">待办</span> {todo.suggestion} →
+                    </Link>
+                  );
+                })()}
               </Link>
             )}
 

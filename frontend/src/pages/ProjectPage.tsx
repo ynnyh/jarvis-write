@@ -48,6 +48,13 @@ const SETUP_STEPS: { key: SetupStep; label: string }[] = [
   { key: "arch", label: "架构" },
   { key: "outline", label: "大纲" },
 ];
+// 制片向页签(投稿/漫剧/投流)依赖正文:分期 reveal(docs/19 中期)——
+// 0 章时合并为一个锁定 chip(保留可发现性),写完第一章自动解锁成三页签。
+const PRODUCTION_TABS: { key: BookTab; label: string }[] = [
+  { key: "publish", label: "投稿" },
+  { key: "drama", label: "漫剧" },
+  { key: "clips", label: "投流" },
+];
 const BOOK_TABS: { key: BookTab; label: string }[] = [
   { key: "overview", label: "概览" },
   { key: "characters", label: "人物" },
@@ -58,9 +65,7 @@ const BOOK_TABS: { key: BookTab; label: string }[] = [
   { key: "foreshadow", label: "伏笔" },
   { key: "motifs", label: "桥段" },
   { key: "health", label: "成书体检" },
-  { key: "publish", label: "投稿" },
-  { key: "drama", label: "漫剧" },
-  { key: "clips", label: "投流" },
+  ...PRODUCTION_TABS,
   { key: "audit", label: "体检" },
   { key: "refresh", label: "翻新" },
 ];
@@ -356,6 +361,8 @@ export default function ProjectPage() {
   const setupStep: SetupStep = SETUP_STEPS.some((s) => s.key === setupStepRaw)
     ? (setupStepRaw as SetupStep)
     : (SETUP_STEPS.find((s) => !setupDone[s.key])?.key ?? "outline");
+  // 分期 reveal 用:已写章数(正文非空;制片向页签 0 章时锁定)
+  const writtenCount = chapters.filter((c) => c.word_count > 0).length;
   const bookTab: BookTab = BOOK_TABS.some((t) => t.key === bookTabRaw)
     ? (bookTabRaw as BookTab)
     : "overview";
@@ -444,13 +451,20 @@ export default function ProjectPage() {
             )}
             {zone === "book" && (
               <div className="pj-subs">
-                {BOOK_TABS.map((t) => (
-                  <button key={t.key} type="button"
-                    className={"pj-sub-tab" + (bookTab === t.key ? " on" : "")}
-                    onClick={() => setBookTab(t.key)}>
-                    {t.label}
-                  </button>
-                ))}
+                {BOOK_TABS.map((t) => {
+                  // 分期 reveal:0 章时制片向三页签折叠为一个锁定 chip
+                  const isProduction = (PRODUCTION_TABS as { key: BookTab }[]).some((pt) => pt.key === t.key);
+                  const locked = isProduction && writtenCount === 0;
+                  if (locked && t.key !== "publish") return null;
+                  return (
+                    <button key={t.key} type="button"
+                      className={"pj-sub-tab" + (bookTab === t.key ? " on" : "") + (locked ? " locked" : "")}
+                      title={locked ? "写完第一章解锁:投稿/漫剧/投流都从定稿章节开始" : undefined}
+                      onClick={() => { if (!locked) setBookTab(t.key); }}>
+                      {locked ? "🔒 投稿 · 漫剧 · 投流" : t.label}
+                    </button>
+                  );
+                })}
               </div>
             )}
             <button type="button"
