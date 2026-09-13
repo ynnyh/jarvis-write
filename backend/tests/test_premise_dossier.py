@@ -213,3 +213,37 @@ def test_plot_map_and_premise_health(client):
     assert 3 in h["premise_uncovered_chapters"]          # 第 3 章已写无账
     assert h["premise_fulfilled_ratio"] is not None
     assert "核心梗健康度" in h["markdown"]
+
+
+def test_epub_export_has_metadata_and_title_page(client):
+    """epub 导出(P2-3):元数据带作者/简介/修改时间,书名页进 spine 首位。"""
+    headers = _auth(client, f"pm_epub_{uuid.uuid4().hex[:6]}")
+    pid = _mkproject(client, headers, "元数据书")
+    # 简介走 topic(synopsis 为空时回落)
+    client.patch(f"/api/projects/{pid}", headers=headers,
+                 json={"topic": "拿命换命的急救爽文"})
+    from app.db.models import Chapter
+    from app.db.session import SessionLocal as SL
+    with SL() as db:
+        from app.db.models import Project
+        p = db.query(Project).filter(Project.title == "元数据书").first()
+        db.add(Chapter(project_id=p.id, chapter_number=1,
+                       draft_content="正文", final_content="第一章正文内容。", word_count=8))
+        db.commit()
+
+    r = client.get(f"/api/projects/{pid}/export/epub", headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith("application/epub+zip")
+
+    import io as _io
+    import zipfile
+    z = zipfile.ZipFile(_io.BytesIO(r.content))
+    opf = z.read("OEBPS/content.opf").decode("utf-8")
+    assert "<dc:creator>pm_epub_" in opf            # 作者 = 用户名
+    assert "拿命换命的急救爽文" in opf                # 简介
+    assert "dcterms:modified" in opf
+    assert "<dc:description>" in opf
+    title_page = z.read("OEBPS/title.xhtml").decode("utf-8")
+    assert "元数据书" in title_page and "作者:" in title_page
+    # 书名页在 spine 首位(先于第一章)
+    assert opf.find('idref="titlepage"') < opf.find('idref="c1"')

@@ -125,7 +125,7 @@ export function useWritePanel({ pid, outlines }: UseWritePanelArgs) {
     genJob, genResult, setGenResult, genDurSec,
     genTendency, setGenTendency,
     queueMode, setQueueMode, queuePicked, setQueuePicked,
-    queueResume, resumeQueue, dismissQueueResume,
+    queueResume, queueResumeReason, resumeQueue, dismissQueueResume,
     generate, startQueue, pickNextBatch, reconnectGenerate,
   } = useChapterGeneration(pid, outlines, chapters, {
     setErr, setCurrent, reload, setChapterNum, chapterNum,
@@ -397,7 +397,7 @@ export function useWritePanel({ pid, outlines }: UseWritePanelArgs) {
     // useChapterGeneration
     genJob, genResult, setGenResult, genDurSec, genTendency, setGenTendency,
     queueMode, setQueueMode, queuePicked, setQueuePicked,
-    queueResume, resumeQueue, dismissQueueResume,
+    queueResume, queueResumeReason, resumeQueue, dismissQueueResume,
     generate, startQueue, pickNextBatch,
     // useReader
     reader, readerLoading, setReader, openReader, prevNum, nextNum, readerOutline,

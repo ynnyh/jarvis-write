@@ -294,7 +294,19 @@ def _fill_premise(db: Session, project_id: int, report: HealthReport) -> None:
         .first()
     )
     if premise is None or not (premise.high_concept or "").strip():
-        report.notes.append("未建核心梗卡:「梗健康度」无从谈起(本书设置里可补建)")
+        # 有账无卡(抽取先写了 premise_check,梗卡后补):说清数据已在,建卡即回填
+        has_ledger = (
+            db.query(PremiseLedger)
+            .filter(PremiseLedger.project_id == project_id)
+            .count()
+        )
+        if has_ledger:
+            report.notes.append(
+                f"未建核心梗卡,但抽取已记了 {has_ledger} 条兑现账——"
+                "在「本书设置」补建梗卡后,这些账会直接回填成健康度曲线"
+            )
+        else:
+            report.notes.append("未建核心梗卡:「梗健康度」无从谈起(本书设置里可补建)")
         return
     report.premise_defined = True
     report.premise_high_concept = premise.high_concept

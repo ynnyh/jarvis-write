@@ -159,7 +159,21 @@ export default function DualTrackEditor({
         </div>
         <div className="dual-right">
           <div className="dual-pane-title">✏️ 新稿(可编辑){noDiff && <span className="badge">与定稿无差异</span>}</div>
-          <div ref={hostRef} className={"free-write-host" + (genBlocked ? " is-locked" : "")} />
+          <div className="dual-right-host-wrap">
+            <div ref={hostRef} className={"free-write-host" + (genBlocked ? " is-locked" : "")} />
+            {!stats && !genBlocked && (
+              <div className="dual-empty-hint">
+                <div className="muted">右栏还是空的——两种开写方式:</div>
+                <div className="dual-empty-actions">
+                  <button type="button" className="btn-sm primary"
+                    onClick={() => void loadLeft()}>📄 载入当前定稿,在它上面改</button>
+                  <button type="button" className="btn-sm"
+                    onClick={() => ed.viewRef.current?.focus()}>✍️ 直接空白开写</button>
+                </div>
+                <div className="muted dual-empty-note">定稿在左栏始终可见,写完 Ctrl+S 写回</div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
       <p className="hint">

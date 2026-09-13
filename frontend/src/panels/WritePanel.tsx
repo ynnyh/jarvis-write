@@ -74,7 +74,7 @@ export default function WritePanel({ pid, outlines }: Props) {
     // useChapterGeneration
     genJob, genResult, setGenResult, genDurSec, genTendency, setGenTendency,
     queueMode, setQueueMode, queuePicked, setQueuePicked,
-    queueResume, resumeQueue, dismissQueueResume,
+    queueResume, queueResumeReason, resumeQueue, dismissQueueResume,
     generate, startQueue, pickNextBatch,
     // useReader
     reader, readerLoading, setReader, openReader, prevNum, nextNum, readerOutline,
@@ -136,6 +136,9 @@ export default function WritePanel({ pid, outlines }: Props) {
             连写已暂停,剩余 {queueResume.length} 章
             (第 {queueResume[0]}{queueResume.length > 1 ? `-${queueResume[queueResume.length - 1]}` : ""} 章)未写。
             已完成的章节和进度都已保存。
+            {queueResumeReason && (
+              <span className="muted queue-reason"> 停止原因:{queueResumeReason}</span>
+            )}
           </span>
           <button type="button" className="btn-sm" onClick={resumeQueue}>
             从第 {queueResume[0]} 章继续

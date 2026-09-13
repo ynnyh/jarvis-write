@@ -46,6 +46,8 @@ export function useChapterGeneration(
   // 连写中断后的待续跑章号(402 欠费/门禁拦截/严格模式暂停):非空时壳层挂「一键续跑」,
   // 用户不必手动重选剩余区间(402 场景:充值后点一下就接着写)
   const [queueResume, setQueueResume] = useState<number[] | null>(null);
+  // 连写停止原因(P1-B):与 remaining 同源落 localStorage,切走再回来恢复条还能说清「为什么停」
+  const [queueResumeReason, setQueueResumeReason] = useState<string | null>(null);
   // 生成/重写任务卸载时中止轮询,防止卸载后继续 setState(生成/重写/连写共用一个)
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => { abortRef.current?.abort(); }, []);
@@ -158,6 +160,8 @@ export function useChapterGeneration(
         // 门禁拦截不含该章——它要先去写作页处理)。402 欠费场景:充值后点一下就接着写。
         setErr(r.error);
         setQueueResume(r.remaining || []);
+        setQueueResumeReason(r.error || null);
+        try { localStorage.setItem(`queue-paused:${pid}`, JSON.stringify({ remaining: r.remaining || [], reason: r.error || "" })); } catch { /* 隐私模式忽略 */ }
         if (!r.quarantined) {
           toast.err("连写队列中断",
             `已完成 ${r.completed?.length ?? 0}/${r.total} 章,进度已保存。`
@@ -196,7 +200,23 @@ export function useChapterGeneration(
     await runQueue(queueResume);
   }, [queueResume, confirmQueueStart, runQueue]);
 
-  const dismissQueueResume = useCallback(() => setQueueResume(null), []);
+  const dismissQueueResume = useCallback(() => {
+    setQueueResume(null);
+    setQueueResumeReason(null);
+    try { localStorage.removeItem(`queue-paused:${pid}`); } catch { /* 隐私模式忽略 */ }
+  }, [pid]);
+  // 挂载恢复:切走再回来,恢复条(连同停止原因)仍在
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(`queue-paused:${pid}`);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as { remaining?: number[]; reason?: string };
+      if (saved.remaining?.length) {
+        setQueueResume(saved.remaining);
+        setQueueResumeReason(saved.reason || null);
+      }
+    } catch { /* 脏数据忽略 */ }
+  }, [pid]);
 
   const pickNextBatch = useCallback(() => {
     const written = new Set(chapters.map((c) => c.chapter_number));
@@ -225,6 +245,8 @@ export function useChapterGeneration(
           // 重连后才发现队列已中断:同样挂出一键续跑,不让用户对着一句报错手动重选
           setErr(r.error);
           setQueueResume(r.remaining || []);
+          setQueueResumeReason(r.error || null);
+          try { localStorage.setItem(`queue-paused:${pid}`, JSON.stringify({ remaining: r.remaining || [], reason: r.error || "" })); } catch { /* 隐私模式忽略 */ }
         }
       }).catch(() => undefined)
         .finally(() => reload().catch(() => undefined))
@@ -240,7 +262,7 @@ export function useChapterGeneration(
     genJob, genResult, setGenResult, genDurSec,
     genTendency, setGenTendency,
     queueMode, setQueueMode, queuePicked, setQueuePicked,
-    queueResume, resumeQueue, dismissQueueResume,
+    queueResume, queueResumeReason, resumeQueue, dismissQueueResume,
     generate, startQueue, pickNextBatch, reconnectGenerate,
   };
 }

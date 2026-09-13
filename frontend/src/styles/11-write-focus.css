@@ -564,3 +564,19 @@
 
 /* 对账区一句话解释 */
 .recon-hint { font-weight: 400; margin-left: 4px; }
+
+/* 连写恢复条的停止原因 */
+.queue-reason { display: inline; }
+
+/* 双轨对照右栏空态引导(docs/19 二轮评审 P2-1) */
+.dual-right-host-wrap { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.dual-empty-hint {
+  position: absolute; inset: 0; z-index: 2;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--sp-2); text-align: center;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  border-radius: var(--r-sm);
+  pointer-events: none;
+}
+.dual-empty-hint .dual-empty-actions { display: flex; gap: var(--sp-2); pointer-events: auto; }
+.dual-empty-hint .dual-empty-note { font-size: var(--fs-xs); }

@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from app import live
 from app.api.sse import STREAM_HEADERS, sse_event
 from app.auth import assert_project_owner, current_user_id, get_current_user
-from app.db.models import Chapter, LlmUsage, Outline, Project
+from app.db.models import Chapter, LlmUsage, Outline, Project, User
 from app.db.session import get_db
 from app.jobs import cancel_running_job, get_job, get_job_persisted, list_for_user, list_running
 
@@ -247,7 +247,25 @@ async def export_epub(project_id: int, db: Session = Depends(get_db)):
             f"<h2>{escape(title)}</h2>{paras}</body></html>"
         )
 
+    # 书名页:书名 + 作者 + 简介,阅读器打开第一眼不是裸章节(P2-3)
+    owner = db.get(User, project.user_id) if project.user_id else None
+    author = escape(owner.username) if owner else "jarvis-write 作者"
+    topic_line = escape((project.synopsis or project.topic or "").strip()[:500])
+    title_page = (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<html xmlns="http://www.w3.org/1999/xhtml"><head>'
+        f"<title>{escape(project.title)}</title></head><body>"
+        f"<h1>{escape(project.title)}</h1>"
+        f"<p>作者:{author}</p>"
+        + (f"<p>{topic_line}</p>" if topic_line else "")
+        + "</body></html>"
+    )
+
     manifest, spine, files = [], [], []
+    if items:
+        manifest.append('<item id="titlepage" href="title.xhtml" media-type="application/xhtml+xml"/>')
+        spine.append('<itemref idref="titlepage"/>')
+        files.append(("title.xhtml", title_page))
     for i, (title, text) in enumerate(items, 1):
         fn = f"chap{i}.xhtml"
         manifest.append(
@@ -266,14 +284,22 @@ async def export_epub(project_id: int, db: Session = Depends(get_db)):
         '<head><title>目录</title></head><body><nav epub:type="toc"><ol>'
         + nav_lis + "</ol></nav></body></html>"
     )
+    # 元数据(P2-3):作者/简介/修改时间,阅读器书目页不再空白
+    modified = (
+        project.updated_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+        if getattr(project, "updated_at", None)
+        else "2026-01-01T00:00:00Z"
+    )
     opf = (
         '<?xml version="1.0" encoding="utf-8"?>'
         '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">'
         '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
         f'<dc:identifier id="uid">jarvis-write-{project.id}</dc:identifier>'
         f"<dc:title>{escape(project.title)}</dc:title>"
+        f"<dc:creator>{author}</dc:creator>"
         "<dc:language>zh-CN</dc:language>"
-        '<meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>'
+        + (f"<dc:description>{topic_line}</dc:description>" if topic_line else "")
+        + f'<meta property="dcterms:modified">{modified}</meta>'
         "</metadata><manifest>"
         '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
         + "".join(manifest)
