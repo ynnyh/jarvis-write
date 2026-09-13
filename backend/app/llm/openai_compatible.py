@@ -16,6 +16,7 @@ from typing import AsyncIterator
 import httpx
 
 from app.llm.base import (
+    _http_timeout,
     LLMAdapter,
     LLMMessage,
     LLMResponse,
@@ -166,7 +167,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
 
     async def _complete_once(self, messages: list[LLMMessage]) -> LLMResponse:
         """经典非流式调用:POST 后等完整响应体(流式被拒时的兜底路径)。"""
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(timeout=_http_timeout(self.timeout)) as client:
             resp = await client.post(
                 self._endpoint(),
                 headers=self._headers(),
@@ -181,7 +182,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
         """SSE 流式:产出正文增量,把思考/收尾原因/用量塞进 sink。"""
         reasoning: list[str] = []
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(timeout=_http_timeout(self.timeout)) as client:
                 async with client.stream(
                     "POST",
                     self._endpoint(),

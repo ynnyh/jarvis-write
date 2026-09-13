@@ -348,6 +348,19 @@ async def with_retries(call, *, attempts: int = 3, base_delay: float = 2.0, on_r
         f"上游连续 {attempts} 次调用失败,最后错误: {_describe_exc(last)}",
         retryable=True,
     ) from last
+# 连接级独立超时:渠道端口不可达(SYN 被防火墙静默丢弃等)时,总超时(默认 600s)
+# 会让任务黑等 10 分钟且不进重试循环——重试警示挂在重试回调上,循环没进就全失效。
+# 连接 10s 建不起来就直接转入重试(退避+界面警示),总超时只管"连上了但吐字慢"。
+_CONNECT_TIMEOUT_S = 10.0
+
+
+def _http_timeout(total: float | int | None) -> "httpx.Timeout":
+    import httpx
+
+    total_s = float(total) if total and float(total) > 0 else 600.0
+    return httpx.Timeout(total_s, connect=min(_CONNECT_TIMEOUT_S, total_s))
+
+
 # 渠道明确拒收思考控制参数的现场记录:(base_url, model) → 不再下发该参数。
 # 适配器是按次创建的,不落模块级记不住,同一渠道每次调用都要白挨一个 400。
 _THINKING_REJECTED: set[tuple[str, str]] = set()

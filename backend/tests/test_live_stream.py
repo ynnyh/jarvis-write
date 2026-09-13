@@ -551,3 +551,16 @@ def test_follow_carries_retry_count_in_label_frames():
     assert step_frames[0]["retries"] == 0          # 首屏时还没重试过
     assert label_frames and label_frames[-1]["retries"] == 1
     assert "无可用渠道" in label_frames[-1]["lastErr"]
+
+
+def test_http_timeout_has_connect_floor():
+    """渠道不可达时快速失败:连接超时独立于总超时(10s 下限),黑等不再长达 10 分钟。"""
+    from app.llm.base import _http_timeout
+
+    t = _http_timeout(600)
+    assert t.connect == 10.0 and t.read == 600.0
+    # 配置了小总超时的也不被连接超时反超
+    t2 = _http_timeout(5)
+    assert t2.connect == 5.0
+    # 未配置回落 600
+    assert _http_timeout(None).read == 600.0

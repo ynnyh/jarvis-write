@@ -16,6 +16,7 @@ from typing import AsyncIterator
 import httpx
 
 from app.llm.base import (
+    _http_timeout,
     LLMAdapter,
     LLMMessage,
     LLMResponse,
@@ -110,7 +111,7 @@ class GeminiAdapter(LLMAdapter):
 
     async def _complete_once(self, messages: list[LLMMessage]) -> LLMResponse:
         url = f"{self._base()}/models/{self.model_name}:generateContent?key={self.api_key}"
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(timeout=_http_timeout(self.timeout)) as client:
             resp = await client.post(url, json=self._payload(messages))
             data = check_upstream(resp, hint=_HINT)
         return self._parse_candidates(data, status=resp.status_code)
@@ -124,7 +125,7 @@ class GeminiAdapter(LLMAdapter):
         )
         reasoning: list[str] = []
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(timeout=_http_timeout(self.timeout)) as client:
                 async with client.stream("POST", url, json=self._payload(messages)) as resp:
                     if resp.status_code >= 400:
                         # 错误体读出来给可读文案,而不是 raise_for_status 的裸状态码
