@@ -70,3 +70,4 @@ backend/evals_out/
 backend/dist_smoke/
 backend/build_smoke/
 frontend/dist-app/
+frontend/chars2.json
