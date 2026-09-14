@@ -23,12 +23,14 @@ import { useOnboarding } from "./onboarding/useOnboarding";
 export type { SetupStep };
 
 // 方向卡屏轻偏好预置(P0-B 偏好前移):都是高频人话选项,全部可不选;
-// tone/elements 的 directive 已在后端 tag_presets 里,这里只放 label 让用户点
+// tone/elements 的 directive 已在后端 tag_presets 里,这里只放 label 让用户点。
+// P1 口味定标:感情线/开局强度/主角底色/主角视角不再硬编码,直接读 outlineDims(配置驱动)。
 const PREF_TONES = ["热血", "悬疑", "治愈", "甜", "暗黑", "爽"];
 const PREF_ELEMENTS = ["逆袭", "马甲", "身份错位", "成长蜕变", "救赎", "群像", "破镜重圆", "契约关系"];
-const PREF_PROTAGONISTS = ["小人物", "行内老手", "边缘人", "天才", "普通人"];
 // 排斥项对着题材边界最常拦的套路来(用户明确点了才允许,没点就是「不要」)
 const PREF_AVOIDS = ["系统", "重生", "穿越", "觉醒", "异能"];
+// 口味定标维度(outline 目录里的 key,按此顺序渲染):收窄抽卡空间的核心四问
+const TASTE_DIM_KEYS = ["lead_gender", "romance", "opening", "protagonist"] as const;
 
 // AI 推荐的阅读手感:进入基调步时自动预填一次(仅当用户尚未自选),并显示依据横幅
 function ToneAutoApply({ shapeSug, setDim }: {
@@ -67,9 +69,9 @@ export default function OnboardingFlow() {
     // 派生
     concept, tendency, sparkText, allGenreChips, shownSuggests,
     // 各屏 state
-    spark, entry, genreDim, pickedGenreCard, chatInput, busy,
+    spark, entry, genreDim, outlineDims, pickedGenreCard, chatInput, busy,
     ideas, comparison, ideaSig, customOpen, customConcept,
-    prefTone, prefElements, prefProta, prefAvoid,
+    prefTone, prefElements, prefFlavors, prefPersona, prefAvoid, prefAvoidText,
     engineCards, enginePicked, genrePath,
     inferBusy, customGenre,
     titleIdeas, titleSig, titleBusy, titleInput,
@@ -78,7 +80,7 @@ export default function OnboardingFlow() {
     // setter
     setSpark, setEntry, setPickedGenreCard, setChatInput,
     setIdeaSig, setCustomOpen, setCustomConcept,
-    setPrefTone, setPrefElements, setPrefProta, setPrefAvoid,
+    setPrefTone, setPrefElements, setPrefFlavors, setPrefPersona, setPrefAvoid, setPrefAvoidText,
     setGenreSuggests, setSuggestPage, setCustomGenre,
     setTitleSig, setTitleInput, setChapters, setWords, setDirty,
     openEnded, toggleOpenEnded,
@@ -104,17 +106,27 @@ export default function OnboardingFlow() {
   const premiseDraftRef = useRef<Premise | null>(null);
   const [scaleApplied, setScaleApplied] = useState(false);
 
-  // 题材页「随机换一张」:全池重抽题材卡 + 顺带抽口味(与随机开一本同一体验语言)
+  // 题材页「随机换一张」:全池重抽题材卡 + 顺带抽口味(与随机开一本同一体验语言)。
+  // P1 口味定标:分叉口味跟着新卡走;感情线/开局/底色/视角写进 tendency(setDim 落库)。
   function randomizeDraft() {
     if (!allGenreChips.length) return;
     const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
     const pickSome = <T,>(arr: T[], max: number): T[] =>
       [...arr].sort(() => Math.random() - 0.5).slice(0, Math.floor(Math.random() * (max + 1)));
-    setPickedGenreCard(pick(allGenreChips));
+    const card = pick(allGenreChips);
+    setPickedGenreCard(card);
     setPrefTone(pickSome(PREF_TONES, 2));
     setPrefElements(pickSome(PREF_ELEMENTS, 2));
-    setPrefProta(Math.random() < 0.6 ? pick(PREF_PROTAGONISTS) : "");
+    setPrefFlavors(card.flavors?.length ? pickSome(card.flavors, 2) : []);
+    setPrefPersona("");
     setPrefAvoid(pickSome(PREF_AVOIDS, 1));
+    setPrefAvoidText("");
+    for (const key of TASTE_DIM_KEYS) {
+      const dim = outlineDims.find((d) => d.key === key);
+      if (!dim?.chips.length) continue;
+      const labels = dim.chips.map((c) => c.label);
+      void setDim(key, dim.select === "multi" ? pickSome(labels, 2) : pick(labels));
+    }
   }
 
   // 随机开一本·零成本阶段:类型卡、一句话灵感全部本地抽签,不调 LLM。
@@ -240,6 +252,105 @@ export default function OnboardingFlow() {
                         <button onClick={() => goto("genre")}>概念已就绪,跳到题材 →</button>
                       )}
                     </div>
+                        {/* 口味定标(P1):对所有路径可见——AI 出方案/方向卡都会立 pickedGenreCard,
+                            收窄抽卡空间;全部可跳过,一道不选与旧版一致 */}
+                        {pickedGenreCard && (
+                          <div className="pref-quick mt-3">
+                            {!!pickedGenreCard.flavors?.length && (
+                              <div className="pref-row">
+                                <span className="pref-label">这个流派里想看<small>可多选</small></span>
+                                <div className="title-chips">
+                                  {pickedGenreCard.flavors.map((t) => (
+                                    <button key={t} type="button"
+                                      className={"title-chip" + (prefFlavors.includes(t) ? " on" : "")}
+                                      onClick={() => setPrefFlavors((p) =>
+                                        p.includes(t) ? p.filter((x) => x !== t) : [...p, t])}>
+                                      {t}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {TASTE_DIM_KEYS.map((key) => {
+                              const dim = outlineDims.find((d) => d.key === key);
+                              if (!dim?.chips.length) return null;
+                              const cur = tendency[key];
+                              return (
+                                <div className="pref-row" key={key}>
+                                  <span className="pref-label">{dim.label}<small>{dim.select === "multi" ? "可多选" : "可不选"}</small></span>
+                                  <div className="title-chips">
+                                    {dim.chips.map((c) => {
+                                      const on = dim.select === "multi"
+                                        ? Array.isArray(cur) && cur.includes(c.label)
+                                        : cur === c.label;
+                                      return (
+                                        <button key={c.label} type="button"
+                                          className={"title-chip" + (on ? " on" : "")}
+                                          title={c.directive || undefined}
+                                          onClick={() => {
+                                            if (dim.select === "multi") {
+                                              const arr = Array.isArray(cur) ? [...cur] : [];
+                                              void setDim(key, on ? arr.filter((x) => x !== c.label) : [...arr, c.label]);
+                                            } else {
+                                              void setDim(key, on ? "" : c.label);
+                                            }
+                                          }}>{c.label}</button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            <div className="pref-row">
+                              <span className="pref-label">想要的味道<small>可不选</small></span>
+                              <div className="title-chips">
+                                {PREF_TONES.map((t) => (
+                                  <button key={t} type="button"
+                                    className={"title-chip" + (prefTone.includes(t) ? " on" : "")}
+                                    onClick={() => setPrefTone((p) =>
+                                      p.includes(t) ? p.filter((x) => x !== t) : [...p, t])}>
+                                    {t}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="pref-row">
+                              <span className="pref-label">想看的元素<small>可多选</small></span>
+                              <div className="title-chips">
+                                {PREF_ELEMENTS.map((t) => (
+                                  <button key={t} type="button"
+                                    className={"title-chip" + (prefElements.includes(t) ? " on" : "")}
+                                    onClick={() => setPrefElements((p) =>
+                                      p.includes(t) ? p.filter((x) => x !== t) : [...p, t])}>
+                                    {t}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="pref-row">
+                              <span className="pref-label">主角底色·其它</span>
+                              <input className="premise-input" value={prefPersona}
+                                onChange={(e) => setPrefPersona(e.target.value)}
+                                placeholder="chips 没覆盖的底色写这里(可不填)" />
+                            </div>
+                            <div className="pref-row">
+                              <span className="pref-label">排斥项<small>点了就是「不要」</small></span>
+                              <div className="title-chips">
+                                {PREF_AVOIDS.map((t) => (
+                                  <button key={t} type="button"
+                                    className={"title-chip" + (prefAvoid.includes(t) ? " on" : "")}
+                                    onClick={() => setPrefAvoid((p) =>
+                                      p.includes(t) ? p.filter((x) => x !== t) : [...p, t])}>
+                                    {t}
+                                  </button>
+                                ))}
+                                <input className="premise-input" value={prefAvoidText}
+                                  onChange={(e) => setPrefAvoidText(e.target.value)}
+                                  placeholder="其它不要的(可不填)" />
+                              </div>
+                            </div>
+                          </div>
+                        )}
                     {seedHint && (
                       <div className="fld-hint">
                         已抽到一句灵感(已填入上框,可随意改)——觉得方向对,就点「让 AI 出方案」;不对就再抽一次,重抽不花 token。
@@ -290,63 +401,8 @@ export default function OnboardingFlow() {
                           );
                         })}
 
-                        {/* 轻偏好(P0-B 偏好前移):三两个可跳过的小问题,概念生成前先喂给 AI;
-                            都不选也行——但选了就不是"流派平均值"了 */}
-                        {pickedGenreCard && (
-                          <div className="pref-quick mt-3">
-                            <div className="pref-row">
-                              <span className="pref-label">想要的味道<small>可不选</small></span>
-                              <div className="title-chips">
-                                {PREF_TONES.map((t) => (
-                                  <button key={t} type="button"
-                                    className={"title-chip" + (prefTone.includes(t) ? " on" : "")}
-                                    onClick={() => setPrefTone((p) =>
-                                      p.includes(t) ? p.filter((x) => x !== t) : [...p, t])}>
-                                    {t}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                            <div className="pref-row">
-                              <span className="pref-label">想要的元素<small>可多选</small></span>
-                              <div className="title-chips">
-                                {PREF_ELEMENTS.map((t) => (
-                                  <button key={t} type="button"
-                                    className={"title-chip" + (prefElements.includes(t) ? " on" : "")}
-                                    onClick={() => setPrefElements((p) =>
-                                      p.includes(t) ? p.filter((x) => x !== t) : [...p, t])}>
-                                    {t}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                            <div className="pref-row">
-                              <span className="pref-label">主角更像<small>可不选</small></span>
-                              <div className="title-chips">
-                                {PREF_PROTAGONISTS.map((t) => (
-                                  <button key={t} type="button"
-                                    className={"title-chip" + (prefProta === t ? " on" : "")}
-                                    onClick={() => setPrefProta((p) => (p === t ? "" : t))}>
-                                    {t}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                            <div className="pref-row">
-                              <span className="pref-label">不想看到<small>可不选</small></span>
-                              <div className="title-chips">
-                                {PREF_AVOIDS.map((t) => (
-                                  <button key={t} type="button"
-                                    className={"title-chip" + (prefAvoid.includes(t) ? " on" : "")}
-                                    onClick={() => setPrefAvoid((p) =>
-                                      p.includes(t) ? p.filter((x) => x !== t) : [...p, t])}>
-                                    {t}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          </div>
-                        )}
+                        {/* 口味定标(P1):流派内分叉 + 感情线/开局/底色/视角,收窄抽卡空间;
+                            全部可跳过——一道不选就和旧版完全一样,收窄是加分项不是门槛 */}
 
                         <div className="actions mt-3">
                           <button className="primary" disabled={!pickedGenreCard}
@@ -439,6 +495,16 @@ export default function OnboardingFlow() {
                                       {card.angle && <span className="engine-angle">{card.angle}</span>}
                                       <b>{card.engine}</b>
                                       {card.hook && <span className="engine-hook">抓人点:{card.hook}</span>}
+                                      {/* 锚点重抽(P1):这张方向对就沿它变着来,不再全盘否定重抽——
+                                          省掉"8 张里其实有 1 张接近"被整批扔掉的浪费 */}
+                                      <span className="engine-anchor" title="这张方向对——以它为锚,再出一批不重样的变体"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (busy) return;
+                                          fetchEngines((engineCards ?? []).map((c) => c.engine), card.engine);
+                                        }}>
+                                        🎯 照这张再来点
+                                      </span>
                                     </button>
                                   ))}
                                 </div>

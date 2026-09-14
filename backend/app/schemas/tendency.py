@@ -22,6 +22,9 @@ class ChipOut(BaseModel):
     # 两级题材库扩展字段(仅 genre 维度有):所属大类 key / 用户向一句话卖点
     category: str | None = None
     desc: str | None = None
+    # 流派内分叉口味(仅 genre 维度有):该流派里更细的子口味选项,
+    # 供开书偏好面板收窄抽卡范围;选中项拼进 spark 文本,不进 tendency 指令
+    flavors: list[str] | None = None
 
 
 class DimensionOut(BaseModel):

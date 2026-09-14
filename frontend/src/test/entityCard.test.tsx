@@ -7,6 +7,7 @@ import { CharacterCard } from "../api";
 const CARD: CharacterCard = {
   id: 11, name: "林夏", aliases: ["林医生"], entity_type: "character", retired: false,
   profile: "急诊科主治医师",
+  persona: {},
   key_facts: [{ id: 1, fact_type: "state", content: "左手截肢", valid_from: 3, valid_until: null, importance: "critical" }],
   appearance_chapters: [1, 2, 5],
   relations: [

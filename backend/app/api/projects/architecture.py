@@ -3,12 +3,15 @@
 """顶层架构:雪花四步生成(同步/异步)、手动编辑、多轮研讨。"""
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db.models import Project
 from app.db.session import SessionLocal, get_db
+from app.engines.consistency.persona import extract_cast_profiles
 from app.engines.pipeline.architecture import (
     discuss_architecture,
     generate_architecture,
@@ -20,6 +23,18 @@ from app.schemas.project import ArchitectureOut, GenerateArchitectureRequest
 from ._common import _get_project_or_404
 
 router = APIRouter()
+
+logger = logging.getLogger("jarvis-write.persona")
+
+
+async def _extract_personas_safe(db: Session, project: Project) -> None:
+    """架构落库后提炼核心人物画像卡;失败只告警,绝不拖垮架构链路(降级对齐 clock/canon)。"""
+    try:
+        await extract_cast_profiles(db, project)
+        db.commit()
+    except Exception as exc:  # noqa: BLE001 — 画像提炼是增值步骤,不阻塞主流程
+        db.rollback()
+        logger.warning("核心人物画像提炼失败(已跳过): %s", exc)
 
 
 class ArchitecturePatch(BaseModel):
@@ -72,6 +87,8 @@ async def generate_project_architecture(
     arch = save_architecture(db, project, result)
     db.commit()
     db.refresh(arch)
+    await _extract_personas_safe(db, project)
+    db.refresh(arch)
     return arch
 
 
@@ -109,6 +126,9 @@ async def generate_project_architecture_async(
             update_stage(job_id, "落库中")
             arch = save_architecture(session, project, result)
             session.commit()
+            session.refresh(arch)
+            update_stage(job_id, "提炼核心人物画像")
+            await _extract_personas_safe(session, project)
             session.refresh(arch)
             finish_job(job_id, ArchitectureOut.model_validate(arch).model_dump())
         except Exception as exc:  # noqa: BLE001 — 任务失败进 job 状态

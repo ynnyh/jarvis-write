@@ -29,6 +29,7 @@ const CHAPTER: ChapterDetail = {
 const LINYUAN: CharacterCard = {
   id: 1, name: "林渊", aliases: ["小渊"], entity_type: "character", retired: false,
   profile: "少年剑客,性格孤僻。",
+  persona: {},
   key_facts: [{ id: 9, fact_type: "trait", content: "擅长御剑术", valid_from: 1, valid_until: null, importance: "major" }],
   appearance_chapters: [1], relations: [],
 };

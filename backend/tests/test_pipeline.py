@@ -19,7 +19,11 @@ def test_catalog():
     catalog = get_catalog()
     assert set(catalog) == {"outline", "chapter", "polish"}
     outline_dims = {d["key"] for d in get_node_catalog("outline")["dimensions"]}
-    assert outline_dims == {"genre", "pace", "structure", "tone", "length_style", "elements"}
+    # P1 口味定标:感情线/开局强度/主角底色/主角视角是四个跨流派新维度
+    assert outline_dims == {
+        "genre", "pace", "structure", "tone", "elements", "length_style",
+        "lead_gender", "romance", "opening", "protagonist",
+    }
 
 
 # ---------- 拼装器 ----------

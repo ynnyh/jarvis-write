@@ -338,6 +338,42 @@ class BibleService:
             "设定保持一致,不要无缘由地多出仆役、随从、邻居等常驻配角。"
         )
 
+    def personas_block(
+        self, chapter_number: int, entity_names: list[str] | None = None
+    ) -> str:
+        """人物画像块(本性注入):核心角色的性格底色/说话方式/底线禁忌。
+
+        与 hard_constraints(状态事实:「人物此刻怎么样」)互补,画像管
+        「人物本来是什么样的人」——台词行事的基准线。有画像卡(架构提炼/
+        作者手写)才渲染;没有则空串,prompt 零变化(老书零影响)。
+        entity_names 给了就只渲染名单内(本章涉及人物);没给渲染全书全部
+        画像卡(门禁用,它要对照所有既立人设)。退场人物不注入。
+        """
+        from app.engines.consistency.persona import render_persona_lines
+
+        query = self.db.query(Entity).filter(
+            Entity.project_id == self.project_id,
+            Entity.entity_type == "character",
+            Entity.retired.is_(False),
+        )
+        rows = query.order_by(Entity.id).all()
+        wanted = {n.strip() for n in (entity_names or []) if n and n.strip()}
+        lines: list[str] = []
+        for e in rows:
+            if wanted and e.name not in wanted and not (set(e.aliases or []) & wanted):
+                continue
+            line = render_persona_lines(e)
+            if line:
+                lines.append(line)
+            if len(lines) >= 6:
+                break
+        if not lines:
+            return ""
+        return (
+            "【人物画像(台词与行事务必贴合底色与说话方式;「绝不做」是硬底线,违反即崩人设)】\n"
+            + "\n".join(lines)
+        )
+
     # ---------- 写回 ----------
     def purge_chapter_extraction(self, chapter_number: int) -> dict:
         """撤销某章此前抽取的全部圣经写入(重写正文前调用,防记忆污染)。

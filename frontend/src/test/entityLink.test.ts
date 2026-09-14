@@ -5,7 +5,7 @@ import { buildEntityIndex, segmentParagraph, entitySummary, isEntitySeg } from "
 
 function char(over: Partial<CharacterCard> & { name: string }): CharacterCard {
   return {
-    id: 1, aliases: [], entity_type: "character", retired: false, profile: "",
+    id: 1, aliases: [], entity_type: "character", retired: false, profile: "", persona: {},
     key_facts: [], appearance_chapters: [], relations: [], ...over,
   };
 }

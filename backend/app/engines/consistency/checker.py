@@ -220,6 +220,9 @@ async def check_chapter(
     active_facts = bible.hard_constraints_block(
         chapter_number, exclude_types=RESOURCE_FACT_TYPES
     )
+    # 人物画像(本性比对):与状态事实分开单列——状态查「此刻对不对」,画像查
+    # 「言行像不像这个人、有没有破底线」。无画像卡为空串,占位符给降级文案。
+    personas_block = bible.personas_block(chapter_number)
     # 资源账本单独一块喂门禁(与草稿/定稿看到的是同一份渲染):它才让「凭空掏出道具」
     # 「送出去的东西又戴回来」有可对照的清单——混在 active_facts 里模型分不出哪条是资源。
     resource_ledger = ledger_block(bible, chapter_number)
@@ -259,6 +262,7 @@ async def check_chapter(
             active_facts=facts,
             known_roster=bible.known_roster_block(chapter_number),
             resource_ledger=resource_ledger,
+            personas_block=personas_block or "(本书尚无人物画像卡,跳过画像比对)",
             constitution=constitution,
             prev_contract=prev_contract or "(无上一章契约——未提取或正文已改动失效)",
             prev_tail=prev_tail or "(无上一章结尾原文,本章可能是第一章)",

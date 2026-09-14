@@ -267,6 +267,9 @@ class EnginesRequest(BaseModel):
     avoid_engines: list[str] = Field(
         default_factory=list, description="上一批引擎句,本轮要明显区别于它们",
     )
+    # 锚点重抽:用户点了某张卡「方向对,照这张再来点」——以它为轴出变体,
+    # 保留吸引力内核但换主角/局面/破局点;与 avoid_engines(全盘否定)互补
+    anchor_engine: str = Field(default="", description="用户认可的锚点引擎句,本轮沿它出变体")
 
 
 class EnginesResponse(BaseModel):
@@ -285,11 +288,21 @@ async def _engines_impl(req: EnginesRequest) -> EnginesResponse:
             "【上一批引擎用户都不满意,本轮必须换方向:以下内核不要再现,主角类型/冲突来源至少换轴】\n"
             + "\n".join(f"- {a}" for a in clean_avoid) + "\n"
         )
+    # 锚点重抽:与 avoid 相反,这张卡方向是对的——沿它变着来,不是否定它
+    anchor_block = ""
+    anchor = (req.anchor_engine or "").strip()
+    if anchor:
+        anchor_block = (
+            "【锚点引擎(用户明确喜欢这个方向,本轮沿它出变体)】\n"
+            f"- {anchor}\n"
+            "保留这张卡最抓人的内核与情绪,但每张变体在主角身份/具体局面/破局点上至少换一处,"
+            "不要复述原句,也不要只做同义改写。\n"
+        )
     prompt = ENGINES_PROMPT.format(
         spark=req.spark.strip() or "(空白,按所选方向自由发挥)",
         count=req.count,
         style_directives=style_block,
-        avoid_block=avoid_block,
+        avoid_block=avoid_block + anchor_block,
         genre_boundary=_GENRE_BOUNDARY,
     )
     try:

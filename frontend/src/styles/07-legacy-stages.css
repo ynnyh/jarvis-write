@@ -442,6 +442,12 @@
   display: block; color: var(--text-2); font-size: var(--fs-xs); margin-top: 4px;
   overflow-wrap: break-word;
 }
+/* 锚点重抽入口:卡内右下角的小链接,stopPropagation 不触发选卡 */
+.engine-card .engine-anchor {
+  display: inline-block; margin-top: 6px;
+  font-size: var(--fs-xs); color: var(--brand); cursor: pointer;
+}
+.engine-card .engine-anchor:hover { text-decoration: underline; }
 
 .scale-cards { display: flex; gap: 12px; flex-wrap: wrap; }
 .scale-card {

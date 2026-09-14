@@ -413,6 +413,8 @@ export interface Chip {
   label: string; directive: string;
   // 两级题材库(仅 genre 维度):所属大类 key / 用户向一句话卖点
   category?: string | null; desc?: string | null;
+  // 流派内分叉口味(仅 genre 维度):该流派里更细的子口味,开书偏好面板据此收窄抽卡范围
+  flavors?: string[] | null;
 }
 export interface Dimension {
   key: string; label: string; select: "single" | "multi"; chips: Chip[];
@@ -465,9 +467,16 @@ export interface CharacterRelation {
   status: "confirmed" | "pending"; other_retired: boolean;
   evidence: RelationEvidence[]; // 支撑这条边的原文事实(带章节引用),新→旧最多 3 条
 }
+/** 结构化人物画像(P1):底色/说话方式/底线禁忌等;portrait_prompt/avatar 为立绘素材,不进生成 prompt */
+export interface Persona {
+  logline?: string; appearance?: string; traits?: string[]; speech?: string;
+  motive?: string; fear?: string; arc?: string; never_do?: string[];
+  portrait_prompt?: string; avatar?: string;
+  source?: "architecture" | "author" | "extract";
+}
 export interface CharacterCard {
   id: number; name: string; aliases: string[]; entity_type: string; retired: boolean;
-  profile: string; key_facts: CharacterFact[]; appearance_chapters: number[];
+  profile: string; persona: Persona; key_facts: CharacterFact[]; appearance_chapters: number[];
   relations: CharacterRelation[];
 }
 export interface CharactersOut { characters: CharacterCard[]; other_entities_count: number; }
@@ -1235,9 +1244,11 @@ export const api = {
   inspireAsync: (spark: string, tendency: Tendency, count = 4, dna: StoryDNA | null = null, avoid?: Concept | null) =>
     req<{ job_id: string }>("POST", "/api/inspire/async", { spark, tendency, count, dna, avoid: avoid && !conceptIsEmpty(avoid) ? avoid : undefined }),
   // 两段式构思·第一段:方向+偏好 → 一批故事引擎卡(FAST 档,先便宜收敛)
-  enginesAsync: (spark: string, tendency: Tendency, count = 8, dna: StoryDNA | null = null, avoidEngines: string[] = []) =>
+  enginesAsync: (spark: string, tendency: Tendency, count = 8, dna: StoryDNA | null = null,
+    avoidEngines: string[] = [], anchorEngine = "") =>
     req<{ job_id: string }>("POST", "/api/inspire/engines/async",
-      { spark, tendency, count, dna, avoid_engines: avoidEngines.length ? avoidEngines : undefined }),
+      { spark, tendency, count, dna, avoid_engines: avoidEngines.length ? avoidEngines : undefined,
+        anchor_engine: anchorEngine || undefined }),
   // 两段式构思·第二段:选中的引擎(1-2 张,可混搭)→ 深化成完整概念(强模型)
   developConceptAsync: (engines: string[], spark = "", tendency: Tendency = {}, dna: StoryDNA | null = null) =>
     req<{ job_id: string }>("POST", "/api/inspire/develop/async", { engines, spark, tendency, dna }),
@@ -1443,14 +1454,18 @@ export const api = {
   // 时序事实时间线(每角色一条轨道,事实为章节区间条;与故事圣经·时间机同源)
   factsTimeline: (pid: number) =>
     req<FactsTimelineOut>("GET", `/api/projects/${pid}/facts-timeline`),
-  createCharacter: (pid: number, payload: { name: string; aliases?: string[]; profile?: string }) =>
+  createCharacter: (pid: number, payload: { name: string; aliases?: string[]; profile?: string; persona?: Persona }) =>
     req<CharacterCard>("POST", `/api/projects/${pid}/characters`, payload),
   setCharacterRetired: (pid: number, entityId: number, retired: boolean) =>
     req<CharacterCard>("PATCH", `/api/projects/${pid}/characters/${entityId}`, { retired }),
-  // 编辑人物资料(别名/简介):简介变更时返回 changes(句级 diff,带 entity),供追问级联
-  editCharacter: (pid: number, entityId: number, payload: { profile?: string; aliases?: string[] }) =>
+  // 编辑人物资料(别名/简介/画像):简介变更时返回 changes(句级 diff,带 entity),供追问级联
+  editCharacter: (pid: number, entityId: number, payload: { profile?: string; aliases?: string[]; persona?: Persona }) =>
     req<CharacterCard & { changes: SettingChange[] }>(
       "PATCH", `/api/projects/${pid}/characters/${entityId}`, payload),
+  // P3 立绘提示词:从画像生成中英双语绘图提示词(存进画像,拿去即梦/MJ 出图)
+  characterPortraitPrompt: (pid: number, entityId: number) =>
+    req<{ prompt_cn: string; prompt_en: string }>(
+      "POST", `/api/projects/${pid}/characters/${entityId}/portrait-prompt`, {}),
   deleteFact: (pid: number, factId: number) =>
     req<{ ok: boolean }>("DELETE", `/api/projects/${pid}/facts/${factId}`),
 

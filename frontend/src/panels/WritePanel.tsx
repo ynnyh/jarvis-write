@@ -12,7 +12,7 @@
 // 仍内联的是纯 UI:act= 校对/评分两张动作卡、GenResultCard、版本对比与全屏 Reader。
 // 移动端:m-topbar(←/章题/阅读)+ 左右滑切章 + act 卡全屏 sheet。
 import { lazy, Suspense, useState } from "react";
-import { Outline, api } from "../api";
+import { Outline, api, GenerateChapterResponse } from "../api";
 import { qk } from "../hooks/queries";
 import { toast } from "../ui/Toaster";
 import Banner from "../ui/Banner";
@@ -97,6 +97,13 @@ export default function WritePanel({ pid, outlines }: Props) {
   // 编辑器模式:prose=段落点选(默认) / free=自由改稿(CM6 整章) / dual=同文双轨(左定稿参照+右新稿)。
   // 切章保持模式,编辑器按章号 key 重建加载新章内容。
   const [editorMode, setEditorMode] = useState<"prose" | "free" | "dual">("prose");
+
+  // 卡内修订/重写完成后回写新检测结果:重跑过的问题徽标/检查明细/门禁横幅立即替换旧快照,
+  // 不再出现"点了修复/重写,卡片还挂着上一轮的同一批问题"。旧卡属于别的章时保持不动
+  // (它此刻已是历史快照,被跨章顶掉反而让人懵;那章的审核报告仍可从章首状态卡打开)。
+  const applyFreshResult = (r: GenerateChapterResponse) => {
+    setGenResult((cur) => (cur && cur.chapter_number !== r.chapter_number ? cur : r));
+  };
 
   // 动作卡(act= 进 URL,可刷新/分享):桌面在中栏内联,移动端换全屏 sheet 容器(组件同一份)
   const actCards = (
@@ -204,6 +211,7 @@ export default function WritePanel({ pid, outlines }: Props) {
               genBlocked={genBlocked}
               genHint={genHint}
               onClose={() => setGenResult(null)}
+              onResult={applyFreshResult}
               onChanged={() => {
                 reload();
                 // 修订/放行后同步刷新打开的正文(失效缓存,共享 qk.chapter 自动重拉)
@@ -296,6 +304,7 @@ export default function WritePanel({ pid, outlines }: Props) {
               genBlocked={genBlocked}
               genHint={genHint}
               onApprove={() => approve(current.chapter_number)}
+              onResult={applyFreshResult}
               onAct={(a) => {
                 // P2:重写/整章优化由 AI 窄栏承接;校对/评分仍走 act= 动作卡
                 if (a === "revise") openDock({ mode: "revise" });

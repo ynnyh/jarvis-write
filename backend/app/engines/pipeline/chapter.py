@@ -249,6 +249,14 @@ async def _prepare_chapter_context(
     # 一个每天伺候起居的仆役)。与 hard_constraints 互补——后者只列本章涉及人物的状态,
     # 名册列全书已登场的人;草稿/定稿注入约束生成,同一份也喂给门禁(checker)比对。
     known_roster = bible.known_roster_block(chapter_number)
+    # 人物画像(本性注入):硬约束只管「人物此刻的状态」,画像管「人物本来是什么样的人」
+    # (底色/说话方式/底线禁忌)——这是人物跑偏的根因补丁。挂进 hard_constraints 文本
+    # 末尾(同一占位符流经草稿/定稿),无画像卡时是空串,prompt 零变化(老书零影响)。
+    personas = bible.personas_block(
+        chapter_number, [str(c) for c in outline.characters_involved]
+    )
+    if personas:
+        hard_constraints = f"{hard_constraints}\n\n{personas}"
     scheduler = ForeshadowScheduler(db, project.id)
     # 伏笔日程(§1.3):把「到期提醒」升级为硬性任务 + 准入控制。
     # 旧提醒是模型可以无视的一行字;日程是「本章必须兑现 X」的清单——

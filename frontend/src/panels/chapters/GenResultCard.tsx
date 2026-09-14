@@ -45,6 +45,9 @@ interface Props {
   durationSec?: number | null;
   // 章节数据有变(修订完成/放行后状态变化):刷新章节列表与打开的正文
   onChanged: () => void;
+  // 按建议修订/让 AI 按这条重写完成后,后端回带的新一次检测结果(问题清单/五维分/门禁态都是重跑过的):
+  // 必须回写父级替换旧快照,否则卡片还挂着上一轮生成的旧问题,看起来像"检测没重跑"
+  onResult?: (r: GenerateChapterResponse) => void;
   // 「重写」引导:展开本章的行内重写框
   onRewrite: () => void;
   // 关闭按钮(右上角 ×):仅刚生成完的结果卡传入(WritePanel setGenResult(null));
@@ -59,7 +62,7 @@ interface Props {
   historical?: boolean;
 }
 
-export default function GenResultCard({ pid, result, durationSec, onChanged, onRewrite, onClose, genBlocked, genHint, historical }: Props) {
+export default function GenResultCard({ pid, result, durationSec, onChanged, onResult, onRewrite, onClose, genBlocked, genHint, historical }: Props) {
   const { run } = useJob();
   const invalidateProject = useInvalidateProject(pid);
   const n = result.chapter_number;
@@ -114,6 +117,9 @@ export default function GenResultCard({ pid, result, durationSec, onChanged, onR
       );
       if (res) {
         toast.ok(`第 ${n} 章已按建议修订`, "正文已更新,一致性门禁已重跑");
+        // 重跑后的检测结果回写父级:卡片顶部的徽标/检查明细/门禁横幅跟着换成新快照,
+        // 光刷问题清单会让旧徽标和「一致性问题 N」继续挂在上一次生成的数字上
+        onResult?.(res);
         await reloadIssues();
         onChanged();
       }
@@ -280,6 +286,7 @@ export default function GenResultCard({ pid, result, durationSec, onChanged, onR
             genHint={genHint}
             onChanged={() => { reloadIssues(); onChanged(); }}
             onRewriteFallback={onRewrite}
+            onRewritten={(r) => { onResult?.(r); }}
           />
         </div>
       )}

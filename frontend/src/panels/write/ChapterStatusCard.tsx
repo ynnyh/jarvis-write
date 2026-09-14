@@ -14,7 +14,7 @@
 // 的逐条 diff + 修复流(§5:把校对问题带进 diff 验收流)。
 // 底部「更多」保留评分/校对/历史版本全量入口:交稿单已把当前章的校对/冲突提到显眼处,这里覆盖 approved
 // 章的可达性(§8:动作卡外壳最终退场,本轮 ProofreadCard/ReviewCard 作为明细面板经 act= 复用,故不删)。
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   api, ChapterBrief, ChapterDetail, ChapterReview, GenerateChapterResponse, ProofreadSnapshot,
@@ -40,11 +40,14 @@ interface Props {
   onVersions: () => void;
   // 审核报告卡内操作(修订/放行)后:父级刷新章节列表与正文缓存
   onChanged: () => void;
+  // 卡内「重写/按建议修订」完成后,后端回带的新一次检测结果:经父级回写生成结果卡的旧快照
+  // (若正挂着),否则结果卡的问题徽标/门禁横幅仍停在重写前那一轮
+  onResult?: (r: GenerateChapterResponse) => void;
 }
 
 export default function ChapterStatusCard({
   pid, stage, currentBrief, current, genBlocked, genHint,
-  onApprove, onAct, onVersions, onChanged,
+  onApprove, onAct, onVersions, onChanged, onResult,
 }: Props) {
   const qc = useQueryClient();
   const n = current.chapter_number;
@@ -56,26 +59,39 @@ export default function ChapterStatusCard({
   const [proof, setProof] = useState<ProofreadSnapshot | null>(null);
   const stale = !!currentBrief?.is_stale;
 
+  // 两个自检快照的拉取函数:进章时由 effect 调,卡内动作(重写/修订/放行/重检)后手动再调——
+  // 正文已变而 stage 未变时 effect 不会重跑,不手动刷就会一直挂旧结论(校对还剩 N 处/过期评分)
+  const refreshReview = useCallback(() => {
+    api.getReview(pid, n)
+      .then((r) => setReviewSnap(r.review))
+      .catch(() => setReviewSnap(null));
+  }, [pid, n]);
+
+  const refreshProof = useCallback(() => {
+    api.getProofread(pid, n)
+      .then((r) => setProof(r.proofread))
+      .catch(() => setProof(null));
+  }, [pid, n]);
+
   useEffect(() => {
     setReportOpen(false);
     if (stage !== "blocked") { setReviewSnap(null); return; }
-    let cancelled = false;
-    api.getReview(pid, n)
-      .then((r) => { if (!cancelled) setReviewSnap(r.review); })
-      .catch(() => { if (!cancelled) setReviewSnap(null); });
-    return () => { cancelled = true; };
-  }, [stage, pid, n]);
+    refreshReview();
+  }, [stage, pid, n, refreshReview]);
 
   // 校对自检快照(现有信号,GET /proofread;正文改过后端返 null → 不展示,不重算)。
   // 只在写好待过目/被拦下时取——一句话结论要用到;stale-only 与 approved 不需要。
   useEffect(() => {
     if (stage !== "review" && stage !== "blocked") { setProof(null); return; }
-    let cancelled = false;
-    api.getProofread(pid, n)
-      .then((r) => { if (!cancelled) setProof(r.proofread); })
-      .catch(() => { if (!cancelled) setProof(null); });
-    return () => { cancelled = true; };
-  }, [stage, pid, n]);
+    refreshProof();
+  }, [stage, pid, n, refreshProof]);
+
+  // 卡内动作统一走这里:父级刷新章节列表/正文缓存 + 本卡两个自检快照立即重拉
+  const refreshAfterAction = useCallback(() => {
+    onChanged();
+    refreshReview();
+    refreshProof();
+  }, [onChanged, refreshReview, refreshProof]);
 
   // blocked 冲突详情与三个处理动作(放行/重检/按建议重写)统一收进 GateResolve 自取自管,
   // 此处不再单算 conflictCount。
@@ -136,7 +152,8 @@ export default function ChapterStatusCard({
                 n={n}
                 genBlocked={genBlocked}
                 genHint={genHint}
-                onChanged={onChanged}
+                onChanged={refreshAfterAction}
+                onRewritten={(r) => onResult?.(r)}
                 onRewriteFallback={() => onAct("revise")}
               />
               {proofHasIssues && (
@@ -160,13 +177,11 @@ export default function ChapterStatusCard({
                   genBlocked={genBlocked}
                   genHint={genHint}
                   onChanged={() => {
-                    onChanged();
-                    // 修订/放行后同步刷新主审快照
+                    refreshAfterAction();
+                    // 修订/放行后同步刷新打开的正文缓存(共享 qk.chapter 自动重拉)
                     qc.invalidateQueries({ queryKey: qk.chapter(pid, n) });
-                    api.getReview(pid, n)
-                      .then((r) => setReviewSnap(r.review))
-                      .catch(() => undefined);
                   }}
+                  onResult={onResult}
                   onRewrite={() => onAct("revise")}
                 />
               )}

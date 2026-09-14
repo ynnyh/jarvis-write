@@ -20,6 +20,7 @@ from app.auth import get_current_user
 from app.db.models import Entity, Fact, Foreshadowing, Outline, Relationship
 from app.db.session import get_db
 from app.engines.consistency import BibleService, ForeshadowScheduler
+from app.engines.consistency.persona import coerce_persona
 
 router = APIRouter(
     prefix="/api/projects/{project_id}",
@@ -204,6 +205,8 @@ class CharacterOut(BaseModel):
     entity_type: str
     retired: bool
     profile: str
+    # 结构化人物画像(P1/P2):底色/说话方式/底线禁忌等;无画像为 {}(老数据/未提炼)
+    persona: dict = {}
     key_facts: list[CharacterFactOut]
     appearance_chapters: list[int]
     relations: list[RelationOut]
@@ -218,17 +221,22 @@ class CharacterCreate(BaseModel):
     name: str
     aliases: list[str] | None = None
     profile: str | None = None
+    # P2:开卡时可直接给结构化画像(前端表单提交);按 author 来源落库
+    persona: dict | None = None
 
 
 class CharacterPatch(BaseModel):
-    """退场/恢复 + 资料编辑(别名/简介)。
+    """退场/恢复 + 资料编辑(别名/简介/画像)。
 
     profile 变更时返回 changes(句级 diff,带 entity 名)——前端拿它
     追问「是否扫描全书影响」,走设定级级联;不改简介时 changes 为空。
+    persona 变更不触发级联:画像管「本性」(底色/底线),不是可对账的
+    情节事实;作者手改后 persona.source 标 author,架构重提炼不再覆盖。
     """
     retired: bool | None = None
     aliases: list[str] | None = None
     profile: str | None = None
+    persona: dict | None = None
 
 
 class CharacterPatchOut(CharacterOut):
@@ -328,6 +336,7 @@ def _character_out(db: Session, project_id: int, ent: Entity, outlines: list[Out
         entity_type=ent.entity_type,
         retired=bool(ent.retired),
         profile=(ent.base_profile or {}).get("profile", ""),
+        persona=coerce_persona((ent.base_profile or {}).get("persona")),
         key_facts=[
             CharacterFactOut(
                 id=f.id,
@@ -486,12 +495,18 @@ async def create_character(
             )
 
     profile = (body.profile or "").strip()
+    base = {"profile": profile} if profile else {}
+
+    persona = coerce_persona(body.persona or {})
+    if persona:
+        persona["source"] = "author"  # 开卡手填的画像 = 作者主张
+        base["persona"] = persona
     ent = Entity(
         project_id=project_id,
         entity_type="character",
         name=name,
         aliases=aliases,
-        base_profile={"profile": profile} if profile else {},
+        base_profile=base,
         retired=False,
     )
     db.add(ent)
@@ -567,6 +582,19 @@ async def patch_character(
     if body.retired is not None:
         ent.retired = body.retired
 
+    # P2:画像编辑。归一后按 author 来源覆盖(AI 提炼的画像作者随时可改,改了就姓作者);
+    # 不触发级联扫描(画像非情节事实,见 CharacterPatch docstring)
+    if body.persona is not None:
+
+        persona = coerce_persona({**(body.persona or {}), "source": "author"})
+        profile = dict(ent.base_profile or {})
+        if persona:
+            persona["source"] = "author"
+            profile["persona"] = persona
+        else:
+            profile.pop("persona", None)  # 显式清空 = 删画像
+        ent.base_profile = profile
+
     db.commit()
     db.refresh(ent)
     outlines = (
@@ -574,6 +602,46 @@ async def patch_character(
     )
     out = _character_out(db, project_id, ent, outlines)
     return CharacterPatchOut(**out.model_dump(), changes=changes)
+
+
+@router.post("/characters/{entity_id}/portrait-prompt")
+async def character_portrait_prompt(
+    project_id: int,
+    entity_id: int,
+    db: Session = Depends(get_db),
+):
+    """从人物画像生成立绘提示词(中英双语,P3)。
+
+    项目边界:只产提示词,不接绘图模型(与漫剧/宣传片同哲学)——用户拿去
+    即梦/MJ 生成,把图回贴到画像的 avatar 字段。生成的提示词存进
+    persona.portrait_prompt,下次直接可看可复制,不重复烧 token。
+    """
+    get_project_or_404(db, project_id)
+    ent = db.get(Entity, entity_id)
+    if ent is None or ent.project_id != project_id or ent.entity_type != "character":
+        raise HTTPException(status_code=404, detail="人物不存在")
+    from app.engines.consistency.persona import build_portrait_prompt, coerce_persona
+
+    persona = coerce_persona((ent.base_profile or {}).get("persona"))
+    if not persona:
+        raise HTTPException(
+            status_code=400,
+            detail="先补画像(人设/底色/形象)再生成提示词——没有画像就没有素材可拼",
+        )
+    try:
+        result = await build_portrait_prompt(ent.name, persona)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"立绘提示词生成失败: {exc}") from exc
+    combined = "\n---\n".join(p for p in (result["prompt_cn"], result["prompt_en"]) if p)
+    if combined:
+        profile = dict(ent.base_profile or {})
+        stored = dict(profile.get("persona") or {})
+        stored["portrait_prompt"] = combined
+        # source 不动:立绘提示词是素材补充,不改画像本身的作者归属
+        profile["persona"] = stored
+        ent.base_profile = profile
+        db.commit()
+    return result
 
 
 @router.delete("/facts/{fact_id}")

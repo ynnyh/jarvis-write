@@ -1,4 +1,5 @@
-// 节奏 / 结构 / 基调三个通用维度的 chips(从目录动态取)。拆自 OnboardingFlow.tsx。
+// 节奏/结构/基调等通用维度的 chips(从目录动态取)。拆自 OnboardingFlow.tsx。
+// P1 口味定标:感情线/开局强度/主角底色/主角视角也在倾向屏可改(开书偏好里选过会带过来)
 import { useEffect, useState } from "react";
 import { api, Dimension, Tendency } from "../../api";
 
@@ -9,7 +10,8 @@ export function ToneDims({ tendency, onSet }: {
   const [dims, setDims] = useState<Dimension[]>([]);
   useEffect(() => {
     api.tendencyCatalog("outline").then((cat) => {
-      setDims(cat.dimensions.filter((d) => ["pace", "structure", "tone", "elements"].includes(d.key)));
+      setDims(cat.dimensions.filter((d) =>
+        ["pace", "structure", "tone", "elements", "lead_gender", "romance", "opening", "protagonist"].includes(d.key)));
     }).catch(() => undefined);
   }, []);
   return (

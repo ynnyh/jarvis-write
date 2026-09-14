@@ -9,7 +9,7 @@
 // 自取 open issues(单点计算 topBlocker/blockerCount,两处调用点零 prop 线缆、措辞零漂移)。
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, ChapterIssue } from "../../api";
+import { api, ChapterIssue, GenerateChapterResponse } from "../../api";
 import { errMsg } from "../../pollJob";
 import { toast } from "../../ui/Toaster";
 import { useJob } from "../../ui/useJob";
@@ -20,6 +20,9 @@ interface Props {
   n: number;
   // 处理后(重写受理 / 放行 / 重检自动放行)刷新章节列表与打开的正文;拦截解除后父级会自然收起本卡
   onChanged: () => void;
+  // 重写完成后后端回带的新一次检测结果(门禁已重跑):回传父级替换旧快照,
+  // 否则横幅/问题徽标还挂在重写前的旧检测上,看起来像"点了重写但检测没刷新"
+  onRewritten?: (r: GenerateChapterResponse) => void;
   // 拿不到具体 blocker 时的兜底重写(打开 AI 窄栏梳理);由章首卡传入
   onRewriteFallback?: () => void;
   // 任务锁:有生成/重写任务在跑时禁用重写/放行(后端也会 409),title 给原因
@@ -27,7 +30,7 @@ interface Props {
   genHint?: string;
 }
 
-export default function GateResolve({ pid, n, onChanged, onRewriteFallback, genBlocked, genHint }: Props) {
+export default function GateResolve({ pid, n, onChanged, onRewritten, onRewriteFallback, genBlocked, genHint }: Props) {
   const nav = useNavigate();
   const { run } = useJob();
   const [issues, setIssues] = useState<ChapterIssue[] | null>(null);
@@ -58,13 +61,14 @@ export default function GateResolve({ pid, n, onChanged, onRewriteFallback, genB
     if (!topBlocker) { onRewriteFallback?.(); return; }
     setBusy("rewrite");
     try {
-      const res = await run<{ applied_issue_id?: number }>(
+      const res = await run<GenerateChapterResponse & { applied_issue_id?: number }>(
         () => api.applyIssueRevision(pid, n, topBlocker.id),
         { kind: `chapter-${pid}-${n}` },
       );
       if (res) {
         toast.ok(`第 ${n} 章已按这条矛盾重写`, "正文已更新,门禁已重跑核对");
         reload();
+        onRewritten?.(res);
         onChanged();
       }
     } catch (e) {

@@ -39,17 +39,25 @@ export function useOnboarding() {
   const [entry, setEntry] = useState<"more" | "genre" | "chat" | null>(null);
   const [spark, setSpark] = useState("");
   const [genreDim, setGenreDim] = useState<Dimension | null>(null);
-  const [pickedGenreCard, setPickedGenreCard] = useState<Chip | null>(null);
+  // 口味定标(P1):outline 目录整体缓存,偏好面板据此渲染感情线/开局强度/主角底色等维度
+  const [outlineDims, setOutlineDims] = useState<Dimension[]>([]);
+  // 选中的题材卡(含 flavors 分叉):按书持久化,刷新/回跳不丢(P1 口味定标依赖它回显)
+  const [pickedGenreCard, setPickedGenreCard] = useState<Chip | null>(() => {
+    try { return null; } catch { return null; }
+  });
   const [chatInput, setChatInput] = useState("");
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const sparkRef = useRef<HTMLTextAreaElement | null>(null);
-  // 方向卡屏·轻偏好(P0-B 偏好前移):全部可选、可跳过。零信号下模型只能给流派平均值
-  // (=最套路的写法),这就是"选了方向生成的还不对味"的根因;偏好前移一步,命中率先升。
-  // 基调/元素直接进 tendency(后端结构化注入,零新维度);主角类型/排斥拼进 spark 文本。
+  // 方向卡屏·轻偏好(P0-B 偏好前移 + P1 口味定标):全部可选、可跳过。零信号下模型只能给
+  // 流派平均值(=最套路的写法),这就是"选了方向生成的还不对味"的根因;偏好越具体,抽卡越准。
+  // 基调/元素/感情线/开局强度/主角底色/主角视角进 tendency(后端结构化注入);流派口味/画像
+  // 补充/避雷补充拼进 spark 文本(收敛层语义,不进贯穿全书的指令)。
   const [prefTone, setPrefTone] = useState<string[]>([]);
   const [prefElements, setPrefElements] = useState<string[]>([]);
-  const [prefProta, setPrefProta] = useState("");
+  const [prefFlavors, setPrefFlavors] = useState<string[]>([]);
+  const [prefPersona, setPrefPersona] = useState("");
   const [prefAvoid, setPrefAvoid] = useState<string[]>([]);
+  const [prefAvoidText, setPrefAvoidText] = useState("");
 
   // 概念屏
   const [ideas, setIdeas] = useState<Concept[] | null>(null);
@@ -137,10 +145,11 @@ export function useOnboarding() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pid]);
 
-  // 流派卡片墙数据(想法屏/题材屏共用)
+  // 流派卡片墙 + 口味维度数据(想法屏/题材屏共用)
   useEffect(() => {
     api.tendencyCatalog("outline").then((cat) => {
       setGenreDim(cat.dimensions.find((d) => d.key === "genre") ?? null);
+      setOutlineDims(cat.dimensions);
     }).catch(() => undefined);
   }, []);
 
@@ -201,14 +210,17 @@ export function useOnboarding() {
 
   async function pickGenreBrainstorm() {
     if (!pickedGenreCard) return;
-    // P0-B 偏好前移:基调/元素走 tendency 结构化注入(后端渲染成【本次写作倾向】);
-    // 主角类型/排斥拼进 spark 文本(无对应倾向维度,拼文本最直接且零后端改动)
+    // P0-B 偏好前移 + P1 口味定标:基调/元素/感情线/开局强度/主角底色/主角视角走
+    // tendency 结构化注入(后端渲染成【本次写作倾向】,全链路可见);流派口味/画像
+    // 补充/避雷补充无对应维度,拼进 spark 文本(收敛层最直接且零后端改动)。
     const t: Tendency = { ...tendency, genre: pickedGenreCard.label };
     if (prefTone.length) t.tone = prefTone;
     if (prefElements.length) t.elements = prefElements;
     const extras: string[] = [];
-    if (prefProta) extras.push(`主角偏好:${prefProta}`);
+    if (prefFlavors.length) extras.push(`流派口味(在这个流派里,只想看这些子类型):${prefFlavors.join("、")}`);
+    if (prefPersona.trim()) extras.push(`主角画像:${prefPersona.trim()}`);
     if (prefAvoid.length) extras.push(`不要出现:${prefAvoid.join("、")}`);
+    if (prefAvoidText.trim()) extras.push(`不要出现:${prefAvoidText.trim()}`);
     const text = extras.length
       ? `按「${pickedGenreCard.label}」的套路来。${extras.join(";")}`
       : `按「${pickedGenreCard.label}」的套路来`;
@@ -248,13 +260,14 @@ export function useOnboarding() {
     return text.startsWith("按「") && text.includes("套路来");
   }
 
-  // 两段式·第一段:FAST 档出一批故事引擎卡(带差异轴);换一批传上一批引擎句当 avoid,不趋同
-  async function fetchEngines(avoidEngines: string[] = []) {
+  // 两段式·第一段:FAST 档出一批故事引擎卡(带差异轴);换一批传上一批引擎句当 avoid,不趋同;
+  // 锚点重抽传 anchorEngine——「方向对,照这张再来点」,沿这张卡出变体而非全盘否定。
+  async function fetchEngines(avoidEngines: string[] = [], anchorEngine = "") {
     setErr(""); setEngineCards(null); setEnginePicked([]);
-    setBusy("AI 正在快速出一批故事引擎(几十秒)…");
+    setBusy(anchorEngine ? "AI 正在照着锚点引擎出变体(几十秒)…" : "AI 正在快速出一批故事引擎(几十秒)…");
     try {
       const r = await runJob<{ engines: EngineCard[] }>(
-        () => api.enginesAsync(sparkText, tendency, 8, project?.dna ?? null, avoidEngines),
+        () => api.enginesAsync(sparkText, tendency, 8, project?.dna ?? null, avoidEngines, anchorEngine),
         { kind: "inspire" },
       );
       if (r) setEngineCards(r.engines);
@@ -540,9 +553,9 @@ export function useOnboarding() {
     // 派生
     concept, tendency, sparkText, allGenreChips, shownSuggests,
     // 各屏 state
-    spark, entry, genreDim, pickedGenreCard, chatInput, busy,
+    spark, entry, genreDim, outlineDims, pickedGenreCard, chatInput, busy,
     ideas, comparison, ideaSig, customOpen, customConcept,
-    prefTone, prefElements, prefProta, prefAvoid,
+    prefTone, prefElements, prefFlavors, prefPersona, prefAvoid, prefAvoidText,
     engineCards, enginePicked, genrePath,
     inferBusy, customGenre,
     titleIdeas, titleSig, titleBusy, titleInput,
@@ -551,7 +564,7 @@ export function useOnboarding() {
     // 渲染需要的 setter
     setSpark, setEntry, setPickedGenreCard, setChatInput,
     setIdeaSig, setCustomOpen, setCustomConcept,
-    setPrefTone, setPrefElements, setPrefProta, setPrefAvoid,
+    setPrefTone, setPrefElements, setPrefFlavors, setPrefPersona, setPrefAvoid, setPrefAvoidText,
     setGenreSuggests, setSuggestPage, setCustomGenre,
     setTitleSig, setTitleInput, setChapters, setWords, setAdvOpen, setDirty,
     // ref
