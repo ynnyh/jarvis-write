@@ -630,6 +630,15 @@ export interface ProjectTodo {
 export interface ProjectDashboard { projects: ProjectTodo[]; }
 /** 续集方向卡(docs/20 同批):AI 依据前作出 8 个方向,选卡或整批重摇 */
 export interface SequelDirection { title: string; desc: string; }
+/** 结构化文风画像(docs/20 同批):六维可执行指令,画像卡是 projects.style_profile 的投影 */
+export interface StyleProfileDim { text: string; source: string; at: string; }
+export interface StyleDimensionsOut {
+  dims: Record<string, StyleProfileDim>;
+  version: number;
+  history: { version: number; dims: Record<string, StyleProfileDim>; at: string }[];
+  dim_defs: { key: string; label: string; hint: string }[];
+  memo: string;
+}
 export interface FactSpan {
   content: string; fact_type: string; importance: string;
   valid_from: number; valid_until: number | null;
@@ -1273,6 +1282,16 @@ export const api = {
   // 前作分析(前情提要+文风技法画像)异步进行,字数按前作实际章节中位数对齐
   sequelDirectionsAsync: (id: number, avoid: string[] = []) =>
     req<{ job_id: string }>("POST", `/api/projects/${id}/sequel-directions-async`, { avoid }),
+  // 文风画像·六维笔法(docs/20 同批):可视化+进化——读/保存(手改)/历史回退/重新分析。
+  // 与「创作偏好档案」(/style-profile)互补:那边是创作主张,这边是笔法指令。
+  getStyleDimensions: (id: number) =>
+    req<StyleDimensionsOut>("GET", `/api/projects/${id}/style-dimensions`),
+  saveStyleDimensions: (id: number, dims: Record<string, string>) =>
+    req<StyleDimensionsOut>("PUT", `/api/projects/${id}/style-dimensions`, { dims }),
+  restoreStyleDimensions: (id: number, version: number) =>
+    req<StyleDimensionsOut>("POST", `/api/projects/${id}/style-dimensions/history/${version}/restore`),
+  reanalyzeStyleDimensionsAsync: (id: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${id}/style-dimensions/reanalyze-async`),
   createSequel: (id: number, body: { title: string; direction: string }) =>
     req<{ project_id: number; analyze_job_id: string | null }>(
       "POST", `/api/projects/${id}/sequel`, body),

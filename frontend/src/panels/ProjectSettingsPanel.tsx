@@ -10,6 +10,7 @@ import { toast } from "../ui/Toaster";
 import { confirmDialog } from "../ui/ConfirmDialog";
 import SettingCascade from "./SettingCascade";
 import PremiseCard from "../ui/PremiseCard";
+import StyleDimensionsCard from "../ui/StyleDimensionsCard";
 import { useQueryClient } from "@tanstack/react-query";
 
 // 每章目标字数的合法区间(前端自校验,后端 ProjectPatch 不设上下界;区间来自交互改造计划)
@@ -233,7 +234,8 @@ export default function ProjectSettingsPanel({ pid, project }: Props) {
         )}
       </div>
       {/* 每章目标字数(死路 #3:此前只能在创建向导设,成书后无处可改) */}
-      <div className="card card-compact">
+      <StyleDimensionsCard pid={pid} />
+      <div className="card card-compact mt-2">
         <label className="fl">每章目标字数</label>
         <div className="hint mb-1">生成与字数守卫的基准,保存后作用于后续章节。</div>
         <div className="input-row">

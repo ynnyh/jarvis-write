@@ -110,7 +110,7 @@ export default function ProjectsPage() {
       setImportOpen(false);
       setImportFile(null);
       setImportTitle("");
-      toast.ok(`已导入《${r.title}》`, `共 ${r.chapters} 章,可直接阅读、检索或跑已有书翻新`);
+      toast.ok(`已导入《${r.title}》`, `共 ${r.chapters} 章,可阅读、检索、翻新,或点「开续集」写第二部`);
       const fresh = await api.listProjects();
       setProjects(fresh);
     } catch (e) {
@@ -238,9 +238,10 @@ export default function ProjectsPage() {
           <div className="dlg-content" onClick={(e) => e.stopPropagation()}>
             <h2 className="dlg-title">开续集 · 承《{sequelFor.title}》</h2>
             <p className="dlg-body">
-              新书自动继承这部书的文风倾向、架构、核心梗与人物档案;前作分析会把
-              <b>前情提要</b>(上一部讲了什么)和<b>文风技法画像</b>(怎么写的)注入续集,
-              每章字数按前作实际篇幅对齐。先选一个第二部的方向:
+              新书自动继承这部书的文风倾向、核心梗与人物档案(架构沿用;导入的书由
+              AI 依前情起草,可改);前作分析会把<b>前情提要</b>(上一部讲了什么)和
+              <b>文风技法画像</b>(怎么写的)注入续集,每章字数按前作实际篇幅对齐。
+              先选一个第二部的方向:
             </p>
 
             {/* 方向卡:AI 依据前作出 8 张,选一张或整批重摇;也可手填覆盖 */}

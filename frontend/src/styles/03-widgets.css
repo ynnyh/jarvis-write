@@ -579,3 +579,15 @@
 .sequel-dir b { font-size: 13.5px; }
 .sequel-dir span { font-size: 12.5px; color: var(--text-2); line-height: 1.5; }
 @media (max-width: 640px) { .sequel-dirs { grid-template-columns: 1fr; } }
+
+/* 文风画像卡(docs/20 同批):六维可视化 */
+.style-dims { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); }
+.style-dim { border: 1px solid var(--line-1, rgba(128,128,128,.25)); border-radius: 8px; padding: var(--sp-2); }
+.style-dim.empty { border-style: dashed; opacity: .8; }
+.style-dim-head { display: flex; align-items: center; gap: var(--sp-1); margin-bottom: 4px; flex-wrap: wrap; }
+.style-dim-text { font-size: 13px; line-height: 1.55; white-space: pre-wrap; margin: 0; }
+.style-dim-edit { width: 100%; box-sizing: border-box; }
+.style-hist-row { display: flex; align-items: center; gap: var(--sp-2); padding: 3px 0; font-size: 13px; }
+.style-hist-row button { margin-left: auto; }
+@media (max-width: 640px) { .style-dims { grid-template-columns: 1fr; } }
+.style-card-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }

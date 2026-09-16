@@ -198,6 +198,11 @@ async def _prepare_chapter_context(
 
     assembled = assemble_tendency("chapter", tendency, project.global_tendency)
     style_block = render_style_block(assembled)
+    # 结构化文风画像(docs/20 同批):六维可执行指令,画像卡可视化的那份真相。
+    # 空画像返回空串,prompt 字节级不变(存量书零影响)。
+    from app.engines.style_profile import render_style_profile_block
+
+    style_block += render_style_profile_block(project.style_profile)
     # 文风备忘(随书累积):拼进本次写作风格约束,后续章保持统一调性与人物声音。
     # 走 style_block 而非新占位符 —— draft/finalize 都吃 {style_directives},一处注入两处生效,
     # 且不必改模板占位符(避免模板与 format 两处只改一处导致 KeyError)。

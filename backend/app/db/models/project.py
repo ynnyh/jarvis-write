@@ -85,6 +85,11 @@ class Project(Base, TimestampMixin):
     # 每写完一章由快模型增量更新,注入后续章节草稿,防长篇后段人物声音漂移、调性变淡。
     # 空/NULL = 尚未累积(开篇几章)。见 prompts/chapter.py STYLE_MEMO_UPDATE_PROMPT。
     style_memo: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 结构化文风画像(docs/20 同批「文风可视化+进化」):六维可执行指令
+    # {dims: {perspective/rhythm/dialogue/rhetoric/mood/hook: {text, source, at}},
+    #  version, history: [...]},与 style_memo(随书自由备忘)同路注入 style_block。
+    # 一份真相:画像卡是它的投影,手改/重分析都写回这里。
+    style_profile: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # 世界观硬规则(钉板):用户手填的"本书不可违背的设定/常识"(如"2024 新高考,
     # 理科不考政治,高考 6.7-6.8 两天"),逐行一条。注入蓝图/草稿/定稿等生成环节
     # (见 engines/common.world_rules_block),并可发起「规则扫描」逐章体检正文

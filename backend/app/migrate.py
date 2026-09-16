@@ -88,6 +88,17 @@ def _add_synopsis_column() -> None:
             logger.info("迁移:projects 补 synopsis 列")
 
 
+def _add_project_style_profile_column() -> None:
+    """给 projects 表补 style_profile 列(结构化文风画像,存量 NULL,幂等)。"""
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "projects" not in insp.get_table_names():
+            return
+        if not _column_exists("projects", "style_profile"):
+            conn.execute(text("ALTER TABLE projects ADD COLUMN style_profile JSON"))
+            logger.info("迁移:projects 补 style_profile 列")
+
+
 def _add_project_sequel_column() -> None:
     """给 projects 表补 sequel_of_id 列(续集来源,存量一律 NULL,幂等)。"""
     with engine.begin() as conn:
@@ -1062,6 +1073,7 @@ def run_migrations() -> None:
     _add_canon_column()
     _add_issue_payload_column()
     _add_setup_columns()
+    _add_project_style_profile_column()
     _add_project_sequel_column()
     _add_job_owner_columns()
     _add_outline_locked_column()

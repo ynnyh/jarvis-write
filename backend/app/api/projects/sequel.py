@@ -234,9 +234,11 @@ async def create_sequel(
     if digest_text:
         db.add(ChapterSummary(project_id=project.id, chapter_number=0, rolling_summary=digest_text))
     need_style = len((src.style_memo or "").strip()) < _STYLE_MEMO_MIN_CHARS
-    if not digest_text or need_style:
+    need_arch = src_arch is None  # 导入书来源:无架构可继承,分析任务顺手起草
+    if not digest_text or need_style or need_arch:
         analyze_job_id = _spawn_analyze_job(
-            project.id, src.id, need_digest=not digest_text, need_style=need_style,
+            project.id, src.id,
+            need_digest=not digest_text, need_style=need_style, need_arch=need_arch,
         )
 
     db.commit()
@@ -292,8 +294,11 @@ def _sample_source(db: Session, project_id: int) -> tuple[str | None, list[int]]
     return samples, sizes
 
 
-def _spawn_analyze_job(new_pid: int, src_pid: int, *, need_digest: bool, need_style: bool) -> str:
-    """前作分析任务:前情提要 → 第 0 章摘要行;文风技法画像 → style_memo。"""
+def _spawn_analyze_job(
+    new_pid: int, src_pid: int, *, need_digest: bool, need_style: bool, need_arch: bool = False,
+) -> str:
+    """前作分析任务:前情提要 → 第 0 章摘要行;文风画像 → style_profile;
+    架构草稿 → Architecture(导入书来源的续集没有架构可继承,同一次调用顺手出)。"""
     from app.db.session import SessionLocal
 
     async def work(progress) -> None:
@@ -314,11 +319,25 @@ def _spawn_analyze_job(new_pid: int, src_pid: int, *, need_digest: bool, need_st
                     '"digest": "前情提要,800-1200 字:主要人物及关系与结局状态、主线事件链、'
                     "未收束的伏笔与悬念、结尾停在何处、章回节奏与每章大致篇幅;只陈述事实\""
                 )
+            if need_arch:
+                asks.append(
+                    '"architecture": "承前作的架构草稿(JSON 对象):'
+                    '{"core_seed": 一句话故事本质(显性冲突+潜在危机), '
+                    '"character_dynamics": 主要人物及其创伤/追求/关系动力学, '
+                    '"world_building": 世界观要点(物理/社会/规则), '
+                    '"plot_architecture": 第二部的主线骨架与终局方向},'
+                    '各 80-200 字,必须长在第一部的人物与未收线上"'
+                )
             if need_style:
                 asks.append(
-                    '"style_profile": "文风技法画像,300-500 字,可执行可模仿:叙事视角与人称、'
-                    "句式长短与节奏、对话与描写的比例、高频修辞与惯用手法、氛围与基调、"
-                    "章节开头的起势方式与结尾的钩法;写成给续集写手的工作指令,不是夸奖\""
+                    '"style_profile": "六维文风技法画像(JSON 对象,可执行可模仿,不是夸奖):'
+                    '{"perspective": 叙事视角(第几人称/跟谁的视角/是否切换), '
+                    '"rhythm": 句式节奏(句长偏好/长短句交替/段落节奏), '
+                    '"dialogue": 对话密度(占比与对白风格), '
+                    '"rhetoric": 修辞惯用(高频修辞与意象/惯用手法), '
+                    '"mood": 氛围基调(调性/烘法/情绪浓度), '
+                    '"hook": 起势与钩法(章头怎么起/章尾怎么留钩)},'
+                    "每维 40-80 字\""
                 )
             prompt = "\n".join([
                 "你是一部长篇小说的编辑部主编。作者要开写续集,需要你从第一部里提炼两样东西。",
@@ -348,15 +367,37 @@ def _spawn_analyze_job(new_pid: int, src_pid: int, *, need_digest: bool, need_st
                     row = ChapterSummary(project_id=new_pid, chapter_number=0)
                     session.add(row)
                 row.rolling_summary = digest
+            if need_arch:
+                arch = data.get("architecture") if isinstance(data.get("architecture"), dict) else None
+                if arch and str(arch.get("core_seed") or "").strip():
+                    from app.db.models import Architecture as ArchModel
+
+                    exists = (
+                        session.query(ArchModel)
+                        .filter(ArchModel.project_id == new_pid)
+                        .first()
+                    )
+                    if exists is None:
+                        session.add(ArchModel(
+                            project_id=new_pid,
+                            core_seed=str(arch.get("core_seed") or "").strip(),
+                            character_dynamics=str(arch.get("character_dynamics") or "").strip(),
+                            world_building=str(arch.get("world_building") or "").strip(),
+                            plot_architecture=str(arch.get("plot_architecture") or "").strip(),
+                            version=1,
+                        ))
             if need_style:
-                profile = str(data.get("style_profile") or "").strip()
-                if profile:
+                # 结构化画像写 style_profile 列(画像卡的唯一真相;来源标注「前作分析」)
+                from app.engines.style_profile import normalize_profile, profile_from_analysis
+
+                new_profile = profile_from_analysis(data)
+                if any(d["text"] for d in new_profile["dims"].values()):
                     project = session.get(Project, new_pid)
                     if project is not None:
-                        memo = (project.style_memo or "").strip()
-                        project.style_memo = (
-                            f"{memo}\n" if memo else ""
-                        ) + f"【承前作文风画像(续集必须延续这部书的笔法)】\n{profile}"
+                        old = normalize_profile(project.style_profile)
+                        new_profile["version"] = old["version"] + 1
+                        new_profile["history"] = old["history"]
+                        project.style_profile = new_profile
             session.commit()
         finally:
             session.close()
