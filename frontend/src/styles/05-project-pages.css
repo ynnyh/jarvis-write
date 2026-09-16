@@ -116,7 +116,11 @@
 
 /* ---------- 表单行 / 双栏 ---------- */
 .row { display: flex; gap: 14px; flex-wrap: wrap; }
+/* 贪心均分只给文本类控件;复选/单选是原生小方框,跟着伸缩会变成满行大白块
+   (向导「开放式连载」复选框实测 310×44) */
 .row > * { flex: 1 1 200px; }
+.row > input[type="checkbox"],
+.row > input[type="radio"] { flex: 0 0 auto; width: auto; height: auto; align-self: center; }
 
 .split { display: flex; gap: 14px; }
 .split > div { flex: 1; min-width: 0; }
