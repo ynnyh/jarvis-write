@@ -337,6 +337,11 @@ def save_blueprint(
             db.add(outline)
             version = 1
         else:
+            if getattr(outline, "locked", False):
+                # 作者锁定(docs/20 铁律 2):重铺不触碰本章,原样保留;
+                # 版本/失配标记都不动——要改,先解锁(显式动作)
+                saved.append(outline)
+                continue
             if outline.content_hash == content_hash:
                 saved.append(outline)  # 内容没变,不升版本
                 continue

@@ -13,6 +13,7 @@ import { CandidateCards } from "../ui/CandidateCards";
 import { ThinkingText } from "../ui/ThinkingText";
 import { conceptSig, conceptStaleText, isStale, titleSig as calcTitleSig, titleStaleText } from "./wizSig";
 import { SetupStep, STEP_ORDER, STEP_LABEL } from "./onboarding/steps";
+import SkeletonWall from "./onboarding/SkeletonWall";
 import { SCALE_PRESETS, THINK_CONCEPT, THINK_TITLE } from "./onboarding/presets";
 import { composeRandomSeed } from "./onboarding/randomSeeds";
 import { ConceptBrief, conceptKey } from "./onboarding/ConceptBrief";
@@ -92,6 +93,7 @@ export default function OnboardingFlow() {
     fetchEngines, pickEngine, developConcept,
     setGenre, setDim, fetchTitles, pickTitle, pickScale, confirmScale,
     runArch, runBp, enterWorkbench, abandon, goto, editFrom, markDirtyOk,
+    trustMode, setTrustMode, setBp,
   } = useOnboarding();
 
   // 引擎卡抽卡页码:一批 AI 生成 8 张,先翻前 4 张(零成本),翻完才再调 AI 补池
@@ -948,7 +950,8 @@ export default function OnboardingFlow() {
                   <div className="card">
                     <h2>《{project.title}》点火</h2>
                     <div className="card-desc">
-                      AI 按确认好的设定,先生成全书架构,再展开分章蓝图;都在后台跑,切走也继续。
+                      AI 按确认好的设定生成架构 → 出故事骨架(分段走向,你逐段拍板)→ 按骨架铺章;
+                      都在后台跑,切走也继续。
                       {arch.status === "run" || bp.status === "run" ? (
                         <span className="muted">
                           {" "}真实渠道约需几分钟——趁这个空档,可以去右侧检查梗卡与设定,
@@ -988,6 +991,18 @@ export default function OnboardingFlow() {
                         </div>
                       ))}
                     </div>
+                    {/* 故事骨架墙(docs/20 两段式点火):架构完成且未进蓝图时上墙 */}
+                    {arch.status === "done" && bp.status === "wait" && !trustMode && (
+                      <SkeletonWall
+                        pid={pid!}
+                        tendency={tendency}
+                        onTrust={() => { setTrustMode(true); void runBp(); }}
+                        onPaved={() => setBp({ status: "done", stage: "", error: "" })}
+                      />
+                    )}
+                    {trustMode && arch.status === "done" && bp.status === "wait" && (
+                      <div className="muted mt-2">信任模式:架构完成,直接铺全书蓝图(跳过骨架墙)。</div>
+                    )}
                     {allDone && (
                       <motion.div className="wiz-celebrate"
                         initial={{ scale: 0.6, opacity: 0 }}

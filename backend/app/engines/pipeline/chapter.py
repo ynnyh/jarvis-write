@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import (
     Chapter,
+    ChapterOrder as OrderModel,
     Outline,
     Project,
     WritingCard,
@@ -140,6 +141,8 @@ class PreparedContext:
     revision_block: str
     premise_block: str = ""
     preflight_issues: list[dict] = field(default_factory=list)
+    # 章节订单(docs/20):确认订单的 payload;None = 无订单,槽位走蓝图行(存量行为)
+    order_payload: dict | None = None
 
     def compose_context(self, *, project) -> "ChapterContext":
         """转成 Composer 用的上下文(含运行时算出的 deai_rules)。"""
@@ -162,6 +165,7 @@ class PreparedContext:
             twist_prep=self.twist_prep,
             premise_block=self.premise_block,
             deai_rules=_deai_rules_block(self.recent_full),
+            order=self.order_payload,
             project=project,
         )
 
@@ -345,7 +349,19 @@ async def _prepare_chapter_context(
             lines.append(f"本章兑现:{beat}——正文要让它真实发生,不要一笔带过")
         premise_block = "\n".join(lines) + "\n\n"
 
+    # 章节订单(docs/20):确认订单存在才注入;无订单/草稿单 → None,存量行为零变化
+    order_row = (
+        db.query(OrderModel)
+        .filter(
+            OrderModel.project_id == project.id,
+            OrderModel.chapter_number == chapter_number,
+            OrderModel.status == "confirmed",
+        )
+        .first()
+    )
+
     return PreparedContext(
+        order_payload=order_row.payload if order_row is not None else None,
         outline=outline,
         next_outline=next_outline,
         style_block=style_block,

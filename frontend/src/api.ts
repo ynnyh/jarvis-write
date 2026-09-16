@@ -216,6 +216,26 @@ export interface Outline {
   // 本章戏核:这一章必须让读者记住的那一个瞬间,全章围着它铺
   scene_anchor: string;
   beats?: string[] | null;
+  /** 作者锁定(docs/20):级联/批量重铺短路 */
+  locked?: boolean;
+}
+
+/** 故事骨架分段(docs/20 两段式点火):存于 macro_plan,作者逐段拍板后铺章 */
+export interface SkeletonSegment {
+  start: number;
+  end: number;
+  title: string;
+  goal: string;
+  conflict: string;
+  start_state: string;
+  end_state: string;
+  confirmed: boolean;
+  locked: boolean;
+}
+export interface SkeletonOut {
+  segments: SkeletonSegment[];
+  target_chapters: number;
+  segment_size: number;
 }
 /** 全书张力总线的节奏体检:用来判断"整本书是不是一条平线" */
 export interface TensionReport {
@@ -325,6 +345,8 @@ export interface ChapterIssue {
   payload?: Record<string, unknown> | null;
 }
 export interface GenerateChapterResponse extends ChapterDetail {
+  /** 按确认订单生成时回填订单版本(docs/20);undefined = 按蓝图行生成 */
+  order_version?: number | null;
   consistency_issues: Record<string, string>[];
   extraction_stats: Record<string, unknown>;
   ai_flavor: FlavorInfo | null;
@@ -426,10 +448,12 @@ export interface EditResult {
   changed_fields: string[]; own_chapter_stale: boolean;
   needs_impact_analysis: boolean; outline: Outline;
 }
-export interface ImpactItem { chapter_number: number; reason: string; action: string; }
+export interface ImpactItem { chapter_number: number; reason: string; action: string; locked?: boolean; }
 export interface ImpactReport { source_chapter: number; affected: ImpactItem[]; overall: string; }
 export interface CascadeResult {
   updated: number[]; stale_chapters: number[]; warnings: string[]; outlines: Outline[];
+  /** 因作者锁定被级联跳过的章(docs/20 铁律 2) */
+  skipped_locked?: number[];
 }
 export interface DirectiveItem {
   chapter_number: number; new_title: string | null;
@@ -550,6 +574,50 @@ export interface ChapterReconciliation {
   ledger: ReconciliationLedger | null;
   foreshadow_changes: ReconciliationForeChange[];
   confirmed: boolean;
+  /** 确认订单才有的对账区(docs/20);undefined/null = 无订单 */
+  order_check?: OrderCheck | null;
+}
+/** 章节订单六单(docs/20 §5.1):写前确认单,确认后按单生成 */
+export interface OrderPayload {
+  cast: {
+    entering: { name: string; reason: string }[];
+    present: string[];
+    exiting: { name: string; mode: string; threads: string }[];
+  };
+  relations: { from: string; to: string; before: string; after: string; event: string }[];
+  beats: string[];
+  hooks: { carry_in: { text: string; must: boolean }[]; leave: string };
+  foreshadow: { due?: { id: number; description: string }[]; plant: string[]; payoff?: string[]; reinforce?: string[] };
+  scenes: number[];
+  free_directive: string;
+}
+export interface ChapterOrder {
+  id: number;
+  chapter_number: number;
+  payload: OrderPayload;
+  status: "draft" | "confirmed";
+  version: number;
+  beat_check: { beat: string; hit: boolean; note: string }[] | null;
+  updated_at: string | null;
+}
+export interface OrderPrefill {
+  cast: { entering: {name:string;reason:string}[]; present: string[]; exiting: {name:string;mode:string;threads:string}[] };
+  relations: { from: string; to: string; before: string; after: string; event: string }[];
+  beats: string[];
+  hooks: { carry_in: { text: string; must: boolean }[]; leave: string };
+  foreshadow: { due: { id: number; description: string }[]; plant: string[] };
+  scenes: number[];
+  free_directive: string;
+}
+/** 订单对账(docs/20 §6.1):纯规则判定 + 章后节拍判定只读 */
+export interface OrderCheck {
+  version: number;
+  missed: string[];
+  uninvited: string[];
+  exit_missing: string[];
+  relations_missed: { from: string; to: string; after: string }[];
+  beats: { beat: string; hit: boolean; note: string }[];
+  beats_judged: boolean;
 }
 /** 首页驾驶舱单本书的待办信号(docs/19 中期) */
 export interface ProjectTodo {
@@ -1179,6 +1247,19 @@ export const api = {
     req<{ confirmed: number; rejected: number }>(
       "POST", `/api/projects/${pid}/chapters/${n}/reconciliation/confirm`, body),
 
+  // 章节订单(docs/20):写前确认单——存草稿/确认/撤回/删除
+  getChapterOrder: (pid: number, n: number) =>
+    req<{ order: ChapterOrder | null; prefill: OrderPrefill | null }>(
+      "GET", `/api/projects/${pid}/chapters/${n}/order`),
+  saveChapterOrder: (pid: number, n: number, payload: OrderPayload) =>
+    req<ChapterOrder>("PUT", `/api/projects/${pid}/chapters/${n}/order`, payload),
+  confirmChapterOrder: (pid: number, n: number, payload?: OrderPayload) =>
+    req<ChapterOrder>("POST", `/api/projects/${pid}/chapters/${n}/order/confirm`, payload ?? {}),
+  unconfirmChapterOrder: (pid: number, n: number) =>
+    req<ChapterOrder | { order: null }>("POST", `/api/projects/${pid}/chapters/${n}/order/unconfirm`),
+  deleteChapterOrder: (pid: number, n: number) =>
+    req<{ deleted: number }>("DELETE", `/api/projects/${pid}/chapters/${n}/order`),
+
   suggestTitleAsync: (topic: string, genre: string, concept?: Concept | null) =>
     req<{ job_id: string }>("POST", "/api/projects/title-suggestion-async",
       { topic, genre, concept: concept ?? null }),
@@ -1252,8 +1333,8 @@ export const api = {
   // 两段式构思·第二段:选中的引擎(1-2 张,可混搭)→ 深化成完整概念(强模型)
   developConceptAsync: (engines: string[], spark = "", tendency: Tendency = {}, dna: StoryDNA | null = null) =>
     req<{ job_id: string }>("POST", "/api/inspire/develop/async", { engines, spark, tendency, dna }),
-  refineConceptAsync: (concept: Concept, directive: string, tendency: Tendency = {}, dna: StoryDNA | null = null) =>
-    req<{ job_id: string }>("POST", "/api/inspire/refine-async", { concept, directive, tendency, dna }),
+  refineConceptAsync: (concept: Concept, directive: string, tendency: Tendency = {}, dna: StoryDNA | null = null, lockedFields: string[] = []) =>
+    req<{ job_id: string }>("POST", "/api/inspire/refine-async", { concept, directive, tendency, dna, locked_fields: lockedFields }),
   polishChapterAsync: (pid: number, n: number, tendency: Tendency, directive = "") =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/polish/chapter/${n}/async`, { tendency, directive }),
   polishSegmentAsync: (pid: number, text: string, tendency: Tendency) =>
@@ -1305,6 +1386,23 @@ export const api = {
   // 滚动规划:展开下一卷蓝图(按卷纲+已成文状态)
   extendBlueprintAsync: (id: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${id}/blueprint-extend-async`, {}),
+  // 故事骨架(docs/20 两段式点火):分段走向墙——生成/改/拍板/锁/逐段铺章
+  getSkeleton: (id: number) =>
+    req<SkeletonOut>("GET", `/api/projects/${id}/skeleton`),
+  generateSkeletonAsync: (id: number, tendency: Tendency) =>
+    req<{ job_id: string }>("POST", `/api/projects/${id}/skeleton-async`, { tendency }),
+  editSkeletonSegment: (id: number, index: number, body: Partial<SkeletonSegment>) =>
+    req<{ segment: SkeletonSegment }>("PUT", `/api/projects/${id}/skeleton/${index}`, body),
+  confirmSkeletonSegment: (id: number, index: number, confirmed: boolean) =>
+    req<{ segment: SkeletonSegment }>("POST", `/api/projects/${id}/skeleton/${index}/confirm?confirmed=${confirmed}`),
+  lockSkeletonSegment: (id: number, index: number, locked: boolean) =>
+    req<{ segment: SkeletonSegment }>("POST", `/api/projects/${id}/skeleton/${index}/lock?locked=${locked}`),
+  paveSegmentAsync: (id: number, segment: number, tendency: Tendency) =>
+    req<{ job_id: string }>("POST", `/api/projects/${id}/pave-async?segment=${segment}`, { tendency }),
+  // 章纲锁定(docs/20 铁律 2):级联/批量重铺短路
+  lockOutline: (id: number, n: number, locked: boolean) =>
+    req<{ chapter_number: number; locked: boolean }>(
+      "POST", `/api/projects/${id}/outlines/${n}/lock?locked=${locked}`),
   listOutlines: (id: number) => req<Outline[]>("GET", `/api/projects/${id}/outlines`),
   // 全书张力总线:每章目标张力(1-5)+ 节奏体检(极差/均值/是否平/峰值章)。
   // 确定性计算,不花 LLM;前端用来画节奏曲线,治「全书一条平线」。

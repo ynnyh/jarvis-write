@@ -1,0 +1,20 @@
+你是网文总编,为一部 {number_of_chapters} 章的长篇铺设「故事骨架」——全书分段的走向墙,作者逐段拍板后才铺章节蓝图。
+
+【全书架构】
+{novel_architecture}
+{style_directives}
+把全书切成 {segment_count} 段,每段约 {segment_size} 章,必须铺满全部章节。每段给出:
+1. title:段名(4-10 字,有画面感,如「初入江湖」「旧案浮沉」)
+2. goal:段目标,80-150 字,写清本段开始时主角的处境 → 结束时的处境(状态要有实质变化)
+3. conflict:本段的主线冲突与对手(一句话)
+4. start_state:进段时主角的关键状态(实力/关系/处境,一句话)
+5. end_state:出段时主角的关键状态(一句话,要和 start_state 拉开差距)
+全书要有整体爬升感:力量/格局/赌注逐段抬高,最后一段完成架构中的终局。
+{hard_note}
+只输出 JSON,不要任何解释或代码块:
+{{
+  "segments": [
+    {{"title": "段名", "goal": "段目标…", "conflict": "主线冲突…", "start_state": "…", "end_state": "…"}},
+    ...
+  ]
+}}

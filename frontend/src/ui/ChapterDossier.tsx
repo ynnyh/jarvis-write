@@ -7,10 +7,15 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { qk } from "../hooks/queries";
+import ChapterOrderCard from "./ChapterOrderCard";
 
 const HIDDEN_KEY = "dossier-hidden";
 
-export default function ChapterDossier({ pid, chapterNumber, yieldTo }: { pid: number; chapterNumber: number; yieldTo?: unknown }) {
+export default function ChapterDossier({ pid, chapterNumber, yieldTo, onGenerate }: {
+  pid: number; chapterNumber: number; yieldTo?: unknown;
+  /** 「确认并按单生成」透传给订单卡(docs/20 订单制);写作区传 generate */
+  onGenerate?: (n: number) => void;
+}) {
   const navigate = useNavigate();
   // 折叠有两层:用户手动收起(记 localStorage,尊重偏好)与「让位折叠」——
   // 生成结果卡出现时(yieldTo 变真)临时收起,写后第一眼应是验收不是写前情报;
@@ -157,6 +162,9 @@ export default function ChapterDossier({ pid, chapterNumber, yieldTo }: { pid: n
               ? d.prev_threads.join("；")
               : <span className="muted">{d.chapter_number > 1 ? "上一章没有未回收的钩子(或未提取契约)" : "全书第一章"}</span>}
           </div>
+
+          {/* 本章订单(docs/20 订单制):写前确认单,确认后按单生成;未确认按蓝图行 */}
+          <ChapterOrderCard pid={pid} n={chapterNumber} onGenerate={onGenerate} />
         </>
       )}
     </div>

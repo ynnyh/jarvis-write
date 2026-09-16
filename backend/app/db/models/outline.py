@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -50,6 +50,9 @@ class Outline(Base, TimestampMixin):
     # 内容指纹,级联引擎用它判断本章大纲是否真的变了
     content_hash: Mapped[str] = mapped_column(String(64), default="")
     current_version: Mapped[int] = mapped_column(Integer, default=1)
+    # 作者锁定(docs/20 铁律 2):级联/批量重铺不得触碰本章大纲;
+    # 手动编辑仍然允许(作者权威),但锁定态下级联勾选禁用并明示
+    locked: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class OutlineVersion(Base):

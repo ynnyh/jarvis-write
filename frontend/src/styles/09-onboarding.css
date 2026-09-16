@@ -196,3 +196,15 @@
 }
 .wcard input[type="text"], .wcard input:not([type]), .wcard textarea { width: 100%; }
 
+
+/* ============ 故事骨架墙(docs/20 两段式点火) ============ */
+.skeleton-wall .card-head { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; }
+.skeleton-list { display: flex; flex-direction: column; gap: var(--sp-2); }
+.skeleton-seg { border: 1px solid var(--line-1, rgba(128,128,128,.25)); border-radius: 8px; padding: var(--sp-2); }
+.skeleton-seg.confirmed { border-color: var(--ok, #3a9); }
+.skeleton-seg-head { display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; }
+.skeleton-title { width: 10em; font-weight: 600; }
+.skeleton-goal { width: 100%; box-sizing: border-box; margin-top: 4px; }
+.skeleton-meta { display: flex; gap: var(--sp-1); margin-top: 4px; flex-wrap: wrap; }
+.skeleton-in { flex: 1; min-width: 10em; }
+.skeleton-pipe .actions { margin-top: var(--sp-2); }

@@ -98,6 +98,10 @@ export function useOnboarding() {
   // 点火流水线
   const [arch, setArch] = useState<PipeStep>(PIPE_WAIT);
   const [bp, setBp] = useState<PipeStep>(PIPE_WAIT);
+  // 信任模式(docs/20 §4.4):跳过骨架墙一枪铺全书;默认 false = 架构完停在骨架墙
+  const [trustMode, setTrustMode] = useState(false);
+  const trustRef = useRef(false);
+  trustRef.current = trustMode;
   const pipeInit = useRef(false);
 
   const concept: Concept = useMemo(
@@ -442,10 +446,11 @@ export function useOnboarding() {
   function reattach(kind: "arch" | "bp", jobId: string, stage: string) {
     const set = kind === "arch" ? setArch : setBp;
     set({ status: "run", stage: stage || "生成中", error: "" });
-    pollJob(jobId, { onStage: (s) => set((p) => (p.status === "run" ? { ...p, stage: s } : p)) })
+      pollJob(jobId, { onStage: (s) => set((p) => (p.status === "run" ? { ...p, stage: s } : p)) })
       .then(() => {
         set({ status: "done", stage: "", error: "" });
-        if (kind === "arch") void runBp();
+        // docs/20 两段式点火:默认架构完停在骨架墙;信任模式保持旧链路直通蓝图
+        if (kind === "arch" && trustRef.current) void runBp();
       })
       .catch((e) => set({ status: "err", stage: "", error: errMsg(e) }));
   }
@@ -460,7 +465,8 @@ export function useOnboarding() {
       });
       if (r === null) return; // 本地等待被中止(切走),任务继续在后台跑
       setArch({ status: "done", stage: "", error: "" });
-      void runBp();
+      // docs/20 两段式点火:默认停在骨架墙;信任模式直通蓝图
+      if (trustRef.current) void runBp();
     } catch (e) {
       setArch({ status: "err", stage: "", error: errMsg(e) });
     }
@@ -560,7 +566,7 @@ export function useOnboarding() {
     inferBusy, customGenre,
     titleIdeas, titleSig, titleBusy, titleInput,
     chapters, words, advOpen, openEnded,
-    fly, pickedKey, dirty, arch, bp,
+    fly, pickedKey, dirty, arch, bp, setBp, trustMode, setTrustMode,
     // 渲染需要的 setter
     setSpark, setEntry, setPickedGenreCard, setChatInput,
     setIdeaSig, setCustomOpen, setCustomConcept,

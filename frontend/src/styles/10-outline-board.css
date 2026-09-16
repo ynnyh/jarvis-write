@@ -1,0 +1,4 @@
+
+/* 章纲锁定(docs/20 铁律 2) */
+.lock-btn { cursor: pointer; opacity: .65; font-size: 13px; }
+.lock-btn:hover { opacity: 1; }

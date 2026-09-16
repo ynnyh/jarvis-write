@@ -355,6 +355,14 @@ export default function InspirePanel({ project, onChanged, onGotoStep, outlinesC
 
   // 指令式改:输入 → 预览(带 diff)→ 采纳
   const [directive, setDirective] = useState("");
+  // 字段锁(docs/20 灵感层):已锁字段 AI 重写不碰(服务端强制回滚);记 localStorage 尊重偏好
+  const [lockedFields, setLockedFields] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(`concept-locks:${project.id}`) || "[]"); }
+    catch { return []; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(`concept-locks:${project.id}`, JSON.stringify(lockedFields)); } catch { /* 隐私模式 */ }
+  }, [lockedFields, project.id]);
   const [refinePreview, setRefinePreview] = useState<{ concept: Concept; changed: (keyof Concept)[]; note: string } | null>(null);
 
   // 对话式(记录落库:刷新/切步骤不丢)
@@ -461,7 +469,7 @@ export default function InspirePanel({ project, onChanged, onGotoStep, outlinesC
     setBusy("AI 正在按你的意见改写概念…"); setErr(""); setMsg("");
     try {
       const r = await runJob<{ concept: Concept; changed: (keyof Concept)[]; note: string }>(
-        () => api.refineConceptAsync(concept, directive, tendency, dnaIsEmpty(dna) ? null : dna),
+        () => api.refineConceptAsync(concept, directive, tendency, dnaIsEmpty(dna) ? null : dna, lockedFields),
         { kind: "inspire-refine" },
       );
       if (r) setRefinePreview({ concept: r.concept, changed: r.changed, note: r.note });
@@ -722,6 +730,17 @@ export default function InspirePanel({ project, onChanged, onGotoStep, outlinesC
             对当前概念说一句怎么改——AI 只动相关字段,给你新旧对照,确认才生效。
           </div>
           <div className="input-row">
+            <div className="chips mb-1">
+              <span className="hint">字段锁(🔒 后 AI 改写不碰它):</span>
+              {CONCEPT_FIELDS.map((f) => (
+                <button key={f.key} type="button"
+                  className={"chip" + (lockedFields.includes(f.key) ? " done" : "")}
+                  onClick={() => setLockedFields((cur) =>
+                    cur.includes(f.key) ? cur.filter((k) => k !== f.key) : [...cur, f.key])}>
+                  {lockedFields.includes(f.key) ? "🔒" : ""}{f.label}
+                </button>
+              ))}
+            </div>
             <input type="text" value={directive} onChange={(e) => setDirective(e.target.value)}
               placeholder='如:"主角换成女性" / "反转再狠一点" / "背景搬到民国"'
               onKeyDown={(e) => e.key === "Enter" && !busy && directive.trim() && runRefine()} />

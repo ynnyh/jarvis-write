@@ -14,6 +14,9 @@ export interface BgJob {
   status: "running" | "done" | "error";
   stage: string;
   error?: string | null;
+  /** 服务端解析的归属(docs/20);旧任务为空 → 平铺回退 */
+  project_id?: number | null;
+  chapter_number?: number | null;
 }
 
 interface TaskCenterValue {
@@ -166,6 +169,10 @@ export function TaskCenterBadge() {
           <div className="tc-drawer" onMouseLeave={() => setOpen(false)}>
             {recent.map((j) => {
               const stageText = j.status === "error" ? (j.error || "失败") : j.stage;
+              // 连写队列进度:stage 形如「[3/13] 第 5 章:…」→ 抽出分子分母画进度条
+              const qm = j.kind.endsWith("-queue")
+                ? (j.stage || "").match(/^\[(\d+)\/(\d+)\]/)
+                : null;
               return (
                 <div key={j.job_id} className={"tc-item " + j.status}>
                   <span className="tc-label">{jobLabel(j.kind)}</span>
@@ -174,6 +181,11 @@ export function TaskCenterBadge() {
                     {j.status === "running" && <span className="spin" />}
                     {stageText}
                   </span>
+                  {qm && (
+                    <span className="tc-progress" title={`队列进度 ${qm[1]}/${qm[2]}`}>
+                      <span style={{ width: `${(Number(qm[1]) / Number(qm[2])) * 100}%` }} />
+                    </span>
+                  )}
                   {/* 在跑的任务可以直接盯着看模型写字(实时正文窗),或就地终止 */}
                   {j.status === "running" && (
                     <>

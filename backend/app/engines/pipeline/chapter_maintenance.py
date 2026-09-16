@@ -263,4 +263,83 @@ async def apply_chapter_tail(
     except Exception as exc:  # noqa: BLE001 — 桥段软报绝不阻塞主流程
         db.rollback()
         logger.warning("第 %d 章桥段台账校验失败(已跳过): %s", chapter_number, exc)
+
+    # ---- 订单节拍判定(docs/20 §6.1,advisory,不阻断) ----
+    # 只有「确认订单」的章才判:无订单的章零额外 LLM、零行为变化(存量书零影响)。
+    # 成品(本章正文)逐拍对照订单节拍单,结果写回订单的 beat_check,交稿对账区展示。
+    # 判定失败置 None 并落日志——验收缺位可补判(重跑章后链路),绝不拖垮主链路。
+    try:
+        await check_order_beats(db, project.id, chapter_number, final, _report)
+    except Exception as exc:  # noqa: BLE001 — 节拍判定绝不阻塞主流程
+        db.rollback()
+        logger.warning("第 %d 章订单节拍判定失败(已跳过): %s", chapter_number, exc)
     return extraction_stats
+
+
+async def check_order_beats(
+    db: Session,
+    project_id: int,
+    chapter_number: int,
+    final: str,
+    report=None,
+) -> None:
+    """确认订单的节拍单 vs 成品正文,逐拍判定命中与否(结果写订单.beat_check)。
+
+    零订单短路(绝大多数章走这里,零成本);判定失败抛给调用方自吞——
+    beat_check 保持 None,交稿对账区如实显示「未判定」。
+    """
+    import json as _json
+
+    from app.db.models import ChapterOrder
+
+    order = (
+        db.query(ChapterOrder)
+        .filter(
+            ChapterOrder.project_id == project_id,
+            ChapterOrder.chapter_number == chapter_number,
+            ChapterOrder.status == "confirmed",
+        )
+        .first()
+    )
+    beats = [
+        str(b).strip()
+        for b in ((order.payload or {}).get("beats") or [])
+        if str(b).strip()
+    ] if order is not None else []
+    if not beats:
+        return
+    if report:
+        report("订单节拍判定")
+    adapter = get_adapter_for(Task.FACT_EXTRACT)
+    raw = await adapter.ask(
+        "\n".join(
+            [
+                "你是编辑部的节拍验收员。对照【本章节拍单】逐拍检查【正文】是否真实写到了这一拍",
+                "(情节确凿发生,不是一笔带过更不是完全没写)。只输出 JSON 数组,",
+                "每个元素 {\"beat\": 序号从1, \"hit\": true/false, \"note\": 一句话依据(20字内)},",
+                "不要输出任何解释或代码块。",
+                "",
+                "【本章节拍单】",
+                "\n".join(f"{i}. {b}" for i, b in enumerate(beats, 1)),
+                "",
+                "【正文】",
+                final[:12000],
+            ]
+        )
+    )
+    # 容错解析:抓第一个 JSON 数组(对齐 extractor 的 salvage 纪律);解析失败按未判定处理
+    start, end = raw.find("["), raw.rfind("]")
+    if start == -1 or end <= start:
+        raise ValueError("节拍判定输出无法解析")
+    items = _json.loads(raw[start : end + 1])
+    beat_check = [
+        {
+            "beat": beats[max(0, min(len(beats), int(it.get("beat", 0))) - 1)],
+            "hit": bool(it.get("hit")),
+            "note": str(it.get("note") or "")[:80],
+        }
+        for it in items
+        if isinstance(it, dict)
+    ]
+    order.beat_check = beat_check
+    db.commit()

@@ -27,12 +27,14 @@ interface Props {
   onTogglePick: (n: number, checked: boolean) => void;
   onRunCascade: () => void;
   onDirectiveChip: (directive: string) => void;
+  /** 锁定/解锁本章大纲(docs/20 铁律 2):锁定后级联与批量重铺短路 */
+  onToggleLock?: (n: number, locked: boolean) => void;
 }
 
 export default function OutlineItem({
   outline: o, editing, expanded, form, busy, editResult, impact, picked,
   outlineActions, discussOpen, discussNode, onToggleDiscuss, onToggleExpand, onStartEdit,
-  onFormChange, onSave, onCancelEdit, onRunImpact, onTogglePick, onRunCascade, onDirectiveChip,
+  onFormChange, onSave, onCancelEdit, onRunImpact, onTogglePick, onRunCascade, onDirectiveChip, onToggleLock,
 }: Props) {
   const open = editing || expanded;
   return (
@@ -43,6 +45,15 @@ export default function OutlineItem({
         <b className="outline-title">{o.title}</b>
         <span className="badge">{o.chapter_role || "—"}</span>
         <span className="badge">v{o.current_version}</span>
+        {o.locked && (
+          <span className="badge" title="已锁定:级联与批量重铺不碰这章;再点一次锁解锁">🔒 已锁</span>
+        )}
+        {!editing && onToggleLock && (
+          <span className="lock-btn" title={o.locked ? "解锁:恢复参与级联/重铺" : "锁定:这章我认了,级联与重铺别动它"}
+            onClick={(e) => { e.stopPropagation(); onToggleLock(o.chapter_number, !o.locked); }}>
+            {o.locked ? "🔓" : "🔒"}
+          </span>
+        )}
         {!editing && <span className="caret">{open ? "▾" : "▸"}</span>}
       </button>
 
@@ -140,9 +151,12 @@ export default function OutlineItem({
                   {impact.affected.map((a) => (
                     <div key={a.chapter_number} className="fact-line fact-check">
                       <input type="checkbox" checked={picked.has(a.chapter_number)}
+                        title={a.locked ? "已锁定:级联不碰这章;解锁后可勾选" : undefined}
+                        disabled={a.locked}
                         onChange={(e) => onTogglePick(a.chapter_number, e.target.checked)} />
                       <div>
                         <b>第{a.chapter_number}章</b>
+                        {a.locked && <span className="badge" title="docs/20 铁律 2:锁定章级联短路">🔒 已锁</span>}
                         <span className={"badge " + (a.action === "regenerate" ? "warn" : "")}>
                           {a.action === "regenerate" ? "建议重生成" : "建议人工复核"}
                         </span>

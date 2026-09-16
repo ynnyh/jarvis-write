@@ -13,3 +13,8 @@ MACRO_PLAN_PROMPT = load_prompt("rolling/macro_plan.txt")
 
 # 展开下一卷时注入的"已成文状态"块(拼进架构文本尾部)
 ROLLING_CONTEXT_BLOCK = load_prompt("rolling/context_block.txt")
+
+# 故事骨架(docs/20 两段式点火):分段的走向墙(段名/段目标/冲突/起止状态),
+# 作者逐段确认后才铺章。与 MACRO_PLAN_PROMPT 的区别:多四个人话字段、默认逐墙确认;
+# 卷纲是 >150 章书的自动指南针,骨架是所有书的显式订单——两者共存于 macro_plan。
+SKELETON_PROMPT = load_prompt("rolling/skeleton.txt")

@@ -72,6 +72,8 @@ class ImpactItem(BaseModel):
     chapter_number: int
     reason: str
     action: str = "regenerate"
+    # 该章是否被作者锁定(docs/20):锁定章级联勾选禁用、执行时短路
+    locked: bool = False
 
 
 class ImpactReport(BaseModel):
@@ -91,6 +93,8 @@ class CascadeResult(BaseModel):
     updated: list[int]
     stale_chapters: list[int]
     warnings: list[str]
+    # 因作者锁定被级联跳过的章(docs/20 铁律 2);空 = 无锁定干扰
+    skipped_locked: list[int] = []
     outlines: list[OutlineOut]
 
 
@@ -175,6 +179,29 @@ def _outline_block(o: Outline) -> str:
     if beats:
         lines.append("场景节拍:" + ";".join(beats[:8]))
     return "\n".join(lines)
+
+
+@router.post("/{chapter_number}/lock")
+def lock_outline(
+    chapter_number: int,
+    project_id: int,
+    locked: bool,
+    db: Session = Depends(get_db),
+):
+    """作者锁定/解锁本章大纲(docs/20 铁律 2):锁定后级联与批量重铺短路。
+
+    手动编辑不受限(作者权威永远最大);锁定只约束「批量操作不碰它」。
+    """
+    outline = (
+        db.query(Outline)
+        .filter(Outline.project_id == project_id, Outline.chapter_number == chapter_number)
+        .first()
+    )
+    if outline is None:
+        raise HTTPException(status_code=404, detail=f"第 {chapter_number} 章大纲不存在")
+    outline.locked = bool(locked)
+    db.commit()
+    return {"chapter_number": chapter_number, "locked": outline.locked}
 
 
 @router.post("/{chapter_number}/discuss", response_model=OutlineDiscussResponse)
@@ -367,10 +394,19 @@ async def impact(
     project = get_project_or_404(db, project_id)
     outline = _outline(db, project_id, chapter_number)
     result = await analyze_impact(db, project, outline)
+    locked_set = {
+        o.chapter_number
+        for o in db.query(Outline).filter(
+            Outline.project_id == project_id, Outline.locked.is_(True)
+        )
+    }
     return ImpactReport(
         source_chapter=result["source_chapter"],
         overall=result["overall"],
-        affected=[ImpactItem(**a) for a in result["affected"]],
+        affected=[
+            ImpactItem(**a, locked=a["chapter_number"] in locked_set)
+            for a in result["affected"]
+        ],
     )
 
 
@@ -399,10 +435,19 @@ async def impact_async(
                 .first()
             )
             result = await analyze_impact(session, project, outline)
+            locked_set = {
+                o.chapter_number
+                for o in session.query(Outline).filter(
+                    Outline.project_id == project_id, Outline.locked.is_(True)
+                )
+            }
             return {
                 "source_chapter": result["source_chapter"],
                 "overall": result["overall"],
-                "affected": result["affected"],
+                "affected": [
+                    {**a, "locked": a["chapter_number"] in locked_set}
+                    for a in result["affected"]
+                ],
             }
         finally:
             session.close()

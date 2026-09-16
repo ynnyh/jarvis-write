@@ -21,7 +21,12 @@ export default function ReconciliationBlock({ pid, n }: { pid: number; n: number
 
   if (recon.isLoading || recon.isError || !recon.data) return null;
   const d = recon.data;
-  const nothing = d.confirmed && !d.ledger && d.foreshadow_changes.length === 0;
+  const oc = d.order_check;
+  const orderHasFindings = !!oc && (
+    oc.missed.length > 0 || oc.uninvited.length > 0 || oc.exit_missing.length > 0
+    || oc.relations_missed.length > 0 || oc.beats.some((b) => !b.hit)
+  );
+  const nothing = d.confirmed && !d.ledger && d.foreshadow_changes.length === 0 && !orderHasFindings;
   if (nothing) return null;
 
   async function decide(confirmedIds: number[], rejectedIds: number[]) {
@@ -66,6 +71,58 @@ export default function ReconciliationBlock({ pid, n }: { pid: number; n: number
           <span>{f.description}</span>
         </div>
       ))}
+
+      {/* 订单对账(docs/20 §6.1):确认订单的六单 vs 成品;偏差逐条亮出来 */}
+      {oc && (
+        <div className="recon-order" data-testid="order-check">
+          <div className="recon-line">
+            <span className="chip">订单 v{oc.version}</span>
+            <span className="muted">按单验收——偏差逐条裁决:接受就改订单,不对就打回重写</span>
+          </div>
+          {oc.missed.map((name, i) => (
+            <div className="recon-line" key={`m${i}`}>
+              <span className="chip chip-warn">该来没来</span><span>订单里要出场,正文没写到:{name}</span>
+            </div>
+          ))}
+          {oc.uninvited.map((name, i) => (
+            <div className="recon-line" key={`u${i}`}>
+              <span className="chip chip-warn">不请自来</span><span>正文冒出的订单外人物:{name}(确认上方关系边或去圣经建档)</span>
+            </div>
+          ))}
+          {oc.exit_missing.map((name, i) => (
+            <div className="recon-line" key={`e${i}`}>
+              <span className="chip chip-warn">没写退场</span><span>说好本章下场,正文连人都没出现:{name}</span>
+            </div>
+          ))}
+          {oc.relations_missed.map((r, i) => (
+            <div className="recon-line" key={`r${i}`}>
+              <span className="chip chip-warn">该变没变</span><span>{r.from}—{r.to} 应变为「{r.after}」,本章没有对应的关系变化</span>
+            </div>
+          ))}
+          {oc.beats_judged && oc.beats.map((b, i) => !b.hit && (
+            <div className="recon-line" key={`b${i}`}>
+              <span className="chip chip-warn">节拍未砸</span><span>{b.beat}{b.note ? ` · ${b.note}` : ""}</span>
+            </div>
+          ))}
+          {oc.beats_judged && oc.beats.length > 0 && oc.beats.every((b) => b.hit) && (
+            <div className="recon-line">
+              <span className="chip">节拍全中</span>
+              <span className="muted">{oc.beats.length} 拍全部兑现</span>
+            </div>
+          )}
+          {!oc.beats_judged && (
+            <div className="recon-line">
+              <span className="chip chip-warn">节拍未判定</span>
+              <span className="muted">章后判定没跑成(可重跑一致性同步补判),先看上面的人物账</span>
+            </div>
+          )}
+          {!orderHasFindings && (
+            <div className="recon-line">
+              <span className="chip">订单全对</span><span className="muted">人物/关系与订单一致</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {d.pending_relations.map((r) => (
         <div className="recon-line" key={r.id}>

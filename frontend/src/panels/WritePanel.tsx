@@ -186,7 +186,7 @@ export default function WritePanel({ pid, outlines }: Props) {
       <div className="write-main" onTouchStart={onMainTouchStart} onTouchEnd={onMainTouchEnd}>
         <NoviceChecklist pid={pid} onGoto={(path) => nav(path)} />
         <WriteGuide />
-        {chapterNum !== null && <ChapterDossier pid={pid} chapterNumber={chapterNum} yieldTo={genResult} />}
+        {chapterNum !== null && <ChapterDossier pid={pid} chapterNumber={chapterNum} yieldTo={genResult} onGenerate={(n) => { void generate(n); }} />}
         {versionsFor !== null && versions !== null && (
           <div ref={versionRef}>
             <VersionCompare

@@ -403,6 +403,8 @@ class RefineRequest(BaseModel):
     directive: str = Field(min_length=1, description="一句话修改意见")
     tendency: Tendency = Field(default_factory=dict)
     dna: StoryDNA | None = None
+    # 已锁字段(docs/20 灵感字段级摇/锁):重写绝对不碰;改了也在服务端回滚为原值
+    locked_fields: list[str] = Field(default_factory=list)
 
 
 class RefineResponse(BaseModel):
@@ -440,9 +442,19 @@ async def _refine_impl(req: RefineRequest) -> RefineResponse:
 
     # 味道锚(本书基因)折进 genre_boundary 自由文本槽注入(REFINE_PROMPT 无 style 占位符)
     dna_block = dna_block_of(_dna_of(req.dna))
+    # 已锁字段(docs/20):锁 = 宪法,prompt 禁令 + 输出回滚双保险
+    valid_fields = {k for k, _ in CONCEPT_FIELDS}
+    locked = [k for k in req.locked_fields if k in valid_fields]
+    lock_note = ""
+    if locked:
+        labels = dict(CONCEPT_FIELDS)
+        lock_note = (
+            "\n【字段锁(作者已拍板,以下字段一个字都不许改,原样保留)】\n"
+            + "\n".join(f"- {labels[k]}:{getattr(req.concept, k)}" for k in locked)
+        )
     prompt = REFINE_PROMPT.format(
         concept_block=req.concept.render(),
-        directive=directive,
+        directive=directive + lock_note,
         genre_boundary=_GENRE_BOUNDARY + (("\n" + dna_block) if dna_block else ""),
     )
     try:
@@ -455,15 +467,23 @@ async def _refine_impl(req: RefineRequest) -> RefineResponse:
     if new_concept.is_empty():
         raise HTTPException(status_code=502, detail="概念改写解析失败,请重试")
 
+    # 锁字段回滚(docs/20):模型越界改了已锁字段,一律还原为原值——锁在服务端兜底
+    for k in locked:
+        setattr(new_concept, k, getattr(req.concept, k))
+
     # changed 以后端为准重算(不轻信模型自报),与原概念逐字段比对
     valid_fields = {k for k, _ in CONCEPT_FIELDS}
     changed = [
         k for k, _ in CONCEPT_FIELDS
         if getattr(new_concept, k).strip() != getattr(req.concept, k).strip()
     ]
-    # 模型自报的 changed 仅作补充(它可能语义上"改了"但文字近似),取并集且过滤非法字段
+    # 模型自报的 changed 仅作补充(它可能语义上"改了"但文字近似),取并集且过滤非法字段;
+    # 但仍须以「真实文本差异」为准——锁字段回滚后没差异,不许因模型自报混进 changed
     for k in data.get("changed") or []:
-        if isinstance(k, str) and k in valid_fields and k not in changed:
+        if (
+            isinstance(k, str) and k in valid_fields and k not in changed
+            and getattr(new_concept, k).strip() != getattr(req.concept, k).strip()
+        ):
             changed.append(k)
 
     return RefineResponse(

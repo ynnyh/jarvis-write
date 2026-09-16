@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_project_or_404
-from app.db.models import Chapter, Outline, Project
+from app.db.models import Chapter, ChapterOrder, Outline, Project
 from app.db.session import SessionLocal, get_db
 from app.engines.pipeline.chapter import generate_chapter
 from app.jobs import create_job, finish_job, fire_and_track, list_running, normalize_job_error, update_stage
@@ -43,6 +43,22 @@ class GenerateChapterResponse(ChapterDetail):
     gate: dict = {}
     # 写前审核警告(docs/08 §5.3):{"warnings": [...]},severity 一律 major,只警告不阻断
     preflight: dict = {}
+    # 章节订单(docs/20):按确认订单生成时回填订单版本号;None = 按蓝图行生成
+    order_version: int | None = None
+
+
+def _confirmed_order_version(db: Session, project_id: int, chapter_number: int) -> int | None:
+    """确认订单的版本号;无确认订单返回 None(前端据此刻「按单/按蓝图行」标签)。"""
+    row = (
+        db.query(ChapterOrder)
+        .filter(
+            ChapterOrder.project_id == project_id,
+            ChapterOrder.chapter_number == chapter_number,
+            ChapterOrder.status == "confirmed",
+        )
+        .first()
+    )
+    return row.version if row is not None else None
 
 
 @router.post("/{chapter_number}/generate", response_model=GenerateChapterResponse)
@@ -73,6 +89,7 @@ async def generate(
     resp.review = review_result
     resp.gate = _gate_payload(chapter, issues)
     resp.preflight = {"warnings": preflight}
+    resp.order_version = _confirmed_order_version(db, project_id, chapter_number)
     _fill_handoff(db, chapter, resp)
     return resp
 

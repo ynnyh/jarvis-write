@@ -88,6 +88,41 @@ def _add_synopsis_column() -> None:
             logger.info("迁移:projects 补 synopsis 列")
 
 
+def _add_job_owner_columns() -> None:
+    """给 jobs 表补 project_id/chapter_number/parent_job_id(任务中心分组用,幂等)。
+
+    旧任务三列为 NULL,前端按「未分组」平铺;存量行为零变化。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "jobs" not in insp.get_table_names():
+            return  # create_all 会新建,无需补列
+        for col, ddl in (
+            ("project_id", "INTEGER"),
+            ("chapter_number", "INTEGER"),
+            ("parent_job_id", "VARCHAR(12)"),
+        ):
+            if not _column_exists("jobs", col):
+                conn.execute(text(f"ALTER TABLE jobs ADD COLUMN {col} {ddl}"))
+                logger.info(f"迁移:jobs 补 {col} 列")
+
+
+def _add_outline_locked_column() -> None:
+    """给 outlines 表补 locked 列(作者锁定,级联/重铺短路;存量一律未锁,幂等)。"""
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "outlines" not in insp.get_table_names():
+            return  # create_all 会新建,无需补列
+        if not _column_exists("outlines", "locked"):
+            conn.execute(
+                text(
+                    "ALTER TABLE outlines ADD COLUMN locked BOOLEAN "
+                    "NOT NULL DEFAULT 0"
+                )
+            )
+            logger.info("迁移:outlines 补 locked 列")
+
+
 def _add_retired_column() -> None:
     """给 entities 表补 retired 列(人物退场标记,存量一律活跃,幂等)。"""
     with engine.begin() as conn:
@@ -1016,6 +1051,8 @@ def run_migrations() -> None:
     _add_canon_column()
     _add_issue_payload_column()
     _add_setup_columns()
+    _add_job_owner_columns()
+    _add_outline_locked_column()
     _add_retired_column()
     _add_word_guard_columns()
     _add_review_columns()

@@ -70,6 +70,8 @@ class ChapterContext:
     deai_rules: str
     # 核心梗块(全书梗卡摘要 + 本章兑现拍):空串 = 无梗卡,prompt 零变化
     premise_block: str = ""
+    # 章节订单(docs/20):确认订单的 payload;None = 无订单,槽位维持蓝图行
+    order: dict | None = None
     project: Any = None
     db: Session | None = None
 
@@ -95,10 +97,30 @@ class Composer:
         self.ctx = ctx
         self._precomputed = precomputed
 
+    def _order_slots(self) -> dict[str, str]:
+        """确认订单 → 槽位替换表;无订单返回空表,调用方零分支。"""
+        from app.engines.pipeline.order_block import order_slots
+
+        return order_slots(getattr(self.ctx, "order", None)) or {}
+
     def _draft_prompt(self, rev_block: str) -> str:
         ctx = self.ctx
         outline = ctx.outline
         project = ctx.project
+        # 订单槽位替换(docs/20 §5.2):确认订单逐槽覆盖蓝图行,空单不覆盖。
+        # 简述槽 = 蓝图简述 + 订单要点附录(同一槽位,不新增模板占位符)。
+        slots = self._order_slots()
+        characters_involved = slots.get("characters_involved") or (
+            "、".join(map(str, outline.characters_involved)) or "(未指定)"
+        )
+        chapter_beats = slots.get("chapter_beats") or _beats_block(outline)
+        chapter_summary = outline.summary
+        if slots.get("order_appendix"):
+            chapter_summary = (
+                f"{chapter_summary}\n【本章订单要点(作者确认,优先级高于上面的简述)】\n"
+                + slots["order_appendix"]
+            )
+        foreshadowing = slots.get("foreshadowing") or outline.foreshadowing
         return CHAPTER_DRAFT_PROMPT.format(
             chapter_number=ctx.chapter_number,
             chapter_title=outline.title,
@@ -126,12 +148,12 @@ class Composer:
             chapter_role=outline.chapter_role,
             chapter_purpose=outline.chapter_purpose,
             suspense_level=outline.suspense_level,
-            foreshadowing=outline.foreshadowing,
-            characters_involved="、".join(map(str, outline.characters_involved)) or "(未指定)",
+            foreshadowing=foreshadowing,
+            characters_involved=characters_involved,
             key_items="、".join(map(str, outline.key_items)) or "无",
             scene_location=outline.scene_location,
-            chapter_summary=outline.summary,
-            chapter_beats=_beats_block(outline),
+            chapter_summary=chapter_summary,
+            chapter_beats=chapter_beats,
             next_chapter_brief=_next_chapter_brief(ctx.next_outline),
             word_number=project.target_words_per_chapter,
             word_floor=project.target_words_per_chapter * 4 // 5,
@@ -149,6 +171,15 @@ class Composer:
         # 定稿前的去味诊断(纯规则零成本):草稿先过 AI 味检测,命中句贴进定稿
         # prompt 定点改写 —— 复用润色端"先诊断后治疗"的成熟模式,生成端不再只靠自觉。
         flavor_hits = _flavor_hits_block(ai_flavor_report(draft))
+        # 订单槽位替换与草稿同款(§5.2):只覆盖简述/伏笔两槽,其余定稿槽不动
+        slots = self._order_slots()
+        chapter_summary = outline.summary
+        if slots.get("order_appendix"):
+            chapter_summary = (
+                f"{chapter_summary}\n【本章订单要点(作者确认,优先级高于上面的简述)】\n"
+                + slots["order_appendix"]
+            )
+        foreshadowing = slots.get("foreshadowing") or outline.foreshadowing
         return CHAPTER_FINALIZE_PROMPT.format(
             chapter_number=ctx.chapter_number,
             premise_block=ctx.premise_block,
@@ -162,8 +193,8 @@ class Composer:
                 chapter_role=str(outline.chapter_role or ""),
                 suspense_level=str(outline.suspense_level or ""),
             ),
-            foreshadowing=outline.foreshadowing,
-            chapter_summary=outline.summary,
+            foreshadowing=foreshadowing,
+            chapter_summary=chapter_summary,
             rolling_summary=ctx.rolling,
             known_roster=ctx.known_roster,
             resource_ledger=ctx.resource_ledger,

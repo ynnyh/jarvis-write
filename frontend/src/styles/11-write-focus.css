@@ -617,3 +617,26 @@
 
 /* 制片向页签分期 reveal:锁定态 */
 .pj-sub-tab.locked { opacity: 0.55; cursor: not-allowed; }
+
+/* ============ 章节订单(docs/20 订单制):作战图内的写前确认单 ============ */
+.order-card { margin-top: var(--sp-2); }
+.order-card .dossier-block-title { display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; }
+.order-row { display: flex; align-items: center; gap: var(--sp-1); margin: 3px 0; flex-wrap: wrap; }
+.order-in { min-width: 0; }
+.order-in.name { width: 7em; }
+.order-in.grow { flex: 1; min-width: 8em; }
+.order-in.full { width: 100%; box-sizing: border-box; }
+.order-check { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; color: var(--text-2); white-space: nowrap; }
+.order-sec { border-top: 1px dashed var(--line-1, rgba(128,128,128,.25)); padding: var(--sp-1) 0 0; margin-top: var(--sp-1); }
+.order-sec-title { font-weight: 600; font-size: 12.5px; color: var(--text-2); margin-bottom: 2px; }
+.order-actions { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.order-summary .dossier-line { display: flex; gap: 6px; font-size: 13px; }
+.recon-order { border-top: 1px dashed var(--line-1, rgba(128,128,128,.25)); margin-top: var(--sp-1); padding-top: var(--sp-1); }
+
+/* 人物在场带(docs/20 §7.2) */
+.plotmap-fs-cell.cast.on { background: var(--ok, #3a9); }
+.plotmap-fs-cell.debut { background: #e8b93c !important; border-radius: 50%; }
+.plotmap-fs-cell.latest { background: var(--text-1, #222) !important; }
+.plotmap-fs-label.retired { opacity: .5; text-decoration: line-through; }
+.plotmap-fs-row.missing .plotmap-fs-label { color: #b8860b; font-weight: 600; }
+.plotmap-fs-row.missing .plotmap-fs-cell.on { background: #e8b93c; }

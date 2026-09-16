@@ -48,6 +48,7 @@ async def cascade_regenerate(
     updated: list[int] = []
     stale: list[int] = []
     warnings: list[str] = []
+    skipped_locked: list[int] = []
 
     for n in sorted(chapter_numbers):
         outline = get_outline(db, project.id, n)
@@ -56,6 +57,11 @@ async def cascade_regenerate(
             continue
         if n <= source_chapter:
             warnings.append(f"第 {n} 章不在下游,跳过")
+            continue
+        if getattr(outline, "locked", False):
+            # 作者锁定(docs/20 铁律 2):级联不触碰;解锁后重跑影响分析即可续上
+            warnings.append(f"第 {n} 章已锁定,级联跳过(解锁后可重跑)")
+            skipped_locked.append(n)
             continue
 
         # 相邻章节(重生成过的用新版)
@@ -135,4 +141,4 @@ async def cascade_regenerate(
     logger.info(
         "级联重生成完成: 源第%d章, 更新%s, 失配%s", source_chapter, updated, stale
     )
-    return {"updated": updated, "stale_chapters": stale, "warnings": warnings}
+    return {"updated": updated, "stale_chapters": stale, "warnings": warnings, "skipped_locked": skipped_locked}

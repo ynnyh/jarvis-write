@@ -15,6 +15,8 @@ export const qk = {
   // 核心梗卡 + 本章作战图(docs/19):梗是纲,存档/生成/对账都围绕它
   premise: (pid: number) => ["premise", pid] as const,
   dossier: (pid: number, ch: number) => ["dossier", pid, ch] as const,
+  // 章节订单(docs/20 订单制):写前确认单
+  chapterOrder: (pid: number, ch: number) => ["chapterOrder", pid, ch] as const,
   cards: (pid: number) => ["cards", pid] as const,
   // 故事圣经人物(正文实体高亮/hover 卡复用;随一致性同步刷新)
   characters: (pid: number) => ["characters", pid] as const,

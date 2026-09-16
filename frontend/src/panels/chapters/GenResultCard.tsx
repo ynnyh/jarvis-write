@@ -218,6 +218,12 @@ export default function GenResultCard({ pid, result, durationSec, onChanged, onR
         )}
       </div>
       {result.word_count} 字
+      {result.order_version != null && (
+        <span className="badge ok"
+          title="本章按你确认的订单生成(人物/节拍/钩子以订单为准);对账区可验订单偏差">
+          按订单 v{result.order_version} 生成
+        </span>
+      )}
       {durationSec != null && durationSec >= 60 && (
         <span className="badge"
           title="本章从发起到落地的实际用时(含草稿/审校/自愈等全部环节)">用时 {Math.round(durationSec / 60)} 分钟</span>

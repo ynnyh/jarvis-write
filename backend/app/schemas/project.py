@@ -122,6 +122,8 @@ class OutlineOut(BaseModel):
     scene_location: str
     beats: list[Any] = []
     current_version: int
+    # 作者锁定(docs/20):级联/批量重铺短路;存量行为不变(默认 False)
+    locked: bool = False
 
     model_config = {"from_attributes": True}
 

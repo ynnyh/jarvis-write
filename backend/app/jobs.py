@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import threading
 import uuid
 from collections.abc import Awaitable, Callable, Coroutine
@@ -35,12 +36,17 @@ def _db_session():
     return SessionLocal()
 
 
-def _persist_create(job_id: str, kind: str, owner_id: Any) -> None:
+def _persist_create(job_id: str, kind: str, owner_id: Any, parent_job_id: str | None = None) -> None:
     """状态转换:创建 → 写 DB。"""
     try:
         from app.db.models import Job
         session = _db_session()
-        session.add(Job(id=job_id, kind=kind, status="running", owner_id=owner_id, stage="排队中"))
+        project_id, chapter_number = parse_job_kind(kind)
+        session.add(Job(
+            id=job_id, kind=kind, status="running", owner_id=owner_id,
+            stage="排队中", project_id=project_id, chapter_number=chapter_number,
+            parent_job_id=parent_job_id,
+        ))
         session.commit()
         session.close()
     except Exception:  # noqa: BLE001 — 持久化失败不阻塞任务
@@ -83,7 +89,30 @@ def _persist_fail(job_id: str, error: str) -> None:
 # 公开 API(与旧版签名完全兼容)
 # ---------------------------------------------------------------------------
 
-def create_job(kind: str) -> str:
+# kind 里带章号的任务族:chapter-{pid}-{n} / re-extract / polish / review /
+# proofread / impact。其余 kind 只解析尾部项目号(如 architecture-{pid}、
+# blueprint-{pid});解析不出就全 NULL——前端回退平铺,行为同旧版。
+_KIND_CHAPTER_RE = re.compile(
+    r"^(?:chapter|re-extract|polish|review|proofread|impact)-(\d+)-(\d+)$"
+)
+_KIND_PROJECT_RE = re.compile(r"^.{1,80}-(\d+)$")
+
+
+def parse_job_kind(kind: str) -> tuple[int | None, int | None]:
+    """kind → (project_id, chapter_number),解析不出为 None(不做猜测)。"""
+    m = _KIND_CHAPTER_RE.match(kind)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    m = re.match(r"^chapter-(\d+)-queue$", kind)
+    if m:
+        return int(m.group(1)), None
+    m = _KIND_PROJECT_RE.match(kind)
+    if m:
+        return int(m.group(1)), None
+    return None, None
+
+
+def create_job(kind: str, parent_job_id: str | None = None) -> str:
     """建任务。owner_id 记当前登录用户,取不到(脚本/迁移上下文)则为 None。"""
     from app.auth import current_user_id
 
@@ -93,9 +122,12 @@ def create_job(kind: str) -> str:
         if len(_JOBS) > _MAX_JOBS:
             for k in [k for k, v in _JOBS.items() if v["status"] != "running"][: len(_JOBS) - _MAX_JOBS]:
                 _JOBS.pop(k, None)
+        project_id, chapter_number = parse_job_kind(kind)
         _JOBS[job_id] = {
             "kind": kind, "status": "running", "owner_id": owner,
             "stage": "排队中", "result": None, "error": None,
+            "project_id": project_id, "chapter_number": chapter_number,
+            "parent_job_id": parent_job_id,
         }
     # 实时正文归属:在这里(而非各 runner 里)设 ContextVar——asyncio.create_task
     # 复制创建时的上下文,所以随后 fire_and_track/spawn_job 起的后台任务及其嵌套
@@ -103,7 +135,7 @@ def create_job(kind: str) -> str:
     live.current_job_id.set(job_id)
     # 日志上下文:任务期间的所有日志行带 job=<id>,排查"哪次生成在刷屏"直接按号过滤
     set_job_id(job_id)
-    _persist_create(job_id, kind, owner)
+    _persist_create(job_id, kind, owner, parent_job_id)
     return job_id
 
 

@@ -44,6 +44,9 @@ async def my_jobs(include_done: bool = Query(False, alias="all")):
                 "status": job["status"],
                 "stage": job["stage"],
                 "error": job.get("error"),
+                # docs/20 任务中心分组字段;旧任务 NULL → 前端平铺回退
+                "project_id": job.get("project_id"),
+                "chapter_number": job.get("chapter_number"),
             }
             for jid, job in items
         ]

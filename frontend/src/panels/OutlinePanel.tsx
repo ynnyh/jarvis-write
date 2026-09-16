@@ -222,11 +222,21 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
       );
       if (r) {
         setFlash(`级联完成:已更新第 ${r.updated.join("、")} 章大纲` +
-          (r.stale_chapters.length ? `;第 ${r.stale_chapters.join("、")} 章正文标记失配` : ""));
+          (r.stale_chapters.length ? `;第 ${r.stale_chapters.join("、")} 章正文标记失配` : "") +
+          (r.skipped_locked?.length ? `;第 ${r.skipped_locked.join("、")} 章已锁定,级联跳过` : ""));
         setImpact(null); setEditResult(null); setEditingNum(null);
         await onChanged();
       }
     } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
+  }
+
+  // 锁定/解锁本章大纲(docs/20 铁律 2):锁定章级联勾选禁用、执行短路、重铺保留
+  async function toggleLock(n: number, locked: boolean) {
+    try {
+      await api.lockOutline(pid, n, locked);
+      await onChanged();
+      setFlash(locked ? `第 ${n} 章已锁定:级联与批量重铺不再碰它` : `第 ${n} 章已解锁`);
+    } catch (e) { setErr(errMsg(e)); }
   }
 
   async function runDirectiveParse() {
@@ -484,6 +494,7 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
             setPicked(s);
           }}
           onRunCascade={() => runCascade(o.chapter_number)}
+          onToggleLock={(n, locked) => { void toggleLock(n, locked); }}
           onDirectiveChip={(directive) => {
             setShowDirective(true);
             setDirectiveText(directive);

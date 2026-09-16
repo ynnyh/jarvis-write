@@ -20,7 +20,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.api.chapters._common import _flavor_dict, _gate_payload
-from app.db.models import Project
+from app.db.models import ChapterOrder, Project
 from app.db.session import SessionLocal
 from app.engines.pipeline.chapter import generate_chapter
 from app.engines.pipeline.handoff import handoff_payload
@@ -55,8 +55,19 @@ async def run_chapter_job(
         session.commit()
         # 契约必须在 commit 之后取(它读的是刚落库的章末状态)
         handoff = handoff_payload(session, chapter)
+        # 确认订单版本(docs/20):结果卡据此刻「按订单 vN 生成」标签;无订单不落键
+        order_row = (
+            session.query(ChapterOrder)
+            .filter(
+                ChapterOrder.project_id == project_id,
+                ChapterOrder.chapter_number == chapter_number,
+                ChapterOrder.status == "confirmed",
+            )
+            .first()
+        )
         payload: dict[str, Any] = {
             "chapter_number": chapter.chapter_number,
+            "order_version": order_row.version if order_row is not None else None,
             "word_count": chapter.word_count,
             "status": chapter.status,
             "final_content": chapter.final_content,
