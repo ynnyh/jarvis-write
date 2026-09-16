@@ -434,12 +434,13 @@ def _add_provider(client: TestClient, headers: dict, **fields) -> dict:
 
 
 def test_provider_status_covers_all_protocols(client):
-    """status.providers 覆盖三大类 + 两别名共 5 键(前端据此渲染协议清单)。"""
+    """status.providers 覆盖注册表全键:三大类 + Go 卡/Responses + 两别名(前端据此渲染协议清单)。"""
     headers = _auth(_register(client, "proto_all")["token"])
     r = client.get("/api/settings/providers/status", headers=headers)
     assert r.status_code == 200, r.text
     assert set(r.json()["providers"]) == {
-        "openai-compatible", "anthropic", "gemini", "deepseek", "openai",
+        "openai-compatible", "anthropic", "gemini",
+        "opencode-go", "openai-responses", "deepseek", "openai",
     }
 
 

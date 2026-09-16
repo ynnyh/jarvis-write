@@ -4,16 +4,24 @@ jarvis-write 不内置任何模型——生成文字全部走你自己的 key,�
 
 设置入口:登录后进 **设置 → 模型设置**,可建多套命名配置一键切换;每套可指定用途档位(写手/审校),key 按账号隔离、加密存储。
 
-## 支持的协议卡(三选一 + 存量别名)
+## 支持的协议卡(四选一 + 存量别名)
 
 | 协议卡 | 适用场景 | base_url 预填 | 模型名示例 |
 |---|---|---|---|
 | **openai-compatible**(主力) | OpenAI / DeepSeek / Kimi / 通义 / 各类中转站 / 本地 Ollama 等一切 OpenAI Chat Completions 兼容服务 | `https://api.openai.com/v1` | `gpt-4o` / `deepseek-chat` / 中转站给的模型名 |
-| **anthropic** | Anthropic Claude 原生 Messages 协议 | `https://api.anthropic.com` | `claude-sonnet-4-20250514` |
+| **opencode-go** | [OpenCode Go](https://opencode.ai/zh/go)(opencode.ai 的 $10/月订阅,一个 Key 通吃 GLM / Kimi / DeepSeek / MiMo / Grok 等),填 Key 选模型即用 | `https://opencode.ai/zen/go/v1` | `glm-5.3-flash` / `kimi-k3` / `grok-4.6`(表单内置清单可选) |
+| **anthropic** | Anthropic Claude 原生 Messages 协议;也包括 OpenCode Go 的 Qwen / MiniMax 系(base_url 填 `https://opencode.ai/zen/go`,**不带 /v1**) | `https://api.anthropic.com` | `claude-sonnet-4-20250514` |
 | **gemini** | Google Gemini 原生协议 | `https://generativelanguage.googleapis.com/v1beta` | `gemini-2.0-flash` |
-| deepseek / openai | 上面两张卡的**存量别名**(行为完全等同),保留给历史配置,新配置建议直接用 openai-compatible | — | — |
+| deepseek / openai | 上面卡片的**存量别名**(行为完全等同),保留给历史配置,新配置建议直接用 openai-compatible | — | — |
 
-**一句话结论:除非你明确要用 Claude / Gemini 原生协议,选 openai-compatible 就对了。**
+**一句话结论:除非你明确要用 Claude / Gemini 原生协议,选 openai-compatible 就对了;订了 OpenCode Go 就选 opencode-go 卡。**
+
+### OpenCode Go 的注意事项
+
+- **按模型自动路由协议**:GLM / Kimi / DeepSeek / MiMo / LongCat / Hy 走 Chat Completions,Grok / GPT-luna 走 Responses 协议(`/v1/responses`),同一张卡内自动切换,不用关心差异
+- **Qwen / MiniMax 例外**:Go 网关给这两个族的是 Anthropic Messages 协议,请另建一套 anthropic 卡配置(Base URL 填 `https://opencode.ai/zen/go`,不带 `/v1`,适配器会自己拼 `/v1/messages`)
+- **Key 获取**:到 [opencode.ai/auth](https://opencode.ai/auth) 订阅 Go 后复制 API Key;每套配置可设并发/RPM 上限,防打爆订阅配额
+- 该渠道套 Cloudflare CDN,设置页会自动给出直连波动提示;长文生成偶发断连时系统会自动退避重试
 
 ## 已验证清单
 

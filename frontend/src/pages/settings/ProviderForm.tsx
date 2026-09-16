@@ -128,7 +128,16 @@ export function ProviderForm({ editing, onSaved, onCancel }: {
             value={model}
             onChange={(e) => setModel(e.target.value)}
             placeholder={cur?.model}
+            list={cur?.models?.length ? `model-options-${cur.key}` : undefined}
           />
+          {cur?.models?.length ? (
+            <datalist id={`model-options-${cur.key}`}>
+              {cur.models.map((m) => <option key={m} value={m} />)}
+            </datalist>
+          ) : null}
+          {cur?.models?.length ? (
+            <div className="fld-hint">点输入框从清单里选,也可手填任意模型名(以渠道文档为准)。</div>
+          ) : null}
         </div>
       </div>
 

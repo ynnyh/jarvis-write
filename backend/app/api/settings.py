@@ -46,6 +46,10 @@ _PRESETS = {
         "base_url": "https://generativelanguage.googleapis.com/v1beta",
         "model": "gemini-2.0-flash",
     },
+    "opencode-go": {
+        "base_url": "https://opencode.ai/zen/go/v1",
+        "model": "glm-5.3-flash",
+    },
     "deepseek": {"base_url": "https://api.deepseek.com", "model": "deepseek-chat"},
     "openai": {"base_url": "https://api.openai.com/v1", "model": "gpt-4o"},
 }

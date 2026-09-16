@@ -28,18 +28,24 @@ from .deepseek import DeepSeekAdapter
 from .openai import OpenAIAdapter
 from .gemini import GeminiAdapter
 from .anthropic import AnthropicAdapter
+from .openai_responses import OpenAIResponsesAdapter
+from .opencode_go import OpenCodeGoAdapter
 
 logger = logging.getLogger("jarvis-write.llm")
 
-# interface_format -> 适配器类。三个 wire 协议大类 + 两个带预填的别名:
+# interface_format -> 适配器类。wire 协议 + 渠道卡两级:
 # - openai-compatible:主力通用卡(OpenAI/DeepSeek/Kimi/通义/中转站/本地 Ollama…);
 # - anthropic / gemini:各自的原生协议;
+# - openai-responses:OpenAI 新一代 /responses 协议(暂无前端卡,Go 卡内部改道复用);
+# - opencode-go:OpenCode Go 渠道卡(兼容族 + Responses 族自动路由,见 opencode_go.py);
 # - deepseek / openai:openai-compatible 的别名(存量配置沿用,行为完全等同),
 #   保留是为了历史数据零迁移与前端快捷预设,不应再引导用户新建。
 _REGISTRY: dict[str, type[LLMAdapter]] = {
     "openai-compatible": OpenAICompatibleAdapter,
     "anthropic": AnthropicAdapter,
     "gemini": GeminiAdapter,
+    "openai-responses": OpenAIResponsesAdapter,
+    "opencode-go": OpenCodeGoAdapter,
     "deepseek": DeepSeekAdapter,
     "openai": OpenAIAdapter,
 }
