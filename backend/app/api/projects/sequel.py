@@ -40,11 +40,7 @@ from ._common import _get_project_or_404
 
 router = APIRouter()
 
-# 前作采样规模:首 2 章 + 末 3 章,每章截断——够分析出靠谱的提要与文风,
-# 又不至于把整本书塞进 prompt
-_HEAD_CHAPTERS = 2
-_TAIL_CHAPTERS = 3
-_CHAPTER_CHARS = 3000
+
 # 方向卡数量(作者点名:八个方向可选)
 _DIRECTION_COUNT = 8
 # style_memo 少于这个字数视为「没有成体系的文风画像」,需要分析补写
@@ -117,7 +113,7 @@ async def sequel_directions_async(
             if avoid:
                 prompt += ("\n\n【已出过的方向(这次一个都不要重复,也不要换皮重出)】\n"
                            + "\n".join(f"- {a}" for a in avoid))
-            prompt += "\n\n【第一部正文采样(开头两章 + 结尾三章)】\n" + samples
+            prompt += "\n\n【第一部正文采样(全书均匀分层节选)】\n" + samples
             raw = await get_adapter_for(Task.BLUEPRINT).ask(prompt)
             data = parse_llm_json(raw)
             cards = [
@@ -260,8 +256,19 @@ def _last_rolling_summary(db: Session, project_id: int) -> str:
     return (row.rolling_summary if row else "").strip()
 
 
+# 前作采样规模:全书均匀分层取 6 章,每章截断——**常数开销,与书的体量无关**
+# (300 万字和 3000 万字的分析成本一样)。分层比只看头尾更能代表全书的文风:
+# 千章长卷的笔法会漂移,首/1/3/中/2/3/尾各采一段才立得住。
+_SLICE_COUNT = 6
+_SLICE_CHARS = 2500
+
+
 def _sample_source(db: Session, project_id: int) -> tuple[str | None, list[int]]:
-    """前作正文采样(首 2 + 末 3 章)与各章字数表;没有正文返回 (None, [])。"""
+    """前作正文采样(全书均匀分层)与各章字数表;没有正文返回 (None, [])。
+
+    总输入量恒定在 _SLICE_COUNT × _SLICE_CHARS ≈ 1.5 万字,token 花销可预算;
+    章数不足以铺满分层时退化为「有几分层采几分」。
+    """
     chapters = (
         db.query(Chapter)
         .filter(Chapter.project_id == project_id, Chapter.final_content != "")
@@ -270,9 +277,15 @@ def _sample_source(db: Session, project_id: int) -> tuple[str | None, list[int]]
     )
     if not chapters:
         return None, []
-    picked = chapters[:_HEAD_CHAPTERS] + chapters[-_TAIL_CHAPTERS:]
+    n = len(chapters)
+    if n <= _SLICE_COUNT:
+        picked = chapters
+    else:
+        # 均匀分层:首章必采,末章必采,中间等距铺开(浮点定位再取整,避免都挤在开头)
+        idxs = sorted({round(i * (n - 1) / (_SLICE_COUNT - 1)) for i in range(_SLICE_COUNT)})
+        picked = [chapters[i] for i in idxs]
     samples = "\n\n".join(
-        f"【第{c.chapter_number}章】{c.final_content[:_CHAPTER_CHARS]}"
+        f"【第{c.chapter_number}章(节选)】{c.final_content[:_SLICE_CHARS]}"
         for c in picked
     )
     sizes = [len(c.final_content) for c in chapters]
@@ -314,7 +327,7 @@ def _spawn_analyze_job(new_pid: int, src_pid: int, *, need_digest: bool, need_st
                 "",
                 f"【续集每章目标字数】约 {median_words} 字(与第一部一致,提要里的篇幅观察按此口径)",
                 "",
-                "【第一部正文采样(开头两章 + 结尾三章)】",
+                "【第一部正文采样(全书均匀分层节选)】",
                 samples,
             ])
             raw = await get_adapter_for(Task.BLUEPRINT).ask(prompt)

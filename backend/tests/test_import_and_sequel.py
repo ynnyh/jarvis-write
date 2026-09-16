@@ -220,3 +220,41 @@ class TestSequel:
         assert "旧方向甲" in captured[0] and "旧方向乙" in captured[0]
         # 采样与字数口径进了 prompt
         assert "正文采样" in captured[0]
+
+
+class TestSamplingAndLimits:
+    def test_sample_source_stratified_and_bounded(self, client: TestClient):
+        """采样全书均匀分层(首/中/尾都覆盖),总输入量恒定,与书体量无关。"""
+        from unittest.mock import MagicMock
+
+        from app.api.projects.sequel import _SLICE_CHARS, _SLICE_COUNT, _sample_source
+
+        db = MagicMock()
+        # 1000 章的书:采样章数恒为 ≤ 6,且首尾都在
+        chapters = [
+            MagicMock(chapter_number=i + 1, final_content="字" * 5000) for i in range(1000)
+        ]
+        db.query.return_value.filter.return_value.order_by.return_value.all.return_value = chapters
+        samples, sizes = _sample_source(db, project_id=1)
+        assert samples is not None
+        assert samples.count("【第") <= _SLICE_COUNT
+        assert "【第1章(节选)】" in samples and "【第1000章(节选)】" in samples
+        # 恒定开销:总量封顶(6 × 2500 + 标签开销)
+        assert len(samples) < _SLICE_COUNT * _SLICE_CHARS + 500
+        assert sizes == [5000] * 1000
+
+        # 少于分层数:有几分层采几分
+        db.query.return_value.filter.return_value.order_by.return_value.all.return_value = chapters[:3]
+        samples3, _ = _sample_source(db, project_id=1)
+        assert samples3.count("【第") == 3
+
+    def test_docx_xml_size_guard(self):
+        """DOCX 解压后正文 XML 超限要能在读取前拦住(防 zip 解压爆内存)。"""
+        from app.engines.book_import import _MAX_DOCX_XML_BYTES
+
+        assert _MAX_DOCX_XML_BYTES == 256 * 1024 * 1024
+        from app.engines.book_import import MAX_IMPORT_BYTES
+
+        # 120MB ≈ 4000 万字(UTF-8 中文 3 字节/字),三千万字体量进得来
+        assert MAX_IMPORT_BYTES == 120 * 1024 * 1024
+        assert MAX_IMPORT_BYTES // 3 >= 30_000_000

@@ -28,8 +28,11 @@ from app.db.models import Chapter, Outline, Project
 
 logger = logging.getLogger("jarvis-write.book_import")
 
-# 单文件上限:网文长篇一年 300 万字约 6-10MB 纯文本,20MB 绰绰有余且防误传
-MAX_IMPORT_BYTES = 20 * 1024 * 1024
+# 单文件上限:UTF-8 中文 3 字节/字,120MB ≈ 4000 万字——网文超长篇(千万字体量)
+# 也能整本进来;再大就该分卷了。DOCX 另有解压后 XML 大小护栏(见 project_io 导入端点)。
+MAX_IMPORT_BYTES = 120 * 1024 * 1024
+# DOCX 正文 XML 解压后上限:docx 是 zip,100MB 的包能解出上 GB 的 XML,读取前拦住
+_MAX_DOCX_XML_BYTES = 256 * 1024 * 1024
 # 无章标题时的兜底切章目标长度(字)
 _FALLBACK_CHAPTER_CHARS = 4000
 # 章标题行最大长度:超过它基本是正文里引用的标题而非标题本身
@@ -214,7 +217,10 @@ def import_book_to_project(
             current_version=1,
         )
         db.add(outline)
-        db.flush()
+        if i % 500 == 0:
+            # 超长书(几千章)分批 flush:单事务一次 flush 上万行会让 SQLite
+            # 长时间持锁、内存峰值也高;分批后单次提交语义不变
+            db.flush()
         db.add(
             Chapter(
                 project_id=project.id,

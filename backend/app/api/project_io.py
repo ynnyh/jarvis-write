@@ -20,6 +20,7 @@ from app.db.models import Chapter, Project, User
 from app.db.session import get_db
 from app.engines.book_import import (
     MAX_IMPORT_BYTES,
+    _MAX_DOCX_XML_BYTES,
     decode_text,
     extract_docx_text,
     import_book_to_project,
@@ -125,10 +126,30 @@ async def import_book_endpoint(
     if len(raw) == 0:
         raise HTTPException(status_code=400, detail="文件是空的")
     if len(raw) > MAX_IMPORT_BYTES:
-        raise HTTPException(status_code=400, detail="文件超过 20MB 上限,请拆分后分卷导入")
+        mb = MAX_IMPORT_BYTES // (1024 * 1024)
+        raise HTTPException(
+            status_code=400,
+            detail=f"文件超过 {mb}MB 上限(约 {mb * 1024 * 1024 // 3 // 10000} 万字),请拆分后分卷导入",
+        )
 
     name = (file.filename or "book.txt").strip()
     if name.lower().endswith(".docx"):
+        try:
+            import zipfile as _zipfile
+            import io as _io
+
+            with _zipfile.ZipFile(_io.BytesIO(raw)) as _zf:
+                _xml_size = _zf.getinfo("word/document.xml").file_size
+        except (ValueError, KeyError, _zipfile.BadZipFile):
+            _xml_size = 0  # 不是合法 docx:放行,让 extract_docx_text 给出明确报错
+        if _xml_size > _MAX_DOCX_XML_BYTES:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"这份 .docx 解压后的正文过大({_xml_size // (1024 * 1024)}MB),"
+                    "超出处理能力;请另存为 .txt 后导入"
+                ),
+            )
         try:
             text = extract_docx_text(raw)
         except ValueError as e:

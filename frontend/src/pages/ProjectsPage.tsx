@@ -204,8 +204,9 @@ export default function ProjectsPage() {
           <div className="dlg-content" onClick={(e) => e.stopPropagation()}>
             <h2 className="dlg-title">导入旧书</h2>
             <p className="dlg-body">
-              支持 .txt / .docx(≤20MB)。自动识别分卷与章节标题(第X章/序章/番外/后记…),
-              没有章标题就按段落长度切章;导入的正文按「已定稿」入库,可直接阅读、检索或跑已有书翻新。
+              支持 .txt / .docx(≤120MB,约四千万字——千万字体量的超长篇也能整本进)。
+              自动识别分卷与章节标题(第X章/序章/番外/后记…),没有章标题就按段落长度切章;
+              导入的正文按「已定稿」入库,可直接阅读、检索、跑已有书翻新,也能一键开续集。
             </p>
             <div className="actions mt-2" style={{ flexDirection: "column", alignItems: "stretch" }}>
               <input
