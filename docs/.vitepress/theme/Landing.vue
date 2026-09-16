@@ -181,6 +181,9 @@ const ideas = [
       <div class="lw-shell">
         <p class="kicker accent" data-reveal>为什么是它</p>
         <h2 class="band-title" data-reveal>长篇创作,三件事不能让。</h2>
+        <p class="band-sub" data-reveal>
+          初心:写出《剑来》《青山》那样的长篇网文——先「能看」,再「爱看」,终「好看」。撑起这三层的,是下面三件不能让的事。
+        </p>
         <div class="ideas-grid">
           <article v-for="(it, i) in ideas" :key="it.no" class="idea" data-reveal :style="{ transitionDelay: `${i * 70}ms` }">
             <span class="idea-no">{{ it.no }}</span>
