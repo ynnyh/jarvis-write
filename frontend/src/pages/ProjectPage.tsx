@@ -212,8 +212,8 @@ export default function ProjectPage() {
   // React Query 数据获取(替代手动 useState + reload)
   const { data: project, error: projectErr } = useProject(pid);
   const { data: arch } = useArchitecture(pid);
-  const { data: outlines = [] } = useOutlines(pid);
-  const { data: chapters = [] } = useChapters(pid);
+  const { data: outlines = [], isLoading: outlinesLoading } = useOutlines(pid);
+  const { data: chapters = [], isLoading: chaptersLoading } = useChapters(pid);
   const reload = useInvalidateProject(pid);
 
   // 公开分享弹层(书架卡「分享」与标题行「分享」共用)
@@ -327,13 +327,19 @@ export default function ProjectPage() {
       return;
     }
     if (zone !== null) return;
+    // 列表没加载完先不动:否则导入书(chapters 慢于 outlines)会被误判成空书推进向导
+    if (outlinesLoading || chaptersLoading) return;
+    // 已有成稿的书(导入的成书/写过正文的书):直接进写作区,不回炉起步向导——
+    // 概念/架构那些步骤对已经写完的书没有意义(导入反馈 2026-09-16)
+    const hasContent = chapters.some((c) => c.word_count > 0);
     let target: string;
-    if (!project.topic) target = "setup?step=inspire";
+    if (hasContent && outlines.length) target = "write";
+    else if (!project.topic) target = "setup?step=inspire";
     else if (!arch) target = "setup?step=arch";
     else if (!outlines.length) target = "setup?step=outline";
     else target = "write";
     nav(`/project/${pid}/${target}`, { replace: true });
-  }, [project, arch, outlines, zone, legacyTarget, nav, pid]);
+  }, [project, arch, outlines, chapters, outlinesLoading, chaptersLoading, zone, legacyTarget, nav, pid]);
 
   if (legacyTarget) return <Navigate to={legacyTarget} replace />;
   if (!project) return <div className="muted">{projectErr ? String(projectErr) : "加载中…"}</div>;

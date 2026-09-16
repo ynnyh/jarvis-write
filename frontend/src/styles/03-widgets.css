@@ -568,3 +568,14 @@
 /* 任务中心:连写队列进度条(docs/20 任务分组) */
 .tc-progress { display: inline-block; width: 72px; height: 4px; border-radius: 2px; background: var(--line-1, rgba(128,128,128,.25)); overflow: hidden; flex: none; }
 .tc-progress > span { display: block; height: 100%; background: var(--accent, var(--ok, #3a9)); border-radius: 2px; transition: width .4s; }
+
+/* 开续集:AI 出的 8 张方向卡,选中金圈(docs/20 同批) */
+.sequel-dirs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); }
+.sequel-dir { display: flex; flex-direction: column; gap: 4px; text-align: left; padding: var(--sp-2);
+  border: 1px solid var(--line-1, rgba(128,128,128,.3)); border-radius: 8px; background: var(--surface-1, transparent);
+  cursor: pointer; }
+.sequel-dir:hover { border-color: var(--brand); }
+.sequel-dir.picked { border-color: var(--brand); box-shadow: 0 0 0 2px var(--brand-weak, rgba(80,160,120,.25)); }
+.sequel-dir b { font-size: 13.5px; }
+.sequel-dir span { font-size: 12.5px; color: var(--text-2); line-height: 1.5; }
+@media (max-width: 640px) { .sequel-dirs { grid-template-columns: 1fr; } }

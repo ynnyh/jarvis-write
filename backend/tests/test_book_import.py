@@ -70,7 +70,7 @@ def test_parse_volumes_and_chapters():
     chapters = parse_chapters(text)
     titles = [c["title"] for c in chapters]
     assert len(chapters) == 3
-    assert titles[0] == "第一卷 长夜 · 第一章 灰塔之下"
+    assert titles[0] == "第一卷 长夜 · 灰塔之下"  # 章号不进标题:UI 统一前置,否则「第1章 第一章 灰塔之下」
     assert titles[2] == "第二卷 长夜 破晓 · 第三章 选拔" or titles[2].startswith("第二卷")
     assert "雨水沿着灰塔的铜檐坠落" in chapters[0]["body"]
     assert "封泉台前人山人海" in chapters[2]["body"]
@@ -87,14 +87,14 @@ def test_parse_special_chapters():
 写完啦。"""
     chapters = parse_chapters(text)
     titles = [c["title"] for c in chapters]
-    assert titles == ["序章", "第一章 启程", "后记"]
+    assert titles == ["序章", "启程", "后记"]
 
 
 def test_parse_fallback_by_length():
     body = "\n\n".join("这是第%d段普通段落,没有任何章节标题标记。" % i + "字" * 60 for i in range(300))
     chapters = parse_chapters(body)
     assert len(chapters) >= 3
-    assert all(c["title"].startswith("第") and c["title"].endswith("章") for c in chapters)
+    assert all(c["title"] == "" for c in chapters)  # 兜底章标题留空,章号 UI 统一渲染
     # 兜底按 ~4000 字/章切;末章是余量,允许偏短
     assert all(len(c["body"]) >= 3000 for c in chapters[:-1])
     assert chapters[-1]["body"]
@@ -162,7 +162,7 @@ def test_import_book_to_project(db_session):
     assert chapters[0].final_content.startswith("他推开门。")
     assert chapters[0].word_count == len(chapters[0].final_content)
     outlines = db_session.query(Outline).filter(Outline.project_id == project.id).all()
-    assert [o.title for o in outlines] == ["第一章 起步", "第二章 深入"]
+    assert [o.title for o in outlines] == ["起步", "深入"]
     assert outlines[0].summary.startswith("他推开门")
 
 

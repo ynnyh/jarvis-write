@@ -1,12 +1,12 @@
 // 项目列表;新建走 /new 创作起步流(建书即建草稿,五步走到点火)
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, Project, ProjectTodo } from "../api";
+import { api, Project, ProjectTodo, SequelDirection } from "../api";
 import TitleSuggest from "../components/TitleSuggest";
 import { confirmDialog } from "../ui/ConfirmDialog";
 import EmptyState from "../ui/EmptyState";
 import { toast } from "../ui/Toaster";
-import { errMsg } from "../pollJob";
+import { pollJob, errMsg } from "../pollJob";
 
 // 项目状态英文值 → 中文徽标(未知值原样兜底)
 const PROJECT_STATUS_CN: Record<string, string> = { draft: "草稿", writing: "连载中" };
@@ -28,6 +28,18 @@ export default function ProjectsPage() {
   const [importTitle, setImportTitle] = useState("");
   const [importing, setImporting] = useState(false);
 
+  // 开续集(docs/20 同批):基于一部已有作品(系统写的或导入的)开第二部/第三部。
+  // 方向走「AI 出 8 张卡 → 选一张/整批重摇 → 可手填覆盖」的选卡模式(同灵感工坊)。
+  const [sequelFor, setSequelFor] = useState<Project | null>(null);
+  const [sequelTitle, setSequelTitle] = useState("");
+  const [sequelDir, setSequelDir] = useState("");
+  const [sequelBusy, setSequelBusy] = useState(false);
+  const [dirCards, setDirCards] = useState<SequelDirection[] | null>(null);
+  const [dirPicked, setDirPicked] = useState<number | null>(null);
+  const [dirBusy, setDirBusy] = useState(false);
+  const [dirStage, setDirStage] = useState("");
+  const seenDirTitlesRef = useRef<string[]>([]);
+
   // 重命名编辑态:editingId 为正在改名的项目
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editTitle, setEditTitle] = useState("");
@@ -35,6 +47,60 @@ export default function ProjectsPage() {
   useEffect(() => {
     api.listProjects().then(setProjects).catch((e) => setErr(errMsg(e)));
   }, []);
+
+  function openSequel(p: Project) {
+    setSequelFor(p);
+    setSequelTitle(`${p.title}·续集`);
+    setSequelDir("");
+    setDirCards(null);
+    setDirPicked(null);
+    seenDirTitlesRef.current = [];
+    void fetchDirections(p, []);
+  }
+
+  async function fetchDirections(p: Project, avoid: string[]) {
+    setDirBusy(true); setErr("");
+    try {
+      const { job_id } = await api.sequelDirectionsAsync(p.id, avoid);
+      const r = await pollJob<{ directions: SequelDirection[] }>(job_id, { onStage: setDirStage });
+      const cards = r?.directions ?? [];
+      setDirCards(cards);
+      setDirPicked(null);
+      seenDirTitlesRef.current = [...seenDirTitlesRef.current, ...cards.map((c) => c.title)];
+    } catch (e) {
+      setErr(errMsg(e));
+    } finally {
+      setDirBusy(false);
+    }
+  }
+
+  function pickDirection(i: number) {
+    if (!dirCards) return;
+    setDirPicked(i);
+    setSequelDir(dirCards[i].desc);
+  }
+
+  async function submitSequel() {
+    if (!sequelFor) return;
+    setSequelBusy(true); setErr("");
+    try {
+      const r = await api.createSequel(sequelFor.id, {
+        title: sequelTitle.trim(),
+        direction: sequelDir.trim(),
+      });
+      toast.ok(`续集《${sequelTitle.trim() || sequelFor.title + "·续集"}》已创建`,
+        r.analyze_job_id
+          ? "前作分析(前情提要+文风画像)生成中,完成后自动注入;先去大纲铺第二部的蓝图"
+          : "前情提要与文风画像已就位,先去大纲铺第二部的蓝图");
+      setSequelFor(null); setSequelTitle(""); setSequelDir("");
+      setDirCards(null); setDirPicked(null);
+      nav(`/project/${r.project_id}`);
+    } catch (e) {
+      toast.err("开续集失败", errMsg(e));
+    } finally {
+      setSequelBusy(false);
+    }
+  }
 
   async function submitImport() {
     if (!importFile) { setErr("先选一个 .txt / .docx 文件"); return; }
@@ -166,6 +232,70 @@ export default function ProjectsPage() {
         </div>
       )}
 
+      {sequelFor && (
+        <div className="dlg-overlay" onClick={() => !sequelBusy && setSequelFor(null)}>
+          <div className="dlg-content" onClick={(e) => e.stopPropagation()}>
+            <h2 className="dlg-title">开续集 · 承《{sequelFor.title}》</h2>
+            <p className="dlg-body">
+              新书自动继承这部书的文风倾向、架构、核心梗与人物档案;前作分析会把
+              <b>前情提要</b>(上一部讲了什么)和<b>文风技法画像</b>(怎么写的)注入续集,
+              每章字数按前作实际篇幅对齐。先选一个第二部的方向:
+            </p>
+
+            {/* 方向卡:AI 依据前作出 8 张,选一张或整批重摇;也可手填覆盖 */}
+            {dirBusy ? (
+              <div className="muted mt-2">
+                <span className="spin spin-sm" /> {dirStage || "AI 正在读前作、出方向"}…
+              </div>
+            ) : dirCards && dirCards.length > 0 ? (
+              <div className="sequel-dirs mt-2">
+                {dirCards.map((c, i) => (
+                  <button key={i} type="button"
+                    className={"sequel-dir" + (dirPicked === i ? " picked" : "")}
+                    onClick={() => pickDirection(i)}>
+                    <b>{c.title}</b>
+                    <span>{c.desc}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="muted mt-2">{err || "没出方向卡,可直接手填方向。"}</div>
+            )}
+            <div className="actions mt-1">
+              <button className="btn-sm" disabled={dirBusy}
+                title="重新出一批(已出过的方向不会重复)"
+                onClick={() => { if (sequelFor) void fetchDirections(sequelFor, seenDirTitlesRef.current); }}>
+                {dirBusy ? "生成中…" : "换一批方向"}
+              </button>
+            </div>
+
+            <div className="actions mt-2" style={{ flexDirection: "column", alignItems: "stretch" }}>
+              <input
+                type="text"
+                placeholder="续集书名"
+                value={sequelTitle}
+                maxLength={100}
+                onChange={(e) => setSequelTitle(e.target.value)}
+              />
+              <input
+                type="text"
+                placeholder="方向(点上方卡片带入,或自己写)"
+                value={sequelDir}
+                maxLength={400}
+                onChange={(e) => { setDirPicked(null); setSequelDir(e.target.value); }}
+              />
+              {err && dirCards && dirCards.length > 0 && <span className="badge err">{err}</span>}
+            </div>
+            <div className="dlg-actions">
+              <button disabled={sequelBusy} onClick={() => setSequelFor(null)}>取消</button>
+              <button className="primary" disabled={sequelBusy || !sequelTitle.trim()} onClick={submitSequel}>
+                {sequelBusy ? "创建中…" : "创建续集"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="proj-grid">
         {projects.map((p) => (
           <div key={p.id} className="proj-card">
@@ -234,6 +364,13 @@ export default function ProjectsPage() {
               {p.setup_state
                 ? <Link to={`/new/${p.id}/${p.setup_state}`} className="proj-go">继续创建 →</Link>
                 : <Link to={`/project/${p.id}`} className="proj-go">进入 →</Link>}
+              {(p.written_chapters ?? 0) > 0 && (
+                <button
+                  className="btn-sm"
+                  title="基于这部书开续集:继承文风/架构/人物,前情提要自动带进新书"
+                  onClick={() => openSequel(p)}
+                >开续集</button>
+              )}
               <button
                 className="btn-sm"
                 disabled={p.finished || busy}

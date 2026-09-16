@@ -628,6 +628,8 @@ export interface ProjectTodo {
   suggestion: string | null; path: string | null;
 }
 export interface ProjectDashboard { projects: ProjectTodo[]; }
+/** 续集方向卡(docs/20 同批):AI 依据前作出 8 个方向,选卡或整批重摇 */
+export interface SequelDirection { title: string; desc: string; }
 export interface FactSpan {
   content: string; fact_type: string; importance: string;
   valid_from: number; valid_until: number | null;
@@ -1267,6 +1269,13 @@ export const api = {
   listProjects: () => req<Project[]>("GET", "/api/projects"),
   createProject: (p: Partial<Project>) => req<Project>("POST", "/api/projects", p),
   // 整本旧书导入(TXT/DOCX):后端解析分卷/章节,建为可继续写作的新项目
+  // 开续集:AI 出 8 个方向卡可选可重摇;建书继承文风/架构/梗卡/人物,
+  // 前作分析(前情提要+文风技法画像)异步进行,字数按前作实际章节中位数对齐
+  sequelDirectionsAsync: (id: number, avoid: string[] = []) =>
+    req<{ job_id: string }>("POST", `/api/projects/${id}/sequel-directions-async`, { avoid }),
+  createSequel: (id: number, body: { title: string; direction: string }) =>
+    req<{ project_id: number; analyze_job_id: string | null }>(
+      "POST", `/api/projects/${id}/sequel`, body),
   importBook: (file: File, title: string) => {
     const form = new FormData();
     form.append("file", file);

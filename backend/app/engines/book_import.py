@@ -130,10 +130,13 @@ def parse_chapters(text: str) -> list[dict[str, str]]:
             flush()
             recognized += 1
             if m_ch:
-                num_and_rest = stripped.strip()
-                title = _clean_heading(num_and_rest, prefix=(cur_volume + " · " if cur_volume else ""))
+                # 标题只留「第N章」后面的部分:章号已单独落 chapter_number,UI 统一
+                # 前置「第N章」;整行存标题会渲染成「第2章 第2章 白色连衣裙」
+                rest = (m_ch.group(1) or "").strip()
+                title = _clean_heading(rest, prefix=(cur_volume + " · " if cur_volume else ""))
             elif m_en:
-                title = _clean_heading(stripped, prefix=(cur_volume + " · " if cur_volume else ""))
+                rest = (m_en.group(2) or "").strip()
+                title = _clean_heading(rest, prefix=(cur_volume + " · " if cur_volume else ""))
             else:
                 base = (m_sp.group(1) + (" " + m_sp.group(2) if m_sp.group(2) else "")).strip()
                 title = _clean_heading(base, prefix=(cur_volume + " · " if cur_volume else ""))
@@ -158,11 +161,11 @@ def parse_chapters(text: str) -> list[dict[str, str]]:
         buf.append(para)
         size += len(para)
         if size >= _FALLBACK_CHAPTER_CHARS:
-            chapters.append({"title": f"第{idx}章", "body": "\n\n".join(buf)})
+            chapters.append({"title": "", "body": "\n\n".join(buf)})
             idx += 1
             buf, size = [], 0
     if buf:
-        chapters.append({"title": f"第{idx}章", "body": "\n\n".join(buf)})
+        chapters.append({"title": "", "body": "\n\n".join(buf)})
     logger.info("导入解析:无章标题,兜底切为 %d 章", len(chapters))
     return chapters
 

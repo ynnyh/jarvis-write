@@ -112,7 +112,7 @@ async def generate_project_blueprint_async(
         session = SessionLocal()
         try:
             p = session.get(Project, project_id)
-            arch_text = _arch_text(p)
+            arch_text = _arch_text(p) + _sequel_prev_block(session, p.id)
             # 滚动规划:长书只铺第一卷,先出卷纲定全书方向;短书一次铺完
             end_chapter = None
             if p.target_chapters > ROLLING_THRESHOLD:
@@ -160,6 +160,27 @@ SEGMENT_SIZE = 30
 ROLLING_THRESHOLD = 150
 # 开放式连载自动续订步长:铺满当前批次后再「展开下一卷」,体量顺延这么多章继续写
 _SERIAL_EXTEND_CHAPTERS = 30
+
+
+def _sequel_prev_block(session, project_id: int) -> str:
+    """续集前情块(docs/20 同批):第 0 章摘要行(开续集时写入)→ 拼进架构文本。
+
+    普通书没有第 0 章摘要行 → 空串,蓝图 prompt 字节级不变。
+    """
+    from app.db.models import ChapterSummary
+
+    row = (
+        session.query(ChapterSummary)
+        .filter(ChapterSummary.project_id == project_id, ChapterSummary.chapter_number == 0)
+        .first()
+    )
+    text = (row.rolling_summary if row else "").strip()
+    if not text:
+        return ""
+    return (
+        "\n【前情提要(本书是续集,以下是上一部的全部前情。蓝图必须无缝衔接"
+        "这些人物、事件与未收束的线,不得矛盾或重讲)】\n" + text + "\n"
+    )
 
 
 def _arch_text(p: Project) -> str:
@@ -372,7 +393,7 @@ async def extend_blueprint_async(project_id: int, db: Session = Depends(get_db))
             )
             chapters, warnings = await generate_blueprint(
                 core_premise=_core_premise_text(session, p.id),
-                novel_architecture=_arch_text(p) + context,
+                novel_architecture=_arch_text(p) + _sequel_prev_block(session, p.id) + context,
                 number_of_chapters=p.target_chapters,
                 global_tendency=p.global_tendency,
                 progress=lambda s: update_stage(job_id, s),

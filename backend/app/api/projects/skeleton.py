@@ -35,7 +35,7 @@ from app.prompts.rolling import SKELETON_PROMPT
 from app.schemas.project import GenerateBlueprintRequest, OutlineOut
 
 from ._common import _get_project_or_404
-from .blueprint import _arch_text, _core_premise_text
+from .blueprint import _arch_text, _core_premise_text, _sequel_prev_block
 
 router = APIRouter()
 
@@ -296,7 +296,7 @@ async def pave_segment_async(
                     ctx_lines.append(f"上一段收束于第{prev['end']}章《{tail.title}》:{tail.summary}")
             chapters, warnings = await generate_blueprint(
                 core_premise=_core_premise_text(session, p.id),
-                novel_architecture=_arch_text(p) + "\n" + "\n".join(ctx_lines),
+                novel_architecture=_arch_text(p) + _sequel_prev_block(session, p.id) + "\n" + "\n".join(ctx_lines),
                 number_of_chapters=p.target_chapters,
                 tendency=req.tendency,
                 global_tendency=p.global_tendency,

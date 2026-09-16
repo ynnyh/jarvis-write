@@ -73,6 +73,9 @@ class Project(Base, TimestampMixin):
     # 起步流进度:创建即建草稿,记录停在哪一步(idea/tone/title/scale/launch);
     # 空/NULL = 起步完成(老项目天然视为完成)。列表页据此显示"继续创建"。
     setup_state: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # 续集来源(docs/20 同批作者诉求):本书承接哪部作品;NULL = 独立作品。
+    # 不加 FK 约束:前作删除不应连带/阻塞续集(续集是独立的书)。
+    sequel_of_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # 灵感对话记录([{role, content}, ...]):对话式捏概念的持久化,刷新不丢
     chat_log: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
     # 卷纲(滚动规划的"指南针"):[{start, end, goal}, ...]。长书蓝图只铺当前卷,

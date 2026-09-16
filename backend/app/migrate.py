@@ -88,6 +88,17 @@ def _add_synopsis_column() -> None:
             logger.info("迁移:projects 补 synopsis 列")
 
 
+def _add_project_sequel_column() -> None:
+    """给 projects 表补 sequel_of_id 列(续集来源,存量一律 NULL,幂等)。"""
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "projects" not in insp.get_table_names():
+            return
+        if not _column_exists("projects", "sequel_of_id"):
+            conn.execute(text("ALTER TABLE projects ADD COLUMN sequel_of_id INTEGER"))
+            logger.info("迁移:projects 补 sequel_of_id 列")
+
+
 def _add_job_owner_columns() -> None:
     """给 jobs 表补 project_id/chapter_number/parent_job_id(任务中心分组用,幂等)。
 
@@ -1051,6 +1062,7 @@ def run_migrations() -> None:
     _add_canon_column()
     _add_issue_payload_column()
     _add_setup_columns()
+    _add_project_sequel_column()
     _add_job_owner_columns()
     _add_outline_locked_column()
     _add_retired_column()
