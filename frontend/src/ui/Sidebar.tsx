@@ -36,6 +36,7 @@ const GROUPS: { title: string; defaultOpen: boolean; entries: Entry[] }[] = [
       { to: "/promo", ico: "🎬", label: "宣传片工坊" },
       { to: "/clips", ico: "⚡", label: "情绪短片" },
       { to: "/series", ico: "🐾", label: "系列短片" },
+      { to: "/anime", ico: "🐛", label: "动画短剧" },
       { to: "/birthday", ico: "🎂", label: "生日祝福" },
     ],
   },

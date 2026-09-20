@@ -54,6 +54,11 @@ class Task(str, Enum):
     BIRTHDAY_BATCH = "birthday_batch"   # 生日祝福批产(三本子一次出)
     SERIES_LOOK = "series_look"         # 角色系列·AI 代写定妆描述
     SERIES_PROMPT = "series_prompt"     # 角色系列·单集成片提示词(篇幅自由)
+    ANIME_CAST = "anime_cast"           # 动画短剧·固定卡司设计(1 主角+配角)
+    ANIME_CHAT = "anime_chat"           # 动画短剧·简介聊天(点子补充完善,JSON)
+    ANIME_TAKES = "anime_takes"         # 动画短剧·梗纲三选一(类型节奏库)
+    ANIME_SHOTS = "anime_shots"         # 动画短剧·分镜展开(每镜 2-5 秒,JSON)
+    ANIME_PROMPT = "anime_prompt"       # 动画短剧·整集分段精准提示词
     # 书籍元信息类短任务。这几条原先绕开本路由、直接按「协议名」造适配器,
     # 于是永远取到该协议里**创建最早**的那套配置,用户在设置页标「默认」的那套被丢掉
     # (症状:换成官方 DeepSeek 也没用,请求照旧打到最早那个中转站)。
@@ -118,6 +123,12 @@ _TASK_TIER: dict[Task, Tier] = {
     # 角色系列:定妆是全系列一致性锚求稳,单集提示词要细节密度与镜头感
     Task.SERIES_LOOK: Tier.QUALITY,
     Task.SERIES_PROMPT: Tier.QUALITY,
+    # 动画短剧:卡司是全季一致性锚、出梗要才气、分镜与提示词是结构化长输出,全上强档
+    Task.ANIME_CAST: Tier.QUALITY,
+    Task.ANIME_CHAT: Tier.QUALITY,
+    Task.ANIME_TAKES: Tier.QUALITY,
+    Task.ANIME_SHOTS: Tier.QUALITY,
+    Task.ANIME_PROMPT: Tier.QUALITY,
     # 书籍元信息:书名/简介/投稿包是门面活,一次性、字数少,上强档不心疼。
     # **必须显式列出**——`_TASK_TIER.get(task, Tier.FAST)` 缺省是快档,漏一条就是静默降档。
     Task.TITLE: Tier.QUALITY,
@@ -169,6 +180,13 @@ _TASK_TEMPERATURE: dict[Task, float] = {
     # 角色系列:定妆求稳(锚定全系列形象),单集提示词是结构化长输出也要克制
     Task.SERIES_LOOK: 0.5,
     Task.SERIES_PROMPT: 0.6,
+    # 动画短剧:出梗纲要才气(高温),聊天是搭档语感(偏高),卡司稳定可复现、
+    # 分镜/提示词结构化求稳(低温)
+    Task.ANIME_CAST: 0.6,
+    Task.ANIME_CHAT: 0.8,
+    Task.ANIME_TAKES: 0.9,
+    Task.ANIME_SHOTS: 0.5,
+    Task.ANIME_PROMPT: 0.4,
 }
 
 
@@ -214,6 +232,13 @@ _TASK_MAX_TOKENS: dict[Task, int] = {
     # 4000 会把长提示词砍在半句话上(与 DRAMA_ASSET 同一教训)
     Task.SERIES_LOOK: 6000,
     Task.SERIES_PROMPT: 8000,
+    # 动画短剧:卡司 3-4 人×六项定妆、梗纲 3×四拍、分镜 15-30 镜 JSON、
+    # 提示词每段 ≥400 字×4-6 段——都是长输出,给足预算防截断(同一教训)
+    Task.ANIME_CAST: 6000,
+    Task.ANIME_CHAT: 4000,
+    Task.ANIME_TAKES: 6000,
+    Task.ANIME_SHOTS: 12000,
+    Task.ANIME_PROMPT: 16384,
     # 校验类 JSON 任务:输出本身只有几百字,但中转渠道的部分后端会忽略
     # thinking 参数(2026-09-08 50 章压测实锤:魔芋上游轮换后端,落上不认参数的
     # 后端时思考默认开且 effort 高,8192 预算被思考吃穿,JSON 截断在半途→

@@ -6,6 +6,7 @@ clips 系的原料在行内 JSON(clip.shots/lines),宣传片在独立表(promo_s
 两种形态各验一遍生成链路,LLM 全程打桩:
 - 无分镜拦截(说人话)
 - 生成跑通:风格/台词/说话人/点子/地标/素材点进原料,围栏被剥掉,结果落库可读
+  (clips 系是单条合并版,宣传片是分段版)
 - PUT 整段替换保存;归属隔离 404
 """
 from __future__ import annotations
@@ -163,14 +164,15 @@ def test_clip_film_prompt_generate_and_get(client):
 
     assert job["status"] == "done", job
     got = client.get(f"/api/clips/{eid}/film-prompt", headers=headers)
-    assert got.json()["film_prompt"].startswith("【使用说明】")  # 分段文档头(引擎写)
-    assert _CLIP_REPLY in got.json()["film_prompt"]  # 围栏已剥,分段块整段保存
+    assert got.json()["film_prompt"] == _CLIP_REPLY  # 围栏已剥;单条版整段保存,没有分段文档头
 
     prompt = adapter.prompts[0]
     assert "写实电影质感" in prompt  # 风格锚进原料
     assert "异地恋的最后一通电话" in prompt  # 点子进原料
     assert "台词(她):你为什么还要听?" in prompt  # 台词带说话人(lines 文本反查)
     assert "到站了,别下车。" in prompt  # 金句进原料
+    assert "0—4秒" in prompt  # 分镜原料带累计时间码
+    assert "合并" in prompt  # 单条版:要求把分镜合并成连续叙事
 
 
 def test_clip_film_prompt_save_and_ownership(client):
