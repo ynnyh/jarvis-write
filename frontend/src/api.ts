@@ -155,6 +155,8 @@ export interface WritingCard {
 export interface Project {
   id: number; title: string; topic: string; genre: string;
   target_chapters: number; target_words_per_chapter: number;
+  // 创建时间(向导缓存所有权校验:对不上 = 缓存属于已删除的同号旧项目,丢弃)
+  created_at?: string | null;
   // 开放式连载(结局未定):架构只定长线引擎+首批方向;蓝图铺满后「展开下一卷」自动续订
   open_ended?: boolean;
   // 字数守卫:超标自动压缩/拆章,默认关闭(写作页开关控制)
@@ -1352,12 +1354,13 @@ export const api = {
   // ---- 异步 job 版长任务(返回 job_id,配合 pollJob/任务中心) ----
   inspireAsync: (spark: string, tendency: Tendency, count = 4, dna: StoryDNA | null = null, avoid?: Concept | null) =>
     req<{ job_id: string }>("POST", "/api/inspire/async", { spark, tendency, count, dna, avoid: avoid && !conceptIsEmpty(avoid) ? avoid : undefined }),
-  // 两段式构思·第一段:方向+偏好 → 一批故事引擎卡(FAST 档,先便宜收敛)
+  // 两段式构思·第一段:方向+偏好 → 一批故事引擎卡(FAST 档,先便宜收敛)。
+  // feedback = 用户对上一批的修改要求(带话重出,最高优先级约束)
   enginesAsync: (spark: string, tendency: Tendency, count = 8, dna: StoryDNA | null = null,
-    avoidEngines: string[] = [], anchorEngine = "") =>
+    avoidEngines: string[] = [], anchorEngine = "", feedback = "") =>
     req<{ job_id: string }>("POST", "/api/inspire/engines/async",
       { spark, tendency, count, dna, avoid_engines: avoidEngines.length ? avoidEngines : undefined,
-        anchor_engine: anchorEngine || undefined }),
+        anchor_engine: anchorEngine || undefined, feedback: feedback || undefined }),
   // 两段式构思·第二段:选中的引擎(1-2 张,可混搭)→ 深化成完整概念(强模型)
   developConceptAsync: (engines: string[], spark = "", tendency: Tendency = {}, dna: StoryDNA | null = null) =>
     req<{ job_id: string }>("POST", "/api/inspire/develop/async", { engines, spark, tendency, dna }),
@@ -1408,9 +1411,10 @@ export const api = {
   // 架构研讨:多轮对话聊清不满意在哪 → 蒸馏出「额外要求」directive,拿去重新生成
   discussArchitecture: (id: number, messages: { role: string; content: string }[]) =>
     req<{ reply: string; directive: string }>("POST", `/api/projects/${id}/architecture/discuss`, { messages }, LLM_TIMEOUT),
-  generateBlueprintAsync: (id: number, tendency: Tendency, titleStyle = "", titleDirective = "") =>
+  // 生成/重铺章节蓝图;directive = 用户对这版蓝图的修改要求(重铺带话,最高优先级)
+  generateBlueprintAsync: (id: number, tendency: Tendency, titleStyle = "", titleDirective = "", directive = "") =>
     req<{ job_id: string }>("POST", `/api/projects/${id}/blueprint-async`,
-      { tendency, title_style: titleStyle, title_directive: titleDirective }),
+      { tendency, title_style: titleStyle, title_directive: titleDirective, directive: directive || undefined }),
   // 滚动规划:展开下一卷蓝图(按卷纲+已成文状态)
   extendBlueprintAsync: (id: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${id}/blueprint-extend-async`, {}),

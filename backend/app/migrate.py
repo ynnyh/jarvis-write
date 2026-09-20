@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
@@ -43,6 +44,82 @@ def _column_exists(table: str, column: str) -> bool:
     except Exception:  # noqa: BLE001 — 表不存在等
         return False
     return column in cols
+
+
+def rebuild_projects_autoincrement(bind) -> None:
+    """projects.id 改 AUTOINCREMENT(SQLite 不支持原地改,需整表重建;幂等)。
+
+    动机(开书串档 bug,2026-09-20 用户实测踩中):普通 INTEGER PRIMARY KEY
+    按 max(rowid)+1 分配,删掉 id 最大的书再新建,新草稿拿到同一个 id;前端
+    localStorage 里按 pid 存的向导缓存(提示文字/候选卡/引擎卡)随即被灌进
+    新书——表现为「删书重开,提示文字和卡片还是上一次的」。AUTOINCREMENT
+    只增不复用,从根上掐断串档。
+
+    bind 须处于可执行 PRAGMA 的状态(autocommit):foreign_keys 在事务内
+    改是静默 no-op。Alembic 侧经 autocommit_block 调用;启动兜底由
+    _ensure_projects_autoincrement 用 AUTOCOMMIT 连接调用。
+    """
+    if bind.dialect.name != "sqlite":
+        return
+    row = bind.exec_driver_sql(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='projects'"
+    ).fetchone()
+    ddl = row[0] if row else None
+    if not ddl or "AUTOINCREMENT" in ddl.upper():
+        return  # 新装库(create_all 已按 AUTOINCREMENT 建)/已迁移/无表
+    # 从活 DDL 派生新表 DDL,不手抄列定义——列集合随库自适应用户停在哪次迁移。
+    # SQLite 的 AUTOINCREMENT 只支持列内联写法。两种历史 DDL 形态都要认,统一成
+    # 「NOT NULL + 内联 PK」:NOT NULL 必须保留——裸 INTEGER PRIMARY KEY 的
+    # notnull=0,schema 漂移门禁(模型侧 nullable=False)会拦下整条 CI。
+    # alembic 基线:  id INTEGER PRIMARY KEY,                 → 内联改写 + 摘表约束
+    # create_all:    id INTEGER NOT NULL, + PRIMARY KEY (id)  → 内联改写 + 摘表约束
+    new_ddl = re.sub(
+        r"\bid\s+INTEGER\s+PRIMARY\s+KEY\s*,",
+        "id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,",
+        ddl, count=1)
+    new_ddl = re.sub(
+        r"\bid\s+INTEGER\s+NOT\s+NULL\s*,",
+        "id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,",
+        new_ddl, count=1)
+    new_ddl = re.sub(r",\s*PRIMARY\s+KEY\s*\(id\)", "", new_ddl, count=1)
+    if new_ddl == ddl or "AUTOINCREMENT" not in new_ddl:
+        raise RuntimeError(f"projects 表 DDL 与预期不符,未敢重建: {ddl[:400]}")
+    # 重建期间要原样搬回的索引/触发器(DROP TABLE 会连它们一起删)
+    aux = bind.exec_driver_sql(
+        "SELECT sql FROM sqlite_master "
+        "WHERE tbl_name='projects' AND type IN ('index','trigger') AND sql IS NOT NULL"
+    ).fetchall()
+    count_before = bind.exec_driver_sql("SELECT COUNT(*) FROM projects").fetchone()[0]
+    bind.exec_driver_sql("PRAGMA foreign_keys=OFF")
+    try:
+        bind.exec_driver_sql("DROP TABLE IF EXISTS projects_new")  # 上次中断的残骸
+        bind.exec_driver_sql("BEGIN")
+        try:
+            bind.exec_driver_sql(new_ddl.replace("CREATE TABLE projects ", "CREATE TABLE projects_new ", 1))
+            bind.exec_driver_sql("INSERT INTO projects_new SELECT * FROM projects")
+            count_after = bind.exec_driver_sql("SELECT COUNT(*) FROM projects_new").fetchone()[0]
+            if count_after != count_before:
+                raise RuntimeError(f"projects 数据拷贝不全: {count_before} -> {count_after}")
+            bind.exec_driver_sql("DROP TABLE projects")
+            bind.exec_driver_sql("ALTER TABLE projects_new RENAME TO projects")
+            for (sql,) in aux:
+                bind.exec_driver_sql(sql)
+            bind.exec_driver_sql("COMMIT")
+        except Exception:
+            bind.exec_driver_sql("ROLLBACK")
+            raise
+    finally:
+        bind.exec_driver_sql("PRAGMA foreign_keys=ON")
+    logger.info("projects.id 已重建为 AUTOINCREMENT(共搬 %s 行)", count_before)
+
+
+def _ensure_projects_autoincrement() -> None:
+    """启动兜底:Alembic 链失败回退 create_all 时,老库仍能补上 AUTOINCREMENT。"""
+    if engine.dialect.name != "sqlite":
+        return
+    # PRAGMA foreign_keys 不能在事务里改(静默 no-op),用 AUTOCOMMIT 连接做整表重建
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        rebuild_projects_autoincrement(conn)
 
 
 def _add_user_id_columns() -> None:
@@ -1112,6 +1189,7 @@ def run_migrations() -> None:
     _add_llm_usage_duration_column()
     _add_chapter_feedback_table()
     _add_fact_usage_table()
+    _ensure_projects_autoincrement()
     _disable_word_guard_default()
     _migrate_finalized_to_approved()
     # 先补加密老表存量明文 key,再拷到新表,保证 provider_configs 落库必为密文

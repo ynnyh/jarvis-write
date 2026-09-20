@@ -58,7 +58,8 @@ _PROMPT = """\
 class ShapeSuggestion(BaseModel):
     tone: list[str] = []
     elements: list[str] = []
-    scale: str = "mid"
+    # 空 = 本次没有篇幅推荐(解析失败/非法值都不伪造档位,前端不自动应用)
+    scale: str = ""
     tone_reason: str = ""
     scale_reason: str = ""
 
@@ -120,9 +121,15 @@ async def suggest_shape(
         raise HTTPException(status_code=502, detail=f"推荐生成失败: {exc}") from exc
 
     data = parse_llm_json(raw) or {}
+    if not data:
+        # 模型输出解析失败:宁可不推荐也不伪造——前端会把推荐档位自动预填,
+        # 伪造的「中篇 60 章」等于替用户做了体量决定(实测踩中:垃圾输出被
+        # 兜底成 mid 并静默改掉默认 30 章)。502 由前端静默忽略,只失去预填。
+        raise HTTPException(status_code=502, detail="推荐解析失败,已跳过(不影响开书)")
     tone = _match_labels(data.get("tone") or [], tone_labels, 3)
     elements = _match_labels(data.get("elements") or [], elements_labels, 3)
-    scale = data.get("scale") if data.get("scale") in _SCALES else "mid"
+    # 非法 scale 置空 = 「本次没有篇幅推荐」;前端找不到对应预设档就不自动应用
+    scale = data.get("scale") if data.get("scale") in _SCALES else ""
     return ShapeSuggestion(
         tone=tone,
         elements=elements,

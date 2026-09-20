@@ -42,7 +42,7 @@ def _auth(client: TestClient, username: str) -> dict:
 
 
 def test_suggest_shape_filters_labels_and_clamps_scale(client):
-    """tone/elements 只保留目录内标签;scale 非法回落 mid。"""
+    """tone/elements 只保留目录内标签;scale 非法置空(不伪造档位)。"""
     from app.api.projects import shape as shape_mod
 
     headers = _auth(client, f"shape_{uuid.uuid4().hex[:6]}")
@@ -61,10 +61,25 @@ def test_suggest_shape_filters_labels_and_clamps_scale(client):
     body = r.json()
     assert body["tone"] == ["悬疑"]          # 目录外标签被丢弃
     assert body["elements"] == ["身份错位"]
-    assert body["scale"] == "mid"            # 非法档位兜底
+    assert body["scale"] == ""               # 非法档位=没有推荐,不伪造(旧版兜底 mid 会静默改掉用户默认 30 章)
     assert "题材冷" in body["tone_reason"]
     # prompt 里带上了目录标签池,供模型照池选
     assert "悬疑" in fake.prompts[0]
+
+
+def test_suggest_shape_unparseable_is_502(client):
+    """输出解析失败 → 502 跳过,绝不兜底成「中篇 60 章」替用户做体量决定。"""
+    from app.api.projects import shape as shape_mod
+
+    headers = _auth(client, f"shape_garbage_{uuid.uuid4().hex[:6]}")
+    r = client.post("/api/projects", headers=headers,
+                    json={"title": "垃圾输出书", "target_chapters": 30})
+    pid = r.json()["id"]
+
+    fake = _FakeAdapter("这不是 JSON,是模型跑题的散文。")
+    with patch.object(shape_mod, "get_adapter_for", return_value=fake):
+        r = client.post(f"/api/projects/{pid}/suggest-shape", headers=headers)
+    assert r.status_code == 502
 
 
 def test_suggest_shape_llm_failure_is_502(client):
@@ -78,9 +93,8 @@ def test_suggest_shape_llm_failure_is_502(client):
     fake = _FakeAdapter("")  # 空回复
     with patch.object(shape_mod, "get_adapter_for", return_value=fake):
         r = client.post(f"/api/projects/{pid}/suggest-shape", headers=headers)
-    # 空回复不炸:返回空推荐(前端不预填即可)
-    assert r.status_code == 200
-    assert r.json()["tone"] == []
+    # 空回复=解析不出任何东西:502 跳过(前端静默忽略,只失去预填,不拦开书)
+    assert r.status_code == 502
 
 
 def test_suggest_shape_recovers_compound_labels(client):

@@ -47,6 +47,7 @@ ENGINES_PROMPT = """\
 
 {style_directives}
 {avoid_block}
+{feedback_block}
 要求:
 1. 出 {count} 张引擎卡。差异在【用户约束内拉开】:感情线/开局强度/主角底色/主角视角/流派口味等
    用户已勾选或写明的口味是红线,每张卡都必须遵守、不得混入用户没要的方向;

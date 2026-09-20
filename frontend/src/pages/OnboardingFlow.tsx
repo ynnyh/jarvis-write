@@ -18,6 +18,7 @@ import { SCALE_PRESETS, THINK_CONCEPT, THINK_TITLE } from "./onboarding/presets"
 import { composeRandomSeed } from "./onboarding/randomSeeds";
 import { ConceptBrief, conceptKey } from "./onboarding/ConceptBrief";
 import { ToneDims } from "./onboarding/ToneDims";
+import { wizKeys } from "./onboarding/storage";
 import { useOnboarding } from "./onboarding/useOnboarding";
 
 // SetupStep 原在本文件定义,保留 re-export 以兼容潜在外部引用(现仅本文件内部使用)
@@ -73,7 +74,7 @@ export default function OnboardingFlow() {
     spark, entry, genreDim, outlineDims, pickedGenreCard, chatInput, busy,
     ideas, comparison, ideaSig, customOpen, customConcept,
     prefTone, prefElements, prefFlavors, prefPersona, prefAvoid, prefAvoidText,
-    engineCards, enginePicked, genrePath,
+    engineCards, enginePicked, genrePath, engineFeedback,
     inferBusy, customGenre,
     titleIdeas, titleSig, titleBusy, titleInput,
     chapters, words,
@@ -90,7 +91,7 @@ export default function OnboardingFlow() {
     // handler
     submitSpark, pickGenreBrainstorm, sendChat,
     brainstorm, regenWithFeedback, pickConcept, saveCustomConcept,
-    fetchEngines, pickEngine, developConcept,
+    fetchEngines, pickEngine, developConcept, applyEngineFeedback,
     setGenre, setDim, fetchTitles, pickTitle, pickScale, confirmScale,
     runArch, runBp, enterWorkbench, abandon, goto, editFrom, markDirtyOk,
     trustMode, setTrustMode, setBp,
@@ -98,6 +99,8 @@ export default function OnboardingFlow() {
 
   // 引擎卡抽卡页码:一批 AI 生成 8 张,先翻前 4 张(零成本),翻完才再调 AI 补池
   const [enginePage, setEnginePage] = useState(0);
+  // 引擎卡反馈输入框内容(提交后转为常驻要求 engineFeedback,输入框清空)
+  const [engineInput, setEngineInput] = useState("");
   const [showAllEngines, setShowAllEngines] = useState(false);
   const [seedHint, setSeedHint] = useState(false);
   const [scaleMode, setScaleMode] = useState<"" | "auto" | "manual">("");
@@ -139,6 +142,17 @@ export default function OnboardingFlow() {
     }
     setSpark(composeRandomSeed());
     setSeedHint(true);
+  }
+
+  // 带话重出(P0 沟通修改):反馈升格为常驻要求(之后的换一批/锚点重抽都带着,
+  // 直到「不再带这条」),同时避开本批引擎句重出一批
+  function submitEngineFeedback() {
+    const f = engineInput.trim();
+    if (!f || busy) return;
+    applyEngineFeedback(f);
+    setEngineInput("");
+    fetchEngines((engineCards ?? []).map((c) => c.engine), "", f);
+    setEnginePage(0);
   }
 
 
@@ -482,7 +496,7 @@ export default function OnboardingFlow() {
                               <>
                                 <div className="card-desc">
                                   先挑对味的故事内核——都只是一句话种子,选中后再深化成完整概念
-                                  (选两张 = 混搭:A 的主角遇 B 的局面)。
+                                  (选两张 = 混搭:A 的主角遇 B 的局面);都不对味就可在下面直接说要什么,带话重出。
                                 </div>
                                 <div className="gacha-hand" key={enginePage + (showAllEngines ? "-all" : "")}>
                                   {(showAllEngines ? (engineCards ?? []) : enginePageCards).map((card, i) => (
@@ -518,7 +532,7 @@ export default function OnboardingFlow() {
                                   {!showAllEngines && (enginePage === 0 ? (
                                     <button disabled={!!busy}
                                       onClick={() => setEnginePage((n) => n + 1)}>
-                                      🎴 再抽一批(池里还有 {poolRemain} 张) →
+                                      🎴 翻下一批(池里还有 {poolRemain} 张) →
                                     </button>
                                   ) : (
                                     <button disabled={!!busy}
@@ -526,20 +540,38 @@ export default function OnboardingFlow() {
                                       ← 上一批
                                     </button>
                                   ))}
-                                  {showAllEngines || enginePage === 1 ? (
-                                    <button disabled={!!busy}
-                                      onClick={() => {
-                                        fetchEngines((engineCards ?? []).map((c) => c.engine));
-                                        setEnginePage(0);
-                                      }}>
-                                      都不对味,AI 重新出一批
-                                    </button>
-                                  ) : null}
+                                  {/* 盲换一批:不带话的快速重抽,常驻可见(此前藏在翻页第二页才出现) */}
+                                  <button disabled={!!busy}
+                                    onClick={() => {
+                                      fetchEngines((engineCards ?? []).map((c) => c.engine));
+                                      setEnginePage(0);
+                                    }}>
+                                    🎴 都不对味?避开这批重出
+                                  </button>
                                   <button disabled={!!busy}
                                     onClick={() => setShowAllEngines((v) => !v)}>
                                     {showAllEngines ? "回到分批抽" : "一次看全部 8 张"}
                                   </button>
                                 </div>
+                                {/* 沟通修改(P0):带话重出——与概念卡「带反馈重新生成」同一交互语言,
+                                    常驻可见;提交后反馈成为常驻要求,换一批/锚点重抽也一直带着 */}
+                                <div className="input-row mt-2">
+                                  <input type="text" value={engineInput} disabled={!!busy}
+                                    onChange={(e) => setEngineInput(e.target.value)}
+                                    placeholder="这批不对味?直接说要什么,如:不要系统流,来个女主搞事业的"
+                                    onKeyDown={(e) => e.key === "Enter" && submitEngineFeedback()} />
+                                  <button className="btn-sm primary" disabled={!engineInput.trim() || !!busy}
+                                    onClick={submitEngineFeedback}>
+                                    💬 带话重出一批
+                                  </button>
+                                </div>
+                                {engineFeedback && (
+                                  <div className="fld-hint mt-2">
+                                    本批已按你的要求「{engineFeedback}」来出,再换一批也继续带着这条。
+                                    <button className="btn-sm" disabled={!!busy}
+                                      onClick={() => applyEngineFeedback("")}>不再带这条</button>
+                                  </div>
+                                )}
                                 {busy && (
                                   <div className="muted mt-2">
                                     <span className="spin" />{busy}
@@ -936,7 +968,7 @@ export default function OnboardingFlow() {
                           }
                         } catch { /* 保存失败不拦点火:进工作台后可在本书设置补 */ }
                         setDirty(null);
-                        localStorage.removeItem(`wiz-dirty:${pid}`);
+                        localStorage.removeItem(wizKeys(pid!).dirty);
                         void goto("launch");
                       }}>
                         🔥 开始创建
@@ -1009,6 +1041,10 @@ export default function OnboardingFlow() {
                         animate={{ scale: 1, opacity: 1 }}
                         transition={{ type: "spring", stiffness: 260, damping: 15 }}>
                         🎉 架构和蓝图都生成好了,去审阅吧
+                        <span className="wiz-celebrate-hint">
+                          以后想改也不用怕:工作台左侧「开书」区可随时重调概念/架构/大纲
+                          (大纲支持带一句话要求重铺);写崩了点顶部状态条的「重来向导」。
+                        </span>
                       </motion.div>
                     )}
                     <div className="actions mt-4 onboard-nav">

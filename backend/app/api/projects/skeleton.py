@@ -192,23 +192,38 @@ async def generate_skeleton_async(
     return {"job_id": job_id}
 
 
+def _mutate_segments(project: Project, fn) -> list[dict]:
+    """拷贝-改-赋回地改 macro_plan,返回新列表。
+
+    JSON 列的原地改不触发变更追踪:segs = project.macro_plan 拿到的是同一个
+    对象,改完再赋回去,flush 时新旧相等被视为未变更,commit 空转——拍板/锁定
+    曾因此「响应成功、库没写」的静默失败(2026-09-20 实测踩中)。必须赋一个新对象。
+    """
+    segs = [dict(s) for s in (project.macro_plan or [])]
+    fn(segs)
+    project.macro_plan = segs
+    return segs
+
+
 @router.put("/{project_id}/skeleton/{index}")
 def edit_segment(
     project_id: int, index: int, body: SegmentEdit, db: Session = Depends(get_db)
 ):
     """编辑分段的人话字段(段名/目标/冲突/起止状态)。章号区间不在此改(重出骨架改)。"""
     project = _get_project_or_404(db, project_id)
-    segs = project.macro_plan or []
-    if index < 0 or index >= len(segs):
+    if index < 0 or index >= len(project.macro_plan or []):
         raise HTTPException(status_code=404, detail="分段不存在")
-    seg = segs[index]
-    for field in ("title", "goal", "conflict", "start_state", "end_state"):
-        v = getattr(body, field)
-        if v is not None:
-            seg[field] = v.strip()
-    project.macro_plan = segs  # 重新赋值触发 JSON 变更追踪
+
+    def _edit(segs: list[dict]) -> None:
+        seg = segs[index]
+        for field in ("title", "goal", "conflict", "start_state", "end_state"):
+            v = getattr(body, field)
+            if v is not None:
+                seg[field] = v.strip()
+
+    segs = _mutate_segments(project, _edit)
     db.commit()
-    return {"segment": seg}
+    return {"segment": segs[index]}
 
 
 @router.post("/{project_id}/skeleton/{index}/confirm")
@@ -217,11 +232,13 @@ def confirm_segment(
 ):
     """拍板/撤回一个分段:confirmed 才能铺章。"""
     project = _get_project_or_404(db, project_id)
-    segs = project.macro_plan or []
-    if index < 0 or index >= len(segs):
+    if index < 0 or index >= len(project.macro_plan or []):
         raise HTTPException(status_code=404, detail="分段不存在")
-    segs[index]["confirmed"] = bool(confirmed)
-    project.macro_plan = segs
+
+    def _confirm(segs: list[dict]) -> None:
+        segs[index]["confirmed"] = bool(confirmed)
+
+    segs = _mutate_segments(project, _confirm)
     db.commit()
     return {"segment": segs[index]}
 
@@ -232,13 +249,15 @@ def lock_segment(
 ):
     """锁定/解锁分段:locked 段重出骨架时原样保留(铁律 2)。"""
     project = _get_project_or_404(db, project_id)
-    segs = project.macro_plan or []
-    if index < 0 or index >= len(segs):
+    if index < 0 or index >= len(project.macro_plan or []):
         raise HTTPException(status_code=404, detail="分段不存在")
-    segs[index]["locked"] = bool(locked)
-    if locked:
-        segs[index]["confirmed"] = True  # 锁定即拍板
-    project.macro_plan = segs
+
+    def _lock(segs: list[dict]) -> None:
+        segs[index]["locked"] = bool(locked)
+        if locked:
+            segs[index]["confirmed"] = True  # 锁定即拍板
+
+    segs = _mutate_segments(project, _lock)
     db.commit()
     return {"segment": segs[index]}
 

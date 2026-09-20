@@ -1,5 +1,6 @@
 // 大纲工作区:蓝图生成 / 内联编辑 / 大改分级 → 影响分析 → 勾选级联
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, CascadeResult, DirectiveApplyResult, DirectiveItem, DirectivePreview, EditorAction, EditResult, ImpactReport, Outline, Project, Tendency } from "../api";
 import { pollJob, errMsg } from "../pollJob";
 import TendencySelector from "../components/TendencySelector";
@@ -28,6 +29,8 @@ type Form = Partial<Outline>;
 
 export default function OutlinePanel({ pid, project, outlines, hasArch, onChanged, onGotoStep }: Props) {
   const { run: runAsyncJob } = useJob();
+  // 清空重来/重做大纲的入口带 ?gen=1 落地:首次挂载即展开生成面板,别让用户对着空列表再点一次
+  const [searchParams] = useSearchParams();
   const [genTendency, setGenTendency] = useState<Tendency>({});
   // Pillar 2:蓝图生成时选章节标题风格(预设档 + 可选自由文本)
   const [titleStyle, setTitleStyle] = useState<TitleStyle>(DEFAULT_TITLE_STYLE);
@@ -35,7 +38,7 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
   const [genProgress, setGenProgress] = useState<{ done: number; total: number } | null>(null);
   // Pillar 3:批量重拟标题面板开关
   const [showBatchRetitle, setShowBatchRetitle] = useState(false);
-  const [showGen, setShowGen] = useState(!outlines.length);
+  const [showGen, setShowGen] = useState(!outlines.length || searchParams.get("gen") === "1");
   const [showAdv, setShowAdv] = useState(false);
   const [editingNum, setEditingNum] = useState<number | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -50,6 +53,8 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
   // 修改指令:输入 → LLM 预览(可再编辑/勾选) → 应用
   const [showDirective, setShowDirective] = useState(false);
   const [directiveText, setDirectiveText] = useState("");
+  // 重铺蓝图时的一句话要求(整体不满意时的「带话重铺」,与逐章的修改指令互补)
+  const [genDirective, setGenDirective] = useState("");
   // 单章 AI 研讨:当前展开研讨面板的章号(null=收起)
   const [discussFor, setDiscussFor] = useState<number | null>(null);
   // 编辑部预设优化动作(大纲级 chips:深化冲突/增加伏笔…,点了走指令改预览链路)
@@ -100,11 +105,13 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
     }
     // 峰时(官方 DeepSeek 计费 ×2)提示:蓝图按章批量出,按已有章数估;会话内确认一次
     if (!(await confirmPeakPricing(outlines.length || 1))) return;
+    const directive = genDirective.trim();
+    const isRegen = outlines.length > 0;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setBusy("蓝图生成:排队中…"); setErr(""); setGenProgress(null);
     try {
-      const { job_id } = await api.generateBlueprintAsync(pid, genTendency, titleStyle.style, titleStyle.directive);
+      const { job_id } = await api.generateBlueprintAsync(pid, genTendency, titleStyle.style, titleStyle.directive, directive);
       // 轮询任务进度:后端流式上报「已生成 N/M 章」→ 解析成进度条(Pillar 1);其余阶段走文案
       const r = await pollJob<{ outlines: Outline[]; warnings: string[] }>(job_id, {
         signal: ctrl.signal,
@@ -119,7 +126,9 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
       await onChanged();
       setShowGen(false);
       setExpanded(new Set());
+      setGenDirective("");
       setGenDone(r.outlines.length);
+      if (directive) setFlash(`已按你的要求「${directive}」${isRegen ? "重铺" : "生成"}蓝图;不满意可再带话重出,或用「修改指令」微调。`);
     } catch (e) {
       if (!ctrl.signal.aborted) setErr(errMsg(e));
     } finally { if (!ctrl.signal.aborted) { setBusy(""); setGenProgress(null); } }
@@ -346,6 +355,7 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
         </div>
         <div className="card-desc mt-2">
           每章都可直接编辑。动了情节的"大改"会自动分析下游影响,由你决定级联范围——不会出现"这里改了那里还是旧的"。
+          整体不满意?点「重新生成蓝图」时可带一句话要求重铺;只想动几章就用「修改指令」。
           {target > 40 && !outlines.length && "长篇采用滚动规划:先出全书卷纲定方向,蓝图只铺第一卷,写到卷尾再按实际剧情展开下一卷——远期章节不再空洞跑偏。"}
         </div>
         {project?.outline_stale && outlines.length > 0 && (
@@ -377,33 +387,46 @@ export default function OutlinePanel({ pid, project, outlines, hasArch, onChange
         {showGen && (
           <div className="mt-3">
             {!hasArch && <div className="msg-err">请先在「架构」生成顶层架构。</div>}
-            {hasArch && (outlines.length ? (
+            {hasArch && (
               <>
-                <TendencySelector node="outline" value={genTendency} onChange={setGenTendency} compact />
-                <TitleStyleControl value={titleStyle} onChange={setTitleStyle} compact />
-                <button className="primary mt-2" disabled={!!busy} onClick={generateBlueprint}>
-                  {busy && <span className="spin" />}
-                  覆盖并重新生成全部蓝图
-                </button>
-              </>
-            ) : (
-              <>
-                <div className="muted">根据架构一次性生成全部章节蓝图,生成后可逐章微调。</div>
-                <TitleStyleControl value={titleStyle} onChange={setTitleStyle} compact />
-                <button className="primary btn-lg mt-2" disabled={!!busy} onClick={generateBlueprint}>
-                  {busy && <span className="spin" />}
-                  生成章节蓝图
-                </button>
+                {/* 带话生成/重铺(P0 沟通修改):整体不满意的「要什么」走这里;逐章的「改哪里」走修改指令 */}
                 <div className="mt-2">
-                  <button className="linkbtn" onClick={() => setShowAdv(!showAdv)}>
-                    {showAdv ? "▾" : "▸"} 高级选项:本章倾向(可选)
-                  </button>
+                  <div className="hint">想让它怎么走?一句话告诉 AI(可选,生成与重铺都生效)</div>
+                  <input className="mt-1" style={{ width: "100%" }} type="text" value={genDirective}
+                    maxLength={200} disabled={!!busy}
+                    placeholder="如:前期节奏太拖,前 10 章每 3 章要有一个钩子;不要恋爱线"
+                    onChange={(e) => setGenDirective(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && void generateBlueprint()} />
                 </div>
-                {showAdv && (
-                  <TendencySelector node="outline" value={genTendency} onChange={setGenTendency} compact />
+                {outlines.length ? (
+                  <>
+                    <TendencySelector node="outline" value={genTendency} onChange={setGenTendency} compact />
+                    <TitleStyleControl value={titleStyle} onChange={setTitleStyle} compact />
+                    <button className="primary mt-2" disabled={!!busy} onClick={generateBlueprint}>
+                      {busy && <span className="spin" />}
+                      {genDirective.trim() ? "按你的要求重新生成全部蓝图" : "覆盖并重新生成全部蓝图"}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="muted">根据架构一次性生成全部章节蓝图,生成后可逐章微调。</div>
+                    <TitleStyleControl value={titleStyle} onChange={setTitleStyle} compact />
+                    <button className="primary btn-lg mt-2" disabled={!!busy} onClick={generateBlueprint}>
+                      {busy && <span className="spin" />}
+                      生成章节蓝图
+                    </button>
+                    <div className="mt-2">
+                      <button className="linkbtn" onClick={() => setShowAdv(!showAdv)}>
+                        {showAdv ? "▾" : "▸"} 高级选项:本章倾向(可选)
+                      </button>
+                    </div>
+                    {showAdv && (
+                      <TendencySelector node="outline" value={genTendency} onChange={setGenTendency} compact />
+                    )}
+                  </>
                 )}
               </>
-            ))}
+            )}
           </div>
         )}
         {showDirective && (

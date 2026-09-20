@@ -164,6 +164,14 @@
   text-align: center;
   font-size: var(--fs-lg);
 }
+.wiz-celebrate-hint {
+  display: block;
+  margin-top: var(--sp-2);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  color: var(--ink-2, inherit);
+  text-align: center;
+}
 
 .ml-2 { margin-left: var(--sp-2); }
 

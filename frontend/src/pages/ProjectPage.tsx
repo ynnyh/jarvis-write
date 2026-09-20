@@ -112,7 +112,8 @@ function BookStatus({ project, arch, outlines, doneCount, totalWords, staleCount
         ))}
       </div>
       {(arch || doneCount > 0) && (
-        <button type="button" className="bs-rework-btn btn-sm" onClick={onOpenRework}>
+        <button type="button" className="bs-rework-btn btn-sm" onClick={onOpenRework}
+          title="对概念/大纲/正文不满意?从这里选深度重来:改哪层、保留什么、代价多少,先算清楚再动手">
           重来向导 →
         </button>
       )}
@@ -142,12 +143,12 @@ const GUIDES = {
   },
   outline: {
     what: "把架构展开成逐章蓝图:每章的目的、悬念、伏笔、出场人物。",
-    ai: "AI 分块生成全部章节;之后可逐章编辑或一句话指令修改,大改会自动做级联影响分析。",
+    ai: "AI 分块生成全部章节;生成/重铺时可带一句话要求(如「前期别拖」)。之后可逐章编辑,或用「修改指令」一句话改几章,大改会自动做级联影响分析。",
     done: "章节蓝图生成完毕即可开始「写作」。",
   },
   write: {
     what: "逐章生成正文,主场就是正文本身:选中段落就地「改这段/手改」,读到多处问题边批注边一次改;右侧常驻 AI 窄栏梳理意见后整章优化或重写。章首「交稿单」一句话报告自检(校对/与设定有无冲突)并给出「通过/放行」,校对/评分/历史版本收在「更多」;目录(Ctrl+B/点章题)选章,连写在目录里。",
-    ai: "AI 按蓝图写正文并维护一致性;改动一律 diff 逐条验收、旧版留快照可回退;校对/评分结果可一键带进验收流修复。",
+    ai: "AI 按蓝图写正文并维护一致性;改动一律 diff 逐条验收、旧版留快照可回退;校对/评分结果可一键带进验收流修复。对概念/大纲不满意?回左侧「开书」区随时重调;想整本推倒重来,点上方状态条的「重来向导」。",
     done: "定稿的章节会计入总字数,可随时在「全书」查看全书状态。",
   },
   overview: {
@@ -603,7 +604,8 @@ export default function ProjectPage() {
           onWipe={async () => {
             await api.resetProjectContent(pid);
             await reload();
-            nav(`/project/${pid}/setup?step=outline`, { replace: true });
+            // gen=1:清空后直落大纲页并自动展开「生成蓝图」面板(与面板内清空按钮同一体验)
+            nav(`/project/${pid}/setup?step=outline&gen=1`, { replace: true });
           }}
           onClose={() => setReworkOpen(false)}
         />

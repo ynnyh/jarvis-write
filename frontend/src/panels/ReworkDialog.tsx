@@ -34,7 +34,7 @@ const DEPTHS: { key: ReworkStart; label: string; keep: string; redo: string; cos
   {
     key: "outline", label: "重铺蓝图",
     keep: "概念 / 架构",
-    redo: "重铺蓝图 → 正文",
+    redo: "重铺蓝图(可带一句话要求) → 正文",
     costWhen: (done) => done > 0 ? "内容变化的蓝图会令对应章正文标「失配」。" : "",
   },
   {

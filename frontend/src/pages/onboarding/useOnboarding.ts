@@ -12,7 +12,7 @@ import { toast } from "../../ui/Toaster";
 import { confirmDialog } from "../../ui/ConfirmDialog";
 import { conceptSig, titleSig as calcTitleSig } from "../wizSig";
 import { SetupStep, STEP_ORDER, SETUP_STATE, parseStep } from "./steps";
-import { WizCache, Dirty, loadJSON, saveJSON } from "./storage";
+import { WizCache, Dirty, loadJSON, saveJSON, sweepLegacyWizKeys, wizKeys } from "./storage";
 import { SCALE_PRESETS, PipeStep, PIPE_WAIT } from "./presets";
 import { conceptKey } from "./ConceptBrief";
 
@@ -69,6 +69,14 @@ export function useOnboarding() {
   // 两段式构思(P0-A):方向路先出便宜的引擎卡(FAST 档)收敛,选中 1-2 张才花强模型深化
   const [engineCards, setEngineCards] = useState<EngineCard[] | null>(null);
   const [enginePicked, setEnginePicked] = useState<string[]>([]);
+  // 引擎卡的常驻修改要求(P0 沟通修改):用户带话重出后一直生效(换一批/锚点重抽都带着),
+  // 直到点「不再带这条」;存进 wiz 缓存,刷新不丢
+  const [engineFeedback, setEngineFeedback] = useState("");
+  const engineFeedbackRef = useRef("");
+  function applyEngineFeedback(f: string) {
+    engineFeedbackRef.current = f;
+    setEngineFeedback(f);
+  }
 
   // 题材屏
   const [inferBusy, setInferBusy] = useState(false);
@@ -120,19 +128,28 @@ export function useOnboarding() {
   // 只建一次草稿:StrictMode/重渲染下 effect 可能重入,无守卫会静默建出多个空项目
   const createdRef = useRef(false);
   useEffect(() => {
+    sweepLegacyWizKeys(); // v1 遗留键没有所有权标记,一次性清掉(见 storage.ts 注释)
     if (pid !== null) {
       api.getProject(pid).then((p) => {
         setProject(p);
         setTitleInput(p.title === "未命名新书" ? "" : p.title);
         setChapters(String(p.target_chapters));
         setWords(String(p.target_words_per_chapter));
-        const c = loadJSON<WizCache>(`wiz-cache:${pid}`);
-        if (c) {
-          setSpark(c.spark); setIdeas(c.ideas); setTitleIdeas(c.titleIdeas);
-          setIdeaSig(c.ideaSig ?? null); setTitleSig(c.titleSig ?? null);
-          setEngineCards(c.engineCards ?? null);
+        const c = loadJSON<WizCache>(wizKeys(pid).cache);
+        // 所有权校验(开书串档防线二):缓存记录的项目创建时间与当前项目对不上,
+        // 说明这份缓存属于一个已删除的同号旧项目(库被回滚/多端同步等 id 复用场景),
+        // 整份丢弃——绝不能把上一个项目的提示文字和候选卡灌进新书。
+        // dirty 同判:旧项目的影响标记对新书毫无意义
+        const cacheOwned = !c?.createdAt || !p.created_at || c.createdAt === p.created_at;
+        if (!c || cacheOwned) {
+          if (c) {
+            setSpark(c.spark); setIdeas(c.ideas); setTitleIdeas(c.titleIdeas);
+            setIdeaSig(c.ideaSig ?? null); setTitleSig(c.titleSig ?? null);
+            setEngineCards(c.engineCards ?? null);
+            applyEngineFeedback(c.engineFeedback ?? "");
+          }
+          setDirty(loadJSON<Dirty>(wizKeys(pid).dirty));
         }
-        setDirty(loadJSON<Dirty>(`wiz-dirty:${pid}`));
         // 直达续建:无 step 参数时按 setup_state 落到对应屏
         if (!stepParam) {
           nav(`/new/${pid}/${p.setup_state ? parseStep(p.setup_state) : "idea"}`, { replace: true });
@@ -159,11 +176,15 @@ export function useOnboarding() {
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [project?.chat_log, busy]);
 
-  // 候选内容写入 localStorage:刷新后回到当前屏接着选
+  // 候选内容写入 localStorage:刷新后回到当前屏接着选。
+  // createdAt 随存:加载时校验所有权(见上方加载注释)
   useEffect(() => {
     if (pid === null || !project) return;
-    saveJSON(`wiz-cache:${pid}`, { spark, ideas, titleIdeas, ideaSig, titleSig, engineCards } satisfies WizCache);
-  }, [pid, project, spark, ideas, titleIdeas, ideaSig, titleSig, engineCards]);
+    saveJSON(wizKeys(pid).cache, {
+      spark, ideas, titleIdeas, ideaSig, titleSig, engineCards, engineFeedback,
+      createdAt: project.created_at ?? undefined,
+    } satisfies WizCache);
+  }, [pid, project, spark, ideas, titleIdeas, ideaSig, titleSig, engineCards, engineFeedback]);
 
   const patch = useCallback(async (updates: Partial<Project> & { setup_state?: string }) => {
     if (pid === null) return null;
@@ -265,13 +286,18 @@ export function useOnboarding() {
   }
 
   // 两段式·第一段:FAST 档出一批故事引擎卡(带差异轴);换一批传上一批引擎句当 avoid,不趋同;
-  // 锚点重抽传 anchorEngine——「方向对,照这张再来点」,沿这张卡出变体而非全盘否定。
-  async function fetchEngines(avoidEngines: string[] = [], anchorEngine = "") {
+  // 锚点重抽传 anchorEngine——「方向对,照这张再来点」,沿这张卡出变体而非全盘否定;
+  // feedbackOverride = 用户对上一批的修改要求(带话重出)。常驻要求 engineFeedbackRef
+  // 在换一批/锚点重抽时也生效(「不要系统流」不会因为换了一批就失效)。
+  async function fetchEngines(avoidEngines: string[] = [], anchorEngine = "", feedbackOverride = "") {
+    const fb = (feedbackOverride || engineFeedbackRef.current).trim();
     setErr(""); setEngineCards(null); setEnginePicked([]);
-    setBusy(anchorEngine ? "AI 正在照着锚点引擎出变体(几十秒)…" : "AI 正在快速出一批故事引擎(几十秒)…");
+    setBusy(anchorEngine ? "AI 正在照着锚点引擎出变体(几十秒)…"
+      : fb ? "AI 正在按你的要求重出一批(几十秒)…"
+      : "AI 正在快速出一批故事引擎(几十秒)…");
     try {
       const r = await runJob<{ engines: EngineCard[] }>(
-        () => api.enginesAsync(sparkText, tendency, 8, project?.dna ?? null, avoidEngines, anchorEngine),
+        () => api.enginesAsync(sparkText, tendency, 8, project?.dna ?? null, avoidEngines, anchorEngine, fb),
         { kind: "inspire" },
       );
       if (r) setEngineCards(r.engines);
@@ -510,8 +536,10 @@ export function useOnboarding() {
       catch { /* 无蓝图 */ }
       if (archDone) setArch({ status: "done", stage: "", error: "" });
       if (bpDone) setBp({ status: "done", stage: "", error: "" });
-      if (!archDone && loadJSON<string>(`wiz-pipe:${pid}`) !== "started") {
-        saveJSON(`wiz-pipe:${pid}`, "started");
+      // 点火标记带项目创建时间戳:id 被复用(换库/回滚)时旧标记不拦新书的自动点火
+      const createdStamp = project?.created_at ?? "";
+      if (!archDone && loadJSON<string>(wizKeys(pid).pipe) !== createdStamp) {
+        saveJSON(wizKeys(pid).pipe, createdStamp);
         void runArch();
       }
     })();
@@ -544,9 +572,10 @@ export function useOnboarding() {
     try {
       await api.deleteProject(pid);
       if (project) {
-        localStorage.removeItem(`wiz-cache:${pid}`);
-        localStorage.removeItem(`wiz-dirty:${pid}`);
-        localStorage.removeItem(`wiz-pipe:${pid}`);
+        const k = wizKeys(pid);
+        localStorage.removeItem(k.cache);
+        localStorage.removeItem(k.dirty);
+        localStorage.removeItem(k.pipe);
       }
       toast.ok("已放弃创建");
       nav("/");
@@ -562,7 +591,7 @@ export function useOnboarding() {
     spark, entry, genreDim, outlineDims, pickedGenreCard, chatInput, busy,
     ideas, comparison, ideaSig, customOpen, customConcept,
     prefTone, prefElements, prefFlavors, prefPersona, prefAvoid, prefAvoidText,
-    engineCards, enginePicked, genrePath,
+    engineCards, enginePicked, genrePath, engineFeedback,
     inferBusy, customGenre,
     titleIdeas, titleSig, titleBusy, titleInput,
     chapters, words, advOpen, openEnded,
@@ -578,7 +607,7 @@ export function useOnboarding() {
     // handler
     submitSpark, pickGenreBrainstorm, sendChat,
     brainstorm, regenWithFeedback, pickConcept, saveCustomConcept,
-    fetchEngines, pickEngine, developConcept,
+    fetchEngines, pickEngine, developConcept, applyEngineFeedback,
     setGenre, setDim, fetchTitles, pickTitle, pickScale, confirmScale, toggleOpenEnded,
     runArch, runBp, enterWorkbench, abandon, goto, editFrom, markDirtyOk,
   };

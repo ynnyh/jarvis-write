@@ -270,6 +270,9 @@ class EnginesRequest(BaseModel):
     # 锚点重抽:用户点了某张卡「方向对,照这张再来点」——以它为轴出变体,
     # 保留吸引力内核但换主角/局面/破局点;与 avoid_engines(全盘否定)互补
     anchor_engine: str = Field(default="", description="用户认可的锚点引擎句,本轮沿它出变体")
+    # 沟通修改(P0):用户看完上一批直接说要什么——本批的最高优先级约束。
+    # 与 avoid_engines 互补:avoid 只能表达「不要这些」,feedback 能表达「要什么样」
+    feedback: str = Field(default="", max_length=300, description="用户看了上一批后的修改要求")
 
 
 class EnginesResponse(BaseModel):
@@ -298,11 +301,20 @@ async def _engines_impl(req: EnginesRequest) -> EnginesResponse:
             "保留这张卡最抓人的内核与情绪,但每张变体在主角身份/具体局面/破局点上至少换一处,"
             "不要复述原句,也不要只做同义改写。\n"
         )
+    # 沟通修改:用户带话重出——比 avoid(只知道不要什么)更强的收敛信号
+    feedback_block = ""
+    fb = (req.feedback or "").strip()
+    if fb:
+        feedback_block = (
+            "【用户看了上一批后的修改要求(本轮最高优先级,每张卡都必须遵守)】\n"
+            f"- {fb}\n"
+        )
     prompt = ENGINES_PROMPT.format(
         spark=req.spark.strip() or "(空白,按所选方向自由发挥)",
         count=req.count,
         style_directives=style_block,
         avoid_block=avoid_block + anchor_block,
+        feedback_block=feedback_block,
         genre_boundary=_GENRE_BOUNDARY,
     )
     try:

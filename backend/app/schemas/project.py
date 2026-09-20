@@ -3,6 +3,7 @@
 """项目与流水线接口的请求/响应模型。"""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -32,6 +33,9 @@ class ProjectCreate(BaseModel):
 
 class ProjectOut(BaseModel):
     id: int
+    # 创建时间:前端向导缓存据此做所有权校验——缓存里的 created_at 与当前项目
+    # 对不上 = 这份缓存属于一个已删除的同号旧项目,丢弃,防「删书重开串档」
+    created_at: datetime | None = None
     title: str
     topic: str
     genre: str
@@ -141,6 +145,9 @@ class GenerateBlueprintRequest(BaseModel):
     # 由后端 resolve_title_directive 解析成一句导向注入蓝图 prompt。空=默认朴素档。
     title_style: str = Field(default="", max_length=20)
     title_directive: str = Field(default="", max_length=500)
+    # 用户对这版蓝图的修改要求(重铺时带话,如「前期太拖,10 章内要有个大钩子」);
+    # 最高优先级注入蓝图 prompt,空=行为不变。与 title_directive(只管标题)互补。
+    directive: str = Field(default="", max_length=500)
 
 
 class GenerateBlueprintResponse(BaseModel):

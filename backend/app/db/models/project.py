@@ -15,6 +15,11 @@ class Project(Base, TimestampMixin):
     """一部小说。global_tendency 存全局倾向标签组合(见 04-tag-system)。"""
 
     __tablename__ = "projects"
+    # AUTOINCREMENT:id 只增不复用。普通 INTEGER PRIMARY KEY 按 max(rowid)+1 分配,
+    # 删掉 id 最大的书再新建,新草稿会拿到同一个 id,前端按 pid 存的向导草稿缓存
+    # (提示文字/候选卡/引擎卡)就被灌进新书——「删书重开后还是上一次的内容」。
+    # 老库由迁移重建表补上(见 app.migrate.rebuild_projects_autoincrement)。
+    __table_args__ = {"sqlite_autoincrement": True}
 
     id: Mapped[int] = mapped_column(primary_key=True)
     # 归属用户(阶段 8 多用户隔离);存量数据迁移时归到 admin

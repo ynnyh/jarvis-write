@@ -207,6 +207,7 @@ CHAPTER_BLUEPRINT_PROMPT = """\
 {core_premise_block}
 {style_directives}
 {word_scope}
+{directive_block}
 要求:
 1. 章节节奏遵循情节架构的三幕划分
 2. 伏笔操作要与情节架构中列出的主要伏笔呼应:埋设、强化、回收形成完整链条
@@ -228,6 +229,7 @@ CHUNKED_BLUEPRINT_PROMPT = """\
 
 {style_directives}
 {word_scope}
+{directive_block}
 要求:
 1. 与已生成蓝图自然衔接,人物、伏笔、剧情走向保持连续
 2. 伏笔操作与全书伏笔链条呼应

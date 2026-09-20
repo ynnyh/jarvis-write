@@ -115,6 +115,20 @@ def test_engines_avoid_block_injected(client, monkeypatch):
     assert "落魄镖师接险镖" in adapter.last_prompt
 
 
+def test_engines_feedback_block_injected(client, monkeypatch):
+    """带话重出(P0 沟通修改):用户的修改要求必须以最高优先级约束进 prompt。"""
+    u = _register(client, "eng_user_feedback")
+    adapter = _patch_engines(monkeypatch, _ENGINES_JSON)
+    r = client.post("/api/inspire/engines", headers=_auth(u["token"]), json={
+        "spark": "按「都市」的套路来",
+        "tendency": {"genre": "都市"},
+        "feedback": "不要系统流,想要女主搞事业",
+    })
+    assert r.status_code == 200, r.text
+    assert "修改要求" in adapter.last_prompt
+    assert "不要系统流,想要女主搞事业" in adapter.last_prompt
+
+
 def test_develop_single_engine_to_concept(client, monkeypatch):
     """深化:单引擎 → 六字段概念,走强模型(ARCHITECTURE)。"""
     u = _register(client, "eng_user3")

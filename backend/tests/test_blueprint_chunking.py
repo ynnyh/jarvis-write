@@ -132,3 +132,25 @@ def test_context_overflow_error_humanized():
     )
     out = normalize_job_error(RuntimeError(raw))
     assert "上下文" in out and "章数" in out
+
+
+def test_directive_block_injected_into_prompt():
+    """带话重铺(P0 沟通修改):用户的修改要求必须以最高优先级约束进 prompt;
+    不带 directive 时 prompt 不出现该块(向后兼容,老调用零变化)。"""
+    from unittest.mock import patch
+
+    ad = ScriptedAdapter([_chapters(1, 5)])
+    _chapters_out, _ = _run(ad, 5)
+    assert "修改要求" not in ad.prompts[0]
+
+    ad2 = ScriptedAdapter([_chapters(1, 5)])
+    with patch("app.engines.pipeline.blueprint.get_adapter_for", return_value=ad2):
+        asyncio.run(
+            bp_mod.generate_blueprint(
+                novel_architecture="架构文本",
+                number_of_chapters=5,
+                directive="前期太拖,10 章内要有一个大钩子",
+            )
+        )
+    assert "用户对这版蓝图的修改要求" in ad2.prompts[0]
+    assert "前期太拖,10 章内要有一个大钩子" in ad2.prompts[0]

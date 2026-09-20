@@ -7,6 +7,7 @@ import { confirmDialog } from "../ui/ConfirmDialog";
 import EmptyState from "../ui/EmptyState";
 import { toast } from "../ui/Toaster";
 import { pollJob, errMsg } from "../pollJob";
+import { wizKeys } from "./onboarding/storage";
 
 // 项目状态英文值 → 中文徽标(未知值原样兜底)
 const PROJECT_STATUS_CN: Record<string, string> = { draft: "草稿", writing: "连载中" };
@@ -155,6 +156,13 @@ export default function ProjectsPage() {
     setBusy(true); setErr("");
     try {
       await api.deleteProject(p.id);
+      // 顺路清掉向导的本地缓存(草稿提示文字/候选卡/点火标记):不删的话,
+      // 一旦新草稿复用同一 id(老库未跑 AUTOINCREMENT 迁移、库回滚等),
+      // 缓存会被灌进新书——「删书重开,提示文字和卡片还是上一次的」
+      const k = wizKeys(p.id);
+      localStorage.removeItem(k.cache);
+      localStorage.removeItem(k.dirty);
+      localStorage.removeItem(k.pipe);
       setProjects((ps) => ps.filter((x) => x.id !== p.id));
       toast.ok(`已删除《${p.title}》`);
     } catch (e) {

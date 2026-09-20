@@ -149,6 +149,7 @@ async def generate_blueprint(
     title_directive: str = "",
     word_number: int | None = None,
     core_premise: str = "",
+    directive: str = "",
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """分块生成章节蓝图。返回 (章节 dict 列表, 警告列表)。纯生成,不落库。
 
@@ -159,8 +160,18 @@ async def generate_blueprint(
     title_directive: 章节标题风格导向(预设+自由文本已在上游解析);空则回落默认(plain)。
     word_number: 每章目标字数。蓝图此前不知道字数,节拍会按"默认 3-5 个"自由铺,
     与正文软约束打架导致每章超发;这里把字数盘子注入草稿,让节拍数量与字数匹配。
+    directive: 用户对这版蓝图的修改要求(重铺时带话);空则 prompt 零变化。
     """
     title_directive = (title_directive or "").strip() or DEFAULT_TITLE_DIRECTIVE
+
+    # 带话重铺:用户看完上一版蓝图的修改要求,最高优先级注入(与引擎卡 feedback 同一模式)
+    directive_block = ""
+    clean_directive = (directive or "").strip()
+    if clean_directive:
+        directive_block = (
+            "【用户对这版蓝图的修改要求(最高优先级,规划每一章时都必须遵守)】\n"
+            f"- {clean_directive}\n"
+        )
 
     # 核心梗块:有梗卡才注入(蓝图逐章标「梗兑现」以此节拍表为准);
     # 无梗卡(存量书/未建)给空串,prompt 零变化、行为向后兼容。
@@ -231,6 +242,7 @@ async def generate_blueprint(
                     style_directives=style_block,
                     title_directive=title_directive,
                     word_scope=word_scope,
+                    directive_block=directive_block,
                 )
             else:
                 prompt = CHUNKED_BLUEPRINT_PROMPT.format(
@@ -242,6 +254,7 @@ async def generate_blueprint(
                     style_directives=style_block,
                     title_directive=title_directive,
                     word_scope=word_scope,
+                    directive_block=directive_block,
                 )
             if parse_failed:
                 prompt += _format_hint(seg_start, end)
