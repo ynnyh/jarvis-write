@@ -29,6 +29,9 @@ function SeriesList() {
   const [styleHints, setStyleHints] = useState("");
   const [drafting, setDrafting] = useState(false); // AI 代写中(同步长调用)
   const [creating, setCreating] = useState(false);
+  // 没灵感:AI 出的主角点子(点一条回填名字+概念,之后照常 AI 代写定妆)
+  const [ideas, setIdeas] = useState<{ name: string; brief: string }[]>([]);
+  const [ideaBusy, setIdeaBusy] = useState(false);
 
   const reload = useCallback(async () => {
     try { setRows((await seriesApi.listCharacters()).characters); }
@@ -55,6 +58,14 @@ function SeriesList() {
       setLook(r.look);
       toast.ok("定妆草稿已生成", "不满意可手改,或改概念再点一次");
     } catch (e) { toast.err("代写失败", errMsg(e)); } finally { setDrafting(false); }
+  }
+
+  async function askIdeas() {
+    setIdeaBusy(true);
+    try {
+      setIdeas((await seriesApi.suggestCharacter(direction, styleHints.trim())).ideas);
+      toast.ok("出了三个角色点子", "点一条回填名字和概念,再点「AI 代写定妆」");
+    } catch (e) { toast.err("出点子失败", errMsg(e)); } finally { setIdeaBusy(false); }
   }
 
   async function create() {
@@ -123,6 +134,22 @@ function SeriesList() {
             <input id="sr-brief" value={brief} maxLength={500}
               placeholder="如「一只戴红围巾、爱囤零食的小浣熊,在杂货店里讨生活」"
               onChange={(e) => setBrief(e.target.value)} />
+            <div className="form-actions" style={{ margin: 0, marginTop: 6 }}>
+              <button className="btn-sm" disabled={ideaBusy} onClick={() => void askIdeas()}>
+                {ideaBusy ? "AI 出点子中…" : "🎲 没灵感?AI 出三个角色"}
+              </button>
+              {ideas.length > 0 && <span className="form-actions-tip">点一条回填名字和概念</span>}
+            </div>
+            {ideas.length > 0 && (
+              <div className="chips ideas" style={{ marginTop: 6 }}>
+                {ideas.map((it, i) => (
+                  <button key={i} type="button" className="chip" title={it.brief}
+                    onClick={() => { setName(it.name); setBrief(it.brief); }}>
+                    {it.name}:{it.brief}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="field field-full">
             <span className="fl">画风<span className="hint">全系列固定;定妆参考图也按它生成</span></span>

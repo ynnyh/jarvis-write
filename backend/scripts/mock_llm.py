@@ -173,6 +173,35 @@ def reply_for(prompt: str) -> str:
         return json.dumps(_ANIME_SHOTS, ensure_ascii=False)
     if "动画导演兼提示词工程师" in prompt:
         return _ANIME_FILM_REPLY
+    # ---- 系列短片(主角点子/剧情点子/定妆代写/单集提示词)----
+    if "竖屏短视频的角色策划" in prompt:
+        return json.dumps({"ideas": [
+            {"name": "茶壶精", "brief": "怕水的方块茶壶精在水族馆打工,天天和漏水危机斗智斗勇"},
+            {"name": "老扫帚", "brief": "退休老扫帚在魔法快递站当学徒,扫地魔法专治乱塞包裹"},
+            {"name": "饭团丸", "brief": "饭团精灵开深夜食堂,专招待加班到变形的点心精"},
+        ]}, ensure_ascii=False)
+    if "「下一集」的剧情点子" in prompt:
+        return json.dumps({"plots": [
+            "小浣熊盯上货架最上层的蜂蜜罐,踮脚晃罐,一屁股坐地上稳稳接住",
+            "收银台抽屉卡住,小浣熊用橡果当垫片修好,顺手多收了一颗小费",
+            "打烊后小浣熊给每件商品道晚安,被夜班摄像头拍下成了都市传说",
+        ]}, ensure_ascii=False)
+    if "角色设计总监" in prompt:
+        return json.dumps({"look":
+            "一只成年小浣熊,体态圆润敦实,站起来约到成年人膝盖;灰褐色粗毛,眼圈与尾环"
+            "深黑,耳尖米白,左耳缺一小口(跨集认脸的记号);常年穿洗旧的红色针织围巾,"
+            "右爪总攥着一颗橡果;性格好奇又嘴硬,招牌动作是抱爪眯眼歪头打量。"},
+            ensure_ascii=False)
+    if "导演兼摄影指导" in prompt:
+        return json.dumps({
+            "title": "蜂蜜罐保卫战",
+            "prompt_cn": "黄昏杂货店,暖黄顶灯。穿红围巾的小浣熊蹲在第二层货架前,"
+                         "抱爪眯眼歪头打量最上层的蜂蜜罐;它踮起后爪扒住货架边缘,"
+                         "罐子一寸寸挪到边上,脱爪瞬间前爪在空中捞了两把,最后抱着罐子"
+                         "瘫坐在地,又警觉地左右看看,把罐子塞进围巾里。环境音:顶灯电流"
+                         "嗡鸣、罐子滚过木架的闷响、短促鼻息。",
+            "negative": "畸变,多手多脚,文字,水印",
+        }, ensure_ascii=False)
     if "深化成一个完整的故事概念" in prompt:
         return json.dumps(_CONCEPT, ensure_ascii=False)
     if "产出一批「故事引擎卡」" in prompt:

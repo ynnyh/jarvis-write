@@ -9,6 +9,7 @@ import {
 } from "../../animeApi";
 import { toast } from "../../ui/Toaster";
 import { errMsg } from "../../pollJob";
+import { CopyBtn } from "../../ui/copy";
 import { FilmPromptCard } from "../../ui/FilmPromptCard";
 import EmptyState from "../../ui/EmptyState";
 import { useJob } from "../../ui/useJob";
@@ -157,58 +158,73 @@ function CastSection({ series, meta, onSaved }: {
   return (
     <section className="card">
       <div className="card-head mb-2">
-        <h3 className="grow">固定卡司<span className="muted">主角全季固定;🔒 锁定的角色重出时原样保留</span></h3>
+        <h3 className="grow">固定卡司<span className="muted">主角全季固定;锁定的角色重出时原样保留</span></h3>
         <span className="badge mute">{dirLabel}</span>
         {cast.length > 0 && <button className="btn-sm" disabled={busy} onClick={() => void save()}>保存修改</button>}
         <button className={cast.length === 0 ? "primary" : "btn-sm"} disabled={busy}
-          title={cast.length === 0 ? "按一句话设定设计 1 主角 + 2-3 配角" : "重出卡司:🔒 角色不动,其余换新"}
+          title={cast.length === 0 ? "按一句话设定设计 1 主角 + 2-3 配角" : "重出卡司:锁定的角色不动,其余换新"}
           onClick={() => void generate()}>
           {busy ? "AI 设计中…" : cast.length === 0 ? "AI 设计卡司" : "AI 重出卡司"}
         </button>
       </div>
       <p className="card-desc">
         定妆描述是全系列一致性的锚——出提示词时逐字注入,配合同名角色的定妆参考图走
-        图生视频,形象就锁住了。每个角色可直接改文字;勾「🔒」后重出不覆盖。
+        图生视频,形象就锁住了。每个角色可直接改文字;点「锁定」后重出不覆盖;
+        「复制定妆词」贴进文生图工具就能出这个角色的定妆照。
       </p>
       {cast.length === 0 ? (
         <EmptyState>还没有卡司:点「AI 设计卡司」,或先把一句话设定改得更具体些。</EmptyState>
       ) : (
-        cast.map((c, i) => (
-          <div key={i} className="sub-summary">
-            <div className="card-head mb-2">
-              <b>{c.name}</b>
-              <span className={"badge" + (c.role === "主角" ? "" : " mute")}>{c.role}</span>
-              <span className="grow" />
-              <label className="shot-ticks" style={{ margin: 0 }}>
-                <input type="checkbox" checked={!!c.locked}
-                  onChange={(e) => edit(i, { locked: e.target.checked })} />
-                <span className="muted">🔒 锁定</span>
-              </label>
+        cast.map((c, i) => {
+          // 定妆照提示词:画风锚 + 定妆 + 服装成套,贴进文生图即可出定妆照
+          const lookPrompt = [
+            series.style_cn || dirLabel,
+            `${c.name}(${c.role})定妆:${c.appearance}`,
+            c.wardrobe ? `常驻服装与配饰:${c.wardrobe}` : "",
+          ].filter(Boolean).join("\n");
+          return (
+            <div key={i} className="sub-summary">
+              <div className="card-head mb-2">
+                <b>{c.name}</b>
+                <span className={"badge" + (c.role === "主角" ? "" : " mute")}>{c.role}</span>
+                <span className="grow" />
+                <CopyBtn text={lookPrompt} label="复制定妆词"
+                  title="画风+定妆+服装成套复制,贴进文生图出定妆照" />
+                <button type="button"
+                  className={"chip" + (c.locked ? " on" : "")}
+                  aria-pressed={!!c.locked}
+                  title="锁定后「AI 重出卡司」不会覆盖这个角色"
+                  onClick={() => edit(i, { locked: !c.locked })}>
+                  🔒 {c.locked ? "已锁定" : "锁定"}
+                </button>
+              </div>
+              <div className="form-grid">
+                <div className="field field-full">
+                  <label className="fl">
+                    定妆描述<span className="hint">外貌写到能认脸;提示词逐字用它</span>
+                  </label>
+                  <textarea rows={6} maxLength={800} value={c.appearance}
+                    onChange={(e) => edit(i, { appearance: e.target.value })} />
+                </div>
+                <div className="field">
+                  <label className="fl">常驻服装</label>
+                  <input maxLength={300} value={c.wardrobe}
+                    onChange={(e) => edit(i, { wardrobe: e.target.value })} />
+                </div>
+                <div className="field">
+                  <label className="fl">口头禅</label>
+                  <input maxLength={60} value={c.catchphrase}
+                    onChange={(e) => edit(i, { catchphrase: e.target.value })} />
+                </div>
+                <div className="field field-full">
+                  <label className="fl">性格神态</label>
+                  <input maxLength={300} value={c.personality}
+                    onChange={(e) => edit(i, { personality: e.target.value })} />
+                </div>
+              </div>
             </div>
-            <div className="form-grid">
-              <div className="field field-full">
-                <label className="fl">定妆描述<span className="hint">外貌写到能认脸;提示词逐字用它</span></label>
-                <textarea rows={2} maxLength={800} value={c.appearance}
-                  onChange={(e) => edit(i, { appearance: e.target.value })} />
-              </div>
-              <div className="field">
-                <label className="fl">常驻服装</label>
-                <input maxLength={300} value={c.wardrobe}
-                  onChange={(e) => edit(i, { wardrobe: e.target.value })} />
-              </div>
-              <div className="field">
-                <label className="fl">口头禅</label>
-                <input maxLength={60} value={c.catchphrase}
-                  onChange={(e) => edit(i, { catchphrase: e.target.value })} />
-              </div>
-              <div className="field field-full">
-                <label className="fl">性格神态</label>
-                <input maxLength={300} value={c.personality}
-                  onChange={(e) => edit(i, { personality: e.target.value })} />
-              </div>
-            </div>
-          </div>
-        ))
+          );
+        })
       )}
     </section>
   );
@@ -260,7 +276,7 @@ function EpisodeCreator({ sid, hasCast, onCreated }: {
         </button>
       </div>
       {ideas.length > 0 && (
-        <div className="chips" style={{ marginTop: 6 }}>
+        <div className="chips ideas" style={{ marginTop: 6 }}>
           {ideas.map((p, i) => (
             <button key={i} type="button" className="chip" title={p}
               onClick={() => setPremise(p)}>{p}</button>

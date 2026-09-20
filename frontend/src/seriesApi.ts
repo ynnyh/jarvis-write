@@ -66,6 +66,14 @@ export const seriesApi = {
   draftLook: (brief: string, direction: string, style_hints = "") =>
     req<{ look: string }>("POST", "/api/series/characters/draft-look",
       { brief, direction, style_hints }, LLM_TIMEOUT),
+  /** 没灵感:AI 出 3 个固定主角点子(选中由前端回填表单,不落库) */
+  suggestCharacter: (direction: string, style_hints = "") =>
+    req<{ ideas: { name: string; brief: string }[] }>(
+      "POST", "/api/series/suggest-character", { direction, style_hints }, LLM_TIMEOUT),
+  /** 没灵感:AI 出 3 个下一集剧情点子(贴定妆形象,避开已用剧情;不落库) */
+  suggestPlot: (cid: number) =>
+    req<{ plots: string[] }>(
+      "POST", `/api/series/characters/${cid}/suggest-plot`, {}, LLM_TIMEOUT),
   createEpisode: (cid: number, plot: string, duration_s?: number) =>
     req<{ episode_row: SeriesEpisode }>("POST",
       `/api/series/characters/${cid}/episodes`, { plot, duration_s }),

@@ -42,6 +42,13 @@
 .badge.mute { background: var(--surface-2); color: var(--text-2); }
 
 .chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+/* 长文本点子(设定/角色/剧情点子):竖排全宽、文字可换行——药丸 chip 装长句,
+   手机上一条就横着溢出屏幕,根本读不到(用户实测) */
+.chips.ideas { flex-direction: column; gap: 6px; }
+.chips.ideas .chip {
+  width: 100%; text-align: left; white-space: normal;
+  border-radius: var(--r-md); padding: 8px 12px; line-height: 1.5;
+}
 .chip {
   padding: 6px 14px;
   border-radius: var(--r-full);

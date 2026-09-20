@@ -16,12 +16,20 @@ from .common import (
     episode_dict,
     norm_output,
 )
-from .generate import SeriesError, draft_look, generate_episode
+from .generate import (
+    SeriesError,
+    draft_look,
+    generate_episode,
+    suggest_character_ideas,
+    suggest_plots,
+)
 
 __all__ = [
     "SeriesError",
     "draft_look",
     "generate_episode",
+    "suggest_character_ideas",
+    "suggest_plots",
     "character_dict",
     "episode_dict",
     "norm_output",

@@ -7,6 +7,7 @@ GET    /api/series/characters                      我的角色列表
 POST   /api/series/characters                      新建角色 {name, look, direction, default_duration_s, style_hints}
 POST   /api/series/characters/draft-look           AI 代写定妆草稿 {brief, direction, style_hints}(不落库)
 GET    /api/series/characters/{cid}                角色详情(含剧集列表)
+POST   /api/series/characters/{cid}/suggest-plot   没灵感:AI 出 3 个下一集剧情点子(同步)
 PATCH  /api/series/characters/{cid}                改档案
 DELETE /api/series/characters/{cid}                删角色(级联删剧集+清参考图;生成中 409)
 POST   /api/series/characters/{cid}/episodes       新建一集 {plot, duration_s}
@@ -47,6 +48,8 @@ from app.engines.series import (
     episode_dict,
     generate_episode,
     norm_output,
+    suggest_character_ideas,
+    suggest_plots,
 )
 from app.jobs import list_running, spawn_job
 
@@ -76,6 +79,12 @@ class CharacterPatchIn(BaseModel):
 class DraftLookIn(BaseModel):
     """AI 代写定妆草稿:不落库,返回草稿由用户确认后再保存。"""
     brief: str = Field(max_length=BRIEF_MAX)
+    direction: str = "render3d"
+    style_hints: str = ""
+
+
+class SuggestIdeaIn(BaseModel):
+    """没灵感:AI 出 3 个固定主角点子(选中由前端回填表单,不落库)。"""
     direction: str = "render3d"
     style_hints: str = ""
 
@@ -205,6 +214,19 @@ async def create_character(body: CharacterCreateIn, db: Session = Depends(get_db
     return {"character_row": character_dict(row)}
 
 
+@router.post("/suggest-character")
+async def suggest_character_api(body: SuggestIdeaIn):
+    """没灵感:AI 出 3 个固定主角点子(name+brief,不落库)。"""
+    _check_direction(body.direction)
+    try:
+        ideas = await suggest_character_ideas(
+            body.direction, clip(body.style_hints, HINTS_MAX * 2)
+        )
+    except SeriesError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ideas": ideas}
+
+
 @router.post("/characters/draft-look")
 async def draft_look_api(body: DraftLookIn):
     """一句话概念 → 定妆草稿。同步短调用(单发 LLM,前端给长超时);不落库。"""
@@ -229,6 +251,22 @@ async def get_character(cid: int, db: Session = Depends(get_db)):
         .all()
     )
     return {"character_row": character_dict(row), "episodes": [episode_dict(e) for e in episodes]}
+
+
+@router.post("/characters/{cid}/suggest-plot")
+async def suggest_plot_api(cid: int, db: Session = Depends(get_db)):
+    """没灵感:AI 出 3 个下一集剧情点子(贴定妆形象,避开已用剧情;不落库)。"""
+    row = _get_character(db, cid)
+    used = [
+        e.plot
+        for e in db.query(SeriesEpisode)
+        .filter(SeriesEpisode.character_id == cid, SeriesEpisode.plot != "")
+        .all()
+    ]
+    try:
+        return {"plots": await suggest_plots(row, used=used)}
+    except SeriesError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.patch("/characters/{cid}")

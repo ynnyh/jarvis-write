@@ -23,11 +23,19 @@ from app.engines.consistency.extractor import parse_llm_json
 from app.engines.media.anchors import merge_negative
 from app.engines.media.directions import direction_directive
 from app.engines.series.common import (
+    BRIEF_MAX,
     LOOK_MAX,
+    NAME_MAX,
+    PLOT_MAX,
     norm_output,
 )
 from app.llm.router import Task, get_adapter_for
-from app.prompts.series import SERIES_EPISODE_PROMPT, SERIES_LOOK_PROMPT
+from app.prompts.series import (
+    SERIES_EPISODE_PROMPT,
+    SERIES_IDEA_PROMPT,
+    SERIES_LOOK_PROMPT,
+    SERIES_PLOT_PROMPT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +51,71 @@ def _hints_block(style_hints: str) -> str:
     if not hints:
         return ""
     return f"【氛围关键词(必须自然融入画面与光线)】{hints}\n"
+
+
+# =============== 没灵感?AI 出点子(主角概念 / 下一集剧情) ===============
+
+
+async def suggest_character_ideas(direction: str, style_hints: str = "") -> list[dict]:
+    """没灵感:出 3 个固定主角点子(name+brief),不落库——选中由前端回填表单,
+    之后照常「AI 代写定妆 → 建主角」。"""
+    prompt = SERIES_IDEA_PROMPT.format(
+        direction_directive=direction_directive(direction),
+        hints_block=_hints_block(style_hints),
+    )
+    last_err = ""
+    for attempt in range(1, _ATTEMPTS + 1):
+        try:
+            adapter = get_adapter_for(Task.SERIES_IDEA, timeout=300)
+            ideas = parse_llm_json(await adapter.ask(prompt)).get("ideas")
+            out: list[dict] = []
+            if isinstance(ideas, list):
+                for it in ideas[:6]:
+                    if not isinstance(it, dict):
+                        continue
+                    name = str(it.get("name") or "").strip()[:NAME_MAX]
+                    brief = str(it.get("brief") or "").strip()[:BRIEF_MAX]
+                    if name and brief and all(name != x["name"] for x in out):
+                        out.append({"name": name, "brief": brief})
+            if len(out) >= 3:
+                return out
+            last_err = f"能用的点子只有 {len(out)} 个"
+        except Exception as exc:  # noqa: BLE001 — 重试一次,再失败才上屏
+            last_err = str(exc)
+        logger.warning("主角点子第 %d/%d 次未成:%s", attempt, _ATTEMPTS, last_err)
+    raise SeriesError(f"主角点子没出好({last_err}),再点一次试试。")
+
+
+async def suggest_plots(character: SeriesCharacter, used: list[str] | None = None) -> list[str]:
+    """没灵感:按定妆形象出 3 个下一集剧情点子,避开已经用过的剧情。"""
+    look = (character.look or "").strip()
+    if not look:
+        raise SeriesError("这个主角还没有定妆描述——先写好(或让 AI 代写)再要剧情点子。")
+    used_lines = [str(u or "").strip() for u in (used or [])]
+    used_lines = [u for u in used_lines if u]
+    prompt = SERIES_PLOT_PROMPT.format(
+        look=look[:1200],
+        hints_block=_hints_block(character.style_hints),
+        used_block="\n".join(f"- {u}" for u in used_lines) if used_lines else "(还没有已用剧情)",
+    )
+    last_err = ""
+    for attempt in range(1, _ATTEMPTS + 1):
+        try:
+            adapter = get_adapter_for(Task.SERIES_IDEA, timeout=300)
+            plots = parse_llm_json(await adapter.ask(prompt)).get("plots")
+            out: list[str] = []
+            if isinstance(plots, list):
+                for p in plots[:6]:
+                    text = str(p or "").strip()[:PLOT_MAX]
+                    if text and text not in out:
+                        out.append(text)
+            if len(out) >= 3:
+                return out
+            last_err = f"能用的点子只有 {len(out)} 个"
+        except Exception as exc:  # noqa: BLE001 — 重试一次,再失败才上屏
+            last_err = str(exc)
+        logger.warning("剧情点子第 %d/%d 次未成:%s", attempt, _ATTEMPTS, last_err)
+    raise SeriesError(f"剧情点子没出好({last_err}),再点一次试试。")
 
 
 async def draft_look(brief: str, direction: str, style_hints: str = "") -> str:

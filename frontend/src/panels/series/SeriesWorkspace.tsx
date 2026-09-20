@@ -32,6 +32,9 @@ export default function SeriesWorkspace({ cid }: { cid: number }) {
   const [plot, setPlot] = useState("");
   const [duration, setDuration] = useState(10);
   const [creating, setCreating] = useState(false);
+  // 没灵感:AI 出的下一集剧情点子(点一条回填剧情框)
+  const [ideas, setIdeas] = useState<string[]>([]);
+  const [ideaBusy, setIdeaBusy] = useState(false);
   // ---- 编辑已生成输出(eid | null) ----
   const [editEid, setEditEid] = useState<number | null>(null);
   const [editOut, setEditOut] = useState({ title: "", prompt_cn: "", negative: "" });
@@ -119,6 +122,14 @@ export default function SeriesWorkspace({ cid }: { cid: number }) {
   }
 
   // ================= 剧集 =================
+  async function askIdeas() {
+    setIdeaBusy(true);
+    try {
+      setIdeas((await seriesApi.suggestPlot(cid)).plots);
+      toast.ok("出了三个剧情点子", "点一条回填剧情框,再建一集");
+    } catch (e) { toast.err("出点子失败", errMsg(e)); } finally { setIdeaBusy(false); }
+  }
+
   async function createEpisode() {
     if (!plot.trim()) { toast.err("先写这一集的剧情", "一句话到一段话都行"); return; }
     setCreating(true);
@@ -305,6 +316,20 @@ export default function SeriesWorkspace({ cid }: { cid: number }) {
             <textarea id="sw-plot" rows={3} maxLength={1000} value={plot}
               placeholder="如「小浣熊盯上了货架最上层的蜂蜜罐,踮脚、晃罐、最后一屁股坐在地上稳稳接住」"
               onChange={(e) => setPlot(e.target.value)} />
+            <div className="form-actions" style={{ margin: 0, marginTop: 6 }}>
+              <button className="btn-sm" disabled={ideaBusy} onClick={() => void askIdeas()}>
+                {ideaBusy ? "AI 出点子中…" : "🎲 没灵感?AI 出三个剧情点子"}
+              </button>
+              {ideas.length > 0 && <span className="form-actions-tip">点一条回填剧情框</span>}
+            </div>
+            {ideas.length > 0 && (
+              <div className="chips ideas" style={{ marginTop: 6 }}>
+                {ideas.map((p, i) => (
+                  <button key={i} type="button" className="chip" title={p}
+                    onClick={() => setPlot(p)}>{p}</button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="field">
             <label className="fl" htmlFor="sw-ep-dur">时长(秒)</label>

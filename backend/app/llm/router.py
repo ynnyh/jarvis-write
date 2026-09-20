@@ -52,6 +52,7 @@ class Task(str, Enum):
     PROMO_CHUNKS = "promo_chunks"       # 宣传片生成切段(视频提示词)
     CLIPS_BATCH = "clips_batch"         # 情绪短片批产(三本子一次出)
     BIRTHDAY_BATCH = "birthday_batch"   # 生日祝福批产(三本子一次出)
+    SERIES_IDEA = "series_idea"         # 角色系列·没灵感时 AI 出点子(主角概念/集剧情)
     SERIES_LOOK = "series_look"         # 角色系列·AI 代写定妆描述
     SERIES_PROMPT = "series_prompt"     # 角色系列·单集成片提示词(篇幅自由)
     ANIME_CAST = "anime_cast"           # 动画短剧·固定卡司设计(1 主角+配角)
@@ -122,6 +123,7 @@ _TASK_TIER: dict[Task, Tier] = {
     # 生日祝福批产:寿星定制要才气与专属梗,同情绪短片上强档
     Task.BIRTHDAY_BATCH: Tier.QUALITY,
     # 角色系列:定妆是全系列一致性锚求稳,单集提示词要细节密度与镜头感
+    Task.SERIES_IDEA: Tier.QUALITY,
     Task.SERIES_LOOK: Tier.QUALITY,
     Task.SERIES_PROMPT: Tier.QUALITY,
     # 动画短剧:卡司是全季一致性锚、出梗要才气、分镜与提示词是结构化长输出,全上强档
@@ -179,7 +181,8 @@ _TASK_TEMPERATURE: dict[Task, float] = {
     Task.PROMO_CHUNKS: 0.5,    # 运动叙事要连贯
     Task.CLIPS_BATCH: 0.85,   # 情绪短片要才气与钩子
     Task.BIRTHDAY_BATCH: 0.85,  # 生日祝福要专属梗与钩子,同样要发散
-    # 角色系列:定妆求稳(锚定全系列形象),单集提示词是结构化长输出也要克制
+    # 角色系列:出点子要发散,定妆求稳(锚定全系列形象),单集提示词克制
+    Task.SERIES_IDEA: 0.9,
     Task.SERIES_LOOK: 0.5,
     Task.SERIES_PROMPT: 0.6,
     # 动画短剧:出梗纲要才气(高温),聊天是搭档语感(偏高),卡司稳定可复现、
@@ -233,11 +236,12 @@ _TASK_MAX_TOKENS: dict[Task, int] = {
     Task.BIRTHDAY_BATCH: 8000,
     # 角色系列:定妆与单集提示词篇幅自由(允许上千字),推理模型思考再吃一截,
     # 4000 会把长提示词砍在半句话上(与 DRAMA_ASSET 同一教训)
+    Task.SERIES_IDEA: 3000,
     Task.SERIES_LOOK: 6000,
     Task.SERIES_PROMPT: 8000,
-    # 动画短剧:卡司 3-4 人×六项定妆、梗纲 3×四拍、分镜 15-30 镜 JSON、
-    # 提示词每段 ≥400 字×4-6 段——都是长输出,给足预算防截断(同一教训)
-    Task.ANIME_CAST: 6000,
+    # 动画短剧:卡司 3-4 人×定妆每人不低于 100 字、梗纲 3×四拍、分镜 15-30 镜
+    # JSON、提示词每段 ≥400 字×4-6 段——都是长输出,给足预算防截断(同一教训)
+    Task.ANIME_CAST: 8192,
     Task.ANIME_SUGGEST: 3000,
     Task.ANIME_CHAT: 4000,
     Task.ANIME_TAKES: 6000,

@@ -122,7 +122,7 @@ function SeriesList() {
               {ideas.length > 0 && <span className="form-actions-tip">点一条直接填进上面</span>}
             </div>
             {ideas.length > 0 && (
-              <div className="chips" style={{ marginTop: 6 }}>
+              <div className="chips ideas" style={{ marginTop: 6 }}>
                 {ideas.map((p, i) => (
                   <button key={i} type="button" className="chip"
                     title={p} onClick={() => setPremise(p)}>{p}</button>

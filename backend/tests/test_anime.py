@@ -220,6 +220,9 @@ def test_anime_cast_generate_and_locked_keep(client):
     assert len(cast) == 3
     heroes = [c for c in cast if c["role"] == "主角"]
     assert len(heroes) == 1 and heroes[0]["name"] == "阿丸"
+    # 定妆密度口径(对齐系列短片线):拿去文生图就能出定妆照,每人不少于 100 字
+    cast_prompt = adapter.prompts[0]
+    assert "定妆照" in cast_prompt and "100 字" in cast_prompt
 
     # 锁定阿丸后重出:阿丸原样保留,新提案只补不锁的位子
     cast[0]["locked"] = True

@@ -358,3 +358,49 @@ def test_reference_image_ops(client):
     # 删上传的那张(文件连删),再读 404
     assert client.delete(f"/api/series/characters/{cid}/reference/0", headers=headers).status_code == 200
     assert client.get(f"/api/series/characters/{cid}/reference/0", headers=headers).status_code == 404
+
+
+# =============== 没灵感:AI 出点子(主角概念 / 下一集剧情) ===============
+
+
+def test_series_suggest_character_ideas(client):
+    headers = _auth(client, "sr_idea")
+    stub = _StubAdapter([{"ideas": [
+        {"name": "茶壶精", "brief": "怕水的方块茶壶精在水族馆打工,天天和漏水危机斗智斗勇"},
+        {"name": "老扫帚", "brief": "退休老扫帚在魔法快递站当学徒,扫地魔法专治乱塞包裹"},
+        {"name": "饭团丸", "brief": "饭团精灵开深夜食堂,专招待加班到变形的点心精"},
+    ]}])
+    with patch("app.engines.series.generate.get_adapter_for", return_value=stub):
+        r = client.post("/api/series/suggest-character", headers=headers,
+                        json={"direction": "chibi"})
+    assert r.status_code == 200, r.text
+    ideas = r.json()["ideas"]
+    assert len(ideas) == 3 and ideas[0]["name"] == "茶壶精"
+    assert all(i["name"] and i["brief"] for i in ideas)
+    # 画风方向进原料
+    assert "Q版" in stub.prompts[0]
+    # 方向非法:400
+    r = client.post("/api/series/suggest-character", headers=headers,
+                    json={"direction": "auto"})
+    assert r.status_code == 400
+
+
+def test_series_suggest_plots(client):
+    headers = _auth(client, "sr_plot")
+    r = client.post("/api/series/characters", headers=headers, json=_BODY)
+    assert r.status_code == 200, r.text
+    cid = r.json()["character_row"]["id"]
+
+    stub = _StubAdapter([{"plots": [
+        "小浣熊盯上货架最上层的蜂蜜罐,踮脚晃罐,一屁股坐地上稳稳接住",
+        "收银台抽屉卡住,小浣熊用橡果当垫片修好,顺手多收了一颗小费",
+        "打烊后小浣熊给每件商品道晚安,被夜班摄像头拍下成了都市传说",
+    ]}])
+    with patch("app.engines.series.generate.get_adapter_for", return_value=stub):
+        r = client.post(f"/api/series/characters/{cid}/suggest-plot", headers=headers)
+    assert r.status_code == 200, r.text
+    plots = r.json()["plots"]
+    assert len(plots) == 3 and len(set(plots)) == 3
+    # 原料注入:定妆描述与「不许重复」避重指令进提示词
+    assert "左耳缺一小口" in stub.prompts[0]
+    assert "不许重复" in stub.prompts[0]
