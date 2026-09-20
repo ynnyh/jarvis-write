@@ -287,7 +287,7 @@ function EpisodePanel({ series, episode, meta, onEpisode }: {
     } catch (e) { toast.err("这轮没接住", errMsg(e)); } finally { setChatBusy(false); }
   }
 
-  async function confirm() {
+  async function confirmNow() {
     try {
       onEpisode((await animeApi.confirmSynopsis(episode.id)).episode);
       toast.ok("简介已确认", "分镜解锁了;再聊天或改简介会重新上锁");
@@ -385,7 +385,7 @@ function EpisodePanel({ series, episode, meta, onEpisode }: {
               <b>当前简介{confirmed ? "" : "(草稿,还没拍板)"}</b>
               <span className="grow" />
               {!confirmed && (
-                <button className="btn-sm primary" onClick={() => void confirm()}>
+                <button className="btn-sm primary" onClick={() => void confirmNow()}>
                   ✓ 简介就按这个来
                 </button>
               )}
