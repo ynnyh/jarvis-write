@@ -61,6 +61,14 @@ class _FakeAdapter:
 
     async def ask(self, prompt, system=None):
         self.prompts.append(prompt)
+        if "动画策划" in prompt:
+            return json.dumps({"premises": [
+                "点子A:会做菜的饭团在深夜食堂", "点子B:怕水的茶壶在水族馆打工",
+                "点子C:退休扫帚在魔法快递站当学徒"]}, ensure_ascii=False)
+        if "「下一集」的点子" in prompt:
+            return json.dumps({"premises": [
+                "点子甲:停电夜做蛋糕", "点子乙:跳跳糖汤锅舞会", "点子丙:锅盖侠都市传说"]},
+                ensure_ascii=False)
         if "动画角色设计总监" in prompt:
             return json.dumps({"cast": _CAST_JSON}, ensure_ascii=False)
         if "动画编剧搭档" in prompt:
@@ -240,6 +248,45 @@ def test_anime_episode_requires_cast(client):
     sid = _mk_series(client, headers)
     r = client.post(f"/api/anime/{sid}/episodes", headers=headers, json={"premise": "值日"})
     assert r.status_code == 400 and "卡司" in r.json()["detail"]
+
+
+# =============== 没灵感:AI 出点子(系列设定 / 下一集命题) ===============
+
+
+def test_anime_suggest_series_premises(client):
+    headers = _auth(client, "anime_idea")
+    adapter = _FakeAdapter(_FILM_REPLY)
+    with patch("app.engines.anime.episodes.get_adapter_for", return_value=adapter):
+        r = client.post("/api/anime/suggest-premise", headers=headers, json={"genre": "comedy"})
+    assert r.status_code == 200, r.text
+    premises = r.json()["premises"]
+    assert len(premises) == 3 and len(set(premises)) == 3
+    assert all(p for p in premises)
+    # 类型不在目录:400
+    r = client.post("/api/anime/suggest-premise", headers=headers, json={"genre": "宫斗"})
+    assert r.status_code == 400
+
+
+def test_anime_suggest_episode_premises_requires_cast(client):
+    headers = _auth(client, "anime_epidea")
+    sid = _mk_series(client, headers)
+    r = client.post(f"/api/anime/{sid}/suggest-episode", headers=headers)
+    assert r.status_code == 400 and "卡司" in r.json()["detail"]
+
+
+def test_anime_suggest_episode_premises(client):
+    headers = _auth(client, "anime_epidea2")
+    adapter = _FakeAdapter(_FILM_REPLY)
+    sid = _cast_ready_series(client, headers, adapter)
+    with patch("app.engines.anime.episodes.get_adapter_for", return_value=adapter):
+        r = client.post(f"/api/anime/{sid}/suggest-episode", headers=headers)
+    assert r.status_code == 200, r.text
+    premises = r.json()["premises"]
+    assert len(premises) == 3 and len(set(premises)) == 3
+    # 原料注入:系列设定、卡司、已用命题(避重)都进提示词
+    prompt = adapter.prompts[-1]
+    assert "饭团小厨房" in prompt or "阿丸" in prompt
+    assert "不许重复" in prompt
 
 
 # =============== 对话式简介:聊天 → 确认 → 分镜门控 ===============

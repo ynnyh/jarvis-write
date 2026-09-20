@@ -91,6 +91,12 @@ export const animeApi = {
   }) => req<{ series: AnimeSeries }>("PATCH", `/api/anime/${id}`, body),
   remove: (id: number) => req<{ ok: boolean }>("DELETE", `/api/anime/${id}`),
 
+  // ---- 没灵感:AI 出点子(不落库,选中由前端回填) ----
+  suggestPremise: (genre: string) =>
+    req<{ premises: string[] }>("POST", "/api/anime/suggest-premise", { genre }, LLM_TIMEOUT),
+  suggestEpisode: (id: number) =>
+    req<{ premises: string[] }>("POST", `/api/anime/${id}/suggest-episode`, {}, LLM_TIMEOUT),
+
   // ---- 卡司 ----
   buildCast: (id: number) =>
     req<{ job_id: string }>("POST", `/api/anime/${id}/cast`, {}, LLM_TIMEOUT),

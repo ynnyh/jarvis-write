@@ -144,7 +144,19 @@ def reply_for(prompt: str) -> str:
     # 用「请求章节约」的特征串判别蓝图,骨架再按 segments 关键字接住
     if re.search(r"继续生成第\s*\d+\s*章|生成第\s*1\s*章到第\s*\d+\s*章", prompt):
         return _blueprint_text(prompt)
-    # ---- 动画短剧(卡司/简介聊天/梗纲/分镜/整集分段提示词)----
+    # ---- 动画短剧(设定点子/集点子/卡司/简介聊天/梗纲/分镜/整集分段提示词)----
+    if "动画策划" in prompt:
+        return json.dumps({"premises": [
+            "饭团精灵阿丸的深夜食堂,专门招待加班到变形的点心精",
+            "怕水的方块茶壶精在水族馆打工,天天和'漏水'危机斗智斗勇",
+            "退休的老扫帚在魔法快递站当学徒,最强扫地魔法专治乱塞包裹",
+        ]}, ensure_ascii=False)
+    if "「下一集」的点子" in prompt:
+        return json.dumps({"premises": [
+            "停电夜紧急做蛋糕,阿丸靠萤火虫点心精的光完成翻面绝技",
+            "豆包误把跳跳糖倒进汤锅,全场客人跟着气泡节拍跳起舞",
+            "锅盖打盹滚进蒸笼,被当成'神秘锅盖侠'在全城传闻里越传越玄",
+        ]}, ensure_ascii=False)
     if "动画角色设计总监" in prompt:
         return json.dumps({"cast": _ANIME_CAST}, ensure_ascii=False)
     if "动画编剧搭档" in prompt:

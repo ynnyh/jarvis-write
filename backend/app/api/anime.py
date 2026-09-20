@@ -3,6 +3,7 @@
 """动画短剧接口:固定卡司的 60-90 秒原创系列动画,类型自选,按集出梗出提示词。
 
 GET    /api/anime/meta                                    类型/画风/时长档/切段目录
+POST   /api/anime/suggest-premise                         没灵感:AI 出三个系列设定点子(同步)
 GET    /api/anime                                         我的系列列表
 POST   /api/anime                                         建系列
 GET    /api/anime/{sid}                                   系列详情(含剧集列表)
@@ -11,6 +12,7 @@ DELETE /api/anime/{sid}                                   删系列(级联删集
 POST   /api/anime/{sid}/cast                              AI 设计卡司(job;locked 保留)
 PUT    /api/anime/{sid}/cast                              手改卡司保存
 POST   /api/anime/{sid}/episodes                          新建集 {premise}
+POST   /api/anime/{sid}/suggest-episode                   没灵感:AI 出三个下一集命题(同步)
 PATCH  /api/anime/episodes/{eid}                          改命题/标题
 DELETE /api/anime/episodes/{eid}                          删集(生成中 409)
 POST   /api/anime/episodes/{eid}/takes                    出三梗纲(job,没点子的捷径)
@@ -53,6 +55,8 @@ from app.engines.anime import (
     save_cast,
     save_shots,
     series_dict,
+    suggest_episode_premises,
+    suggest_series_premises,
     valid_genres,
 )
 from app.engines.media.directions import DIRECTIONS, VALID_DIRECTIONS, direction_directive
@@ -64,6 +68,11 @@ router = APIRouter(prefix="/api/anime", tags=["anime"], dependencies=[Depends(ge
 
 
 # ---- 入参模型 ---------------------------------------------
+
+class SuggestPremiseIn(BaseModel):
+    """系列设定点子:按类型出;选一个填进设定框,仍走正常建系列流程。"""
+    genre: str = "comedy"
+
 
 class SeriesCreateIn(BaseModel):
     title: str = Field(default="", max_length=TITLE_MAX)
@@ -193,6 +202,16 @@ def meta():
     }
 
 
+@router.post("/suggest-premise")
+async def suggest_series_premises_route(body: SuggestPremiseIn):
+    """没灵感:按类型出 3 个一句话系列设定点子(不落库,选中由前端回填)。"""
+    genre = _check_genre(body.genre)
+    try:
+        return {"premises": await suggest_series_premises(genre)}
+    except AnimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.get("")
 def list_series(db: Session = Depends(get_db)):
     from app.auth import current_user_id
@@ -305,6 +324,22 @@ def put_cast(sid: int, body: CastIn, db: Session = Depends(get_db)):
 
 
 # ---- 端点:剧集 ---------------------------------------------
+
+@router.post("/{sid}/suggest-episode")
+async def suggest_episode_premises_route(sid: int, db: Session = Depends(get_db)):
+    """没灵感:按卡司+类型出 3 个下一集命题(避开已用过的;不落库,选中由前端回填)。"""
+    series = _get_series(db, sid)
+    used = [
+        row.premise
+        for row in db.query(AnimeEpisode)
+        .filter(AnimeEpisode.series_id == sid, AnimeEpisode.premise != "")
+        .all()
+    ]
+    try:
+        return {"premises": await suggest_episode_premises(series, used=used)}
+    except AnimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 @router.post("/{sid}/episodes")
 def create_episode(sid: int, body: EpisodeCreateIn, db: Session = Depends(get_db)):

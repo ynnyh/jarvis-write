@@ -55,6 +55,7 @@ class Task(str, Enum):
     SERIES_LOOK = "series_look"         # 角色系列·AI 代写定妆描述
     SERIES_PROMPT = "series_prompt"     # 角色系列·单集成片提示词(篇幅自由)
     ANIME_CAST = "anime_cast"           # 动画短剧·固定卡司设计(1 主角+配角)
+    ANIME_SUGGEST = "anime_suggest"     # 动画短剧·没灵感时 AI 出点子(设定/集命题)
     ANIME_CHAT = "anime_chat"           # 动画短剧·简介聊天(点子补充完善,JSON)
     ANIME_TAKES = "anime_takes"         # 动画短剧·梗纲三选一(类型节奏库)
     ANIME_SHOTS = "anime_shots"         # 动画短剧·分镜展开(每镜 2-5 秒,JSON)
@@ -125,6 +126,7 @@ _TASK_TIER: dict[Task, Tier] = {
     Task.SERIES_PROMPT: Tier.QUALITY,
     # 动画短剧:卡司是全季一致性锚、出梗要才气、分镜与提示词是结构化长输出,全上强档
     Task.ANIME_CAST: Tier.QUALITY,
+    Task.ANIME_SUGGEST: Tier.QUALITY,
     Task.ANIME_CHAT: Tier.QUALITY,
     Task.ANIME_TAKES: Tier.QUALITY,
     Task.ANIME_SHOTS: Tier.QUALITY,
@@ -183,6 +185,7 @@ _TASK_TEMPERATURE: dict[Task, float] = {
     # 动画短剧:出梗纲要才气(高温),聊天是搭档语感(偏高),卡司稳定可复现、
     # 分镜/提示词结构化求稳(低温)
     Task.ANIME_CAST: 0.6,
+    Task.ANIME_SUGGEST: 0.95,
     Task.ANIME_CHAT: 0.8,
     Task.ANIME_TAKES: 0.9,
     Task.ANIME_SHOTS: 0.5,
@@ -235,6 +238,7 @@ _TASK_MAX_TOKENS: dict[Task, int] = {
     # 动画短剧:卡司 3-4 人×六项定妆、梗纲 3×四拍、分镜 15-30 镜 JSON、
     # 提示词每段 ≥400 字×4-6 段——都是长输出,给足预算防截断(同一教训)
     Task.ANIME_CAST: 6000,
+    Task.ANIME_SUGGEST: 3000,
     Task.ANIME_CHAT: 4000,
     Task.ANIME_TAKES: 6000,
     Task.ANIME_SHOTS: 12000,

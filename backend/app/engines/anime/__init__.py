@@ -1,6 +1,6 @@
 # app/engines/anime/__init__.py
 # -*- coding: utf-8 -*-
-"""动画短剧引擎:固定卡司的原创系列动画,按集出梗纲三选一/分镜/整集分段提示词。"""
+"""动画短剧引擎:固定卡司的原创系列动画,按集出点子/聊简介/分镜/整集分段提示词。"""
 from app.engines.anime.common import (
     MAX_SHOTS,
     PREMISE_MAX,
@@ -23,6 +23,8 @@ from app.engines.anime.episodes import (
     pick_take,
     save_cast,
     save_shots,
+    suggest_episode_premises,
+    suggest_series_premises,
 )
 
 __all__ = [
@@ -35,7 +37,6 @@ __all__ = [
     "build_film_prompt",
     "confirm_synopsis",
     "episode_dict",
-    "episode_dict",
     "gen_shots",
     "gen_takes",
     "genre_of",
@@ -45,5 +46,7 @@ __all__ = [
     "save_cast",
     "save_shots",
     "series_dict",
+    "suggest_episode_premises",
+    "suggest_series_premises",
     "valid_genres",
 ]

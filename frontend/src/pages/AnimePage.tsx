@@ -26,6 +26,9 @@ function SeriesList() {
   const [direction, setDirection] = useState("chibi");
   const [episodeS, setEpisodeS] = useState(60);
   const [creating, setCreating] = useState(false);
+  // 没灵感:AI 出的系列设定点子(点一条回填设定框)
+  const [ideas, setIdeas] = useState<string[]>([]);
+  const [ideaBusy, setIdeaBusy] = useState(false);
 
   const reload = useCallback(async () => {
     try { setRows((await animeApi.list()).series); }
@@ -34,8 +37,15 @@ function SeriesList() {
   useEffect(() => {
     void reload();
     animeApi.meta().then(setMeta).catch(() => setMeta(null));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reload]);
+
+  async function askIdeas() {
+    setIdeaBusy(true);
+    try {
+      setIdeas((await animeApi.suggestPremise(genre)).premises);
+      toast.ok("出了三个点子", "点一条填进设定框;不满意换个类型再出");
+    } catch (e) { toast.err("出点子失败", errMsg(e)); } finally { setIdeaBusy(false); }
+  }
 
   async function create() {
     if (!premise.trim()) {
@@ -105,6 +115,20 @@ function SeriesList() {
             <input id="an-premise" value={premise} maxLength={500}
               placeholder="如「饭团精灵阿丸的厨房日常,认真撞上不靠谱」"
               onChange={(e) => setPremise(e.target.value)} />
+            <div className="form-actions" style={{ margin: 0, marginTop: 6 }}>
+              <button className="btn-sm" disabled={ideaBusy} onClick={() => void askIdeas()}>
+                {ideaBusy ? "AI 出点子中…" : "🎲 没灵感?AI 出三个点子"}
+              </button>
+              {ideas.length > 0 && <span className="form-actions-tip">点一条直接填进上面</span>}
+            </div>
+            {ideas.length > 0 && (
+              <div className="chips" style={{ marginTop: 6 }}>
+                {ideas.map((p, i) => (
+                  <button key={i} type="button" className="chip"
+                    title={p} onClick={() => setPremise(p)}>{p}</button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="field field-full">
             <span className="fl">类型<span className="hint">决定每集的节奏套路,出梗时按库展开</span></span>
@@ -135,8 +159,7 @@ function SeriesList() {
             {creating ? "创建中…" : "建系列"}
           </button>
           <span className="form-actions-tip">建好先别急着写:先让 AI 把卡司定下来,形象才能全季不漂。</span>
-        </div>
-      </section>
+        </div>      </section>
 
       {rows === null ? <p className="muted">加载中…</p> : rows.length === 0 ? (
         <EmptyState>还没有系列。上面建第一个,定好卡司就能出第一集。</EmptyState>

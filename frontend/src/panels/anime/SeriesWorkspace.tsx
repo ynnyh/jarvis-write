@@ -220,6 +220,17 @@ function EpisodeCreator({ sid, hasCast, onCreated }: {
 }) {
   const [premise, setPremise] = useState("");
   const [busy, setBusy] = useState(false);
+  // 没灵感:AI 出的下一集命题(点一条回填命题框)
+  const [ideas, setIdeas] = useState<string[]>([]);
+  const [ideaBusy, setIdeaBusy] = useState(false);
+
+  async function askIdeas() {
+    setIdeaBusy(true);
+    try {
+      setIdeas((await animeApi.suggestEpisode(sid)).premises);
+      toast.ok("出了三个点子", "点一条填进命题框,也可以直接照它聊简介");
+    } catch (e) { toast.err("出点子失败", errMsg(e)); } finally { setIdeaBusy(false); }
+  }
 
   async function create() {
     if (!hasCast) { toast.err("先定卡司再开集", "卡司是每集出梗的班底;先点「AI 设计卡司」"); return; }
@@ -229,6 +240,7 @@ function EpisodeCreator({ sid, hasCast, onCreated }: {
       toast.ok("新的一集已开", "把你的点子告诉 AI,聊出简介再往下走");
       onCreated(r.episode);
       setPremise("");
+      setIdeas([]);
     } catch (e) { toast.err("开集失败", errMsg(e)); } finally { setBusy(false); }
   }
 
@@ -239,10 +251,22 @@ function EpisodeCreator({ sid, hasCast, onCreated }: {
           placeholder="本集情境命题,如「阿丸第一次掌勺年夜饭」(留空 = AI 自拟)"
           onChange={(e) => setPremise(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void create(); } }} />
+        <button disabled={ideaBusy} title="没灵感?让 AI 按卡司与类型出三个下一集点子"
+          onClick={() => void askIdeas()}>
+          {ideaBusy ? "AI 出点子中…" : "🎲 AI 出点子"}
+        </button>
         <button className="primary" disabled={busy} onClick={() => void create()}>
           {busy ? "开集中…" : "＋ 新开一集"}
         </button>
       </div>
+      {ideas.length > 0 && (
+        <div className="chips" style={{ marginTop: 6 }}>
+          {ideas.map((p, i) => (
+            <button key={i} type="button" className="chip" title={p}
+              onClick={() => setPremise(p)}>{p}</button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

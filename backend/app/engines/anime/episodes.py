@@ -29,6 +29,8 @@ from app.engines.media.directions import direction_directive
 from app.llm.router import Task, get_adapter_for
 from app.prompts.anime import (
     ANIME_CAST_PROMPT,
+    ANIME_EPISODE_SUGGEST_PROMPT,
+    ANIME_PREMISE_SUGGEST_PROMPT,
     ANIME_SEGMENT_PROMPT_TEMPLATE,
     ANIME_SHOTS_PROMPT,
     ANIME_SYNOPSIS_CHAT_PROMPT,
@@ -88,6 +90,71 @@ def save_cast(series, cast: list) -> list[dict]:
     series.cast = merged
     series.status = "cast_ready" if series.status == "cast_empty" else series.status
     return merged
+
+
+# =============== 没灵感?AI 出点子(系列设定 / 下一集命题) ===============
+
+
+def _norm_premises(value: object) -> list[str]:
+    """点子归一:恰好 3 条、每条一句话(≤60 字)、互不相同;空壳报错让引擎重试。"""
+    if not isinstance(value, list) or not value:
+        raise ValueError("模型没有返回点子数组")
+    out: list[str] = []
+    for p in value[:6]:
+        text = str(p or "").strip()[:60]
+        if text and text not in out:
+            out.append(text)
+    if len(out) < 3:
+        raise ValueError(f"点子要 3 个互不相同的,模型只给了能用的 {len(out)} 个")
+    return out
+
+
+async def suggest_series_premises(genre: str, progress=lambda s: None) -> list[str]:
+    """系列设定点子三选一:没灵感也能开工,选中后仍走正常确认流。"""
+    g = genre_of(genre)
+    progress("AI 正在出系列设定点子…")
+    prompt = ANIME_PREMISE_SUGGEST_PROMPT.format(
+        genre_label=g["label"], framing=g["framing"], beats=g["beats"],
+    )
+    last_err = ""
+    for attempt in range(1, _ATTEMPTS + 1):
+        try:
+            adapter = get_adapter_for(Task.ANIME_SUGGEST, timeout=300)
+            return _norm_premises(parse_llm_json(await adapter.ask(prompt)).get("premises"))
+        except Exception as exc:  # noqa: BLE001 — 重试一次,再失败才上屏
+            last_err = str(exc)
+        logger.warning("设定点子第 %d/%d 次未成:%s", attempt, _ATTEMPTS, last_err)
+    raise AnimeError(f"点子没出好({last_err}),再点一次试试。")
+
+
+async def suggest_episode_premises(
+    series, used: list[str] | None = None, progress=lambda s: None
+) -> list[str]:
+    """下一集点子三选一:贴卡司、贴类型节奏,避开已经用过的集命题。"""
+    if not (series.cast or []):
+        raise AnimeError("这个系列还没有卡司:先在系列工作台把班底定下来。")
+    g = genre_of(series.genre)
+    used_lines = [str(u or "").strip() for u in (used or [])]
+    used_lines = [u for u in used_lines if u]
+    used_block = "\n".join(f"- {u}" for u in used_lines) if used_lines else "(还没有已用命题)"
+    progress("AI 正在出下一集点子…")
+    prompt = ANIME_EPISODE_SUGGEST_PROMPT.format(
+        genre_label=g["label"],
+        framing=g["framing"],
+        beats=g["beats"],
+        premise=(series.premise or "").strip() or "(未填,按卡司与类型自拟)",
+        cast_block=cast_block(series.cast),
+        used_block=used_block,
+    )
+    last_err = ""
+    for attempt in range(1, _ATTEMPTS + 1):
+        try:
+            adapter = get_adapter_for(Task.ANIME_SUGGEST, timeout=300)
+            return _norm_premises(parse_llm_json(await adapter.ask(prompt)).get("premises"))
+        except Exception as exc:  # noqa: BLE001 — 重试一次,再失败才上屏
+            last_err = str(exc)
+        logger.warning("集点子第 %d/%d 次未成:%s", attempt, _ATTEMPTS, last_err)
+    raise AnimeError(f"点子没出好({last_err}),再点一次试试。")
 
 
 # =============== 简介聊天(对话式确认流) ===============
