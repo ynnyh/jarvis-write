@@ -21,7 +21,8 @@ def export_markdown(row: MoodClip) -> str:
     shots = clip.get("shots") or []
     name = f"{row.custom_theme or theme_display(row)} · {clip.get('take', '')}"
     L: list[str] = []
-    L.append(f"# 情绪短片手卡 · {name}")
+    title = "动画短剧手卡" if (getattr(row, "mode", "mood") or "mood") == "play" else "情绪短片手卡"
+    L.append(f"# {title} · {name}")
     L.append("")
     L.append(
         f"- 主题:{theme_display(row)} | 时长:{row.duration_s}s | 画风:{row.style_name or row.direction}"
@@ -31,6 +32,8 @@ def export_markdown(row: MoodClip) -> str:
         L.append(f"- 本子:{clip['logline']}")
     if clip.get("emotion_curve"):
         L.append(f"- 情绪曲线:{clip['emotion_curve']}")
+    if clip.get("beat_count"):
+        L.append(f"- 主要看点:{clip['beat_count']} 个" + (f" | {clip['beat_plan']}" if clip.get("beat_plan") else ""))
     if clip.get("hook_text"):
         L.append(f"- 投流钩子:{clip['hook_text']}")
     if clip.get("punchline"):
@@ -67,13 +70,16 @@ def export_markdown(row: MoodClip) -> str:
     if shots:
         L.append("## 分镜")
         L.append("")
-        L.append("| # | 场景 | 景别 | 运镜 | 秒 | 画面 | 台词 |")
-        L.append("|---|---|---|---|---|---|---|")
+        L.append("| #/看点 | 场景/环境 | 氛围 | 景别 | 运镜 | 秒 | 画面 | 台词 |")
+        L.append("|---|---|---|---|---|---|---|---|")
         for s in shots:
             dia = str(s.get("dialogue") or "").replace("|", "/")
             act = str(s.get("action_desc") or "").replace("|", "/")
+            env = str(s.get("environment_desc") or "").replace("|", "/")
+            atmosphere = str(s.get("atmosphere") or "").replace("|", "/")
+            beat = f"{s.get('seq')}" + (f" / {s.get('beat_index')}" if s.get("beat_index") else "")
             L.append(
-                f"| {s.get('seq')} | {s.get('scene_name') or ''} | {s.get('shot_type')} "
+                f"| {beat} | {s.get('scene_name') or ''} {env} | {atmosphere} | {s.get('shot_type')} "
                 f"| {s.get('camera')} | {s.get('duration_s')}s | {act} | {dia} |"
             )
         L.append("")

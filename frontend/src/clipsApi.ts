@@ -36,6 +36,10 @@ export interface ClipShot {
   scene_name: string;
   characters: string[];
   character_desc?: string;
+  environment_desc?: string;
+  atmosphere?: string;
+  beat_index?: number;
+  continuity?: string;
   action_desc: string;
   shot_type: string;
   camera: string;
@@ -61,6 +65,8 @@ export interface ClipCard {
   take: string;
   logline: string;
   emotion_curve: string;
+  beat_count?: number;
+  beat_plan?: string;
   lines: { speaker: string; text: string; action?: string }[];
   shots: ClipShot[];
   character_cards?: ClipCharacterCard[];

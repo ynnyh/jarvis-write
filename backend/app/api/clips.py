@@ -1,6 +1,6 @@
 # app/api/clips.py
 # -*- coding: utf-8 -*-
-"""情绪短片接口:15/30 秒命题短视频,批产三本子三选一;双入口(通用/小说衍生投流)。
+"""短片接口:情绪短片与灵感工坊动画短剧,批产三本子三选一;双入口(通用/小说衍生投流)。
 
 GET    /api/clips/meta                    主题/时长/方向目录
 GET    /api/clips?project_id=             我的短片列表(可按源项目过滤)
@@ -57,7 +57,7 @@ from app.engines.clips.common import (
     VALID_THEMES,
 )
 from app.engines.media.directions import VALID_DIRECTIONS
-from app.engines.media.text import clip
+from app.engines.media.text import clip, coerce_int
 from app.jobs import list_running, spawn_job
 
 logger = logging.getLogger("jarvis-write.clips")
@@ -69,7 +69,9 @@ class ClipCreateIn(BaseModel):
     mode: str = "mood"
     theme: str = ""
     custom_theme: str = ""
-    duration_s: int = Field(default=15)
+    # 灵感工坊默认给 30 秒,更适合建立场景→升级→回收的动画短剧节奏;
+    # 情绪短片仍保持 15 秒的轻量默认。
+    duration_s: int | None = Field(default=None)
     direction: str = "live"
     inspiration: str = ""
     # 导向维度(细化"方向"):全部默认 auto/空,存量行为零变化
@@ -298,7 +300,8 @@ async def list_clips(project_id: int | None = None, mode: str | None = None, db:
 async def create_clip(body: ClipCreateIn, db: Session = Depends(get_db)):
     from app.auth import current_user_id
 
-    _validate_common(body.theme, body.custom_theme, body.duration_s, body.direction, body.mode)
+    duration_s = body.duration_s if body.duration_s is not None else (30 if body.mode == "play" else 15)
+    _validate_common(body.theme, body.custom_theme, duration_s, body.direction, body.mode)
     if body.source_project_id is not None:
         project = db.get(Project, body.source_project_id)
         if project is None:
@@ -310,7 +313,7 @@ async def create_clip(body: ClipCreateIn, db: Session = Depends(get_db)):
         mode=body.mode,
         theme=body.theme,
         custom_theme=body.custom_theme.strip()[:120],
-        duration_s=body.duration_s,
+        duration_s=duration_s,
         direction=body.direction,
         inspiration=body.inspiration.strip()[:500],
         **_norm_steering(
@@ -402,7 +405,7 @@ async def save_clip_card(clip_id: int, body: ClipCardIn, db: Session = Depends(g
     if row.chosen < 0 or not (row.clip or {}).get("shots"):
         raise HTTPException(status_code=400, detail="先「三选一」选定本子,再编辑手卡。")
 
-    from app.engines.clips.batch import _build_candidate
+    from app.engines.clips.batch import _build_candidate, _normalize_play_beats
 
     card = body.card or {}
     old = row.clip or {}
@@ -410,6 +413,8 @@ async def save_clip_card(clip_id: int, body: ClipCardIn, db: Session = Depends(g
         "take": str(card.get("take") or old.get("take") or "").strip()[:60],
         "logline": str(card.get("logline") or old.get("logline") or "").strip()[:200],
         "emotion_curve": str(card.get("emotion_curve") or old.get("emotion_curve") or "").strip()[:120],
+        "beat_count": coerce_int(card.get("beat_count") or old.get("beat_count"), 0, lo=0, hi=5),
+        "beat_plan": str(card.get("beat_plan") or old.get("beat_plan") or "").strip()[:240],
         "punchline": str(card.get("punchline") or old.get("punchline") or "").strip()[:60],
         "hook_text": str(card.get("hook_text") or old.get("hook_text") or "").strip()[:60],
         "quote_source": str(card.get("quote_source") or old.get("quote_source") or "").strip()[:300],
@@ -436,6 +441,8 @@ async def save_clip_card(clip_id: int, body: ClipCardIn, db: Session = Depends(g
     )
     if saved is None:
         raise HTTPException(status_code=400, detail="分镜为空:至少保留一格有效画面。")
+    if (getattr(row, "mode", "mood") or "mood") == "play":
+        _normalize_play_beats(saved, row.duration_s)
     row.clip = saved
     candidates = list(row.candidates or [])
     if 0 <= row.chosen < len(candidates):

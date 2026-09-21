@@ -6,8 +6,9 @@ import { errMsg } from "../../pollJob";
 import { CopyBtn } from "../../ui/copy";
 import { chunkPromptText } from "./shared";
 
-export default function ClipHandcard({ card, onExport, onSave }: {
+export default function ClipHandcard({ card, mode = "mood", onExport, onSave }: {
   card: ClipCard;
+  mode?: string;
   onExport: (fmt: "md" | "srt" | "json") => void;
   onSave?: (card: ClipCard) => Promise<void>;
 }) {
@@ -65,6 +66,20 @@ export default function ClipHandcard({ card, onExport, onSave }: {
             <label className="fl">钩子文案</label>
             <input value={view.hook_text} maxLength={60} onChange={(e) => upd({ hook_text: e.target.value })} />
           </div>
+          {mode === "play" && view.beat_count ? (
+            <>
+              <div className="field">
+                <label className="fl">主要看点数</label>
+                <input type="number" min={1} max={5} value={view.beat_count}
+                  onChange={(e) => upd({ beat_count: Math.max(1, Math.min(5, Number(e.target.value) || 1)) })} />
+              </div>
+              <div className="field field-full">
+                <label className="fl">看点安排</label>
+                <input value={view.beat_plan || ""} maxLength={240}
+                  onChange={(e) => upd({ beat_plan: e.target.value })} />
+              </div>
+            </>
+          ) : null}
           <div className="field field-full">
             <label className="fl">台词(每句一行;留空即无台词)</label>
             {(view.lines ?? []).map((l, i) => (
@@ -97,6 +112,12 @@ export default function ClipHandcard({ card, onExport, onSave }: {
               </div>
               <textarea rows={2} value={s.action_desc} placeholder="画面(40 字内,必须可画)"
                 onChange={(e) => updShot(s.seq, { action_desc: e.target.value })} />
+              <input value={s.environment_desc || ""} maxLength={240} placeholder="环境(空间/陈设/位置关系)"
+                onChange={(e) => updShot(s.seq, { environment_desc: e.target.value })} />
+              <input value={s.atmosphere || ""} maxLength={180} placeholder="氛围与光线(时段/色温/明暗)"
+                onChange={(e) => updShot(s.seq, { atmosphere: e.target.value })} />
+              <input value={s.continuity || ""} maxLength={120} placeholder="与上一格的承接"
+                onChange={(e) => updShot(s.seq, { continuity: e.target.value })} />
               <input value={s.dialogue} maxLength={200} placeholder="该镜头台词(可空)"
                 onChange={(e) => updShot(s.seq, { dialogue: e.target.value })} />
               <textarea rows={3} value={s.prompt_cn} placeholder="中文提示词(含画风锚)"
@@ -111,6 +132,7 @@ export default function ClipHandcard({ card, onExport, onSave }: {
           {card.hook_text && <p className="hint"><b>投流钩子:</b>{card.hook_text}</p>}
           {card.logline && <p className="hint">{card.logline}</p>}
           {card.emotion_curve && <p className="hint"><b>情绪曲线:</b>{card.emotion_curve}</p>}
+          {mode === "play" && card.beat_count ? <p className="hint"><b>主要看点:</b>{card.beat_count} 个{card.beat_plan ? ` · ${card.beat_plan}` : ""}</p> : null}
           {card.quote_source && <p className="hint"><b>金句原句(正文):</b>{card.quote_source}</p>}
           {card.cautions?.length > 0 && <div className="msg-err">⚠ {card.cautions.join(";")}</div>}
           {(() => {
@@ -151,12 +173,13 @@ export default function ClipHandcard({ card, onExport, onSave }: {
           </div>
           <div className="tbl-wrap">
             <table className="tbl">
-              <thead><tr><th>#</th><th>场景</th><th>景别</th><th>运镜</th><th>秒</th><th>画面</th><th>台词</th></tr></thead>
+              <thead><tr><th>#/看点</th><th>场景/环境</th><th>氛围</th><th>景别/运镜</th><th>秒</th><th>画面</th><th>台词</th></tr></thead>
               <tbody>
                 {card.shots.map((s) => (
                   <tr key={s.seq}>
-                    <td>{s.seq}</td><td>{s.scene_name}</td><td>{s.shot_type}</td>
-                    <td>{s.camera}</td><td>{s.duration_s}</td>
+                    <td>{s.seq}{s.beat_index ? ` / ${s.beat_index}` : ""}</td>
+                    <td>{s.scene_name}{s.environment_desc ? ` · ${s.environment_desc}` : ""}</td>
+                    <td>{s.atmosphere || "-"}</td><td>{s.shot_type}/{s.camera}</td><td>{s.duration_s}</td>
                     <td>{s.action_desc}</td><td>{s.dialogue}</td>
                   </tr>
                 ))}

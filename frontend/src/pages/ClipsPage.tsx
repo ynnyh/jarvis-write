@@ -32,7 +32,8 @@ export function ClipsList({ projectId, mode = "mood" }: { projectId: number | nu
   const [rows, setRows] = useState<MoodClip[] | null>(null);
   const [theme, setTheme] = useState("");
   const [custom, setCustom] = useState("");
-  const [duration, setDuration] = useState(15);
+  // 动画短剧默认 30 秒,给场景建立与笑点回收留出呼吸;情绪短片仍默认 15 秒。
+  const [duration, setDuration] = useState(isPlay ? 30 : 15);
   const [direction, setDirection] = useState("live");
   const [inspiration, setInspiration] = useState("");
   const [dialogueStyle, setDialogueStyle] = useState("auto");
@@ -80,14 +81,14 @@ export function ClipsList({ projectId, mode = "mood" }: { projectId: number | nu
         <div className="card-head">
           <h3 className="grow">
             {novelMode ? "为这本书出投流短视频" : isPlay ? "新建灵感片" : "新建情绪短片"}
-            <span className="muted">{novelMode ? "从书里抽金句名场面,金句可溯源" : "15/30 秒,一次三本子三选一"}</span>
+            <span className="muted">{novelMode ? "从书里抽金句名场面,金句可溯源" : isPlay ? "动画短剧 · 默认 30 秒,一次三本子三选一" : "15/30 秒,一次三本子三选一"}</span>
           </h3>
         </div>
         <p className="card-desc">
           {novelMode
             ? "AI 读你的定稿章节,挑最戳人的金句与名场面,一次产 3 个不同切入的投流本子——核心金句必须出自正文,引擎会逐句溯源校验。"
             : isPlay
-              ? "选个好玩/猎奇的灵感玩法(治愈手绘·黏土定格·赛博雨夜…),AI 一次给 3 个不同切入的本子,画风气质一眼可辨,允许荒诞与反差;每格带三轨提示词与切段,拿去即梦/剪映/minimax 直接出片。"
+              ? "选个好玩/猎奇的玩法,AI 会围绕一个核心前提设计 30 秒动画短剧:以 3 个核心看点为主,最多 4 个,看点之间保留环境与反应镜头,每格补齐场景、光线、氛围和三轨提示词。"
               : "选个情绪命题(遗憾/争吵/爱情/童趣…),AI 一次给 3 个不同切入的本子:钩子开场 → 情绪蓄势 → 金句收尾,每格带三轨提示词与切段,拿去即梦/剪映直接出片。"}
         </p>
         <div className="form-grid">

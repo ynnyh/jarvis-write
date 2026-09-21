@@ -32,6 +32,7 @@ from app.prompts.clips import (
     CLIPS_GENERIC_CONTEXT,
     CLIPS_GROUNDING_RULE,
     CLIPS_NOVEL_CONTEXT,
+    CLIPS_PLAY_STRUCTURE_RULES,
     CLIPS_PLAY_CONTEXT,
     CLIPS_PROMPT_DETAILS,
     CLIPS_STRUCTURE_RULES,
@@ -55,6 +56,24 @@ _EXPAND_ATTEMPTS = 2
 # 通用入口的 quote_hint 占位文案:模型常把它逐字回填进 quote_source,
 # 原样入库会跟着导出手卡印出「金句原句:(通用入口留空)」,归一化时摘掉。
 _GENERIC_QUOTE_PLACEHOLDER = "(通用入口留空)"
+
+
+def _play_beat_count(raw: object, duration_s: int) -> int:
+    """把模型给的看点数收敛到动画短剧的产品范围。"""
+    value = coerce_int(raw, 0, lo=0, hi=5)
+    lo, hi = (1, 2) if duration_s <= 15 else (3, 4)
+    if value <= 0:
+        return 2 if duration_s <= 15 else 3
+    return max(lo, min(hi, value))
+
+
+def _normalize_play_beats(candidate: dict, duration_s: int) -> None:
+    """归一化看点元数据,不改镜头内容,只修复不可执行的结构标记。"""
+    candidate["beat_count"] = _play_beat_count(candidate.get("beat_count"), duration_s)
+    count = candidate["beat_count"]
+    for shot in candidate.get("shots") or []:
+        index = coerce_int(shot.get("beat_index"), 0, lo=0, hi=5)
+        shot["beat_index"] = index if 1 <= index <= count else 0
 
 
 class ClipBatchError(ValueError):
@@ -142,6 +161,10 @@ def _norm_shots(raw, style: dict, max_seq_cap: int) -> list[dict]:
         prompt_en = str(item.get("prompt_en") or "").strip()[:800]
         negative = str(item.get("negative") or "").strip()[:500]
         character_desc = str(item.get("character_desc") or "").strip()[:600]
+        environment_desc = str(item.get("environment_desc") or "").strip()[:240]
+        atmosphere = str(item.get("atmosphere") or "").strip()[:180]
+        continuity = str(item.get("continuity") or "").strip()[:120]
+        beat_index = coerce_int(item.get("beat_index"), 0, lo=0, hi=5)
         # LLM 漏写画面提示词时用分镜自身的景别/运镜/动作拼一条确定性兜底——
         # 空着交给画风锚,会产出一条「只有风格锚、没有画面内容」的提示词
         if not prompt_cn:
@@ -149,6 +172,17 @@ def _norm_shots(raw, style: dict, max_seq_cap: int) -> list[dict]:
                 f"{str(item.get('shot_type') or '').strip()}"
                 f"/{str(item.get('camera') or '').strip()}:{action}"
             )
+        # 结构化环境字段是动画短剧的最低保障。模型有时把它写在 JSON 字段里,
+        # 却漏进 prompt_cn;确定性补回,避免复制提示词时环境信息丢失。
+        if environment_desc or atmosphere:
+            env_block = "；".join(
+                x for x in (
+                    f"具体环境:{environment_desc}" if environment_desc else "",
+                    f"氛围光线:{atmosphere}" if atmosphere else "",
+                ) if x
+            )
+            if env_block not in prompt_cn:
+                prompt_cn = f"{env_block}。{prompt_cn}"[:1200]
         # 画风锚/负面词兜底(与漫剧、宣传片同一口径,见 media.anchors)
         prompt_cn, prompt_en = ensure_style_anchors(
             prompt_cn, prompt_en, style.get("style_cn") or "", style.get("style_en") or ""
@@ -162,6 +196,10 @@ def _norm_shots(raw, style: dict, max_seq_cap: int) -> list[dict]:
                     str(c).strip() for c in (item.get("characters") or []) if str(c or "").strip()
                 ][:2],
                 "character_desc": character_desc,
+                "environment_desc": environment_desc,
+                "atmosphere": atmosphere,
+                "beat_index": beat_index,
+                "continuity": continuity,
                 "action_desc": action[:200],
                 "shot_type": str(item.get("shot_type") or "").strip()[:20],
                 "camera": str(item.get("camera") or "").strip()[:20],
@@ -206,6 +244,8 @@ def _norm_takes(data: dict) -> list[dict]:
                 "emotion_curve": str(item.get("emotion_curve") or "").strip()[:120],
                 "punchline": str(item.get("punchline") or "").strip()[:60],
                 "hook_text": str(item.get("hook_text") or "").strip()[:60],
+                "beat_count": coerce_int(item.get("beat_count"), 0, lo=0, hi=5),
+                "beat_plan": str(item.get("beat_plan") or "").strip()[:240],
                 "quote_source": quote_source,
             }
         )
@@ -267,6 +307,8 @@ def _build_candidate(
         "take": take["take"],
         "logline": take["logline"],
         "emotion_curve": take.get("emotion_curve", ""),
+        "beat_count": take.get("beat_count", 0),
+        "beat_plan": take.get("beat_plan", ""),
         "lines": _norm_lines(expanded.get("lines")),
         "shots": shots,
         "character_cards": _norm_character_cards(shots),
@@ -328,7 +370,8 @@ def _build_context(db: Session, clip: MoodClip) -> tuple[str, str, str]:
 
 async def _expand_one(
     take: dict, style: dict, duration_s: int, context: str, grounding: str, excerpts: str,
-    feedback: str = "",
+    feedback: str = "", structure_rules: str = CLIPS_STRUCTURE_RULES,
+    prompt_details: str = CLIPS_PROMPT_DETAILS,
 ) -> dict | None:
     """把一条切入展开成完整本子。整发重试 `_EXPAND_ATTEMPTS` 次,仍不成返回 None。
 
@@ -343,15 +386,17 @@ async def _expand_one(
     """
     prompt = CLIPS_EXPAND_PROMPT.format(
         context_block=context,
-        structure_rules=CLIPS_STRUCTURE_RULES,
+        structure_rules=structure_rules,
         cliche_blacklist=CLIPS_CLICHE_BLACKLIST,
-        prompt_details=CLIPS_PROMPT_DETAILS,
+        prompt_details=prompt_details,
         style_cn=style["style_cn"] or "(未给出,请自行统一并保持三条一致)",
         style_en=style["style_en"],
         negative=style["negative"],
         take=take["take"],
         logline=take["logline"],
         emotion_curve=take.get("emotion_curve") or "(未给出)",
+        beat_count=take.get("beat_count") or "按时长自定",
+        beat_plan=take.get("beat_plan") or "先建立场景,再升级,最后回收",
         punchline=take.get("punchline") or "(未给出,请自拟一句戳心收尾)",
         duration_s=duration_s,
         shot_hint=shot_hint(duration_s),
@@ -382,6 +427,11 @@ async def generate_batch(
     这批要避开旧方向、落实意见;首跑传空。
     """
     context, excerpts, grounding = _build_context(db, clip)
+    is_play = (getattr(clip, "mode", "mood") or "mood") == "play"
+    structure_rules = CLIPS_PLAY_STRUCTURE_RULES if is_play else CLIPS_STRUCTURE_RULES
+    prompt_details = CLIPS_PROMPT_DETAILS
+    if is_play:
+        prompt_details += "\n**动画短剧额外要求**:environment_desc/atmosphere/continuity/beat_index 是必填字段;environment_desc 至少包含空间、两件关键陈设和相对位置;atmosphere 至少包含时段、光源方向、冷暖色温和空气感;同一主场景内保持空间连续,不要每格换背景。"
 
     # ---- ① 风格卡 + 三条切入(小输出,一发)----
     progress("AI 正在定画风、想 3 个不同切入…" if not feedback.strip()
@@ -391,7 +441,7 @@ async def generate_batch(
         await adapter.ask(
             CLIPS_TAKES_PROMPT.format(
                 context_block=context,
-                structure_rules=CLIPS_STRUCTURE_RULES,
+                structure_rules=structure_rules,
                 cliche_blacklist=CLIPS_CLICHE_BLACKLIST,
                 feedback_block=takes_feedback_block(clip.candidates or [], feedback),
                 quote_hint=(
@@ -414,7 +464,22 @@ async def generate_batch(
 
     async def run(take: dict) -> dict | None:
         nonlocal done
-        cand = await _expand_one(take, style, duration_s, context, grounding, excerpts)
+        cand = await _expand_one(
+            take, style, duration_s, context, grounding, excerpts,
+            structure_rules=structure_rules, prompt_details=prompt_details,
+        )
+        if cand and is_play:
+            _normalize_play_beats(cand, duration_s)
+            missing = [
+                str(s.get("seq"))
+                for s in cand.get("shots") or []
+                if not str(s.get("environment_desc") or "").strip()
+                or not str(s.get("atmosphere") or "").strip()
+            ]
+            if missing:
+                cand.setdefault("cautions", []).append(
+                    f"第{','.join(missing)}格缺少环境或氛围字段,建议重拍/手动补齐"
+                )
         done += 1
         # 完成计数式进度:并发下「第几个」没有意义,报「已出几个」才对得上用户看到的卡片数
         progress(f"已出 {done}/{len(takes)} 个本子…")
@@ -458,6 +523,8 @@ async def reexpand_batch(
         "emotion_curve": old.get("emotion_curve") or "",
         "punchline": old.get("punchline") or "",
         "hook_text": old.get("hook_text") or "",
+        "beat_count": old.get("beat_count") or 0,
+        "beat_plan": old.get("beat_plan") or "",
         "quote_source": old.get("quote_source") or "",
     }
     style = {
@@ -466,14 +533,32 @@ async def reexpand_batch(
         "negative": clip.negative or "",
     }
     context, excerpts, grounding = _build_context(db, clip)
+    is_play = (getattr(clip, "mode", "mood") or "mood") == "play"
+    structure_rules = CLIPS_PLAY_STRUCTURE_RULES if is_play else CLIPS_STRUCTURE_RULES
+    prompt_details = CLIPS_PROMPT_DETAILS
+    if is_play:
+        prompt_details += "\n**动画短剧额外要求**:environment_desc/atmosphere/continuity/beat_index 是必填字段;environment_desc 至少包含空间、两件关键陈设和相对位置;atmosphere 至少包含时段、光源方向、冷暖色温和空气感;同一主场景内保持空间连续,不要每格换背景。"
     progress(f"AI 正在重拍「{take['take']}」…")
     cand = await _expand_one(
-        take, style, clip.duration_s, context, grounding, excerpts, feedback=feedback
+        take, style, clip.duration_s, context, grounding, excerpts, feedback=feedback,
+        structure_rules=structure_rules, prompt_details=prompt_details,
     )
     if cand is None:
         raise ClipBatchError(
             f"「{take['take']}」重拍失败(分镜没出来),原候选保持不变,请重试。"
         )
+    if is_play:
+        _normalize_play_beats(cand, clip.duration_s)
+        missing = [
+            str(s.get("seq"))
+            for s in cand.get("shots") or []
+            if not str(s.get("environment_desc") or "").strip()
+            or not str(s.get("atmosphere") or "").strip()
+        ]
+        if missing:
+            cand.setdefault("cautions", []).append(
+                f"第{','.join(missing)}格缺少环境或氛围字段,建议重拍/手动补齐"
+            )
     candidates[index] = cand
     clip.candidates = candidates
     if clip.chosen == index:

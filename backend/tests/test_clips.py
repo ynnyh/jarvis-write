@@ -408,6 +408,46 @@ def test_steering_fields_roundtrip_and_injection(client):
     assert "无台词" in _CaptureAdapter.prompts[1]
 
 
+def test_play_defaults_to_animation_short_drama_shape(client):
+    """灵感工坊默认 30 秒,看点与环境字段进入候选并在提示词中可见。"""
+    headers = _auth(client, "clips_play_shape")
+    r = client.post("/api/clips", headers=headers, json={
+        "mode": "play", "theme": "nonsense", "direction": "watercolor",
+    })
+    assert r.status_code == 200, r.text
+    cid = r.json()["clip_row"]["id"]
+    assert r.json()["clip_row"]["duration_s"] == 30
+
+    head = {**_STYLE, "takes": [
+        {**_take("一只猫的严肃会议"), "beat_count": 9,
+         "beat_plan": "看点1:开会;看点2:升级;看点3:回收"},
+        {**_take("会说话的包子"), "beat_count": 4,
+         "beat_plan": "看点1:发现;看点2:误会;看点3:反转"},
+        {**_take("迟到的英雄"), "beat_count": 3,
+         "beat_plan": "看点1:出场;看点2:升级;看点3:收束"},
+    ]}
+    expand = _expand("动画短剧环境锚")
+    for shot in expand["shots"]:
+        shot["environment_desc"] = "小餐馆靠窗座位,桌子在画面中央,收银台在右后方"
+        shot["atmosphere"] = "午后侧光,暖黄,窗外尘埃缓慢漂浮"
+        shot["continuity"] = "沿用上一格的餐桌位置"
+        shot["beat_index"] = 1
+
+    _CaptureAdapter.reset()
+    with patch("app.engines.clips.batch.get_adapter_for",
+               return_value=_CaptureAdapter(head, expand)):
+        r = client.post(f"/api/clips/{cid}/generate", headers=headers)
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    candidate = job["result"]["candidates"][0]
+    assert candidate["beat_count"] == 4  # 30 秒最多 4,模型的 9 被收敛
+    assert candidate["shots"][0]["environment_desc"]
+    assert candidate["shots"][0]["atmosphere"]
+    assert "具体环境:" in candidate["shots"][0]["prompt_cn"]
+    assert "动画短剧节奏铁律" in _CaptureAdapter.prompts[0]
+    assert "看点数量" in _CaptureAdapter.prompts[1]
+
+
 def test_generate_feedback_reaches_takes_prompt(client):
     """换一批带意见:上一批切入摘要 + 用户意见进①提示词,这批避开旧方向。"""
     headers = _auth(client, "clips_fb")
