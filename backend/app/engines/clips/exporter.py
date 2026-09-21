@@ -28,7 +28,8 @@ def export_markdown(row: MoodClip) -> str:
     name = f"{row.custom_theme or theme_display(row)} · {clip.get('take', '')}"
 
     md = Md()
-    md.h1(f"情绪短片手卡 · {name}")
+    title = "动画短剧手卡" if (getattr(row, "mode", "mood") or "mood") == "play" else "情绪短片手卡"
+    md.h1(f"{title} · {name}")
     md.bullet(
         f"主题:{theme_display(row)} | 时长:{row.duration_s}s | 画风:{row.style_name or row.direction}"
         f" | 分镜 {len(shots)} 格 · {sum(int(s.get('duration_s') or 0) for s in shots)}s"
@@ -37,6 +38,8 @@ def export_markdown(row: MoodClip) -> str:
         md.bullet(f"本子:{clip['logline']}")
     if clip.get("emotion_curve"):
         md.bullet(f"情绪曲线:{clip['emotion_curve']}")
+    if clip.get("beat_count"):
+        md.bullet(f"主要看点:{clip['beat_count']} 个" + (f" | {clip['beat_plan']}" if clip.get("beat_plan") else ""))
     if clip.get("hook_text"):
         md.bullet(f"投流钩子:{clip['hook_text']}")
     if clip.get("punchline"):
@@ -67,10 +70,14 @@ def export_markdown(row: MoodClip) -> str:
     if shots:
         md.h2("分镜")
         md.table(
-            ["#", "场景", "景别", "运镜", "秒", "画面", "台词"],
+            ["# / 看点", "场景 / 环境", "氛围", "景别", "运镜", "秒", "画面", "台词"],
             [
-                [s.get("seq"), s.get("scene_name"), s.get("shot_type"), s.get("camera"),
-                 f"{s.get('duration_s')}s", s.get("action_desc"), s.get("dialogue")]
+                [
+                    f"{s.get('seq')}" + (f" / {s.get('beat_index')}" if s.get("beat_index") else ""),
+                    f"{s.get('scene_name') or ''} {s.get('environment_desc') or ''}",
+                    s.get("atmosphere"), s.get("shot_type"), s.get("camera"),
+                    f"{s.get('duration_s')}s", s.get("action_desc"), s.get("dialogue"),
+                ]
                 for s in shots
             ],
         )

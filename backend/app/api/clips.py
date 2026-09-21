@@ -71,7 +71,9 @@ class ClipCreateIn(BaseModel):
     mode: str = "mood"
     theme: str = ""
     custom_theme: str = ""
-    duration_s: int = Field(default=15)
+    # Omitted duration keeps the classic 15s default, while animation shorts
+    # default to 30s so there is room for setup, escalation, and payoff.
+    duration_s: int | None = Field(default=None)
     direction: str = "live"
     inspiration: str = ""
     # 导向维度(细化"方向"):全部默认 auto/空,存量行为零变化
@@ -325,8 +327,9 @@ async def list_clips(project_id: int | None = None, mode: str | None = None, db:
 async def create_clip(body: ClipCreateIn, db: Session = Depends(get_db)):
     from app.auth import current_user_id
 
+    duration_s = body.duration_s if body.duration_s is not None else (30 if body.mode == "play" else 15)
     _validate_common(
-        body.theme, body.custom_theme, body.duration_s, body.direction,
+        body.theme, body.custom_theme, duration_s, body.direction,
         body.mode, inspiration=body.inspiration,
         derived=body.source_project_id is not None,
     )
@@ -341,7 +344,7 @@ async def create_clip(body: ClipCreateIn, db: Session = Depends(get_db)):
         mode=body.mode,
         theme=body.theme,
         custom_theme=body.custom_theme.strip()[:120],
-        duration_s=body.duration_s,
+        duration_s=duration_s,
         direction=body.direction,
         inspiration=body.inspiration.strip()[:500],
         **_norm_steering(
@@ -484,6 +487,8 @@ async def save_clip_card(clip_id: int, body: ClipCardIn, db: Session = Depends(g
         "emotion_curve": str(card.get("emotion_curve") or old.get("emotion_curve") or "").strip()[:120],
         "punchline": str(card.get("punchline") or old.get("punchline") or "").strip()[:60],
         "hook_text": str(card.get("hook_text") or old.get("hook_text") or "").strip()[:60],
+        "beat_count": card.get("beat_count", old.get("beat_count", 0)),
+        "beat_plan": str(card.get("beat_plan") or old.get("beat_plan") or "").strip()[:240],
         "quote_source": str(card.get("quote_source") or old.get("quote_source") or "").strip()[:300],
     }
     style = {
@@ -508,6 +513,10 @@ async def save_clip_card(clip_id: int, body: ClipCardIn, db: Session = Depends(g
     )
     if saved is None:
         raise HTTPException(status_code=400, detail="分镜为空:至少保留一格有效画面。")
+    if row.mode == "play":
+        from app.engines.clips.batch import _normalize_play_beats
+
+        _normalize_play_beats(saved, row.duration_s)
     row.clip = saved
     candidates = list(row.candidates or [])
     if 0 <= row.chosen < len(candidates):

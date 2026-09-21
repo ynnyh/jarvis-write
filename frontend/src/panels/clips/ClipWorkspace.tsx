@@ -202,6 +202,7 @@ export default function ClipWorkspace({ cid, mode = "mood" }: { cid: number; mod
             </div>
             <div>{c.logline}</div>
             {c.emotion_curve && <div className="muted">情绪曲线:{c.emotion_curve}</div>}
+            {mode === "play" && c.beat_count ? <div className="muted">主要看点:{c.beat_count} 个{c.beat_plan ? ` · ${c.beat_plan}` : ""}</div> : null}
             {c.punchline && <div><b>金句:</b>{c.punchline}</div>}
             {c.quote_source && <div className="muted">原句:{c.quote_source}</div>}
             {c.cautions?.length > 0 && <div className="warn-tip">⚠ {c.cautions.join(";")}</div>}
@@ -221,12 +222,13 @@ export default function ClipWorkspace({ cid, mode = "mood" }: { cid: number; mod
                 )}
                 <div className="tbl-wrap">
                   <table className="tbl">
-                    <thead><tr><th>#</th><th>场景</th><th>景别</th><th>运镜</th><th>秒</th><th>画面</th><th>台词</th></tr></thead>
+                    <thead><tr><th>#/看点</th><th>场景/环境</th><th>氛围</th><th>景别/运镜</th><th>秒</th><th>画面</th><th>台词</th></tr></thead>
                     <tbody>
                       {c.shots.map((s) => (
                         <tr key={s.seq}>
-                          <td>{s.seq}</td><td>{s.scene_name}</td><td>{s.shot_type}</td>
-                          <td>{s.camera}</td><td>{s.duration_s}</td>
+                          <td>{s.seq}{s.beat_index ? ` / ${s.beat_index}` : ""}</td>
+                          <td>{s.scene_name}{s.environment_desc ? ` · ${s.environment_desc}` : ""}</td>
+                          <td>{s.atmosphere || "-"}</td><td>{s.shot_type}/{s.camera}</td><td>{s.duration_s}</td>
                           <td>{s.action_desc}</td><td>{s.dialogue}</td>
                         </tr>
                       ))}
@@ -257,7 +259,7 @@ export default function ClipWorkspace({ cid, mode = "mood" }: { cid: number; mod
 
       {chosen && (
         <div id="clips-step-handcard">
-          <ClipHandcard card={chosen} onExport={exp} onSave={saveCard} />
+          <ClipHandcard card={chosen} mode={mode} durationS={row.duration_s} onExport={exp} onSave={saveCard} />
         </div>
       )}
 
