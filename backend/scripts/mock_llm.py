@@ -211,6 +211,13 @@ def reply_for(prompt: str) -> str:
             cards[0]["engine"] = f"按你的要求重出:『{fb}』——小人物卷入风波,绝活破局"
             cards[0]["hook"] = f"已带上你的要求:{fb}"
         return json.dumps({"engines": cards}, ensure_ascii=False)
+    if "正在打磨的故事概念" in prompt:
+        # 带话精修概念(确认链 L1 概念打磨房):回 changed 字段供前端 diff 高亮
+        c = dict(_CONCEPT)
+        c["logline"] = "按你的要求改过:" + _CONCEPT["logline"]
+        return json.dumps(
+            {"concept": c, "changed": ["logline"], "note": "已按你的要求重捏一句话故事。"},
+            ensure_ascii=False)
     if "扩展出" in prompt and "故事概念" in prompt:
         ideas = []
         for i in range(4):
@@ -239,13 +246,13 @@ def reply_for(prompt: str) -> str:
             {"title": "真相反杀", "goal": "雇主真面目揭开,镖头反杀定局,带着人与债走向新生。",
              "conflict": "最终摊牌", "start_state": "身份揭穿", "end_state": "尘埃落定"},
         ]}, ensure_ascii=False)
-    if "角色动力学" in prompt:
+    if "动力学模型" in prompt:
         return "李镖头(主角):金盆洗手不得,押镖入了死局。弧光:从求稳到担责。"
-    if "情节架构" in prompt:
+    if "全书情节架构" in prompt:
         return "第一幕(1-10 章)接镖入局;第二幕(11-20 章)开箱惊变、亡命千里;第三幕(21-30 章)真相反杀。"
-    if "世界观" in prompt:
+    if "三维交织的世界观" in prompt:
         return "乱世末年,镖局行业凋零,江湖规矩凌驾王法。"
-    if "核心种子" in prompt:
+    if "第一步构建故事核心" in prompt:
         return "押镖人发现自己运的不是货,是命。"
     if "书名" in prompt:
         return "活人镖\n镖人重启\n暗镖\n不可开箱\n千里验货人"

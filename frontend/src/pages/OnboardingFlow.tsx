@@ -117,13 +117,19 @@ export default function OnboardingFlow() {
   // 架构闸门四层全拍板 → 亮骨架墙
   const [archGateDone, setArchGateDone] = useState(false);
 
-  // 概念就绪 → 打磨房自动展开;用户显式收起后同一版概念不再自动弹开(换概念才会)
+  // 概念就绪 → 打磨房自动展开;用户显式收起后同一版概念不再自动弹开(换概念才会)。
+  // 必须挂在「if (!project) 早退」之前:hook 顺序在两次渲染间要一致;
+  // 判空直接用 project.concept,不引用早退之后才初始化的派生值(TDZ)。
   useEffect(() => {
-    if (step !== "concept" || !hasConcept) return;
-    if (forgeOpen || forgeDismissed.current === conceptKey(concept)) return;
+    if (!project || step !== "concept") return;
+    const c = project.concept;
+    if (!c || conceptIsEmpty(c)) return;
+    const key = conceptKey(c);
+    if (forgeOpen || forgeDismissed.current === key) return;
     setForgeOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, concept, forgeOpen]);
+  }, [project, step, forgeOpen]);
+
 
   // 题材页「随机换一张」:全池重抽题材卡 + 顺带抽口味(与随机开一本同一体验语言)。
   // P1 口味定标:分叉口味跟着新卡走;感情线/开局/底色/视角写进 tendency(setDim 落库)。
@@ -205,6 +211,7 @@ export default function OnboardingFlow() {
   const curTitleSig = calcTitleSig(project.topic ?? "", (tendency.genre as string) ?? "", concept);
   const ideasStale = isStale(ideas, ideaSig, curIdeaSig);
   const titlesStale = isStale(titleIdeas, titleSig, curTitleSig);
+
 
   // 顶部步骤条:已确认项的缩略文本(FLIP 落点)
   const thumbOf: Partial<Record<SetupStep, string>> = {

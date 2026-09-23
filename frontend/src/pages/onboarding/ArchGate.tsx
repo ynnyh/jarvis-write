@@ -97,7 +97,8 @@ export default function ArchGate({ pid, tendency, onTrust, onAllConfirmed }: {
   // 链式驱动:从最靠前的未拍板层开始,能自动跑的连跑,遇到必停层就停。
   // 只在「拍板确认」与「首次点火」后调用——撤回/手改不自动重跑(不作惊吓)。
   async function drive(): Promise<void> {
-    const { arch: a, st } = await refresh();
+    const { arch: a, st: st0 } = await refresh();
+    let st = st0;
     if (allConfirmed(st, a)) { onAllConfirmed(); return; }
     for (const k of ARCH_LAYER_KEYS) {
       if (st[k]) continue;
@@ -106,6 +107,9 @@ export default function ArchGate({ pid, tendency, onTrust, onAllConfirmed }: {
       if (!auto) return; // 这层必停:等人
       if (!(await generateLayer(k))) return;
       if (!(await confirmLayer(k, true))) return;
+      // 本地推进镜像:generate/confirm 内部已 refresh 服务器态,
+      // 但循环里的上游判断要用最新拍板态,不能用 drive 起点快照
+      st = { ...st, [k]: true };
     }
     const { arch: a2, st: st2 } = await refresh();
     if (allConfirmed(st2, a2)) onAllConfirmed();
