@@ -83,6 +83,8 @@ class ProjectOut(BaseModel):
     architecture_stale: bool = False
     # 架构已重写、但大纲仍挂在旧架构上(True=建议重铺蓝图或清空重来)
     outline_stale: bool = False
+    # 概念拍板(确认链 L1):True=作者在概念打磨屏拍过板。概念内容再变自动复位
+    concept_confirmed: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -95,6 +97,9 @@ class ArchitectureOut(BaseModel):
     version: int
     # 概念变更后置 True(架构仍挂在旧概念上);重新生成架构后复位 False
     concept_stale: bool = False
+    # 逐层拍板态(架构闸门):{layer_key: bool}。NULL(存量架构)= 全层已认,
+    # 前端据此在旧书上直接显示「已拍板」,仍可逐层撤回重出
+    confirmed_layers: dict[str, bool] | None = None
 
     model_config = {"from_attributes": True}
 
@@ -107,6 +112,24 @@ class GenerateArchitectureRequest(BaseModel):
 
     tendency: Tendency = Field(default_factory=dict)
     directive: str = Field(default="", max_length=2000)
+
+
+class ArchitectureLayerRequest(BaseModel):
+    """架构闸门:逐层生成/带话重出指定一层。
+
+    directive = 对这一层的修改要求(带话重出),与整本研讨 directive 同通道注入。
+    """
+
+    layer: str
+    tendency: Tendency = Field(default_factory=dict)
+    directive: str = Field(default="", max_length=2000)
+
+
+class ArchitectureConfirmRequest(BaseModel):
+    """架构闸门:拍板/撤回指定一层。撤回级联作废下游层。"""
+
+    layer: str
+    confirmed: bool
 
 
 class OutlineOut(BaseModel):

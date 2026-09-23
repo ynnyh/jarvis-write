@@ -891,6 +891,28 @@ def _add_birthday_pack_column() -> None:
             logger.info("迁移:birthday_wishes 补 pack 列")
 
 
+def _add_confirm_chain_columns() -> None:
+    """确认链(docs/确认链):projects 补 concept_confirmed、architecture 补
+    confirmed_layers 列(幂等)。
+
+    concept_confirmed:概念拍板标记,存量默认 False(行为零变化)。
+    confirmed_layers:架构逐层拍板 JSON;存量行 NULL,按「全部已拍板」解释,
+    旧书回访架构工作墙时仍可逐层撤回重出。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "projects" in insp.get_table_names() and not _column_exists("projects", "concept_confirmed"):
+            conn.execute(
+                text("ALTER TABLE projects ADD COLUMN concept_confirmed BOOLEAN DEFAULT 0")
+            )
+            logger.info("迁移:projects 补 concept_confirmed 列")
+        if "architecture" in insp.get_table_names() and not _column_exists("architecture", "confirmed_layers"):
+            conn.execute(
+                text("ALTER TABLE architecture ADD COLUMN confirmed_layers JSON")
+            )
+            logger.info("迁移:architecture 补 confirmed_layers 列")
+
+
 def _add_architecture_concept_stale_column() -> None:
     """小说架构:architecture 补 concept_stale 列(概念变更→建议重生成,幂等)。
 
@@ -1176,6 +1198,7 @@ def run_migrations() -> None:
     _add_mood_clip_steering_columns()
     _add_mood_clip_mode_column()
     _add_birthday_pack_column()
+    _add_confirm_chain_columns()
     _add_architecture_concept_stale_column()
     _add_project_outline_stale_column()
     _add_project_render_mode_column()

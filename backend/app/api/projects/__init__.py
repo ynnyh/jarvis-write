@@ -173,6 +173,8 @@ class ProjectPatch(BaseModel):
     synopsis: str | None = None
     # 起步流进度:传 "" 表示起步完成(落库为 NULL)
     setup_state: str | None = None
+    # 概念拍板(确认链 L1):概念打磨屏点「拍板」置 True;概念内容变化由下方逻辑自动复位
+    concept_confirmed: bool | None = None
     # 灵感对话记录(整段覆盖式保存)
     chat_log: list | None = None
     # 文风备忘手动编辑:传字符串整段覆盖(传 "" 清空);不传(None)则不动
@@ -223,6 +225,8 @@ async def patch_project(
             )
             if changed:
                 project.architecture.concept_stale = True
+                # 概念变了,原拍板不再成立:回未拍板,作者在打磨屏重新过目再拍
+                project.concept_confirmed = False
     # 完本门槛:写完的章数(有正文的章)达到目标章数才允许标完本——
     # 防止 0 章或写了一半就把书标成完本;先取消完本再调整目标可绕过(用户自己的杠杆)
     if updates.get("finished") and not project.finished:

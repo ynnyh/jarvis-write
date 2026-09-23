@@ -110,6 +110,10 @@ class Project(Base, TimestampMixin):
     # 与 Architecture.concept_stale 同一模式,但作用于大纲整组(架构一变影响全部章节蓝图)。
     # 重新铺蓝图(save_blueprint)自动复位 False。存量行为零变化(默认 False)。
     outline_stale: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 概念拍板(docs/确认链 L1):「选了概念」和「定了概念」是两回事。选定概念后进入
+    # 概念打磨屏,作者可带话重捏/手改;点「拍板」才置 True。概念内容再变(含 AI 重捏)
+    # 自动复位 False——拍板永远对着看过、改过的那版概念。存量项目 False,行为零变化。
+    concept_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
 
     architecture: Mapped["Architecture | None"] = relationship(
         back_populates="project", uselist=False, cascade="all, delete-orphan"
@@ -142,5 +146,9 @@ class Architecture(Base):
     # 概念变更后,旧架构仍挂在旧概念上(True=「基于旧概念,建议重新生成架构」)。
     # 重新生成架构(save_architecture)时自动复位 False。详见 app/engines/pipeline/architecture.py
     concept_stale: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 逐层拍板(docs/确认链 L2 架构闸门):{layer_key: bool}。雪花四层各自生成、各自
+    # 拍板;第 N 层重出/手改 → 该层及下游全部回未拍板。NULL = 存量架构(未拆层时代
+    # 生成),按全部已拍板处理(旧行为零变化,回访工作墙时仍可撤回重出)。
+    confirmed_layers: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     project: Mapped[Project] = relationship(back_populates="architecture")

@@ -59,6 +59,145 @@ def _render_directive_block(directive: str | None) -> str:
     )
 
 
+# =============== 架构闸门(docs/确认链 L2):逐层生成/拍板/作废 ===============
+# 雪花四层各自成为一个人工确认点:第 N 层只吃 1..N-1 层**已拍板**的产物,
+# 上游重出/手改 → 该层与下游全部回未拍板(拍板永远对着看过、认过的那版)。
+ARCH_LAYERS: tuple[tuple[str, str], ...] = (
+    ("core_seed", "核心种子"),
+    ("character_dynamics", "角色动力学"),
+    ("world_building", "世界观"),
+    ("plot_architecture", "情节架构"),
+)
+LAYER_LABEL: dict[str, str] = dict(ARCH_LAYERS)
+LAYER_KEYS: tuple[str, ...] = tuple(k for k, _ in ARCH_LAYERS)
+
+
+def validate_layer(layer: str) -> None:
+    """层 key 合法性;非法抛 ValueError(端点层转 400)。"""
+    if layer not in LAYER_LABEL:
+        raise ValueError(f"未知架构层:{layer}")
+
+
+def _require_upstream(value: str, label: str) -> None:
+    if not (value or "").strip():
+        raise ValueError(f"上游「{label}」尚未生成,请先生成并拍板上游")
+
+
+def layer_state(arch: Architecture | None) -> dict[str, bool]:
+    """读逐层拍板态。
+
+    NULL(存量架构,未拆层时代生成)= 全部已拍板:旧行为零变化,旧书回访
+    架构工作墙时四层直接视为已认,仍可逐层撤回重出。无架构 = 全层未拍板。
+    """
+    if arch is None:
+        return {k: False for k in LAYER_KEYS}
+    saved = arch.confirmed_layers or {}
+    return {k: bool(saved.get(k, True)) for k in LAYER_KEYS}
+
+
+def _set_layer_state(arch: Architecture, state: dict[str, bool]) -> None:
+    arch.confirmed_layers = {k: bool(state.get(k, False)) for k in LAYER_KEYS}
+
+
+async def generate_architecture_layer(
+    *,
+    layer: str,
+    topic: str,
+    genre: str,
+    number_of_chapters: int,
+    word_number: int,
+    concept: Concept | dict | None = None,
+    tendency: Tendency | None = None,
+    global_tendency: Tendency | None = None,
+    directive: str | None = None,
+    dna: object | None = None,
+    open_ended: bool = False,
+    core_seed: str = "",
+    character_dynamics: str = "",
+    world_building: str = "",
+) -> str:
+    """生成架构的指定一层,返回该层文本(架构闸门逐层生成/带话重出用)。
+
+    与全书串行的 generate_architecture 共用同一组 prompt——单一代码路径,
+    整本串行只是逐层调本函数的便捷封装。上游产物经参数显式传入:闸门模式
+    只传**已拍板**的上游;依赖的上游为空时抛 ValueError(调用顺序错误)。
+    """
+    validate_layer(layer)
+    assembled = assemble_tendency("outline", tendency, global_tendency)
+    style_block = render_style_block(assembled)
+    if dna is not None:
+        # 故事 DNA(味道锚+故事骨架):未设置时返回空串,prompt 一字不变
+        from app.engines.tendency.assembler import dna_block_of
+
+        style_block += dna_block_of(dna)
+    adapter = get_adapter_for(Task.ARCHITECTURE)
+    topic_block = _render_topic_block(topic, concept)
+    directive_block = _render_directive_block(directive)
+    # 字数盘子:只有核心种子填了每章字数,情节架构/章节蓝图此前完全不知道字数,
+    # 导致大纲按戏剧冲突自然铺、总规模放飞。这里算总盘子注入情节架构(Step4)。
+    word_scope = (
+        f"，总篇幅约 {number_of_chapters * word_number} 字（每章约 {word_number} 字）"
+        if word_number
+        else ""
+    )
+
+    if layer == "core_seed":
+        return (
+            await adapter.ask(
+                CORE_SEED_PROMPT.format(
+                    topic=topic_block,
+                    genre=genre,
+                    number_of_chapters=number_of_chapters,
+                    word_number=word_number,
+                    style_directives=style_block,
+                    directive_block=directive_block,
+                )
+            )
+        ).strip()
+    if layer == "character_dynamics":
+        _require_upstream(core_seed, "核心种子")
+        return (
+            await adapter.ask(
+                CHARACTER_DYNAMICS_PROMPT.format(
+                    core_seed=core_seed,
+                    style_directives=style_block,
+                    directive_block=directive_block,
+                )
+            )
+        ).strip()
+    if layer == "world_building":
+        _require_upstream(core_seed, "核心种子")
+        _require_upstream(character_dynamics, "角色动力学")
+        return (
+            await adapter.ask(
+                WORLD_BUILDING_PROMPT.format(
+                    core_seed=core_seed,
+                    character_dynamics=character_dynamics,
+                    style_directives=style_block,
+                    directive_block=directive_block,
+                )
+            )
+        ).strip()
+    # layer == "plot_architecture"
+    _require_upstream(core_seed, "核心种子")
+    _require_upstream(character_dynamics, "角色动力学")
+    _require_upstream(world_building, "世界观")
+    plot_prompt = PLOT_ARCHITECTURE_OPEN_PROMPT if open_ended else PLOT_ARCHITECTURE_PROMPT
+    return (
+        await adapter.ask(
+            plot_prompt.format(
+                core_seed=core_seed,
+                character_dynamics=character_dynamics,
+                world_building=world_building,
+                number_of_chapters=number_of_chapters,
+                word_scope=word_scope,
+                style_directives=style_block,
+                directive_block=directive_block,
+            )
+        )
+    ).strip()
+
+
 @dataclass
 class ArchitectureResult:
     core_seed: str
@@ -107,84 +246,43 @@ async def generate_architecture(
             except Exception:  # noqa: BLE001 — 进度上报绝不影响生成
                 pass
 
-    assembled = assemble_tendency("outline", tendency, global_tendency)
-    style_block = render_style_block(assembled)
-    if dna is not None:
-        # 故事 DNA(味道锚+故事骨架):未设置时返回空串,prompt 一字不变
-        from app.engines.tendency.assembler import dna_block_of
-
-        style_block += dna_block_of(dna)
-    adapter = get_adapter_for(Task.ARCHITECTURE)
-    topic_block = _render_topic_block(topic, concept)
-    directive_block = _render_directive_block(directive)
-    # 字数盘子:只有核心种子填了每章字数,情节架构/章节蓝图此前完全不知道字数,
-    # 导致大纲按戏剧冲突自然铺、总规模放飞。这里算总盘子注入情节架构(Step4)。
-    word_scope = (
-        f"，总篇幅约 {number_of_chapters * word_number} 字（每章约 {word_number} 字）"
-        if word_number
-        else ""
+    common = dict(
+        topic=topic,
+        genre=genre,
+        number_of_chapters=number_of_chapters,
+        word_number=word_number,
+        concept=concept,
+        tendency=tendency,
+        global_tendency=global_tendency,
+        directive=directive,
+        dna=dna,
+        open_ended=open_ended,
     )
 
-    # Step 1: 核心种子
+    # 四步逐层生成(单一代码路径:与架构闸门的逐层端点共用 generate_architecture_layer)
     logger.info("架构生成 1/4:核心种子...")
     _report("1/4 核心种子")
-    core_seed = (
-        await adapter.ask(
-            CORE_SEED_PROMPT.format(
-                topic=topic_block,
-                genre=genre,
-                number_of_chapters=number_of_chapters,
-                word_number=word_number,
-                style_directives=style_block,
-                directive_block=directive_block,
-            )
-        )
-    ).strip()
+    core_seed = await generate_architecture_layer(layer="core_seed", **common)
 
-    # Step 2: 角色动力学
     logger.info("架构生成 2/4:角色动力学...")
     _report("2/4 角色动力学")
-    character_dynamics = (
-        await adapter.ask(
-            CHARACTER_DYNAMICS_PROMPT.format(
-                core_seed=core_seed,
-                style_directives=style_block,
-                directive_block=directive_block,
-            )
-        )
-    ).strip()
+    character_dynamics = await generate_architecture_layer(
+        layer="character_dynamics", core_seed=core_seed, **common
+    )
 
-    # Step 3: 世界观
     logger.info("架构生成 3/4:世界观...")
     _report("3/4 世界观")
-    world_building = (
-        await adapter.ask(
-            WORLD_BUILDING_PROMPT.format(
-                core_seed=core_seed,
-                character_dynamics=character_dynamics,
-                style_directives=style_block,
-                directive_block=directive_block,
-            )
-        )
-    ).strip()
+    world_building = await generate_architecture_layer(
+        layer="world_building", core_seed=core_seed,
+        character_dynamics=character_dynamics, **common
+    )
 
-    # Step 4: 情节架构(契约式=三幕+全书终局;连载式=长线引擎+首批方向,结局留白)
     logger.info("架构生成 4/4:情节架构(open_ended=%s)...", open_ended)
     _report("4/4 情节架构")
-    plot_prompt = PLOT_ARCHITECTURE_OPEN_PROMPT if open_ended else PLOT_ARCHITECTURE_PROMPT
-    plot_architecture = (
-        await adapter.ask(
-            plot_prompt.format(
-                core_seed=core_seed,
-                character_dynamics=character_dynamics,
-                world_building=world_building,
-                number_of_chapters=number_of_chapters,
-                word_scope=word_scope,
-                style_directives=style_block,
-                directive_block=directive_block,
-            )
-        )
-    ).strip()
+    plot_architecture = await generate_architecture_layer(
+        layer="plot_architecture", core_seed=core_seed,
+        character_dynamics=character_dynamics, world_building=world_building, **common
+    )
 
     logger.info("架构生成完成。")
     return ArchitectureResult(
@@ -218,6 +316,9 @@ def save_architecture(
     arch.plot_architecture = result.plot_architecture
     # 已按（可能刚换过的）最新概念重生成，消退「基于旧概念」标记
     arch.concept_stale = False
+    # 整本重出走的是信任模式链路(不设闸):拍板态回 NULL=全层已认,
+    # 旧书回访工作墙时仍可逐层撤回重出
+    arch.confirmed_layers = None
 
     # 架构真正重写(内容变了)且已有大纲 → 整组大纲落到旧架构上:标 outline_stale,
     # 并把已写正文标失配,前端大纲页据此让作者选「重铺/清空」。首次建架构无大纲则跳过。
@@ -238,6 +339,97 @@ def save_architecture(
     project.status = "outlining"
     db.flush()
     return arch
+
+
+def save_architecture_layer(
+    db: Session, project: Project, layer: str, text: str
+) -> Architecture:
+    """架构闸门单层产物落库(逐层生成/带话重出共用)。
+
+    - 无架构则建行(全层未拍板);该层文本覆盖,内容真变才 version+1;
+    - 该层与下游全部回未拍板——雪花依赖链上,上游变了下游就不再被认;
+    - 已拍板过的层内容真变且已有大纲 → outline_stale + 已写章失配
+      (与整本重出 save_architecture 同语义:整组大纲落在旧架构上)。
+    """
+    validate_layer(layer)
+    arch = project.architecture
+    created = False
+    if arch is None:
+        arch = Architecture(project_id=project.id, version=1)
+        project.architecture = arch
+        db.add(arch)
+        created = True
+    prev_state = layer_state(arch)
+    prev_text = (getattr(arch, layer) or "") if not created else ""
+    changed = prev_text.strip() != (text or "").strip()
+    if changed:
+        arch.version += 1
+    setattr(arch, layer, text)
+    state = prev_state.copy()
+    idx = LAYER_KEYS.index(layer)
+    for k in LAYER_KEYS[idx:]:
+        state[k] = False
+    _set_layer_state(arch, state)
+    if (
+        not created
+        and prev_state.get(layer)
+        and changed
+        and prev_text.strip()
+        and _has_outlines(db, project.id)
+    ):
+        project.outline_stale = True
+        _mark_written_chapters_stale(db, project.id)
+    project.status = "outlining"
+    db.flush()
+    return arch
+
+
+def confirm_architecture_layer(
+    db: Session, project: Project, layer: str, confirmed: bool
+) -> Architecture:
+    """拍板/撤回架构的指定一层。
+
+    拍板的链式约束:上游必须全部已拍板(拍板语义=基于已拍板的上游往下认);
+    撤回的级联:该层撤回 → 下游一并回未拍板(下游基于的上游已不被认)。
+    层还没内容时拍板无意义,抛 ValueError。违反约束/无架构同样 ValueError。
+    """
+    validate_layer(layer)
+    arch = project.architecture
+    if arch is None:
+        raise ValueError("尚未生成架构")
+    if not (getattr(arch, layer) or "").strip():
+        raise ValueError(f"「{LAYER_LABEL[layer]}」还没有内容,先生成或手写再拍板")
+    state = layer_state(arch)
+    idx = LAYER_KEYS.index(layer)
+    if confirmed:
+        missing = [
+            LAYER_LABEL[k] for k in LAYER_KEYS[:idx] if not state.get(k)
+        ]
+        if missing:
+            raise ValueError(
+                f"上游 {'、'.join(missing)} 尚未拍板,先拍板上游再拍这层"
+            )
+    state[layer] = confirmed
+    if not confirmed:
+        for k in LAYER_KEYS[idx + 1:]:
+            state[k] = False
+    _set_layer_state(arch, state)
+    db.flush()
+    return arch
+
+
+def mark_layers_edited(arch: Architecture, fields: list[str]) -> None:
+    """手动编辑层 → 该层与下游回未拍板(拍板永远对着看过、认过的那版)。"""
+    state = layer_state(arch)
+    touched = False
+    for field in fields:
+        if field in LAYER_KEYS:
+            idx = LAYER_KEYS.index(field)
+            for k in LAYER_KEYS[idx:]:
+                state[k] = False
+            touched = True
+    if touched:
+        _set_layer_state(arch, state)
 
 
 def _has_outlines(db: Session, project_id: int) -> bool:
