@@ -229,14 +229,19 @@ async def update_scene_text(
     return {"changed": True, "scene": _scene_out(scene)}
 
 
+class SceneRegenRequest(BaseModel):
+    directive: str = Field(default="", max_length=500)
+
+
 @router.post("/{scene_id}/regenerate")
 async def regenerate_scene(
-    project_id: int, scene_id: int, db: Session = Depends(get_db)
+    project_id: int, scene_id: int, db: Session = Depends(get_db),
+    req: SceneRegenRequest | None = None,
 ):
     """单独重生成某一场(定点重抽,不影响其他场)。
 
-    这是场景级生成的兑现点:章级回炉是「整章重新抽签」,实测 prose 维 6→6→6
-    烧满预算纹丝不动;这里只重抽一场,着力面小得多,也不会把写得好的场一起换掉。
+    directive(可选,确认链 4.3 带话):「这场节奏慢了,直接进冲突」这类
+    对单场的修改要求,经 revision_directive 通道注入本场 prompt。
     重写前留快照;写后写回章正文由前端随后触发的章级同步完成。
     """
     project = get_project_or_404(db, project_id)
@@ -282,6 +287,7 @@ async def regenerate_scene(
             chapter_summary=outline.summary,
             chapter_title=outline.title,
             previous_text=previous,
+            revision_directive=(req.directive if req else "").strip()[:500],
             outline=outline,
         )
     except Exception as exc:  # noqa: BLE001 — 失败要让前端看到原因,不是 500 白屏

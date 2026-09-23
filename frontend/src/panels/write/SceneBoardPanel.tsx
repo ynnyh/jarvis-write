@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from "react";
 import { SceneCard, api } from "../../api";
 import { errMsg } from "../../pollJob";
 import { toast } from "../../ui/Toaster";
+import { DirectiveBar } from "../../ui/confirmKit";
 
 interface Props {
   pid: number;
@@ -106,10 +107,10 @@ export default function SceneBoardPanel({ pid, chapterNumber }: Props) {
     } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
   }
 
-  async function regen(s: SceneCard) {
+  async function regen(s: SceneCard, directive = "") {
     setBusy(`重生成第 ${s.seq} 场…`);
     try {
-      await api.regenerateScene(pid, s.id);
+      await api.regenerateScene(pid, s.id, directive);
       toast.ok(`第 ${s.seq} 场已重生成`, "只动了这一场,其他场未变。");
       load();
       if (openId === s.id) {
@@ -207,6 +208,14 @@ export default function SceneBoardPanel({ pid, chapterNumber }: Props) {
               <button className="btn-sm" disabled={!!busy} onClick={() => regen(s)}>
                 定点重生成
               </button>
+            </div>
+
+            {/* 确认链 4.3 带话:这场不对味,不用整章重抽——带句话只重写这一场 */}
+            <div className="mt-1">
+              <DirectiveBar disabled={!!busy}
+                onSend={(t) => { void regen(s, t); }}
+                placeholder={`带话重写第 ${s.seq} 场,如「直接从冲突进入,砍掉铺垫」`}
+                sendText="带话重写这一场" sendTitle="只重写这一场,其他场不动" />
             </div>
 
             {openId === s.id && (

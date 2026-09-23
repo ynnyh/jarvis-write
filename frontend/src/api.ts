@@ -1485,9 +1485,9 @@ export const api = {
   updateSceneText: (pid: number, sceneId: number, content: string, note = "") =>
     req<{ changed: boolean; scene: SceneCard }>(
       "PUT", `/api/projects/${pid}/scenes/${sceneId}/text`, { content, note }, LLM_TIMEOUT),
-  regenerateScene: (pid: number, sceneId: number) =>
+  regenerateScene: (pid: number, sceneId: number, directive = "") =>
     req<{ scene: SceneCard }>(
-      "POST", `/api/projects/${pid}/scenes/${sceneId}/regenerate`, {}, LLM_TIMEOUT),
+      "POST", `/api/projects/${pid}/scenes/${sceneId}/regenerate`, { directive }, LLM_TIMEOUT),
 
   editOutline: (pid: number, n: number, updates: Partial<Outline>) =>
     req<EditResult>("PUT", `/api/projects/${pid}/outlines/${n}`, updates, LLM_TIMEOUT),
