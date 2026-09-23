@@ -95,8 +95,8 @@ export default function OnboardingFlow() {
     setGenre, setDim, fetchTitles, pickTitle, pickScale, confirmScale,
     runArch, runBp, enterWorkbench, abandon, goto,
     trustMode, setTrustMode, setBp,
-    forgeOpen, forgeSeed, forgeDismissed, setForgeOpen,
-    forgeChanged, forgeConfirmed, forgeUnconfirmed,
+    forgeOpen, forgeSeed, setForgeOpen,
+    forgeChanged, forgeConfirmed, forgeUnconfirmed, isForgeDismissedFor, dismissForge, reopenForge,
   } = useOnboarding();
 
   // 引擎卡抽卡页码:一批 AI 生成 8 张,先翻前 4 张(零成本),翻完才再调 AI 补池
@@ -125,7 +125,7 @@ export default function OnboardingFlow() {
     const c = project.concept;
     if (!c || conceptIsEmpty(c)) return;
     const key = conceptKey(c);
-    if (forgeOpen || forgeDismissed.current === key) return;
+    if (forgeOpen || isForgeDismissedFor(key)) return;
     setForgeOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project, step, forgeOpen]);
@@ -709,7 +709,7 @@ export default function OnboardingFlow() {
                       <button onClick={() => nav(`/new/${pid}/idea`)}>← 上一步</button>
                       {hasConcept && forgeOpen ? (
                         <>
-                          <button onClick={() => { forgeDismissed.current = conceptKey(concept); setForgeOpen(false); }}>
+                          <button onClick={() => dismissForge(conceptKey(concept))}>
                             重新挑一张
                           </button>
                           {!project.concept_confirmed && (
@@ -717,8 +717,7 @@ export default function OnboardingFlow() {
                           )}
                         </>
                       ) : hasConcept ? (
-                        <button className="primary"
-                          onClick={() => { forgeDismissed.current = ""; setForgeOpen(true); }}>
+                        <button className="primary" onClick={reopenForge}>
                           打开打磨房,打磨并拍板 →
                         </button>
                       ) : (

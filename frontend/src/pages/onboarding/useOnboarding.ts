@@ -411,6 +411,20 @@ export function useOnboarding() {
   function forgeUnconfirmed() {
     setProject((prev) => (prev ? { ...prev, concept_confirmed: false } : prev));
   }
+  /** 这版概念的打磨房是否被作者收起过(只读,effect 用) */
+  function isForgeDismissedFor(key: string) {
+    return forgeDismissed.current === key;
+  }
+  /** 收起打磨房(记住收起时对着哪版概念,同一版不再自动弹开) */
+  function dismissForge(key: string) {
+    forgeDismissed.current = key;
+    setForgeOpen(false);
+  }
+  /** 重新打开打磨房(清除收起记忆) */
+  function reopenForge() {
+    forgeDismissed.current = "";
+    setForgeOpen(true);
+  }
 
   // ---------- 配置屏:题材 AI 预填(进屏推断一次,成功落库不跳屏) ----------
   useEffect(() => {
@@ -613,8 +627,8 @@ export function useOnboarding() {
     titleIdeas, titleSig, titleBusy, titleInput,
     chapters, words, advOpen, openEnded,
     fly, pickedKey, dirty, arch, bp, setBp, trustMode, setTrustMode,
-    forgeOpen, forgeSeed, forgeDismissed, setForgeOpen,
-    forgeChanged, forgeConfirmed, forgeUnconfirmed,
+    forgeOpen, forgeSeed, setForgeOpen,
+    forgeChanged, forgeConfirmed, forgeUnconfirmed, isForgeDismissedFor, dismissForge, reopenForge,
     // 渲染需要的 setter
     setSpark, setEntry, setPickedGenreCard, setChatInput,
     setIdeaSig, setCustomOpen, setCustomConcept,
