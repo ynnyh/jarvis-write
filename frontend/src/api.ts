@@ -201,12 +201,37 @@ export interface Project {
   // 故事宪法(结构化):书级恒真声明——刻意留白 / 常驻装置+复现节奏 / 倒计时;
   // 与 world_rules 在后端合并成一张「宪法块」,全程注入生成端 + 全程门禁比对(治长程一致性 #1/#2)
   canon?: StoryCanon | null;
+  // 概念拍板(确认链 L1):True=作者在概念打磨屏拍过板;概念内容再变后端自动复位
+  concept_confirmed?: boolean;
 }
 export interface Architecture {
   core_seed: string; character_dynamics: string;
   world_building: string; plot_architecture: string; version: number;
   // 概念变更后置 true(架构仍挂在旧概念上);重新生成架构后复位 false
   concept_stale?: boolean;
+  // 逐层拍板态(架构闸门):{layer_key: bool}。null(存量架构)= 全层已认,
+  // 前端用 resolvedLayers() 统一解释;新链路逐层生成后为显式 false
+  confirmed_layers?: Record<string, boolean> | null;
+}
+
+/** 架构闸门四层(与后端 ARCH_LAYERS 对齐) */
+export const ARCH_LAYER_KEYS = ["core_seed", "character_dynamics", "world_building", "plot_architecture"] as const;
+export type ArchLayerKey = (typeof ARCH_LAYER_KEYS)[number];
+export const ARCH_LAYER_LABEL: Record<ArchLayerKey, string> = {
+  core_seed: "核心种子", character_dynamics: "角色动力学",
+  world_building: "世界观", plot_architecture: "情节架构",
+};
+export const ARCH_LAYER_DESC: Record<ArchLayerKey, string> = {
+  core_seed: "全书的一句话基因:谁、在什么困境、赌什么。种子里人的介入价值最大,默认必停。",
+  character_dynamics: "主角与对手的动力结构:创伤、渴望、表面追求与深层追求。",
+  world_building: "世界运转的物理/社会/法则维度,与人物深度绑定。",
+  plot_architecture: "三幕(或长线引擎)与全书终局/首批方向。",
+};
+/** 读逐层拍板态:null(存量)= 全层已认 */
+export function resolvedLayers(arch: Architecture | null): Record<ArchLayerKey, boolean> {
+  const out = {} as Record<ArchLayerKey, boolean>;
+  for (const k of ARCH_LAYER_KEYS) out[k] = arch?.confirmed_layers ? !!arch.confirmed_layers[k] : !!arch;
+  return out;
 }
 export interface Outline {
   id: number; chapter_number: number; title: string; chapter_role: string;
@@ -1408,6 +1433,12 @@ export const api = {
     req<{ outlines: Outline[]; warnings: string[] }>("POST", `/api/projects/${id}/blueprint`, { tendency }, LLM_TIMEOUT),
   generateArchitectureAsync: (id: number, tendency: Tendency, directive = "") =>
     req<{ job_id: string }>("POST", `/api/projects/${id}/architecture-async`, { tendency, directive }),
+  // 架构闸门:逐层生成/带话重出指定一层(上游须已拍板,后端 409 把关)
+  architectureLayerAsync: (id: number, layer: string, tendency: Tendency, directive = "") =>
+    req<{ job_id: string }>("POST", `/api/projects/${id}/architecture/layer-async`, { layer, tendency, directive }),
+  // 架构闸门:拍板/撤回指定一层(撤回级联作废下游)
+  confirmArchitectureLayer: (id: number, layer: string, confirmed: boolean) =>
+    req<Architecture>("POST", `/api/projects/${id}/architecture/confirm`, { layer, confirmed }),
   // 架构研讨:多轮对话聊清不满意在哪 → 蒸馏出「额外要求」directive,拿去重新生成
   discussArchitecture: (id: number, messages: { role: string; content: string }[]) =>
     req<{ reply: string; directive: string }>("POST", `/api/projects/${id}/architecture/discuss`, { messages }, LLM_TIMEOUT),

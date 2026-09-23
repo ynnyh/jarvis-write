@@ -13,8 +13,10 @@ export function ConfirmGate({
   disabled, confirmTitle, unconfirmTitle, lockTitleOn, lockTitleOff,
 }: {
   confirmed: boolean;
-  onConfirm: () => void;
-  onUnconfirm: () => void;
+  /** 未拍板态渲染;缺省则不渲染拍板钮 */
+  onConfirm?: () => void;
+  /** 已拍板态渲染;缺省则不渲染撤回钮 */
+  onUnconfirm?: () => void;
   confirmText?: string;
   confirmedText?: string;
   unconfirmText?: string;
@@ -32,12 +34,16 @@ export function ConfirmGate({
       {confirmed ? (
         <>
           <span className="ck-state" data-testid="ck-confirmed">{confirmedText}</span>
-          <button className="btn-sm" disabled={disabled} title={unconfirmTitle ?? "撤回拍板,回到可编辑"}
-            onClick={onUnconfirm}>{unconfirmText}</button>
+          {onUnconfirm && (
+            <button className="btn-sm" disabled={disabled} title={unconfirmTitle ?? "撤回拍板,回到可编辑"}
+              onClick={onUnconfirm}>{unconfirmText}</button>
+          )}
         </>
       ) : (
-        <button className="btn-sm ck-confirm" disabled={disabled} title={confirmTitle ?? "这一版我认了"}
-          onClick={onConfirm}>{confirmText}</button>
+        onConfirm && (
+          <button className="btn-sm ck-confirm" disabled={disabled} title={confirmTitle ?? "这一版我认了"}
+            onClick={onConfirm}>{confirmText}</button>
+        )
       )}
       {onToggleLock !== undefined && (
         <button className="btn-sm" disabled={disabled}

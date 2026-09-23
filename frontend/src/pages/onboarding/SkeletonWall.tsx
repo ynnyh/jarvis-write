@@ -26,6 +26,8 @@ export default function SkeletonWall({ pid, tendency, onTrust, onPaved }: {
   const [segments, setSegments] = useState<SkeletonSegment[]>([]);
   const [edits, setEdits] = useState<Record<number, Partial<SkeletonSegment>>>({});
   const [pavedRanges, setPavedRanges] = useState<string>("");
+  // 铺完一段后的前三张章卡速览(确认链 L4):歪了马上重铺,不等全书
+  const [preview, setPreview] = useState<{ range: [number, number]; items: { num: number; title: string; summary: string }[] } | null>(null);
 
   async function refresh() {
     const out = await api.getSkeleton(pid);
@@ -73,6 +75,15 @@ export default function SkeletonWall({ pid, tendency, onTrust, onPaved }: {
       const r = await pollJob<{ planned_range?: number[] }>(job_id, { onStage: setStage });
       const [s, e] = r?.planned_range ?? [];
       setPavedRanges((cur) => (cur ? `${cur}、第${s}-${e}章` : `第${s}-${e}章`));
+      // 前三张速览:标题 + 一句话,人立刻能判断这段铺得对不对
+      try {
+        const outs = await api.listOutlines(pid);
+        const inRange = outs.filter((o) => o.chapter_number >= s && o.chapter_number <= e);
+        setPreview({
+          range: [s, e],
+          items: inRange.slice(0, 3).map((o) => ({ num: o.chapter_number, title: o.title, summary: o.summary })),
+        });
+      } catch { setPreview(null); }
       // 蓝图落了库,向导的大纲缓存作废;工作台按钮亮起
       qc.invalidateQueries({ queryKey: ["outlines", pid] });
       onPaved();
@@ -189,6 +200,22 @@ export default function SkeletonWall({ pid, tendency, onTrust, onPaved }: {
           );
         })}
       </div>
+      {preview && (
+        <div className="pave-preview mt-2" data-testid="pave-preview">
+          <div className="card-head">
+            <h3>第 {preview.range[0]}-{preview.range[1]} 章 · 前三张速览</h3>
+            <span className="hint">方向不对就改完再「铺这一段」(会覆盖重铺);细看去工作台目录。</span>
+          </div>
+          <div className="pave-preview-cards">
+            {preview.items.map((it) => (
+              <div key={it.num} className="pave-preview-card">
+                <b>第 {it.num} 章 · {it.title}</b>
+                <p className="hint">{it.summary}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {err && <div className="msg-err mt-1">{err}</div>}
       <div className="actions mt-2">
         <button className="btn-sm" onClick={() => { void runGenerate(); }}

@@ -100,6 +100,13 @@ export function useOnboarding() {
   const [fly, setFly] = useState<{ step: SetupStep; text: string } | null>(null);
   const [pickedKey, setPickedKey] = useState<string | null>(null);
 
+  // 概念打磨房(确认链 L1):选定概念后进打磨而非直接飞走。
+  // forgeSeed 只在「换了一个概念」时自增(驱动 ConceptForge 重挂载),
+  // 打磨中的字段编辑向上同步不换 key,避免高亮/草稿被打断。
+  const [forgeOpen, setForgeOpen] = useState(false);
+  const [forgeSeed, setForgeSeed] = useState(0);
+  const forgeDismissed = useRef("");
+
   // 确认墙:回改上游后,下游已确认项标"可能受影响"
   const [dirty, setDirty] = useState<Dirty | null>(null);
 
@@ -149,6 +156,10 @@ export function useOnboarding() {
             applyEngineFeedback(c.engineFeedback ?? "");
           }
           setDirty(loadJSON<Dirty>(wizKeys(pid).dirty));
+        }
+        // 确认链 L1:回到概念屏且已有概念但未拍板 → 直接进打磨房(自然续接)
+        if (p.concept && !conceptIsEmpty(p.concept) && !p.concept_confirmed) {
+          setForgeOpen(true);
         }
         // 直达续建:无 step 参数时按 setup_state 落到对应屏
         if (!stepParam) {
@@ -374,31 +385,44 @@ export function useOnboarding() {
     setPickedKey(conceptKey(c));
     try {
       await patch({ concept: c });
-      toast.ok("已选定故事概念", "进入工作台后还能继续打磨");
     } catch (e) { setErr(errMsg(e)); }
-    flyTo("concept", c.logline || "已选定概念", "genre");
+    // 确认链 L1:选定 → 进打磨房(不再直接飞走);血肉在那里面过目、改、拍板
+    setForgeOpen(true);
+    setForgeSeed((n) => n + 1);
+    toast.ok("已选定故事概念", "先打磨:逐项看/改/带话重捏,满意再拍板");
   }
 
   async function saveCustomConcept() {
     if (conceptIsEmpty(customConcept)) { setErr("至少填一个字段再保存"); return; }
     try { await patch({ concept: customConcept }); } catch (e) { setErr(errMsg(e)); return; }
     setCustomOpen(false);
-    flyTo("concept", customConcept.logline || "手写概念", "genre");
+    setForgeOpen(true);
+    setForgeSeed((n) => n + 1);
   }
 
-  // ---------- 第 3 屏:题材(AI 预填,推断成功自动跳过) ----------
+  // 打磨房回调:内容变化(手改/重捏落库后)同步本地 project;拍板 → 飞入配置屏
+  function forgeChanged(c: Concept) {
+    setProject((prev) => (prev ? { ...prev, concept: c } : prev));
+  }
+  function forgeConfirmed(c: Concept) {
+    toast.ok("概念已拍板", "它现在是全书的硬约束;配置屏里仍可改(改后需重新拍板)");
+    flyTo("concept", c.logline || "概念已拍板", "setup");
+  }
+  function forgeUnconfirmed() {
+    setProject((prev) => (prev ? { ...prev, concept_confirmed: false } : prev));
+  }
+
+  // ---------- 配置屏:题材 AI 预填(进屏推断一次,成功落库不跳屏) ----------
   useEffect(() => {
-    if (step !== "genre" || !conceptText.trim() || tendency.genre) return;
+    if (step !== "setup" || !conceptText.trim() || tendency.genre) return;
     setInferBusy(true);
     api.genreInfer(conceptText).then(async (r) => {
       setGenreSuggests(r.suggestions.map((s) => ({ directive: "", ...s })));
       if (r.genre) {
         await patch({ global_tendency: { ...tendency, genre: r.genre } });
-        // 推断成功即落库并直接进倾向屏,题材屏不再停留(回退/确认墙仍可改)
-        toast.ok(`题材已定为「${r.genre}」`, "确认墙里还能改");
-        await goto("tone");
+        toast.ok(`题材已定为「${r.genre}」`, "不对就在配置屏换一个或自己写");
       }
-      // 推断为空:维持停在题材屏,用户手选或自写
+      // 推断为空:停在配置屏,用户手选或自写
     }).catch(() => undefined).finally(() => setInferBusy(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
@@ -414,13 +438,6 @@ export function useOnboarding() {
   async function setDim(key: string, value: string | string[]) {
     await patch({ global_tendency: { ...tendency, [key]: value } });
   }
-
-  // ---------- 第 5 屏:书名 ----------
-  useEffect(() => {
-    if (step !== "title" || !project || titleIdeas !== null) return;
-    void fetchTitles();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, project, titleIdeas]);
 
   async function fetchTitles(feedback = "") {
     // 签名只取规范字段(不含一次性反馈词),与 suggestTitle 的语义入参一致
@@ -441,11 +458,11 @@ export function useOnboarding() {
   async function pickTitle(t: string) {
     const v = t.trim();
     if (!v) { setErr("先选一个候选或自己写一个书名"); return; }
-    if (pickedKey) return;
-    setPickedKey(v);
     setTitleInput(v);
-    try { await patch({ title: v }); } catch (e) { setErr(errMsg(e)); }
-    flyTo("title", v, "scale");
+    try {
+      await patch({ title: v });
+      toast.ok("书名已定", "进工作台后随时可改");
+    } catch (e) { setErr(errMsg(e)); }
   }
 
   // ---------- 第 6 屏:篇幅 ----------
@@ -459,7 +476,6 @@ export function useOnboarding() {
     if (!Number.isInteger(ch) || ch < 1 || ch > 5000) { setErr("章节数需为 1-5000 的整数"); return; }
     if (!Number.isInteger(w) || w < 200 || w > 20000) { setErr("每章字数需为 200-20000 的整数"); return; }
     await patch({ target_chapters: ch, target_words_per_chapter: w });
-    await goto("confirm");
   }
 
   // 开放式连载开关(篇幅屏勾选):True=结局未定,架构只定长线引擎+首批方向,铺满可续订
@@ -513,10 +529,11 @@ export function useOnboarding() {
     }
   }
 
-  // 流水线屏恢复:优先接回仍在跑的任务,否则按已有产物推断完成态;
+  // 旧流水线屏恢复(信任模式专用;闸门模式的架构自举在 ArchGate 内):
+  // 优先接回仍在跑的任务,否则按已有产物推断完成态;
   // 两手空空且首次进入 → 自动点火(仅一次,失败重跑由用户手动触发,避免刷新反复烧 token)
   useEffect(() => {
-    if (step !== "launch" || pid === null || pipeInit.current) return;
+    if (step !== "launch" || pid === null || pipeInit.current || !trustMode) return;
     pipeInit.current = true;
     (async () => {
       const { jobs } = await api.runningJobs(pid)
@@ -596,6 +613,8 @@ export function useOnboarding() {
     titleIdeas, titleSig, titleBusy, titleInput,
     chapters, words, advOpen, openEnded,
     fly, pickedKey, dirty, arch, bp, setBp, trustMode, setTrustMode,
+    forgeOpen, forgeSeed, forgeDismissed, setForgeOpen,
+    forgeChanged, forgeConfirmed, forgeUnconfirmed,
     // 渲染需要的 setter
     setSpark, setEntry, setPickedGenreCard, setChatInput,
     setIdeaSig, setCustomOpen, setCustomConcept,

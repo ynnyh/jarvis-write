@@ -1,7 +1,6 @@
-// 创作起步流:建书即建草稿项目,三幕式向导走到点火生成。
-// 第一幕 一屏一问:idea → concept → genre → tone → title → scale
-// 第二幕 确认墙:confirm(全部设定卡片墙,可回改,下游标"可能受影响")
-// 第三幕 点火流水线:launch(架构生成 → 蓝图生成,失败只重跑该步)
+// 创作起步流(确认链重构后):建书即建草稿项目,四步主线走到点火。
+// idea → concept(选卡+打磨拍板) → setup(题材口味/篇幅书名/总检三页签) → launch(架构闸门→骨架墙→铺章)
+// 旧八步路由由 steps.parseStep 兼容映射;信任模式(一枪整本)保留为逃生通道。
 // /new → 静默建草稿 → /new/:id/idea → … → /new/:id/launch → 工作台
 // 每屏选择实时 PATCH 落库(刷新不丢、列表页可"继续创建");
 // localStorage 缓存候选内容,刷新后回到当前屏接着选。
@@ -17,8 +16,9 @@ import SkeletonWall from "./onboarding/SkeletonWall";
 import { SCALE_PRESETS, THINK_CONCEPT, THINK_TITLE } from "./onboarding/presets";
 import { composeRandomSeed } from "./onboarding/randomSeeds";
 import { ConceptBrief, conceptKey } from "./onboarding/ConceptBrief";
+import ConceptForge from "./onboarding/ConceptForge";
+import ArchGate from "./onboarding/ArchGate";
 import { ToneDims } from "./onboarding/ToneDims";
-import { wizKeys } from "./onboarding/storage";
 import { useOnboarding } from "./onboarding/useOnboarding";
 
 // SetupStep 原在本文件定义,保留 re-export 以兼容潜在外部引用(现仅本文件内部使用)
@@ -84,7 +84,7 @@ export default function OnboardingFlow() {
     setIdeaSig, setCustomOpen, setCustomConcept,
     setPrefTone, setPrefElements, setPrefFlavors, setPrefPersona, setPrefAvoid, setPrefAvoidText,
     setGenreSuggests, setSuggestPage, setCustomGenre,
-    setTitleSig, setTitleInput, setChapters, setWords, setDirty,
+    setTitleSig, setTitleInput, setChapters, setWords,
     openEnded, toggleOpenEnded,
     // ref
     stepsRef, chatEndRef, sparkRef, titleInputRef,
@@ -93,8 +93,10 @@ export default function OnboardingFlow() {
     brainstorm, regenWithFeedback, pickConcept, saveCustomConcept,
     fetchEngines, pickEngine, developConcept, applyEngineFeedback,
     setGenre, setDim, fetchTitles, pickTitle, pickScale, confirmScale,
-    runArch, runBp, enterWorkbench, abandon, goto, editFrom, markDirtyOk,
+    runArch, runBp, enterWorkbench, abandon, goto,
     trustMode, setTrustMode, setBp,
+    forgeOpen, forgeSeed, forgeDismissed, setForgeOpen,
+    forgeChanged, forgeConfirmed, forgeUnconfirmed,
   } = useOnboarding();
 
   // 引擎卡抽卡页码:一批 AI 生成 8 张,先翻前 4 张(零成本),翻完才再调 AI 补池
@@ -110,6 +112,18 @@ export default function OnboardingFlow() {
   // 保证「向导里确认过的梗卡」一定进数据库——否则蓝图/对账/体检全部失锚
   const premiseDraftRef = useRef<Premise | null>(null);
   const [scaleApplied, setScaleApplied] = useState(false);
+  // 配置屏页签:题材口味 / 篇幅书名 / 总检(旧八步合并为一张卡)
+  const [setupTab, setSetupTab] = useState<"taste" | "scale" | "review">("taste");
+  // 架构闸门四层全拍板 → 亮骨架墙
+  const [archGateDone, setArchGateDone] = useState(false);
+
+  // 概念就绪 → 打磨房自动展开;用户显式收起后同一版概念不再自动弹开(换概念才会)
+  useEffect(() => {
+    if (step !== "concept" || !hasConcept) return;
+    if (forgeOpen || forgeDismissed.current === conceptKey(concept)) return;
+    setForgeOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, concept, forgeOpen]);
 
   // 题材页「随机换一张」:全池重抽题材卡 + 顺带抽口味(与随机开一本同一体验语言)。
   // P1 口味定标:分叉口味跟着新卡走;感情线/开局/底色/视角写进 tendency(setDim 落库)。
@@ -182,7 +196,8 @@ export default function OnboardingFlow() {
   const stepIdx = STEP_ORDER.indexOf(step);
   const hasConcept = !conceptIsEmpty(concept);
   const chatLog = project.chat_log ?? [];
-  const allDone = arch.status === "done" && bp.status === "done";
+  // 点火完成 = 蓝图落库(信任模式 arch+bp 都 done;闸门模式 bp 由骨架墙 onPaved 置 done)
+  const allDone = bp.status === "done";
   const conceptBusy = ideas === null && !!sparkText;
 
   // 候选过期判定:回改上游(灵感/题材/概念…)后,手里的候选与当前输入签名不一致即过期
@@ -194,9 +209,11 @@ export default function OnboardingFlow() {
   // 顶部步骤条:已确认项的缩略文本(FLIP 落点)
   const thumbOf: Partial<Record<SetupStep, string>> = {
     concept: hasConcept ? (concept.logline || "已选定") : "",
-    genre: (tendency.genre as string) || "",
-    title: project.title !== "未命名新书" ? project.title : "",
-    scale: `${project.target_chapters} 章`,
+    setup: [
+      (tendency.genre as string) || "",
+      project.title !== "未命名新书" ? project.title : "",
+      `${project.target_chapters} 章`,
+    ].filter(Boolean).join(" · "),
   };
 
   return (
@@ -209,7 +226,7 @@ export default function OnboardingFlow() {
               {STEP_ORDER.map((s, i) => {
                 const done = i < stepIdx;
                 const thumb = (done && thumbOf[s]) || (fly?.step === s ? fly.text : "");
-                const flyable = s === "concept" || s === "title";
+                const flyable = s === "concept";
                 return (
                   <button key={s} type="button"
                     className={"wiz-step" + (s === step ? " on" : "") + (done ? " done" : "")}
@@ -265,7 +282,7 @@ export default function OnboardingFlow() {
                         {entry ? "收起" : "没有灵感?"}
                       </button>
                       {hasConcept && (
-                        <button onClick={() => goto("genre")}>概念已就绪,跳到题材 →</button>
+                        <button onClick={() => goto("concept")}>概念已就绪,去挑方案 →</button>
                       )}
                     </div>
                         {/* 口味定标(P1):对所有路径可见——AI 出方案/方向卡都会立 pickedGenreCard,
@@ -455,7 +472,7 @@ export default function OnboardingFlow() {
                         <div className="actions mt-2">
                           <button disabled={!!busy} onClick={() => setEntry(null)}>← 换个方式</button>
                           {hasConcept && (
-                            <button className="primary" onClick={() => goto("genre")}>概念已就绪,下一步 →</button>
+                            <button className="primary" onClick={() => goto("concept")}>概念已就绪,去挑方案 →</button>
                           )}
                         </div>
                       </div>
@@ -463,7 +480,7 @@ export default function OnboardingFlow() {
 
                     <div className="actions mt-4 onboard-nav">
                       <span className="grow" />
-                      <button onClick={() => goto("genre")}>跳过,以后再想 →</button>
+                      <button onClick={() => goto("concept")}>跳过,以后再想 →</button>
                     </div>
                   </div>
                 )}
@@ -671,366 +688,366 @@ export default function OnboardingFlow() {
                       </div>
                     )}
 
+                    {/* 打磨房(确认链 L1):选定概念后在这里过目/改/带话重捏,拍板才进配置。
+                        key=forgeSeed:换概念才重挂载;打磨中的字段同步不换 key,高亮不丢 */}
+                    {hasConcept && forgeOpen && (
+                      <ConceptForge key={forgeSeed} pid={pid!} concept={concept}
+                        confirmed={!!project.concept_confirmed}
+                        tendency={tendency} dna={project.dna ?? null}
+                        onChanged={forgeChanged} onConfirmed={forgeConfirmed}
+                        onUnconfirm={forgeUnconfirmed} />
+                    )}
+
                     <div className="actions mt-4 onboard-nav">
                       <button onClick={() => nav(`/new/${pid}/idea`)}>← 上一步</button>
-                      <button className="primary" disabled={!hasConcept} onClick={() => goto("genre")}>
-                        {hasConcept ? "概念可以了,下一步 →" : "先挑一个概念"}
-                      </button>
-                      {!hasConcept && <button onClick={() => goto("genre")}>跳过,以后再想</button>}
-                    </div>
-                  </div>
-                )}
-
-                {/* ---------- 题材 ---------- */}
-                {step === "genre" && (
-                  <div className="card">
-                    <h2>这是什么类型的故事?</h2>
-                    <div className="card-desc">
-                      {inferBusy ? "AI 正在根据你的概念推断题材…" : tendency.genre
-                        ? `AI 推断这本书是「${tendency.genre}」,不对就点别的或自己写。`
-                        : "选一个题材流派,或自己写。"}
-                    </div>
-                    {inferBusy && (
-                      <div className="muted mt-2"><span className="spin" />
-                        <ThinkingText phrases={["正在掂量故事的类型基因…", "正在比对流派特征…"]} />
-                      </div>
-                    )}
-                    <div className="title-chips mt-2">
-                      {!!tendency.genre && !shownSuggests.some((s) => s.label === tendency.genre) && (
-                        <button type="button" className="title-chip on">{tendency.genre as string}</button>
+                      {hasConcept && forgeOpen ? (
+                        <>
+                          <button onClick={() => { forgeDismissed.current = conceptKey(concept); setForgeOpen(false); }}>
+                            重新挑一张
+                          </button>
+                          {!project.concept_confirmed && (
+                            <button className="primary" onClick={() => goto("setup")}>先跳过打磨,直接去配置 →</button>
+                          )}
+                        </>
+                      ) : hasConcept ? (
+                        <button className="primary"
+                          onClick={() => { forgeDismissed.current = ""; setForgeOpen(true); }}>
+                          打开打磨房,打磨并拍板 →
+                        </button>
+                      ) : (
+                        <button className="primary" onClick={() => goto("setup")}>先挑一个概念(也可跳过去)</button>
                       )}
-                      {shownSuggests.map((s) => (
-                        <button key={s.label} type="button"
-                          className={"title-chip" + (tendency.genre === s.label ? " on" : "")}
-                          title={s.desc || undefined}
-                          onClick={() => setGenre(s.label)}>{s.label}</button>
-                      ))}
-                      <button type="button" className="title-chip"
-                        onClick={() => { setGenreSuggests([]); setSuggestPage((p) => (p + 1) % Math.max(1, Math.ceil(allGenreChips.length / 8))); }}>
-                        ↻ 换一批
-                      </button>
-                    </div>
-                    <div className="input-row mt-2">
-                      <input type="text" value={customGenre} onChange={(e) => setCustomGenre(e.target.value)}
-                        placeholder="都不合适?直接写你的题材,如:民国武侠"
-                        onKeyDown={(e) => e.key === "Enter" && customGenre.trim() && setGenre(customGenre.trim())} />
-                      <button className="btn-sm" disabled={!customGenre.trim()}
-                        onClick={() => setGenre(customGenre.trim())}>就用它</button>
-                    </div>
-                    <div className="actions mt-4 onboard-nav">
-                      <button onClick={() => nav(`/new/${pid}/concept`)}>← 上一步</button>
-                      <button className="primary" onClick={() => goto("tone")}>下一步 →</button>
                     </div>
                   </div>
                 )}
 
-                {/* ---------- 基调倾向 ---------- */}
-                {step === "tone" && (
+                {/* ---------- 配置(题材口味 / 篇幅书名 / 总检):旧四屏并一张卡 ---------- */}
+                {step === "setup" && (
                   <div className="card">
-                    <h2>想要什么样的阅读手感?</h2>
-                    <ToneAutoApply shapeSug={shapeSug} setDim={setDim} />
+                    <h2>定调与盘子</h2>
                     <div className="card-desc">
-                      节奏 / 结构 / 基调,可不选,AI 会均衡处理;想叠加的剧情元素(暗恋、双向奔赴、逆袭…)也可在这里勾选。进了工作台也能随时调。
+                      题材、口味、篇幅、书名——AI 都给了预填,逐项过目随手改;不对就换,都认了就去总检点火。
                     </div>
-                    {genreDim ? (
-                      <div className="mt-2"><ToneDims tendency={tendency} onSet={setDim} /></div>
-                    ) : (
-                      <div className="muted mt-2"><span className="spin" />加载倾向选项…</div>
-                    )}
-                    <div className="actions mt-4 onboard-nav">
-                      <button onClick={() => nav(`/new/${pid}/genre`)}>← 上一步</button>
-                      <button className="primary" onClick={() => goto("title")}>下一步 →</button>
-                    </div>
-                  </div>
-                )}
-
-                {/* ---------- 书名 ---------- */}
-                {step === "title" && (
-                  <div className="card">
-                    <h2>给它起个名字</h2>
-                    <div className="card-desc">
-                      AI 根据概念和题材起的候选,点"用这个"即定;随时可改,不是一锤定音。
-                    </div>
-                    {titleIdeas === null && (
-                      <div className="muted mt-2 mb-2">
-                        <span className="spin" /><ThinkingText phrases={THINK_TITLE} />
-                      </div>
-                    )}
-                    {titlesStale && (
-                      <div className="wiz-stale">
-                        <span>⚠ {titleStaleText(titleSig!, project.topic ?? "", (tendency.genre as string) ?? "", concept)}</span>
-                        <span className="grow" />
-                        <button className="btn-sm" onClick={() => fetchTitles()}>重新生成</button>
-                        <button className="btn-sm" onClick={() => setTitleSig(curTitleSig)}>仍用这批</button>
-                      </div>
-                    )}
-                    <CandidateCards
-                      items={titleIdeas} skeletonCount={4} keyOf={(t) => t}
-                      layoutIdPrefix="title" pickedKey={pickedKey}
-                      busy={titleBusy || !!pickedKey}
-                      renderCard={(t) => <h3 className="wiz-cand-title">{t}</h3>}
-                      onPick={pickTitle}
-                      onRefresh={() => fetchTitles()}
-                      onRefine={(f) => fetchTitles(f)}
-                      onCustom={() => titleInputRef.current?.focus()}
-                    />
-                    <div className="input-row mt-3">
-                      <input ref={titleInputRef} type="text" value={titleInput}
-                        onChange={(e) => setTitleInput(e.target.value)}
-                        placeholder="或自己输入书名" maxLength={100}
-                        onKeyDown={(e) => e.key === "Enter" && pickTitle(titleInput)} />
-                      <button className="btn-sm" disabled={!titleInput.trim() || !!pickedKey}
-                        onClick={() => pickTitle(titleInput)}>
-                        就用这个名
-                      </button>
-                    </div>
-                    <div className="actions mt-4 onboard-nav">
-                      <button onClick={() => nav(`/new/${pid}/tone`)}>← 上一步</button>
-                      <button className="primary" disabled={!titleInput.trim()}
-                        onClick={() => pickTitle(titleInput)}>
-                        下一步 →
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* ---------- 篇幅(前置:自动/指定双模式) ---------- */}
-                {step === "scale" && (
-                  <div className="card">
-                    <h2>这本书打算写多长?</h2>
-                    <div className="card-desc">
-                      「自动」= AI 按概念与题材推荐档位(概念确认后生效,随时可改);「我指定」= 按你填的章数生成——
-                      题材与章数不匹配时也按你的来,蓝图自动适配节奏。超过 150 章自动**分卷连载**:先出全书卷纲,
-                      每卷定主题,首铺只铺第一卷,写到卷尾自动展开下一卷——不用一次规划所有细节。
+                    <div className="setup-tabs" role="tablist">
+                      <button type="button" className={setupTab === "taste" ? "on" : ""}
+                        onClick={() => setSetupTab("taste")}>题材与口味</button>
+                      <button type="button" className={setupTab === "scale" ? "on" : ""}
+                        onClick={() => setSetupTab("scale")}>篇幅与书名</button>
+                      <button type="button" className={setupTab === "review" ? "on" : ""}
+                        onClick={() => setSetupTab("review")}>总检 {project.concept_confirmed ? "" : "(概念未拍板也可先看)"}</button>
                     </div>
 
-                    <div className="title-chips mt-3">
-                      <button type="button"
-                        className={"title-chip" + (scaleMode === "auto" ? " on" : "")}
-                        onClick={() => setScaleMode("auto")}>🎴 自动(AI 按题材定)</button>
-                      <button type="button"
-                        className={"title-chip" + (scaleMode === "manual" ? " on" : "")}
-                        onClick={() => setScaleMode("manual")}>✍️ 我指定章数</button>
-                    </div>
-
-                    {scaleMode === "" && (
-                      <div className="muted mt-2">选一种方式继续;不确定就选「自动」。</div>
-                    )}
-
-                    {scaleMode === "auto" && (
+                    {setupTab === "taste" && (
                       <>
-                        <div className="scale-cards mt-3">
-                          {SCALE_PRESETS.map((p) => (
-                            <button key={p.key} type="button"
-                              className={"scale-card" + (Number(chapters) === p.chapters ? " on" : "")}
-                              onClick={() => pickScale(p)}>
-                              <b>{p.label}</b>
-                              <div className="scale-num">{p.chapters} 章 × {p.words} 字</div>
-                              <div className="hint">{p.desc}</div>
-                            </button>
-                          ))}
+                        <h3 className="mt-2">这是什么类型的故事?</h3>
+                        <div className="card-desc">
+                          {inferBusy ? "AI 正在根据你的概念推断题材…" : tendency.genre
+                            ? `AI 推断这本书是「${tendency.genre}」,不对就点别的或自己写。`
+                            : "选一个题材流派,或自己写。"}
                         </div>
-                        <div className="fld-hint mt-2">
-                          点卡为「预选」,仍可在概念确认后接受 AI 推荐档位;不点直接下一步 = 完全交给 AI。
-                        </div>
-                        {shapeSug && scaleApplied && (
-                          <div className="card card-info mt-2">
-                            <b>🎴 AI 按概念推荐篇幅:{shapeSug.scale === "short" ? "短篇" : shapeSug.scale === "long" ? "长篇" : shapeSug.scale === "serial" ? "连载" : "中篇"}</b>
-                            <div className="card-desc mt-1">{shapeSug.scale_reason} 已帮你选好(点其他卡可改)。</div>
+                        {inferBusy && (
+                          <div className="muted mt-2"><span className="spin" />
+                            <ThinkingText phrases={["正在掂量故事的类型基因…", "正在比对流派特征…"]} />
                           </div>
                         )}
+                        <div className="title-chips mt-2">
+                          {!!tendency.genre && !shownSuggests.some((sg) => sg.label === tendency.genre) && (
+                            <button type="button" className="title-chip on">{tendency.genre as string}</button>
+                          )}
+                          {shownSuggests.map((sg) => (
+                            <button key={sg.label} type="button"
+                              className={"title-chip" + (tendency.genre === sg.label ? " on" : "")}
+                              title={sg.desc || undefined}
+                              onClick={() => setGenre(sg.label)}>{sg.label}</button>
+                          ))}
+                          <button type="button" className="title-chip"
+                            onClick={() => { setGenreSuggests([]); setSuggestPage((pg) => (pg + 1) % Math.max(1, Math.ceil(allGenreChips.length / 8))); }}>
+                            ↻ 换一批
+                          </button>
+                        </div>
+                        <div className="input-row mt-2">
+                          <input type="text" value={customGenre} onChange={(e) => setCustomGenre(e.target.value)}
+                            placeholder="都不合适?直接写你的题材,如:民国武侠"
+                            onKeyDown={(e) => e.key === "Enter" && customGenre.trim() && setGenre(customGenre.trim())} />
+                          <button className="btn-sm" disabled={!customGenre.trim()}
+                            onClick={() => setGenre(customGenre.trim())}>就用它</button>
+                        </div>
+
+                        <h3 className="mt-4">想要什么样的阅读手感?</h3>
+                        <ToneAutoApply shapeSug={shapeSug} setDim={setDim} />
+                        <div className="card-desc">
+                          节奏 / 结构 / 基调,可不选,AI 会均衡处理;想叠加的剧情元素也可在这里勾选。进了工作台也能随时调。
+                        </div>
+                        {genreDim ? (
+                          <div className="mt-2"><ToneDims tendency={tendency} onSet={setDim} /></div>
+                        ) : (
+                          <div className="muted mt-2"><span className="spin" />加载倾向选项…</div>
+                        )}
+                        <div className="actions mt-4 onboard-nav">
+                          <button onClick={() => nav(`/new/${pid}/concept`)}>← 上一步</button>
+                          <button className="primary" onClick={() => setSetupTab("scale")}>下一步 →</button>
+                        </div>
                       </>
                     )}
 
-                    {scaleMode === "manual" && (
-                      <div className="row mt-3">
-                        <div>
-                          <label className="fl">目标章节数(1-5000)</label>
-                          <input type="number" value={chapters} min={1} max={5000}
-                            onChange={(e) => setChapters(e.target.value)} />
+                    {setupTab === "scale" && (
+                      <>
+                        <h3 className="mt-2">这本书打算写多长?</h3>
+                        <div className="card-desc">
+                          「自动」= AI 按概念与题材推荐档位(随时可改);「我指定」= 按你填的章数生成——
+                          超过 150 章自动**分卷连载**:先出全书卷纲,首铺只铺第一卷,写到卷尾自动展开下一卷。
                         </div>
-                        <div>
-                          <label className="fl">每章目标字数</label>
-                          <input type="number" value={words} min={200} max={20000} step={500}
-                            onChange={(e) => setWords(e.target.value)} />
+
+                        <div className="title-chips mt-3">
+                          <button type="button"
+                            className={"title-chip" + (scaleMode === "auto" ? " on" : "")}
+                            onClick={() => setScaleMode("auto")}>🎴 自动(AI 按题材定)</button>
+                          <button type="button"
+                            className={"title-chip" + (scaleMode === "manual" ? " on" : "")}
+                            onClick={() => setScaleMode("manual")}>✍️ 我指定章数</button>
                         </div>
-                      </div>
-                    )}
 
-                    <label className="row mt-3" style={{ gap: 8, alignItems: "flex-start", cursor: "pointer" }}>
-                      <input type="checkbox" checked={openEnded}
-                        onChange={(e) => toggleOpenEnded(e.target.checked)} style={{ marginTop: 3 }} />
-                      <span>
-                        <b>开放式连载(结局未定)</b>
-                        <span className="hint" style={{ display: "block" }}>
-                          勾上后架构不预设全书终局,只定「长线引擎 + 首批方向」;上面的章数是本批次体量,
-                          写满后蓝图页一键「续订」顺延 30 章接着写——写到哪续到哪。
-                        </span>
-                      </span>
-                    </label>
+                        {scaleMode === "" && (
+                          <div className="muted mt-2">选一种方式继续;不确定就选「自动」。</div>
+                        )}
 
-                    <div className="actions mt-4 onboard-nav">
-                      <button onClick={() => nav(`/new/${pid}/idea`)}>← 上一步</button>
-                      <button className="primary" onClick={confirmScale}>下一步 →</button>
-                    </div>
-                  </div>
-                )}
-
-                {/* ---------- 确认墙 ---------- */}
-                {step === "confirm" && (
-                  <div className="card">
-                    <h2>最后过一遍</h2>
-                    <div className="card-desc">
-                      都对就「开始创建」;哪张卡不对,点「改」跳回去调整,不强制重选。
-                    </div>
-                    <div className="card mt-3">
-                      <div className="card-head"><h3>核心梗卡</h3></div>
-                      <div className="card-desc">
-                        梗是全书的纲:AI 已按概念与题材提炼,点字段可改;蓝图逐章标「梗兑现」、
-                        交稿对账、体检健康度都以它为轴。点火后仍可在「本书设置」修改。
-                      </div>
-                      {pid != null && (
-                        <PremiseCard
-                          pid={pid} initial={null} autoSuggest
-                          onDraftChange={(d) => { premiseDraftRef.current = d; }}
-                        />
-                      )}
-                    </div>
-                    <div className="wiz-wall mt-3">
-                      {([
-                        {
-                          key: "concept" as SetupStep, label: "概念", set: hasConcept,
-                          body: hasConcept ? <ConceptBrief c={concept} /> : null,
-                          text: concept.logline,
-                        },
-                        {
-                          key: "genre" as SetupStep, label: "题材", set: !!tendency.genre,
-                          body: null, text: (tendency.genre as string) || "",
-                        },
-                        {
-                          key: "tone" as SetupStep, label: "倾向",
-                          set: ["pace", "structure", "tone"].some((k) => {
-                            const v = tendency[k];
-                            return Array.isArray(v) ? v.length > 0 : !!v;
-                          }),
-                          body: null,
-                          text: ["pace", "structure", "tone"]
-                            .flatMap((k) => {
-                              const v = tendency[k];
-                              return Array.isArray(v) ? v : v ? [v] : [];
-                            }).join(" / "),
-                        },
-                        {
-                          key: "title" as SetupStep, label: "书名",
-                          set: project.title !== "未命名新书",
-                          body: null,
-                          text: project.title !== "未命名新书" ? project.title : "",
-                        },
-                        {
-                          key: "scale" as SetupStep, label: "篇幅", set: true,
-                          body: null,
-                          text: `${project.target_chapters} 章 × ${project.target_words_per_chapter} 字,合计约 ${project.target_chapters * project.target_words_per_chapter} 字`,
-                        },
-                      ]).map((c) => {
-                        const affected = !!dirty
-                          && STEP_ORDER.indexOf(c.key) > STEP_ORDER.indexOf(dirty.from)
-                          && !dirty.ok.includes(c.key);
-                        return (
-                          <div key={c.key} className="wiz-wall-card">
-                            <div className="wiz-wall-head">
-                              <span className="wiz-wall-label">{c.label}</span>
-                              {affected && <span className="wiz-flag">⚠ 可能受影响</span>}
-                              <span className="grow" />
-                              {affected && (
-                                <button className="btn-sm" onClick={() => markDirtyOk(c.key)}>仍用这个</button>
-                              )}
-                              <button className="btn-sm" onClick={() => editFrom(c.key)}>改</button>
+                        {scaleMode === "auto" && (
+                          <>
+                            <div className="scale-cards mt-3">
+                              {SCALE_PRESETS.map((pp) => (
+                                <button key={pp.key} type="button"
+                                  className={"scale-card" + (Number(chapters) === pp.chapters ? " on" : "")}
+                                  onClick={() => pickScale(pp)}>
+                                  <b>{pp.label}</b>
+                                  <div className="scale-num">{pp.chapters} 章 × {pp.words} 字</div>
+                                  <div className="hint">{pp.desc}</div>
+                                </button>
+                              ))}
                             </div>
-                            <div className="wiz-wall-body">
-                              {c.set
-                                ? (c.body ?? <span className="wiz-wall-text">{c.text}</span>)
-                                : <span className="muted">未定</span>}
+                            {shapeSug && scaleApplied && (
+                              <div className="card card-info mt-2">
+                                <b>🎴 AI 按概念推荐篇幅:{shapeSug.scale === "short" ? "短篇" : shapeSug.scale === "long" ? "长篇" : shapeSug.scale === "serial" ? "连载" : "中篇"}</b>
+                                <div className="card-desc mt-1">{shapeSug.scale_reason} 已帮你选好(点其他卡可改)。</div>
+                              </div>
+                            )}
+                          </>
+                        )}
+
+                        {scaleMode === "manual" && (
+                          <div className="row mt-3">
+                            <div>
+                              <label className="fl">目标章节数(1-5000)</label>
+                              <input type="number" value={chapters} min={1} max={5000}
+                                onChange={(e) => setChapters(e.target.value)} />
+                            </div>
+                            <div>
+                              <label className="fl">每章目标字数</label>
+                              <input type="number" value={words} min={200} max={20000} step={500}
+                                onChange={(e) => setWords(e.target.value)} />
                             </div>
                           </div>
-                        );
-                      })}
-                    </div>
-                    <div className="actions mt-4 onboard-nav">
-                      <button onClick={() => nav(`/new/${pid}/scale`)}>← 上一步</button>
-                      <button className="primary" onClick={async () => {
-                        // P0-1:向导里看过的梗卡必须落库。优先保存编辑中的草稿;
-                        // 用户没进编辑框时草稿 ref 为空——此时把 AI 预填的那份直接保存
-                        // (展示即所得,不能让「确认过」的梗卡停在展示层)
-                        try {
-                          if (premiseDraftRef.current) {
-                            await api.savePremise(pid!, premiseDraftRef.current);
-                            premiseDraftRef.current = null;  // 已落库,重复点火不重写
-                          }
-                        } catch { /* 保存失败不拦点火:进工作台后可在本书设置补 */ }
-                        setDirty(null);
-                        localStorage.removeItem(wizKeys(pid!).dirty);
-                        void goto("launch");
-                      }}>
-                        🔥 开始创建
-                      </button>
-                    </div>
+                        )}
+
+                        <label className="row mt-3" style={{ gap: 8, alignItems: "flex-start", cursor: "pointer" }}>
+                          <input type="checkbox" checked={openEnded}
+                            onChange={(e) => toggleOpenEnded(e.target.checked)} style={{ marginTop: 3 }} />
+                          <span>
+                            <b>开放式连载(结局未定)</b>
+                            <span className="hint" style={{ display: "block" }}>
+                              勾上后架构不预设全书终局,只定「长线引擎 + 首批方向」;章数是本批次体量,
+                              写满后蓝图页一键「续订」顺延接着写——写到哪续到哪。
+                            </span>
+                          </span>
+                        </label>
+
+                        <h3 className="mt-4">书名(可留空,进工作台再起)</h3>
+                        {titleBusy && (
+                          <div className="muted mt-2 mb-2">
+                            <span className="spin" /><ThinkingText phrases={THINK_TITLE} />
+                          </div>
+                        )}
+                        {titlesStale && (
+                          <div className="wiz-stale">
+                            <span>⚠ {titleStaleText(titleSig!, project.topic ?? "", (tendency.genre as string) ?? "", concept)}</span>
+                            <span className="grow" />
+                            <button className="btn-sm" onClick={() => fetchTitles()}>重新生成</button>
+                            <button className="btn-sm" onClick={() => setTitleSig(curTitleSig)}>仍用这批</button>
+                          </div>
+                        )}
+                        {titleIdeas !== null && titleIdeas.length > 0 && (
+                          <div className="title-chips mt-2">
+                            {titleIdeas.map((t) => (
+                              <button key={t} type="button"
+                                className={"title-chip" + (project.title === t ? " on" : "")}
+                                onClick={() => pickTitle(t)}>{t}</button>
+                            ))}
+                          </div>
+                        )}
+                        <div className="input-row mt-2">
+                          <input ref={titleInputRef} type="text" value={titleInput}
+                            onChange={(e) => setTitleInput(e.target.value)}
+                            placeholder="或自己输入书名" maxLength={100}
+                            onKeyDown={(e) => e.key === "Enter" && titleInput.trim() && pickTitle(titleInput)} />
+                          <button className="btn-sm" disabled={!titleInput.trim()}
+                            onClick={() => pickTitle(titleInput)}>就用这个名</button>
+                          <button className="btn-sm" disabled={titleBusy} title="AI 根据概念与题材出 4 个候选"
+                            onClick={() => fetchTitles()}>AI 起名</button>
+                        </div>
+
+                        <div className="actions mt-4 onboard-nav">
+                          <button onClick={() => setSetupTab("taste")}>← 上一步</button>
+                          <button className="primary"
+                            onClick={() => { void confirmScale().then(() => setSetupTab("review")); }}>去总检 →</button>
+                        </div>
+                      </>
+                    )}
+
+                    {setupTab === "review" && (
+                      <>
+                        <div className="card mt-3">
+                          <div className="card-head"><h3>核心梗卡</h3></div>
+                          <div className="card-desc">
+                            梗是全书的纲:AI 已按概念与题材提炼,点字段可改;蓝图逐章标「梗兑现」、
+                            交稿对账、体检健康度都以它为轴。点火后仍可在「本书设置」修改。
+                          </div>
+                          {pid != null && (
+                            <PremiseCard
+                              pid={pid} initial={null} autoSuggest
+                              onDraftChange={(d) => { premiseDraftRef.current = d; }}
+                            />
+                          )}
+                        </div>
+                        <div className="wiz-wall mt-3">
+                          {([
+                            {
+                              label: "概念", set: hasConcept,
+                              body: hasConcept ? <ConceptBrief c={concept} /> : null,
+                              text: concept.logline,
+                              go: () => nav(`/new/${pid}/concept`),
+                            },
+                            {
+                              label: "题材", set: !!tendency.genre,
+                              body: null, text: (tendency.genre as string) || "",
+                              go: () => setSetupTab("taste"),
+                            },
+                            {
+                              label: "倾向",
+                              set: ["pace", "structure", "tone"].some((k) => {
+                                const v = tendency[k];
+                                return Array.isArray(v) ? v.length > 0 : !!v;
+                              }),
+                              body: null,
+                              text: ["pace", "structure", "tone"]
+                                .flatMap((k) => {
+                                  const v = tendency[k];
+                                  return Array.isArray(v) ? v : v ? [v] : [];
+                                }).join(" / "),
+                              go: () => setSetupTab("taste"),
+                            },
+                            {
+                              label: "书名", set: project.title !== "未命名新书",
+                              body: null,
+                              text: project.title !== "未命名新书" ? project.title : "",
+                              go: () => setSetupTab("scale"),
+                            },
+                            {
+                              label: "篇幅", set: true, body: null,
+                              text: `${project.target_chapters} 章 × ${project.target_words_per_chapter} 字,合计约 ${project.target_chapters * project.target_words_per_chapter} 字`,
+                              go: () => setSetupTab("scale"),
+                            },
+                          ]).map((c) => (
+                            <div key={c.label} className="wiz-wall-card">
+                              <div className="wiz-wall-head">
+                                <span className="wiz-wall-label">{c.label}</span>
+                                <span className="grow" />
+                                <button className="btn-sm" onClick={c.go}>改</button>
+                              </div>
+                              <div className="wiz-wall-body">
+                                {c.set
+                                  ? (c.body ?? <span className="wiz-wall-text">{c.text}</span>)
+                                  : <span className="muted">未定</span>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="actions mt-4 onboard-nav">
+                          <button onClick={() => setSetupTab("scale")}>← 上一步</button>
+                          <button className="primary" onClick={async () => {
+                            // P0-1:向导里看过的梗卡必须落库(展示即所得)
+                            try {
+                              if (premiseDraftRef.current) {
+                                await api.savePremise(pid!, premiseDraftRef.current);
+                                premiseDraftRef.current = null;
+                              }
+                            } catch { /* 保存失败不拦点火:进工作台后可在本书设置补 */ }
+                            void goto("launch");
+                          }}>
+                            🔥 去点火
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
 
-                {/* ---------- 点火流水线 ---------- */}
+                {/* ---------- 点火:架构闸门(逐层拍板)→ 骨架墙 → 铺章 ---------- */}
                 {step === "launch" && (
                   <div className="card">
                     <h2>《{project.title}》点火</h2>
                     <div className="card-desc">
-                      AI 按确认好的设定生成架构 → 出故事骨架(分段走向,你逐段拍板)→ 按骨架铺章;
-                      都在后台跑,切走也继续。
-                      {arch.status === "run" || bp.status === "run" ? (
-                        <span className="muted">
-                          {" "}真实渠道约需几分钟——趁这个空档,可以去右侧检查梗卡与设定,
-                          或翻翻 <a href="#/help">使用指南</a> 的「写作区五分钟上手」。
-                        </span>
-                      ) : null}
+                      {trustMode
+                        ? "信任模式:AI 一枪生成架构 → 蓝图,中途不停。想逐层把关就回上一步关掉信任模式重新来。"
+                        : "架构逐层生成:每层你都看过、拍过板才往下走;四层拍完出故事骨架,逐段拍板铺章。都在后台跑,切走也继续。"}
                     </div>
-                    <div className="wiz-pipe mt-3">
-                      {([
-                        { key: "arch" as const, label: "生成架构",
-                          desc: "核心种子 / 角色关系 / 世界观 / 情节框架", st: arch, retry: runArch },
-                        { key: "bp" as const, label: "生成蓝图",
-                          desc: "按架构展开分章大纲", st: bp, retry: runBp },
-                      ]).map((c) => (
-                        <div key={c.key} className={"wiz-pipe-card " + c.st.status}>
-                          <div className="wiz-pipe-icon">
-                            {c.st.status === "run" ? <span className="spin" />
-                              : c.st.status === "done" ? "✓"
-                              : c.st.status === "err" ? "✕" : "○"}
+                    {trustMode ? (
+                      <div className="wiz-pipe mt-3">
+                        {([
+                          { key: "arch" as const, label: "生成架构",
+                            desc: "核心种子 / 角色关系 / 世界观 / 情节框架", st: arch, retry: runArch },
+                          { key: "bp" as const, label: "生成蓝图",
+                            desc: "按架构展开分章大纲", st: bp, retry: runBp },
+                        ]).map((c) => (
+                          <div key={c.key} className={"wiz-pipe-card " + c.st.status}>
+                            <div className="wiz-pipe-icon">
+                              {c.st.status === "run" ? <span className="spin" />
+                                : c.st.status === "done" ? "✓"
+                                : c.st.status === "err" ? "✕" : "○"}
+                            </div>
+                            <div className="grow">
+                              <div className="wiz-pipe-label">{c.label}</div>
+                              <div className="hint">{c.desc}</div>
+                              {c.st.status === "run" && (
+                                <div className="muted mt-1">
+                                  <ThinkingText phrases={[c.st.stage || "生成中"]} interval={4000} />
+                                  …
+                                </div>
+                              )}
+                              {c.st.status === "err" && (
+                                <div className="msg-err mt-1">
+                                  {c.st.error}
+                                  <button className="btn-sm ml-2" onClick={c.retry}>重跑本步</button>
+                                </div>
+                              )}
+                            </div>
                           </div>
-                          <div className="grow">
-                            <div className="wiz-pipe-label">{c.label}</div>
-                            <div className="hint">{c.desc}</div>
-                            {c.st.status === "run" && (
-                              <div className="muted mt-1">
-                                <ThinkingText phrases={[c.st.stage || "生成中"]} interval={4000} />
-                                …
-                              </div>
-                            )}
-                            {c.st.status === "err" && (
-                              <div className="msg-err mt-1">
-                                {c.st.error}
-                                <button className="btn-sm ml-2" onClick={c.retry}>重跑本步</button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    {/* 故事骨架墙(docs/20 两段式点火):架构完成且未进蓝图时上墙 */}
-                    {arch.status === "done" && bp.status === "wait" && !trustMode && (
-                      <SkeletonWall
-                        pid={pid!}
-                        tendency={tendency}
-                        onTrust={() => { setTrustMode(true); void runBp(); }}
-                        onPaved={() => setBp({ status: "done", stage: "", error: "" })}
-                      />
+                        ))}
+                      </div>
+                    ) : (
+                      <>
+                        {/* 架构工作墙(确认链 L2):雪花四层逐层生成/看改/带话/拍板;种子默认必停,
+                            后三层默认连跑可逐层关;信任模式=一枪整本,走上方旧链路 */}
+                        <ArchGate pid={pid!} tendency={tendency}
+                          onTrust={() => { setTrustMode(true); void runArch(); }}
+                          onAllConfirmed={() => setArchGateDone(true)} />
+                        {archGateDone && (
+                          <SkeletonWall
+                            pid={pid!}
+                            tendency={tendency}
+                            onTrust={() => { setTrustMode(true); void runBp(); }}
+                            onPaved={() => setBp({ status: "done", stage: "", error: "" })}
+                          />
+                        )}
+                      </>
                     )}
                     {trustMode && arch.status === "done" && bp.status === "wait" && (
                       <div className="muted mt-2">信任模式:架构完成,直接铺全书蓝图(跳过骨架墙)。</div>
@@ -1048,10 +1065,7 @@ export default function OnboardingFlow() {
                       </motion.div>
                     )}
                     <div className="actions mt-4 onboard-nav">
-                      <button onClick={() => nav(`/new/${pid}/confirm`)}>← 上一步</button>
-                      {arch.status === "wait" && bp.status === "wait" && (
-                        <button className="primary" onClick={runArch}>🔥 开始生成</button>
-                      )}
+                      <button onClick={() => nav(`/new/${pid}/setup`)}>← 上一步</button>
                       {allDone
                         ? <button className="primary" onClick={enterWorkbench}>进入工作台 →</button>
                         : <button onClick={enterWorkbench}>先不生成,直接进工作台</button>}
