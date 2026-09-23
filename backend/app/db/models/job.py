@@ -37,3 +37,30 @@ class Job(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+class JobStep(Base):
+    """任务步骤检查点(Phase 4.2):长任务里每个昂贵子步骤的落库留痕。
+
+    - clips 批量:每张卡的展开(step_key = "take:{index}");
+    - 场景级章节:每场的生成+验收(step_key = "scene:{seq}")。
+    用途:排查「任务死在哪一步」/ 成本归因到步骤 / 断点续跑的数据底座。
+    同 (job_id, step_key) 重试时覆盖(upsert),只留最新一次。
+    """
+
+    __tablename__ = "job_steps"
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[str] = mapped_column(String(12), index=True)
+    step_key: Mapped[str] = mapped_column(String(100))
+    # done / failed(不记 running:步骤记录是完成时的快照,不是实时状态)
+    status: Mapped[str] = mapped_column(String(10), default="done")
+    # 产出摘要(小体量 JSON:场卡字数/验收结论、卡片的落定状态等;不存大文本)
+    output: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )

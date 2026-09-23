@@ -17,6 +17,8 @@ export interface BgJob {
   /** 服务端解析的归属(docs/20);旧任务为空 → 平铺回退 */
   project_id?: number | null;
   chapter_number?: number | null;
+  /** 本次任务的 token 总账(Phase 4.2);无记录为空 */
+  tokens?: { prompt: number; completion: number; calls: number } | null;
 }
 
 interface TaskCenterValue {
@@ -184,6 +186,12 @@ export function TaskCenterBadge() {
                   {qm && (
                     <span className="tc-progress" title={`队列进度 ${qm[1]}/${qm[2]}`}>
                       <span style={{ width: `${(Number(qm[1]) / Number(qm[2])) * 100}%` }} />
+                    </span>
+                  )}
+                  {/* 成本透明(Phase 4.2):完结任务显示本次 token 总账 */}
+                  {j.status !== "running" && j.tokens && (
+                    <span className="tc-tokens" title={`${j.tokens.calls} 次调用 · 上行 ${j.tokens.prompt} / 下行 ${j.tokens.completion} tokens`}>
+                      {((j.tokens.prompt + j.tokens.completion) / 1000).toFixed(1)}k tok
                     </span>
                   )}
                   {/* 在跑的任务可以直接盯着看模型写字(实时正文窗),或就地终止 */}

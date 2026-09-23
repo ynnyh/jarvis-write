@@ -891,6 +891,29 @@ def _add_birthday_pack_column() -> None:
             logger.info("迁移:birthday_wishes 补 pack 列")
 
 
+def _add_job_steps_table() -> None:
+    """建 job_steps 检查点表(幂等;Alembic 正常时不做事,失败时 create_all 兜底)。"""
+    insp = inspect(engine)
+    if "job_steps" in insp.get_table_names():
+        return
+    from app.db.base import Base
+    import app.db.models  # noqa: F401 — 注册全部模型
+
+    Base.metadata.create_all(bind=engine)
+    logger.info("迁移:补建 job_steps 表")
+
+
+def _add_llm_usage_job_id_column() -> None:
+    """llm_usage 补 job_id 列(token 账按任务归因,幂等)。"""
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "llm_usage" not in insp.get_table_names():
+            return
+        if not _column_exists("llm_usage", "job_id"):
+            conn.execute(text("ALTER TABLE llm_usage ADD COLUMN job_id VARCHAR(12)"))
+            logger.info("迁移:llm_usage 补 job_id 列")
+
+
 def _add_confirm_chain_columns() -> None:
     """确认链(docs/确认链):projects 补 concept_confirmed、architecture 补
     confirmed_layers 列(幂等)。
@@ -1199,6 +1222,8 @@ def run_migrations() -> None:
     _add_mood_clip_mode_column()
     _add_birthday_pack_column()
     _add_confirm_chain_columns()
+    _add_job_steps_table()
+    _add_llm_usage_job_id_column()
     _add_architecture_concept_stale_column()
     _add_project_outline_stale_column()
     _add_project_render_mode_column()

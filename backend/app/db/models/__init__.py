@@ -33,7 +33,7 @@ from app.db.models.usage import FeatureUsage, LlmUsage
 from app.db.models.user import User
 from app.db.models.app_setting import AppSetting
 from app.db.models.invite_code import InviteCode
-from app.db.models.job import Job
+from app.db.models.job import Job, JobStep
 from app.db.models.chapter_order import ChapterOrder
 from app.db.models.script import Script, ScriptEpisode
 from app.db.models.share import ShareLink
@@ -85,6 +85,7 @@ __all__ = [
     "LlmUsage",
     "FeatureUsage",
     "Job",
+    "JobStep",
     "ChapterOrder",
     "Script",
     "ScriptEpisode",

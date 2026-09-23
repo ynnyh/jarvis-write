@@ -767,11 +767,13 @@ class LLMAdapter(abc.ABC):
             from app.auth import current_user_id
             from app.db.models import LlmUsage
             from app.db.session import session_scope
+            from app.live import current_job_id
 
             with session_scope() as db:
                 db.add(
                     LlmUsage(
                         user_id=current_user_id.get(),
+                        job_id=current_job_id.get(),
                         model=resp.model,
                         prompt_tokens=resp.prompt_tokens,
                         completion_tokens=resp.completion_tokens,

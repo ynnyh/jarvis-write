@@ -20,6 +20,7 @@ import logging
 from sqlalchemy.orm import Session
 
 from app.db.models import Chapter, DramaCharacterCard, MoodClip, Project
+from app import live
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.clips.common import group_chunks, shot_hint, steering_block, theme_label
 from app.engines.media.anchors import ensure_style_anchors, merge_negative
@@ -504,12 +505,24 @@ async def generate_batch(
     duration_s = clip.duration_s  # 先取出来:并发协程里不碰 ORM 行(见 _expand_one)
     done = 0
 
+    job_id = live.current_job_id.get() or ""
+
     async def run(take: dict) -> dict | None:
         nonlocal done
+        step_key = f"take:{take.get('index', done)}"
         cand = await _expand_one(
             take, style, duration_s, context, grounding, excerpts,
             structure_rules=structure_rules, prompt_details=prompt_details,
         )
+        if job_id:
+            from app.jobs import record_step
+            if cand:
+                record_step(job_id, step_key, "done", output={
+                    "hook": str(cand.get("hook_text") or "")[:60],
+                    "shots": len(cand.get("shots") or []),
+                })
+            else:
+                record_step(job_id, step_key, "failed", error="展开失败")
         if cand and is_play:
             _normalize_play_beats(cand, duration_s)
             missing = [

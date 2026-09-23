@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 
 from sqlalchemy.orm import Session
+from app import live
 
 from app.db.models import Project, Scene
 from app.engines.pipeline.scene_plan import plan_scenes, scenes_of_chapter
@@ -129,6 +130,13 @@ async def compose_by_scenes(
             continue
 
         scene.word_count = len(scene.content or "")
+        # 步骤检查点(Phase 4.2):场级留痕(字数/状态),排查与成本归因用
+        _job_id = live.current_job_id.get()
+        if _job_id:
+            from app.jobs import record_step
+            record_step(_job_id, f"scene:{scene.seq}", "done", output={
+                "words": scene.word_count, "status": scene.status,
+            })
         db.flush()
 
         # ---- 验收(章级重写轮不做验收:那一轮的目标是改对,不是重判) ----

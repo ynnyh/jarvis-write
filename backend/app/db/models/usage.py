@@ -28,6 +28,9 @@ class LlmUsage(Base, TimestampMixin):
     # 单次调用耗时(毫秒,含网络+生成):质量观测的响应时间维度。
     # 0 = 旧记录或异常路径没量到,聚合时按缺席处理。
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    # 归属任务(Phase 4.2):任务上下文里发起的调用带上 job_id,聚合出
+    # 「这一章/这批卡花了多少 token」。请求上下文外/旧记录为 NULL。
+    job_id: Mapped[str | None] = mapped_column(String(12), nullable=True, index=True)
 
 
 class FeatureUsage(Base):

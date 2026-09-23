@@ -340,6 +340,64 @@ def spawn_job(kind: str, work: Callable[[Callable[[str], None]], Awaitable[Any]]
 # 启动清理:标记 stuck 任务
 # ---------------------------------------------------------------------------
 
+def record_step(
+    job_id: str, step_key: str, status: str = "done",
+    output: dict | None = None, error: str | None = None,
+) -> None:
+    """落一步检查点(Phase 4.2):引擎在昂贵子步骤完成后调用。
+
+    静默失败——检查点是观测/续跑的数据底座,绝不能拖垮生成主链路。
+    同 (job_id, step_key) 覆盖写:重试后留的是最新一次。
+    """
+    try:
+        from sqlalchemy import select
+
+        from app.db.models import JobStep
+        session = _db_session()
+        row = (
+            session.query(JobStep)
+            .filter(JobStep.job_id == job_id, JobStep.step_key == step_key)
+            .first()
+        )
+        if row is None:
+            row = JobStep(job_id=job_id, step_key=step_key)
+            session.add(row)
+        row.status = status
+        row.output = output
+        row.error = (error or "")[:500] or None
+        session.commit()
+        session.close()
+    except Exception:  # noqa: BLE001 — 记录失败不影响任务本身
+        logger.debug("record_step %s/%s 失败", job_id, step_key, exc_info=True)
+
+
+def get_job_steps(job_id: str) -> list[dict[str, Any]]:
+    """读一个任务的全部步骤检查点(时间序)。失败静默返回空。"""
+    try:
+        from app.db.models import JobStep
+        session = _db_session()
+        rows = (
+            session.query(JobStep)
+            .filter(JobStep.job_id == job_id)
+            .order_by(JobStep.id)
+            .all()
+        )
+        out = [
+            {
+                "step_key": r.step_key,
+                "status": r.status,
+                "output": r.output,
+                "error": r.error,
+            }
+            for r in rows
+        ]
+        session.close()
+        return out
+    except Exception:  # noqa: BLE001
+        logger.debug("get_job_steps %s 失败", job_id, exc_info=True)
+        return []
+
+
 def cleanup_stuck_jobs() -> None:
     """服务启动时调用:把 DB 中所有 running 的任务标记为 failed。
 

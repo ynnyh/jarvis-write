@@ -574,6 +574,7 @@
 
 /* 任务中心:连写队列进度条(docs/20 任务分组) */
 .tc-progress { display: inline-block; width: 72px; height: 4px; border-radius: 2px; background: var(--line-1, rgba(128,128,128,.25)); overflow: hidden; flex: none; }
+.tc-tokens { font-size: var(--fs-xs, 12px); color: var(--text-2, #888); white-space: nowrap; flex: none; padding: 1px 8px; border: 1px solid var(--line, #ddd); border-radius: 999px; }
 .tc-progress > span { display: block; height: 100%; background: var(--accent, var(--ok, #3a9)); border-radius: 2px; transition: width .4s; }
 
 /* 开续集:AI 出的 8 张方向卡,选中金圈(docs/20 同批) */

@@ -28,6 +28,8 @@ from app.auth import assert_project_owner, current_user_id, get_current_user
 from app.db.models import Chapter, LlmUsage, Outline, Project, User
 from app.db.session import get_db
 from app.jobs import cancel_running_job, get_job, get_job_persisted, list_for_user, list_running
+from app.jobs import get_job_steps
+from app.jobs import _db_session
 
 router = APIRouter(tags=["misc"], dependencies=[Depends(get_current_user)])
 
@@ -36,6 +38,8 @@ router = APIRouter(tags=["misc"], dependencies=[Depends(get_current_user)])
 async def my_jobs(include_done: bool = Query(False, alias="all")):
     """当前用户的后台任务(全局任务中心数据源)。all=true 时含近期已完成/失败的。"""
     items = list_for_user(current_user_id.get(), running_only=not include_done)
+    # token 总账(Phase 4.2):一次 group by 批量聚合,列表不打多次库
+    token_map = _job_tokens_batch([jid for jid, _ in items])
     return {
         "jobs": [
             {
@@ -47,10 +51,40 @@ async def my_jobs(include_done: bool = Query(False, alias="all")):
                 # docs/20 任务中心分组字段;旧任务 NULL → 前端平铺回退
                 "project_id": job.get("project_id"),
                 "chapter_number": job.get("chapter_number"),
+                "tokens": token_map.get(jid),
             }
             for jid, job in items
         ]
     }
+
+
+def _job_tokens_batch(job_ids: list[str]) -> dict[str, dict]:
+    """按 job_id 批量聚合 llm_usage;无记录的任务不出现在结果里。"""
+    if not job_ids:
+        return {}
+    try:
+        from sqlalchemy import func
+
+        from app.db.models import LlmUsage
+        session = _db_session()
+        rows = (
+            session.query(
+                LlmUsage.job_id,
+                func.coalesce(func.sum(LlmUsage.prompt_tokens), 0),
+                func.coalesce(func.sum(LlmUsage.completion_tokens), 0),
+                func.count(LlmUsage.id),
+            )
+            .filter(LlmUsage.job_id.in_(job_ids))
+            .group_by(LlmUsage.job_id)
+            .all()
+        )
+        session.close()
+        return {
+            r[0]: {"prompt": int(r[1]), "completion": int(r[2]), "calls": int(r[3])}
+            for r in rows if r[0]
+        }
+    except Exception:  # noqa: BLE001 — 聚合失败不拖垮任务中心
+        return {}
 
 
 @router.get("/api/jobs/{job_id}")
@@ -62,7 +96,34 @@ async def job_status(job_id: str):
     if job is None or job.get("owner_id") != current_user_id.get():
         raise HTTPException(status_code=404, detail="任务不存在或已被清理")
     job.pop("owner_id", None)  # 内部字段,不下发
+    # 成本归因(Phase 4.2):本次任务的 token 总账(从 llm_usage 按 job_id 聚合)
+    job["tokens"] = _job_tokens(job_id)
+    job["steps"] = get_job_steps(job_id)
     return job
+
+
+def _job_tokens(job_id: str) -> dict | None:
+    """按 job_id 聚合 llm_usage;无记录返回 None(旧任务/请求外调用)。"""
+    try:
+        from sqlalchemy import func
+
+        from app.db.models import LlmUsage
+        session = _db_session()
+        row = (
+            session.query(
+                func.coalesce(func.sum(LlmUsage.prompt_tokens), 0),
+                func.coalesce(func.sum(LlmUsage.completion_tokens), 0),
+                func.count(LlmUsage.id),
+            )
+            .filter(LlmUsage.job_id == job_id)
+            .one()
+        )
+        session.close()
+        if not row[2]:
+            return None
+        return {"prompt": int(row[0]), "completion": int(row[1]), "calls": int(row[2])}
+    except Exception:  # noqa: BLE001 — 聚合失败不拖垮轮询
+        return None
 
 
 @router.post("/api/jobs/{job_id}/cancel")
