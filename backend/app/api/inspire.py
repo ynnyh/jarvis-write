@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from app.auth import current_user_id, get_current_user
 from app.engines.consistency.extractor import parse_llm_json
+from app.engines.common import ask_llm_json
 from app.engines.drift import (
     confirm_forbidden,
     effective_patterns,
@@ -115,8 +116,13 @@ async def _generate_ideas(
         style_directives=style_block,
         genre_boundary=_GENRE_BOUNDARY,
     )
-    raw = await get_adapter_for(Task.ARCHITECTURE).ask(prompt)
-    data = parse_llm_json(raw)
+    data, parse_err = await ask_llm_json(
+        get_adapter_for(Task.ARCHITECTURE), prompt, label="概念方案",
+        contract={"ideas": list},
+    )
+    if parse_err:
+        # 显式失败(原先是静默空列表,前端只见「没出方案」不知是出错)
+        raise HTTPException(status_code=502, detail=f"概念方案输出无法解析:{parse_err}")
     ideas = [
         coerce_concept(i) for i in (data.get("ideas") or []) if isinstance(i, dict)
     ]
@@ -318,10 +324,14 @@ async def _engines_impl(req: EnginesRequest) -> EnginesResponse:
         genre_boundary=_GENRE_BOUNDARY,
     )
     try:
-        raw = await get_adapter_for(Task.SUMMARY).ask(prompt)  # FAST 档:收敛层要快
+        data, parse_err = await ask_llm_json(
+            get_adapter_for(Task.SUMMARY), prompt, label="故事引擎卡",
+            contract={"engines": list},
+        )  # FAST 档:收敛层要快
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"引擎卡生成失败: {exc}") from exc
-    data = parse_llm_json(raw)
+    if parse_err:
+        raise HTTPException(status_code=502, detail=f"引擎卡解析失败:{parse_err}")
     engines = [
         EngineCard(
             engine=str(e.get("engine") or "").strip(),
@@ -382,10 +392,12 @@ async def _develop_impl(req: DevelopRequest) -> DevelopResponse:
         genre_boundary=_GENRE_BOUNDARY,
     )
     try:
-        raw = await get_adapter_for(Task.ARCHITECTURE).ask(prompt)  # 深化才花强模型
+        data, _parse_err = await ask_llm_json(
+            get_adapter_for(Task.ARCHITECTURE), prompt, label="概念深化",
+        )  # 深化才花强模型;顶层即概念字段,契约由下游 is_empty 兜底
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"概念深化失败: {exc}") from exc
-    concept = coerce_concept(parse_llm_json(raw))
+    concept = coerce_concept(data)  # 深化输出的顶层就是概念字段本身
     if concept.is_empty():
         raise HTTPException(status_code=502, detail="概念深化解析失败,请重试")
     return DevelopResponse(concept=concept)
@@ -470,11 +482,14 @@ async def _refine_impl(req: RefineRequest) -> RefineResponse:
         genre_boundary=_GENRE_BOUNDARY + (("\n" + dna_block) if dna_block else ""),
     )
     try:
-        raw = await get_adapter_for(Task.ARCHITECTURE).ask(prompt)
+        data, _parse_err = await ask_llm_json(
+            get_adapter_for(Task.ARCHITECTURE), prompt, label="概念改写",
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"概念改写失败: {exc}") from exc
 
-    data = parse_llm_json(raw)
+    if _parse_err:
+        data = {}
     new_concept = coerce_concept(data.get("concept"))
     if new_concept.is_empty():
         raise HTTPException(status_code=502, detail="概念改写解析失败,请重试")

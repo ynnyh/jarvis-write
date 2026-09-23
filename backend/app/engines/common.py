@@ -98,6 +98,57 @@ def _continuation_prompt(raw: str) -> str:
     return _CONTINUE_INSTRUCTION + tail
 
 
+# ---- 输出契约校验 + 定向修复(Phase 4.1)----
+# 背景:JSON 合法 ≠ 结构可用。「模型返回了合法 JSON 但缺了 engines 字段」会静默
+# 变成空结果(空列表被当成干净),或者 KeyError 炸在下游。契约校验把这类缺陷
+# 在调用层拦住;定向修复让模型只修结构、不改内容——一次小调用保住已生成的
+# 内容,替代整篇重发(重发=重新抽卡,既贵又可能换个方向全错)。
+
+_TYPE_CN: dict[type, str] = {
+    dict: "对象", list: "数组", str: "字符串",
+    int: "整数", float: "数字", bool: "布尔",
+}
+
+
+def check_contract(data: dict, contract: dict[str, type]) -> str | None:
+    """声明式轻校验:contract 形如 {"engines": list, "concept": dict}。
+
+    只查「必需字段存在 + 顶层类型正确」,不深入业务语义——严了会把可用产出
+    拒之门外。返回 None=通过;否则返回人话缺陷清单(可直接拼进定向修复 prompt)。
+    """
+    problems: list[str] = []
+    for key, want in contract.items():
+        if key not in data:
+            problems.append(f"缺少字段「{key}」(应为{_TYPE_CN.get(want, want)})")
+            continue
+        got = data[key]
+        if want is int:
+            ok = isinstance(got, int) and not isinstance(got, bool)
+        elif want is float:
+            ok = isinstance(got, (int, float)) and not isinstance(got, bool)
+        elif want is bool:
+            ok = isinstance(got, bool)
+        else:
+            ok = isinstance(got, want)
+        if not ok:
+            problems.append(
+                f"字段「{key}」应为{_TYPE_CN.get(want, want)},实际是 {type(got).__name__}"
+            )
+    return "；".join(problems) if problems else None
+
+
+_REPAIR_INSTRUCTION = (
+    "你之前输出了一段 JSON,但结构不合格:{problems}。\n\n"
+    "下面是你的原始输出。请**只修结构、不改内容**:缺失的字段按上下文补全,"
+    "类型不对的纠正,其余内容逐字保留。只返回完整 JSON,不要任何解释,"
+    "不要 markdown 围栏。\n\n原始输出:\n"
+)
+
+
+def _repair_prompt(raw: str, problems: str) -> str:
+    return _REPAIR_INSTRUCTION.format(problems=problems) + _strip_fence(raw)
+
+
 def _stitch(raw: str, cont: str) -> str:
     """把续写片段接到半截输出后面(两者都先剥围栏)。"""
     return _strip_fence(raw) + _strip_fence(cont)
@@ -105,7 +156,7 @@ def _stitch(raw: str, cont: str) -> str:
 
 async def ask_llm_json(
     adapter, prompt: str, *, label: str = "JSON 任务", attempts: int = 2,
-    continue_attempts: int = 2,
+    continue_attempts: int = 2, contract: dict[str, type] | None = None,
 ) -> tuple[dict, str | None]:
     """LLM JSON 任务统一调用 + 两级保险:先「续写补完」,再「整篇重发」。
 
@@ -125,6 +176,26 @@ async def ask_llm_json(
     for attempt in range(1, attempts + 1):
         raw = await adapter.ask(prompt)
         data, err = parse_llm_json_checked(raw)
+        if not err and contract is not None:
+            problems = check_contract(data, contract)
+            if problems is None:
+                return data, None
+            # 结构不合格 → 先定向修复(只修结构不改内容),救不回来才整篇重发
+            err = f"输出契约不符:{problems}"
+            logger.warning("%s:第 %d 次输出契约不符(%s),尝试定向修复", label, attempt, problems)
+            try:
+                fixed, fix_err = parse_llm_json_checked(await adapter.ask(_repair_prompt(raw, problems)))
+                if fix_err:
+                    logger.warning("%s:定向修复输出仍解析失败(%s)", label, fix_err)
+                else:
+                    fixed_problems = check_contract(fixed, contract)
+                    if fixed_problems is None:
+                        logger.warning("%s:定向修复后通过契约", label)
+                        return fixed, None
+                    logger.warning("%s:定向修复仍未通过(%s)", label, fixed_problems)
+            except Exception as exc:  # noqa: BLE001 — 抢救动作失败不致命
+                logger.warning("%s:定向修复调用失败(%s),改走整篇重发", label, exc)
+            continue
         if not err:
             if attempt > 1:
                 logger.warning("%s:第 %d 次解析成功(首次疑似响应被截断)", label, attempt)

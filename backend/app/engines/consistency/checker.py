@@ -276,6 +276,7 @@ async def check_chapter(
                 get_adapter_for(Task.CONSISTENCY),
                 prompt,
                 label=label,
+                contract={"issues": list},
             )
         except Exception as exc:  # noqa: BLE001
             # 显式降级:过去这里 return [] —— 下游分不清「查过没矛盾」与「根本没跑成」,

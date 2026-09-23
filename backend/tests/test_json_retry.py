@@ -236,3 +236,82 @@ def test_continue_prompt_is_task_agnostic():
     assert _CONTINUE_MARK in prompt
     assert '{"issues": [{"severity":' in prompt  # 半截内容必须回传
     assert len(prompt) < 1200  # 只有指令 + 尾部 800 字,不含任务原文
+
+
+# ---------- 输出契约校验 + 定向修复(Phase 4.1) ----------
+
+def test_contract_pass_no_extra_call():
+    """契约首次通过 → 绝不多打。"""
+
+    class _GoodAdapter:
+        def __init__(self):
+            self.calls = 0
+
+        async def ask(self, prompt: str, system=None) -> str:
+            self.calls += 1
+            return '{"engines": [1, 2]}'
+
+    from app.engines.common import ask_llm_json
+
+    adapter = _GoodAdapter()
+    data, err = asyncio.run(ask_llm_json(adapter, "p", label="测试", contract={"engines": list}))
+    assert err is None and data == {"engines": [1, 2]}
+    assert adapter.calls == 1
+
+
+def test_contract_fail_repaired_in_place():
+    """结构缺字段 → 定向修复(只修结构)成功:主调用 1 + 修复 1 = 2 次,不整篇重发。"""
+
+    class _BrokenThenFixedAdapter:
+        def __init__(self):
+            self.prompts: list[str] = []
+
+        async def ask(self, prompt: str, system=None) -> str:
+            self.prompts.append(prompt)
+            if "结构不合格" in prompt:  # 定向修复 prompt 的识别特征
+                return '{"engines": [1, 2]}'
+            return '{"ok": true}'  # 合法 JSON 但缺 engines
+
+    from app.engines.common import ask_llm_json
+
+    adapter = _BrokenThenFixedAdapter()
+    data, err = asyncio.run(ask_llm_json(adapter, "p", label="测试", contract={"engines": list}))
+    assert err is None and data == {"engines": [1, 2]}
+    assert len(adapter.prompts) == 2
+    assert "只修结构" in adapter.prompts[1]  # 修复 prompt 带原始输出,不是整篇重发
+
+
+def test_contract_repair_failure_falls_back_to_full_rerun():
+    """修复也救不回 → 整篇重发;重发通过 → 3 次调用。"""
+
+    class _Adapter:
+        def __init__(self):
+            self.prompts: list[str] = []
+            self.n = 0
+
+        async def ask(self, prompt: str, system=None) -> str:
+            self.prompts.append(prompt)
+            self.n += 1
+            if "结构不合格" in prompt:
+                return "还是不对"
+            if self.n >= 3:
+                return '{"engines": []}'
+            return '{"ok": true}'
+
+    from app.engines.common import ask_llm_json
+
+    adapter = _Adapter()
+    data, err = asyncio.run(ask_llm_json(adapter, "p", label="测试", contract={"engines": list}))
+    assert err is None and data == {"engines": []}
+    assert len(adapter.prompts) == 3
+
+
+def test_check_contract_type_rules():
+    """类型判定:bool 不是 int;缺失字段与类型错误分别报。"""
+    from app.engines.common import check_contract
+
+    assert check_contract({"a": []}, {"a": list}) is None
+    assert check_contract({"a": {}}, {"a": list}) is not None
+    assert check_contract({"n": True}, {"n": int}) is not None
+    problems = check_contract({}, {"a": list, "b": dict})
+    assert "a" in problems and "b" in problems
