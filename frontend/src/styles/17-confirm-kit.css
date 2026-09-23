@@ -1,0 +1,91 @@
+/* ==========================================================================
+   统一确认语言组件库(confirmKit):拍板门 / 作废标记 / 带话栏
+   移动四纪律在本文件即为基线:行必 wrap 或收缩保护(min-width:0)、
+   触摸目标≥44px(窄屏)、不造固定宽度、表格不在本库(见 12-mobile-shell)。
+   ========================================================================== */
+
+/* ---- ConfirmGate:拍板态徽章 + 拍板/撤回(/锁定) ---- */
+.ck-gate {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.ck-state {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  background: var(--ok-weak);
+  border: 1px solid var(--ok-line);
+  color: var(--ok);
+  white-space: nowrap;
+}
+.ck-gate .ck-confirm { border-color: var(--ok-line); color: var(--ok); }
+
+/* ---- StaleBadge:上游改动后的「已作废」可见标记 ---- */
+.ck-stale {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+  padding: 2px 10px;
+  border-radius: var(--r-md);
+  font-size: var(--fs-xs);
+  background: var(--warn-weak);
+  border: 1px solid var(--warn-line);
+  color: var(--warn);
+}
+.ck-stale-text { min-width: 0; overflow-wrap: anywhere; }
+
+/* ---- FeedbackBar:带话输入 + 常驻话 ---- */
+.ck-directive {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.ck-directive input {
+  flex: 1;
+  min-width: 0;
+}
+.ck-persistent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  background: var(--brand-weak);
+  border: 1px solid var(--brand-line);
+}
+.ck-persistent span:not(.muted) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ck-persistent button {
+  border: 0;
+  background: none;
+  padding: 0 2px;
+  min-width: 24px;
+  min-height: 24px;
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+
+@media (max-width: 767px) {
+  /* 触摸目标:窄屏下拍板/撤回/带话都提到 44px */
+  .ck-gate button,
+  .ck-directive button { min-height: 44px; }
+  .ck-directive input { min-height: 44px; }
+  /* 常驻话整行放,不跟输入框挤一行 */
+  .ck-persistent { flex-basis: 100%; }
+}

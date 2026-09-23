@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, SkeletonSegment, Tendency } from "../../api";
 import { pollJob, errMsg } from "../../pollJob";
+import { ConfirmGate } from "../../ui/confirmKit";
 
 type Phase = "loading" | "generating" | "wall" | "paving" | "error";
 
@@ -162,14 +163,11 @@ export default function SkeletonWall({ pid, tendency, onTrust, onPaved }: {
                   onChange={(e) => setEdits((c) => ({ ...c, [i]: { ...c[i], title: e.target.value } }))} />
                 <span className="grow" />
                 {dirty && <button className="btn-sm" onClick={() => { void saveEdit(i); }}>存</button>}
-                <button className="btn-sm" title={seg.confirmed ? "撤回拍板" : "这一段的走向我认了"}
-                  onClick={() => { void api.confirmSkeletonSegment(pid, i, !seg.confirmed).then(refresh); }}>
-                  {seg.confirmed ? "✓ 已拍板" : "拍板"}
-                </button>
-                <button className="btn-sm" title={seg.locked ? "解锁(重出骨架会重出这一段)" : "锁定(重出骨架保留这一段)"}
-                  onClick={() => { void api.lockSkeletonSegment(pid, i, !seg.locked).then(refresh); }}>
-                  {seg.locked ? "🔒" : "🔓"}
-                </button>
+                <ConfirmGate confirmed={seg.confirmed} locked={seg.locked}
+                  lockTitleOn="锁定(重出骨架保留这一段)" lockTitleOff="解锁(重出骨架会重出这一段)"
+                  onConfirm={() => { void api.confirmSkeletonSegment(pid, i, true).then(refresh); }}
+                  onUnconfirm={() => { void api.confirmSkeletonSegment(pid, i, false).then(refresh); }}
+                  onToggleLock={() => { void api.lockSkeletonSegment(pid, i, !seg.locked).then(refresh); }} />
                 <button className="btn-sm primary" disabled={!seg.confirmed}
                   title={seg.confirmed ? `只铺第 ${view.start}-${view.end} 章的章节蓝图` : "先拍板再铺章"}
                   onClick={() => { void pave(i); }}>
