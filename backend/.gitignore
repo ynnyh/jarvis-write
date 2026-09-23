@@ -5,3 +5,4 @@ backend/bin/
 
 # 迁移前自动备份的运行产物(本地库快照),不入库
 migrations-backup/
+*.db
