@@ -195,3 +195,17 @@ body:has(.write-zone.immersive) .next-bar,
 body:has(.write-zone.immersive) .step-guide { display: none; }
 body:has(.write-zone.immersive) .pj-cols { grid-template-columns: minmax(0, 1fr); }
 
+/* ---- 全局移动兜底(确认链重构 Phase 3):四纪律的最后一道网 ----
+   实测 390 宽全路由+board 全页签零溢出(2026-09-23 扫描);以下兜底防未来回归:
+   flex 行不收缩把文字挤成一字一行 / 触摸目标过小 / 长串撑破容器 */
+@media (max-width: 767px) {
+  /* 收缩保护:行容器内的直接子元素允许收缩,文本可断行 */
+  .row > *, .actions > *, .input-row > *, .order-row > *, .recon-line > * {
+    min-width: 0;
+  }
+  .row, .actions, .input-row { flex-wrap: wrap; }
+  /* 长串(链接/ID/英文单词)不断行撑破 */
+  .card, .dossier-block, .msg-err, .hint { overflow-wrap: anywhere; }
+  /* 触摸目标:次级按钮不低于 40px(主按钮/表单控件已有更高标准) */
+  button.btn-sm { min-height: 40px; }
+}

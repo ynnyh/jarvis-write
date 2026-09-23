@@ -362,7 +362,7 @@
 .onboard { display: flex; gap: 20px; align-items: flex-start; }
 .onboard-main { flex: 1; min-width: 0; }
 .onboard-side { width: 280px; flex-shrink: 0; position: sticky; top: 16px; }
-@media (max-width: 900px) { .onboard { flex-direction: column-reverse; } .onboard-side { width: 100%; position: static; } }
+@media (max-width: 900px) { .onboard { flex-direction: column; } .onboard-side { width: 100%; position: static; } }
 
 .entry-cards { display: flex; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
 .entry-card {
