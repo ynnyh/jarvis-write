@@ -8,6 +8,7 @@ import {
   AnimeCastMember, AnimeEpisode, AnimeMeta, AnimeSeries, AnimeShot, animeApi,
 } from "../../animeApi";
 import { toast } from "../../ui/Toaster";
+import { ConfirmGate } from "../../ui/confirmKit";
 import { errMsg } from "../../pollJob";
 import { CopyBtn } from "../../ui/copy";
 import { FilmPromptCard } from "../../ui/FilmPromptCard";
@@ -395,7 +396,10 @@ function EpisodePanel({ series, episode, meta, onEpisode }: {
       <div className="media-field">
         <div className="card-head mb-2">
           <span className="muted">① 简介(和 AI 聊出来)</span>
-          {confirmed && <span className="badge">已确认 ✓</span>}
+          <ConfirmGate confirmed={confirmed}
+            confirmText="✓ 简介就按这个来" confirmedText="已确认 ✓"
+            confirmTitle="拍板这版简介,解锁分镜"
+            onConfirm={() => { void confirmNow(); }} />
           <span className="grow" />
           <button className="btn-sm" disabled={busy !== ""}
             title="没点子?让 AI 按类型节奏库出三个梗纲,选定即确认"
