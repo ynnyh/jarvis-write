@@ -1,6 +1,6 @@
-// 设置页单测:它本身只是容器装配(七张卡片 + 页脚文档链接),
+// 设置页单测:它本身只是容器装配(八张卡片 + 页脚文档链接),
 // 各卡片自己的逻辑由 card 级测试负责(如 render.test 覆盖 RenderCard)。
-// 这里钉两件事:七张卡片都在;桌面/网页两态下页脚文档链接的打开方式不同。
+// 这里钉两件事:八张卡片都在;桌面/网页两态下页脚文档链接的打开方式不同。
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -17,6 +17,7 @@ vi.mock("../pages/settings/AppLockCard", () => ({ AppLockCard: () => <div>APPLOC
 vi.mock("../pages/settings/ProvidersCard", () => ({ ProvidersCard: () => <div>PROVIDERS</div> }));
 vi.mock("../pages/settings/UsageCard", () => ({ UsageCard: () => <div>USAGE</div> }));
 vi.mock("../pages/settings/RenderCard", () => ({ RenderCard: () => <div>RENDER</div> }));
+vi.mock("../pages/settings/SkillPacksCard", () => ({ SkillPacksCard: () => <div>SKILLS</div> }));
 vi.mock("../pages/settings/PreferencesCard", () => ({ PreferencesCard: () => <div>PREFS</div> }));
 
 function renderPage() {
@@ -30,9 +31,9 @@ describe("SettingsPage", () => {
   });
   afterEach(() => cleanup());
 
-  it("装配七张设置卡片与返回工作台入口", () => {
+  it("装配八张设置卡片与返回工作台入口", () => {
     renderPage();
-    for (const marker of ["ABOUT", "ACCOUNT", "APPLOCK", "PROVIDERS", "USAGE", "RENDER", "PREFS"]) {
+    for (const marker of ["ABOUT", "ACCOUNT", "APPLOCK", "PROVIDERS", "USAGE", "RENDER", "SKILLS", "PREFS"]) {
       expect(screen.getByText(marker)).toBeTruthy();
     }
     expect(screen.getByRole("link", { name: /返回工作台/ })).toBeTruthy();

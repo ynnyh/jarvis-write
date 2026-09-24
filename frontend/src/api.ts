@@ -152,6 +152,28 @@ export interface WritingCard {
   sort: number;
 }
 
+// 创作 Skill 包(docs/21):成套工艺,官方内置可开关可编辑,版本化可回退
+export interface SkillEntry {
+  node: string; // idea / outline / draft / polish / shots / render
+  kind: "directive" | "param" | "ban" | "format";
+  directive?: string;
+  params?: Record<string, string>;
+  ban_list?: string[];
+}
+
+export interface SkillPack {
+  id: number;
+  pack_key: string;
+  name: string;
+  description: string;
+  scope: string[]; // anime / series / drama / clips / novel / inspire
+  entries: SkillEntry[];
+  version: number;
+  history: { version: number; entries: SkillEntry[] }[];
+  enabled: boolean;
+  is_builtin: boolean;
+}
+
 export interface Project {
   id: number; title: string; topic: string; genre: string;
   target_chapters: number; target_words_per_chapter: number;
@@ -1765,6 +1787,15 @@ export const api = {
   cardsPreview: (pid: number) =>
     req<{ block: string; enabled_count: number; max_inject: number }>(
       "GET", `/api/projects/${pid}/cards/preview`),
+
+  // ---------- 创作 Skill 包(全局工艺包,docs/21) ----------
+  listSkillPacks: () => req<SkillPack[]>("GET", "/api/skill-packs"),
+  updateSkillPack: (
+    packId: number,
+    patch: { name?: string; enabled?: boolean; entries?: SkillEntry[] },
+  ) => req<SkillPack>("PATCH", `/api/skill-packs/${packId}`, patch),
+  restoreSkillPack: (packId: number, version: number) =>
+    req<SkillPack>("POST", `/api/skill-packs/${packId}/restore`, { version }),
 
   // ---------- 鉴权 ----------
   register: (username: string, password: string, invite_code: string) =>

@@ -17,6 +17,7 @@ import { ProvidersCard } from "./settings/ProvidersCard";
 import { UsageCard } from "./settings/UsageCard";
 import { PreferencesCard } from "./settings/PreferencesCard";
 import { RenderCard } from "./settings/RenderCard";
+import { SkillPacksCard } from "./settings/SkillPacksCard";
 
 export default function SettingsPage() {
   return (
@@ -31,6 +32,7 @@ export default function SettingsPage() {
       <ProvidersCard />
       <UsageCard />
       <RenderCard />
+      <SkillPacksCard />
       <PreferencesCard />
       <div className="settings-foot">
         <a

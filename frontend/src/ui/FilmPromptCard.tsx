@@ -17,6 +17,7 @@ export function FilmPromptCard({
   readyHint = "先完成分镜,才有原料组装整片提示词",
   generateDetail = "文本框可直接改;一键复制贴去 Sora/Veo/可灵一次出一整片",
   headerExtra,
+  usageHint,
 }: {
   /** 读当前稿(空串 = 还没生成过) */
   load: () => Promise<string>;
@@ -32,6 +33,8 @@ export function FilmPromptCard({
   generateDetail?: string;
   /** 头部插槽:生成参数控件(如宣传片的单段时长选择) */
   headerExtra?: ReactNode;
+  /** 用法说明行(默认是「整片一次生成」口径;镜头卡等分段/逐镜工艺传自己的) */
+  usageHint?: ReactNode;
 }) {
   const { run } = useJob();
   const [text, setText] = useState("");
@@ -89,8 +92,10 @@ export function FilmPromptCard({
         </button>
       </div>
       <p className="hint">
-        把每个镜头怎么拍、人物长什么样、环境什么氛围综合成一条完整提示词,贴出去一次生成整片;
-        也可以把自己写好的版本整段粘贴进来保存。改了内容后点「重新生成」即可同步。
+        {usageHint ?? (
+          <>把每个镜头怎么拍、人物长什么样、环境什么氛围综合成一条完整提示词,贴出去一次生成整片;
+          也可以把自己写好的版本整段粘贴进来保存。改了内容后点「重新生成」即可同步。</>
+        )}
       </p>
       {err && <div className="msg-err">{err}</div>}
       <textarea

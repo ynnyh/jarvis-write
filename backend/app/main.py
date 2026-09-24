@@ -60,6 +60,7 @@ from app.api.clips import router as clips_router
 from app.api.birthday import router as birthday_router
 from app.api.series import router as series_router
 from app.api.anime import router as anime_router
+from app.api.skill_packs import router as skill_packs_router
 from app.api.scripts import router as scripts_router, adapt_router as scripts_adapt_router
 from app.api.shares import owner_router as shares_owner_router, public_router as shares_public_router
 from app.api.render import router as render_router
@@ -258,6 +259,7 @@ def create_app() -> FastAPI:
     app.include_router(birthday_router)
     app.include_router(series_router)
     app.include_router(anime_router)
+    app.include_router(skill_packs_router)
     app.include_router(scripts_router)
     app.include_router(scripts_adapt_router)
     app.include_router(render_router)

@@ -7,6 +7,7 @@ import { useNavigate } from "react-router-dom";
 import {
   AnimeCastMember, AnimeEpisode, AnimeMeta, AnimeSeries, AnimeShot, animeApi,
 } from "../../animeApi";
+import { api, SkillPack } from "../../api";
 import { toast } from "../../ui/Toaster";
 import { ConfirmGate } from "../../ui/confirmKit";
 import { errMsg } from "../../pollJob";
@@ -303,6 +304,15 @@ function EpisodePanel({ series, episode, meta, onEpisode }: {
   const [shotsDirty, setShotsDirty] = useState(false);
   const [segS, setSegS] = useState<15 | 30>(15);
   const [busy, setBusy] = useState("");
+  // 镜头卡渲染工艺包(docs/21)启用时,整集提示词是逐镜镜头卡(一镜一卡+首帧图生视频);
+  // 停用则回退旧分段长文。包状态只在设置页能改,拉一次足够。
+  const [shotcardOn, setShotcardOn] = useState(false);
+  useEffect(() => {
+    api.listSkillPacks().then((packs: SkillPack[]) =>
+      setShotcardOn(!!packs.find(
+        (p) => p.pack_key === "anime-shotcard-render" && p.enabled,
+      ))).catch(() => setShotcardOn(false));
+  }, []);
   useEffect(() => { setShots(episode.shots); setShotsDirty(false); }, [episode.shots]);
 
   function editShot(i: number, p: Partial<AnimeShot>) {
@@ -550,8 +560,17 @@ function EpisodePanel({ series, episode, meta, onEpisode }: {
         jobKind={`anime-fp-${episode.id}`}
         ready={hasShots}
         readyHint="先确认简介并展开分镜,才有原料组装整集提示词"
-        generateDetail="文档已按段切好:逐段复制贴进视频模型,生成完按段号拼接"
-        headerExtra={(
+        generateDetail={shotcardOn
+          ? "文档是逐镜镜头卡:每镜用「首帧」图+画面卡出片(2-5 秒/镜),按镜号拼接"
+          : "文档已按段切好:逐段复制贴进视频模型,生成完按段号拼接"}
+        usageHint={shotcardOn
+          ? "镜头卡制:一镜一卡,画面卡 60-120 字只讲一个镜头怎么拍;运动卡零外貌词,长相由首帧钉死;负面词逐镜独立。文档头附每位角色的定妆照提示词——先文生图定妆,再逐镜图生视频,按镜号拼接成片。"
+          : <>提示词由分镜+卡司定妆+画风锚组装,细节全部写死:{meta?.max_shots ?? 40} 镜以内,
+            每段开头复述画风锚,出镜角色的定妆逐字注入——跨段形象不漂移。逐段复制贴进视频模型,
+            生成完按段号拼接;也可以把自己写好的版本整段粘贴进来保存。</>}
+        headerExtra={shotcardOn ? (
+          <span className="skill-entry-meta">镜头卡模式(设置页可切回旧分段式)</span>
+        ) : (
           <select value={segS} title="单段时长上限:外部模型单次生成的上限"
             onChange={(e) => setSegS(Number(e.target.value) as 15 | 30)}
             style={{ padding: "2px 6px" }}>
@@ -560,10 +579,6 @@ function EpisodePanel({ series, episode, meta, onEpisode }: {
           </select>
         )}
       />
-      <p className="hint">
-        提示词由分镜+卡司定妆+画风锚组装,细节全部写死:{meta?.max_shots ?? 40} 镜以内,
-        每段开头复述画风锚,出镜角色的定妆逐字注入——跨段形象不漂移。
-      </p>
     </section>
   );
 }

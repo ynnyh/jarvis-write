@@ -80,6 +80,8 @@ class _FakeAdapter:
             return json.dumps({"takes": _TAKES_JSON}, ensure_ascii=False)
         if "动画的分镜师" in prompt:
             return json.dumps(_SHOTS_JSON, ensure_ascii=False)
+        if "镜头卡" in prompt:
+            return json.dumps({"cards": _CARDS_JSON}, ensure_ascii=False)
         return f"```text\n{self.film_reply}\n```"
 
 
@@ -131,6 +133,17 @@ _SHOTS_JSON = {
         for i in range(1, 13)  # 12 镜 × 5s = 60s
     ],
 }
+
+_CARDS_JSON = [
+    {"seq": i,
+     "identity": "白色饭团精灵,蓝围裙" if i % 2 else "黄豆与饭团精灵",
+     "card_cn": f"第{i}镜:阿丸双手握铲翻锅,手腕一压一挑,眉毛拧紧又舒展。中景,机位齐灶台,缓推。"
+                f"暖黄顶光,蒸汽逆光。Q版二头身漫画风。",
+     "motion_cn": "颠勺两下,蒸汽涌起,眼神从专注到得意。",
+     "voice": "尖着嗓子,语速快" if i == 1 else "",
+     "avoid": "蒸汽别糊脸" if i == 3 else ""}
+    for i in range(1, 13)
+]
 
 _FILM_REPLY = (
     "【第1段|0—15秒】Q版二头身漫画风,线条圆润上色干净。厨房全景,暖黄灯光。"
@@ -406,6 +419,7 @@ def test_anime_takes_pick_shots_chain(client):
     shots_prompt = adapter.prompts[-1]
     assert "阿丸" in shots_prompt and "蓝色围裙" in shots_prompt
     assert "不许新增有名有姓的角色" in shots_prompt
+    assert "分镜功底包" in shots_prompt  # Skill 注入槽:官方分镜功底包默认生效
 
     # 换梗纲要清下游:再 pick 一次,shots/film_prompt 作废
     r = client.post(f"/api/anime/episodes/{eid}/pick", headers=headers, json={"index": 1})
@@ -413,7 +427,8 @@ def test_anime_takes_pick_shots_chain(client):
     assert ep2["chosen"] == 1 and ep2["shots"] == [] and ep2["film_prompt"] == ""
 
 
-def test_anime_film_prompt_segmented(client):
+def test_anime_film_prompt_shotcards(client):
+    """默认走镜头卡工艺:一镜一卡+首帧指引+负面词逐镜独立,引擎确定性拼装。"""
     headers = _auth(client, "anime_fp")
     sid, eid, _adapter = _prepared_episode(client, headers)
 
@@ -427,13 +442,18 @@ def test_anime_film_prompt_segmented(client):
 
     got = client.get(f"/api/anime/episodes/{eid}/film-prompt", headers=headers)
     doc = got.json()["film_prompt"]
-    assert doc.startswith("【使用说明】")  # 分段文档头(引擎写,复用漫剧同一份)
-    assert "【第1段|0—15秒】" in doc and "【第4段" in doc  # 60s → 4 段
-    assert "全片结束" in doc
-    # 精度口径进原料:画风锚 + 卡司定妆逐字
+    assert doc.startswith("【使用说明】")  # 镜头卡文档头(引擎写)
+    assert "❰第1镜|0—5秒" in doc and "❰第12镜" in doc  # 一镜一卡,12 镜
+    assert "画面卡:" in doc and "运动卡:" in doc and "负面:" in doc
+    assert "水印" in doc  # 负面词基座逐镜独立成行
+    assert "【定妆照·阿丸】" in doc  # 定妆照提示词段(身份锁链路)
+    assert "首帧:阿丸定妆照" in doc and "上一镜末帧" in doc  # 首帧指引
+    assert "「包在我身上!」(阿丸" in doc  # 台词逐字,引擎拼装不靠模型自觉
+    # 口径进原料:画风锚+卡司定妆进 prompt;运动卡零外貌词写明理由
     prompt = adapter.prompts[-1]
     assert "Q版" in prompt and "芝麻大小的痣" in prompt
-    assert "五件事缺一不可" in prompt  # 精度铁律进模板
+    assert "外貌/服饰/画风词都不要写" in prompt
+    assert "第1镜|0—5秒" in prompt  # 逐镜原料(时间码累计)
     # 手改保存整段替换
     r = client.put(f"/api/anime/episodes/{eid}/film-prompt", headers=headers,
                    json={"film_prompt": " 自己写的整集提示词。\n"})
@@ -443,6 +463,60 @@ def test_anime_film_prompt_segmented(client):
 
     other = _auth(client, "anime_fp_other")
     assert client.get(f"/api/anime/episodes/{eid}/film-prompt", headers=other).status_code == 404
+
+
+def test_anime_film_prompt_legacy_when_pack_disabled(client):
+    """镜头卡工艺包停用 → 回退旧分段长文模式(兜底开关)。"""
+    headers = _auth(client, "anime_fp_legacy")
+    packs = client.get("/api/skill-packs", headers=headers).json()
+    pack = next(p for p in packs if p["pack_key"] == "anime-shotcard-render")
+    assert client.patch(f"/api/skill-packs/{pack['id']}", headers=headers,
+                        json={"enabled": False}).status_code == 200
+
+    sid, eid, _adapter = _prepared_episode(client, headers)
+    adapter = _FakeAdapter(_FILM_REPLY)
+    with patch("app.engines.anime.episodes.get_adapter_for", return_value=adapter):
+        r = client.post(f"/api/anime/episodes/{eid}/film-prompt", headers=headers,
+                        json={"segment_s": 15})
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    doc = client.get(f"/api/anime/episodes/{eid}/film-prompt", headers=headers) \
+        .json()["film_prompt"]
+    assert doc.startswith("【使用说明】")  # 分段文档头
+    assert "【第1段|0—15秒】" in doc and "全片结束" in doc
+
+    # 恢复启用,全局默认回到镜头卡
+    assert client.patch(f"/api/skill-packs/{pack['id']}", headers=headers,
+                        json={"enabled": True}).json()["enabled"] is True
+
+
+def test_anime_shotcard_contract_gate_repairs(client):
+    """契约闸:卡片数对不上先拦截,定向修复一轮救回,不整单报废。"""
+    headers = _auth(client, "anime_fp_gate")
+    sid, eid, _adapter = _prepared_episode(client, headers)
+
+    class _BadThenFixed:
+        def __init__(self):
+            self.calls = 0
+            self.prompts: list[str] = []
+
+        async def ask(self, prompt, system=None):
+            self.prompts.append(prompt)
+            if "只修结构" in prompt:  # 定向修复:补齐数量
+                return json.dumps({"cards": _CARDS_JSON}, ensure_ascii=False)
+            self.calls += 1
+            return json.dumps({"cards": _CARDS_JSON[:6]}, ensure_ascii=False)  # 首发缺 6 卡
+
+    fake = _BadThenFixed()
+    with patch("app.engines.anime.episodes.get_adapter_for", return_value=fake):
+        r = client.post(f"/api/anime/episodes/{eid}/film-prompt", headers=headers,
+                        json={"segment_s": 15})
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    doc = client.get(f"/api/anime/episodes/{eid}/film-prompt", headers=headers) \
+        .json()["film_prompt"]
+    assert "❰第12镜" in doc  # 修复后 12 卡齐
+    assert any("只修结构" in p for p in fake.prompts)  # 走过定向修复
 
 
 def test_anime_episode_delete_conflict_and_ok(client):

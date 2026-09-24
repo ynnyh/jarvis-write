@@ -599,3 +599,13 @@
 .style-hist-row button { margin-left: auto; }
 @media (max-width: 640px) { .style-dims { grid-template-columns: 1fr; } }
 .style-card-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+
+/* ---- 创作 Skill 包管理卡(docs/21) ---- */
+.skill-pack { border-top: 1px solid var(--line-1); padding: 10px 0 6px; }
+.skill-pack:first-of-type { border-top: 0; }
+.skill-pack-meta { color: var(--text-3); font-size: var(--fs-sm); margin-left: 6px; }
+.skill-pack-body { margin-top: 6px; display: grid; gap: 6px; }
+.skill-entry { border-left: 2px solid var(--line-1); padding-left: 10px; }
+.skill-entry p { margin: 2px 0; font-size: 13px; line-height: 1.7; }
+.skill-entry-meta { color: var(--text-3); font-size: 12px; }
+.skill-hist { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }

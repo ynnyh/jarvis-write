@@ -1,15 +1,18 @@
 # app/engines/anime/episodes.py
 # -*- coding: utf-8 -*-
-"""动画短剧集引擎:命题 → 三梗纲三选一 → 分镜 → 整集分段精准提示词。
+"""动画短剧集引擎:命题 → 三梗纲三选一 → 分镜 → 整集提示词。
 
 一条龙都吃「卡司是硬规则」:出梗/分镜/提示词只用既定卡司,模板里白纸黑字
-写死「不许新增有名有姓的角色」。整集提示词与漫剧/宣传片同走分段式
-(超过外部模型单次上限必然切段,复用镜头边界贪心),文档头也复用同一份;
-差异只在精度口径——逐镜五要素、禁含糊词、每段字数只设下限。
+写死「不许新增有名有姓的角色」。整集提示词默认走**镜头卡制**(docs/21:
+一镜一卡+首帧图生视频+逐镜负面词,治「提示词长、出片差」——视频模型一次只
+吃得下一个镜头,长文塞多镜只会被抽样执行);「动漫镜头卡渲染工艺包」关闭时
+回退旧分段式(与漫剧/宣传片同骨架,复用镜头边界贪心)。分镜生成吃
+「分镜功底包」的 Skill 注入块(engines/skills/packs)。
 """
 from __future__ import annotations
 
 import logging
+import re
 
 from sqlalchemy.orm import Session
 
@@ -22,16 +25,23 @@ from app.engines.anime.common import (
     merge_cast_locked,
     norm_cast,
 )
+from app.engines.common import ask_llm_json, parse_llm_json_checked
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.media.segments import group_by_limit
 from app.engines.media.text import strip_fences
 from app.engines.media.directions import direction_directive
+from app.engines.skills.packs import (
+    ANIME_SHOTCARD_PACK_KEY,
+    active_packs,
+    render_skill_block,
+)
 from app.llm.router import Task, get_adapter_for
 from app.prompts.anime import (
     ANIME_CAST_PROMPT,
     ANIME_EPISODE_SUGGEST_PROMPT,
     ANIME_PREMISE_SUGGEST_PROMPT,
     ANIME_SEGMENT_PROMPT_TEMPLATE,
+    ANIME_SHOTCARD_PROMPT,
     ANIME_SHOTS_PROMPT,
     ANIME_SYNOPSIS_CHAT_PROMPT,
     ANIME_TAKES_PROMPT,
@@ -338,6 +348,7 @@ async def gen_shots(db: Session, series, episode, progress=lambda s: None) -> di
         genre_label=g["label"],
         framing=g["framing"],
         direction_directive=direction_directive(series.direction),
+        skill_block=render_skill_block(db, scope="anime", node="shots"),
         cast_block=cast_block(series.cast),
         title=(episode.title or series.title or "本集").strip()[:40],
         synopsis_block=episode.synopsis.strip(),
@@ -435,11 +446,205 @@ def save_shots(episode, shots: list) -> list[dict]:
     return out
 
 
-# =============== 整集分段提示词 ===============
+# =============== 整集提示词:镜头卡工艺(docs/21,默认)与旧分段式(兜底) ===============
+
+
+def active_shotcard_render(db: Session) -> bool:
+    """镜头卡工艺包是否启用(渲染节点的 format 开关,disable 即回退旧分段式)。"""
+    return any(
+        p.pack_key == ANIME_SHOTCARD_PACK_KEY
+        for p in active_packs(db, scope="anime", node="render")
+    )
+
+
+# 共享负面词基座:逐镜独立成行(旧工艺没有负面槽,这是 awesome-seedance「排除清单」的落地)
+_SHOTCARD_NEGATIVE_BASE = "文字、水印、字幕、脸部变形、多指、肢体扭曲、画风漂移、场景切换"
+
+_VAGUE_RE = re.compile(r"可能|似乎|某种|一些|若隐若现")
+
+
+def _sanitize_vague(text: str) -> str:
+    """含糊词清除:模板禁而不查会静默糊片,查而不容会炸整单——这里查了就地清。"""
+    return _VAGUE_RE.sub("", text)
+
+
+def shotcard_doc_header(shot_count: int, total_s: int) -> str:
+    """镜头卡文档的确定性文档头:逐镜出片的使用说明(引擎写,不属于任何单卡)。"""
+    return (
+        f"【使用说明】本集共 {shot_count} 镜(全片约 {total_s} 秒),逐镜出片:\n"
+        f"1. 先用下方「定妆照」提示词,给每位出场角色文生图一张定妆照;\n"
+        f"2. 每镜:用「首帧」标明的图(定妆照或上一镜末帧)作首帧,贴上该镜画面卡,"
+        f"图生视频一次出这一镜(2-5 秒);\n"
+        f"3. 每段生成的末帧存下来作下一镜首帧;带台词的镜交给音频原生模型直接出声;"
+        f"全部按镜号拼接即成片。\n"
+        f"跨镜角色一致靠首帧钉死——运动卡故意不带外貌词,别手动加回去。\n"
+        f"================\n"
+    )
+
+
+def _ref_plan(shots: list[dict]) -> list[str]:
+    """逐镜首帧指引(确定性):首次出场的角色用其定妆照,熟面孔用上一镜末帧。"""
+    seen: set[str] = set()
+    refs: list[str] = []
+    for s in shots:
+        chars = [str(c).strip() for c in (s.get("characters") or []) if str(c or "").strip()]
+        fresh = [c for c in chars if c not in seen]
+        seen.update(chars)
+        if not chars:
+            refs.append("无(空镜,直接文生视频)")
+        elif fresh:
+            if len(chars) == 1:
+                refs.append(f"{fresh[0]}定妆照")
+            else:
+                refs.append(f"{fresh[0]}定妆照(同框角色按画面卡带入画)")
+        else:
+            refs.append("上一镜末帧(图生视频)")
+    return refs
+
+
+def _shotcard_material_block(shots: list[dict]) -> str:
+    """分镜 → 逐镜原料行(时间码累计;画面卡的血肉全从这里来)。"""
+    rows: list[str] = []
+    t = 0
+    for s in shots:
+        start, t = t, t + int(s.get("duration_s") or 0)
+        line = (
+            f"- 第{s['seq']}镜|{start}—{t}秒|{s['shot_type']}|运镜:{s['camera']}"
+            f"|{s['duration_s']}秒|画面:{s.get('action_desc') or '未写'}"
+        )
+        if s.get("dialogue"):
+            sp = f"({s['speaker']})" if s.get("speaker") else ""
+            line += f"|台词{sp}:{s['dialogue']}"
+        if s.get("sfx"):
+            line += f"|音效:{s['sfx']}"
+        rows.append(line)
+    return "\n".join(rows)
+
+
+def _validate_shotcards(cards: object, shots: list[dict]) -> str | None:
+    """镜头卡契约闸:数量/序号对齐 + 长度口径;含糊词不在此拦(拼装时就地清)。"""
+    if not isinstance(cards, list):
+        return "cards 不是数组"
+    if len(cards) != len(shots):
+        return f"卡片数({len(cards)})与分镜数({len(shots)})不一致"
+    problems: list[str] = []
+    for card, s in zip(cards, shots):
+        seq = s.get("seq")
+        try:
+            if int(card.get("seq") or 0) != int(seq or 0):
+                problems.append(f"第 {seq} 镜的 seq 对不上")
+                continue
+        except (TypeError, ValueError):
+            problems.append(f"第 {seq} 镜的 seq 不是整数")
+            continue
+        card_cn = str(card.get("card_cn") or "").strip()
+        if not card_cn:
+            problems.append(f"第 {seq} 镜缺画面卡")
+        elif len(card_cn) > 160:
+            problems.append(f"第 {seq} 镜画面卡 {len(card_cn)} 字,超 160 上限")
+        motion = str(card.get("motion_cn") or "").strip()
+        if not motion:
+            problems.append(f"第 {seq} 镜缺运动卡")
+        elif len(motion) > 60:
+            problems.append(f"第 {seq} 镜运动卡 {len(motion)} 字,超 60 上限")
+        for key, cap in (("identity", 30), ("voice", 30), ("avoid", 30)):
+            if len(str(card.get(key) or "").strip()) > cap:
+                problems.append(f"第 {seq} 镜 {key} 超 {cap} 字上限")
+    return "；".join(problems[:6]) if problems else None
+
+
+_SHOTCARD_REPAIR_INSTRUCTION = (
+    "你之前输出的镜头卡 JSON 结构不合格:{problems}。\n\n"
+    "下面是你的原始输出。请**只修结构、不改内容**:cards 数量与 seq 对齐分镜,"
+    "缺的字段按分镜原料补全,超长条目压到限内,其余内容逐字保留。"
+    "只返回完整 JSON,不要任何解释,不要 markdown 围栏。\n\n原始输出:\n"
+)
+
+
+def _assemble_shotcard_doc(
+    series, shots: list[dict], cards: list[dict], refs: list[str]
+) -> str:
+    """卡 → 整集文档(确定性拼装):台词/音效/首帧/负面词基座都不靠模型自觉。"""
+    style = (series.style_cn or "").strip() or direction_directive(series.direction)
+    total_s = sum(int(s.get("duration_s") or 0) for s in shots)
+    lines: list[str] = [shotcard_doc_header(len(shots), total_s)]
+    for c in norm_cast(series.cast) if series.cast else []:
+        ref = f"【定妆照·{c['name']}】{c['appearance']}"
+        if c.get("wardrobe"):
+            ref += f" 服装:{c['wardrobe']}"
+        ref += f"。{style}。单角色全身,干净浅灰背景,9:16 竖屏"
+        lines.append(ref)
+    lines.append("================")
+    t = 0
+    for s, card, ref in zip(shots, cards, refs):
+        start, t = t, t + int(s.get("duration_s") or 0)
+        lines.append(
+            f"❰第{s['seq']}镜|{start}—{t}秒|{s['shot_type']}|{s['camera']}|首帧:{ref}❱"
+        )
+        identity = str(card.get("identity") or "").strip()
+        card_cn = _sanitize_vague(str(card.get("card_cn") or "").strip())
+        lines.append("画面卡:" + (f"{identity}。{card_cn}" if identity else card_cn))
+        lines.append("运动卡:" + _sanitize_vague(str(card.get("motion_cn") or "").strip()))
+        if s.get("dialogue"):
+            voice = str(card.get("voice") or "").strip()
+            lines.append(f"台词:「{s['dialogue']}」({s.get('speaker') or '旁白'}{';' + voice if voice else ''})")
+        if s.get("sfx"):
+            lines.append(f"音效:{s['sfx']}")
+        avoid = str(card.get("avoid") or "").strip()
+        lines.append("负面:" + _SHOTCARD_NEGATIVE_BASE + (f"、{avoid}" if avoid else ""))
+    lines.append(f"全片 {t} 秒,共 {len(shots)} 镜,按镜号顺序拼接。")
+    return "\n".join(lines)
+
+
+async def _build_shotcard_prompt(
+    db: Session, series, episode, shots: list[dict], progress=lambda s: None
+) -> dict:
+    """镜头卡工艺:LLM 逐镜产卡 → 契约闸(不合格定向修复一轮)→ 引擎拼文档落库。"""
+    total_s = sum(int(s.get("duration_s") or 0) for s in shots)
+    g = genre_of(series.genre)
+    style = (series.style_cn or "").strip() or direction_directive(series.direction)
+    refs = _ref_plan(shots)
+    progress(f"AI 正在把 {len(shots)} 镜写成镜头卡…")
+    adapter = get_adapter_for(Task.ANIME_PROMPT, timeout=300)
+    prompt = ANIME_SHOTCARD_PROMPT.format(
+        title=(episode.title or series.title or "动画短剧").strip()[:40],
+        genre_label=g["label"],
+        total_s=total_s,
+        shot_count=len(shots),
+        ratio="9:16 竖屏",
+        framing=g["framing"],
+        style_anchor=style,
+        cast_block=cast_block(norm_cast(series.cast)) if series.cast else "(无卡司档案)",
+        shots_block=_shotcard_material_block(shots),
+    )
+    data, err = await ask_llm_json(adapter, prompt, label="镜头卡", contract={"cards": list})
+    cards = data.get("cards") if not err else None
+    problems = _validate_shotcards(cards, shots) if cards is not None else (err or "模型返回空内容")
+    if problems:
+        progress("镜头卡结构不合格,定向修复中…")
+        logger.warning("镜头卡契约闸拦截(%s),定向修复一轮", problems)
+        try:
+            data2, err2 = parse_llm_json_checked(await adapter.ask(
+                _SHOTCARD_REPAIR_INSTRUCTION.format(problems=problems)
+                + strip_fences(str(cards if cards is not None else data))
+            ))
+            cards2 = data2.get("cards") if not err2 else None
+            problems2 = _validate_shotcards(cards2, shots) if cards2 is not None else (err2 or "空内容")
+            if not problems2:
+                cards, problems = cards2, None
+        except Exception as exc:  # noqa: BLE001 — 抢救动作失败不致命,走统一报错
+            logger.warning("镜头卡定向修复调用失败:%s", exc)
+    if problems:
+        raise AnimeError(f"镜头卡没拼好({problems}),再点一次试试。")
+    doc = _assemble_shotcard_doc(series, shots, cards, refs)
+    episode.film_prompt = doc
+    episode.status = "prompted"
+    db.commit()
+    return {"chars": len(doc), "segments": len(shots), "mode": "shotcard"}
 
 
 def _segments_block(groups: list[list[dict]]) -> str:
-    """分段计划原料:每段一行一镜(时间码累计),台词带说话人,音效点名。"""
+    """分段计划原料(旧分段式兜底路径):每段一行一镜,时间码累计,台词带说话人。"""
     rows = []
     t = 0
     for i, group in enumerate(groups, 1):
@@ -464,10 +669,12 @@ def _segments_block(groups: list[list[dict]]) -> str:
 async def build_film_prompt(
     db: Session, series, episode, progress=lambda s: None, segment_s: int = 15
 ) -> dict:
-    """分镜 → 整集分段精准提示词文档,整体覆盖 episode.film_prompt。"""
+    """分镜 → 整集提示词:镜头卡包启用走镜头卡制,否则旧分段式(兜底)。"""
     shots = [s for s in (episode.shots or []) if isinstance(s, dict)]
     if not shots:
         raise AnimeError("这集还没有分镜:先三选一梗纲并展开分镜,再来出提示词。")
+    if active_shotcard_render(db):
+        return await _build_shotcard_prompt(db, series, episode, shots, progress)
     if segment_s not in (15, 30):
         raise AnimeError("单段时长只支持 15 / 30 秒。")
 

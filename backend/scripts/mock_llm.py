@@ -88,6 +88,18 @@ _ANIME_SHOTS = {
     ],
 }
 
+_ANIME_SHOTCARDS = {"cards": [
+    {"seq": i,
+     "identity": "白色饭团精灵,蓝围裙" if i % 2 else "黄豆与饭团精灵",
+     "card_cn": f"第{i}镜:阿丸双手握铲翻锅,手腕一压一挑,眉毛拧紧又舒展。"
+                f"{'中景' if i % 2 else '特写'},机位齐灶台,{'缓推' if i % 3 == 0 else '固定'}。"
+                f"暖黄顶光,蒸汽逆光。Q版二头身漫画风。",
+     "motion_cn": "颠勺两下,蒸汽涌起,眼神从专注到得意。",
+     "voice": "尖着嗓子,语速快" if i == 1 else "",
+     "avoid": "蒸汽别糊脸" if i == 3 else ""}
+    for i in range(1, 13)
+]}
+
 _ANIME_FILM_REPLY = (
     "【第1段|0—15秒】Q版二头身漫画风,线条圆润、平涂上色带软渐变。厨房全景,暖黄灯光,"
     "灶台上蒸汽袅袅。阿丸(白色饭团精灵,蓝色围裙)郑重系紧围裙带子,镜头从围裙特写"
@@ -171,6 +183,9 @@ def reply_for(prompt: str) -> str:
         return json.dumps({"takes": _ANIME_TAKES}, ensure_ascii=False)
     if "动画的分镜师" in prompt:
         return json.dumps(_ANIME_SHOTS, ensure_ascii=False)
+    if "镜头卡" in prompt:
+        # docs/21 镜头卡工艺:一镜一卡 JSON(引擎拼文档;旧分段式仅在工艺包停用时走)
+        return json.dumps(_ANIME_SHOTCARDS, ensure_ascii=False)
     if "动画导演兼提示词工程师" in prompt:
         return _ANIME_FILM_REPLY
     # ---- 系列短片(主角点子/剧情点子/定妆代写/单集提示词)----

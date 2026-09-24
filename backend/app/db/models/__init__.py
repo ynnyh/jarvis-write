@@ -51,6 +51,7 @@ from app.db.models.clips import ClipShoot, MoodClip
 from app.db.models.birthday import BirthdayShoot, BirthdayWish
 from app.db.models.series import SeriesCharacter, SeriesEpisode
 from app.db.models.anime import AnimeSeries, AnimeEpisode
+from app.db.models.skill_pack import SkillPack
 from app.db.models.render import RenderConfig, RenderTask, TtsTrack
 
 __all__ = [
@@ -107,6 +108,7 @@ __all__ = [
     "SeriesEpisode",
     "AnimeSeries",
     "AnimeEpisode",
+    "SkillPack",
     "RenderConfig",
     "RenderTask",
     "TtsTrack",
