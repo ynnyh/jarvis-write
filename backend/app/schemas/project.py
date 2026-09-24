@@ -85,6 +85,10 @@ class ProjectOut(BaseModel):
     outline_stale: bool = False
     # 概念拍板(确认链 L1):True=作者在概念打磨屏拍过板。概念内容再变自动复位
     concept_confirmed: bool = False
+    # 简介确认(对话式确认流 L0):开书先聊出完整简介再拍板;brief_confirmed=True
+    # 是概念深化(/concept-from-brief)的硬门。每出新草稿自动复位 False(重新上锁)。
+    brief: str = ""
+    brief_confirmed: bool = False
 
     model_config = {"from_attributes": True}
 

@@ -49,6 +49,13 @@
   width: 100%; text-align: left; white-space: normal;
   border-radius: var(--r-md); padding: 8px 12px; line-height: 1.5;
 }
+/* 开书方向提案卡(🎲 点子兜底):差异标签 + 100-150 字提案正文,复用 chips.ideas 竖排 */
+.chips.ideas .pitch-card { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.pitch-card .pitch-label {
+  font-size: var(--fs-xs); color: var(--brand);
+  background: var(--brand-weak); border-radius: var(--r-full); padding: 1px 8px;
+}
+.pitch-card .pitch-text { font-weight: 400; line-height: 1.55; }
 .chip {
   padding: 6px 14px;
   border-radius: var(--r-full);

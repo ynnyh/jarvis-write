@@ -41,6 +41,7 @@ from app.schemas.dna import StoryDNA
 from app.schemas.project import ProjectCreate, ProjectOut
 
 from . import architecture, blueprint, dashboard, naming, plot_map, premise, shape, sequel, skeleton, style_profile, style_profile_api
+from . import brief
 from ._common import _get_project_or_404
 
 # 向后兼容 re-export:tests/test_style_profile.py 与其他外部按
@@ -65,6 +66,7 @@ router.include_router(shape.router)
 router.include_router(premise.router)
 router.include_router(plot_map.router)
 router.include_router(dashboard.router)
+router.include_router(brief.router)
 
 
 # —— 项目 CRUD ——
@@ -175,6 +177,10 @@ class ProjectPatch(BaseModel):
     setup_state: str | None = None
     # 概念拍板(确认链 L1):概念打磨屏点「拍板」置 True;概念内容变化由下方逻辑自动复位
     concept_confirmed: bool | None = None
+    # 简介确认(对话式确认流 L0):当前简介草稿 + 拍板标记。brief 内容变化时
+    # brief_confirmed 自动复位 False(每出新草稿重新上锁),除非同次请求显式带新拍板意图
+    brief: str | None = Field(default=None, max_length=5000)
+    brief_confirmed: bool | None = None
     # 灵感对话记录(整段覆盖式保存)
     chat_log: list | None = None
     # 文风备忘手动编辑:传字符串整段覆盖(传 "" 清空);不传(None)则不动
@@ -250,6 +256,12 @@ async def patch_project(
                 f"({written}/{project.target_chapters}),写完目标章数后再标完本;"
                 f"若目标定高了,可先在「篇幅」里调整目标",
             )
+    # 简介确认(对话式确认流 L0):简介内容变了,旧拍板不再成立——除非同一次请求
+    # 显式带了 brief_confirmed(「拍板+顺手改一个字」的合并意图)。前端「每出新草稿
+    # 自动重新上锁」由此在后端也成立(brief-chat 出新草稿时同样置 False,双保险)。
+    if "brief" in updates and updates["brief"] != (project.brief or "") \
+            and "brief_confirmed" not in updates:
+        project.brief_confirmed = False
     if updates.get("setup_state") == "":
         updates["setup_state"] = None  # "" = 起步完成
     if "chat_log" in updates and len(updates["chat_log"]) > 200:

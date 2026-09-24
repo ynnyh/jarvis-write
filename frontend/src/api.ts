@@ -225,6 +225,10 @@ export interface Project {
   canon?: StoryCanon | null;
   // 概念拍板(确认链 L1):True=作者在概念打磨屏拍过板;概念内容再变后端自动复位
   concept_confirmed?: boolean;
+  // 简介确认(对话式确认流 L0):开书先聊出完整简介再拍板;brief_confirmed=True
+  // 是概念深化的硬门(后端 409 把关),每出新草稿自动复位 False(重新上锁)
+  brief?: string;
+  brief_confirmed?: boolean;
 }
 export interface Architecture {
   core_seed: string; character_dynamics: string;
@@ -962,6 +966,12 @@ export interface EngineCard {
   hook: string;
 }
 
+/** 🎲 方向提案(没灵感兜底):100-150 字浓缩介绍+差异标签;选中后仍走对谈+拍板 */
+export interface Pitch {
+  pitch: string;
+  label: string;
+}
+
 // ---------- 故事 DNA / 本书基因(创作坐标) ----------
 /** 概念之上的「定味道」锚:治「选了青春校园却生成觉醒异能」的题材漂移。全字段可空,渐进捏成。
  *  与后端 app/schemas/dna.py 对齐;驱动生成强位注入 + 双向治漂门(越线自动毙+重生)。 */
@@ -1436,6 +1446,21 @@ export const api = {
     req<RefineResult>("POST", "/api/inspire/refine", { concept, directive, tendency, dna }, LLM_TIMEOUT),
   chatConcept: (messages: ChatTurn[], concept: Concept | null, tendency: Tendency = {}, dna: StoryDNA | null = null) =>
     req<ChatResult>("POST", "/api/inspire/chat", { messages, concept, tendency, dna }, LLM_TIMEOUT),
+  // 开书对话式确认流(L0):一轮简介聊天——回策划的 reply + 当前完整版简介草稿
+  // (后端落库 chat_log/brief 并自动重新上锁,返回的最新项目态一并带回)
+  briefChat: (pid: number, message: string) =>
+    req<{ reply: string; brief: string; project: Project }>(
+      "POST", `/api/projects/${pid}/brief-chat`, { message }, LLM_TIMEOUT),
+  // 已拍板简介 → 深化成六字段概念(强模型 job);简介未拍板后端 409 把关
+  conceptFromBriefAsync: (pid: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/concept-from-brief-async`, {}),
+  // 🎲 方向提案(没灵感兜底):3 个 100-150 字提案,选中后仍走对谈+拍板
+  pitchesAsync: (spark: string, tendency: Tendency, dna: StoryDNA | null = null,
+    avoidPitches: string[] = [], feedback = "") =>
+    req<{ job_id: string }>("POST", "/api/inspire/pitches/async",
+      { spark, tendency, dna, count: 3,
+        avoid_pitches: avoidPitches.length ? avoidPitches : undefined,
+        feedback: feedback || undefined }),
   // 坐标卡静态选项(味道锚/模式/味道轴/各模式禁忌)
   dnaOptions: () => req<DnaOptions>("GET", "/api/inspire/dna/options"),
   derivePattern: (text: string) =>

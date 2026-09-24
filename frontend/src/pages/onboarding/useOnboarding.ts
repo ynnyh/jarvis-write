@@ -1,20 +1,25 @@
 // 起步流的状态机:所有 state / effect / handler 集中于此,视图组件只消费其返回值。
-// 拆自 OnboardingFlow.tsx —— 逻辑与渲染分离,零行为变化(hook 调用顺序、effect 依赖原样保留)。
+// 拆自 OnboardingFlow.tsx —— 逻辑与渲染分离,hook 调用顺序、effect 依赖原样保留。
+//
+// 开书对话式确认流(2026-09-24 重构,作者拍板的五步主线):
+//   想法 → 简介(和策划聊/🎲提案兜底 → 开书订单拍板) → 概念(订单深化→打磨拍板)
+//   → 配置 → 点火
+// 「选流派/自写想法直接抽卡」的旧入口交互整体废除:引擎卡墙、概念卡墙、混搭、
+// 锚点重抽、带话重出批全部下线;收敛靠对谈,发散只剩 🎲 提案(勾起拍板,不是方案)。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   api, ChatTurn, Chip, Concept, conceptIsEmpty, Dimension,
-  EMPTY_CONCEPT, EngineCard, Project, RefineResult, Tendency,
+  EMPTY_CONCEPT, Pitch, Project, ShapeSuggestion, Tendency,
 } from "../../api";
 import { useJob } from "../../ui/useJob";
 import { pollJob, errMsg } from "../../pollJob";
 import { toast } from "../../ui/Toaster";
 import { confirmDialog } from "../../ui/ConfirmDialog";
-import { conceptSig, titleSig as calcTitleSig } from "../wizSig";
+import { titleSig as calcTitleSig } from "../wizSig";
 import { SetupStep, STEP_ORDER, SETUP_STATE, parseStep } from "./steps";
 import { WizCache, Dirty, loadJSON, saveJSON, sweepLegacyWizKeys, wizKeys } from "./storage";
 import { SCALE_PRESETS, PipeStep, PIPE_WAIT } from "./presets";
-import { conceptKey } from "./ConceptBrief";
 
 export function useOnboarding() {
   const { id, step: stepParam } = useParams();
@@ -36,22 +41,16 @@ export function useOnboarding() {
   }, [step]);
 
   // 想法屏
-  const [entry, setEntry] = useState<"more" | "genre" | "chat" | null>(null);
+  const [entry, setEntry] = useState<"more" | "genre" | null>(null);
   const [spark, setSpark] = useState("");
   const [genreDim, setGenreDim] = useState<Dimension | null>(null);
   // 口味定标(P1):outline 目录整体缓存,偏好面板据此渲染感情线/开局强度/主角底色等维度
   const [outlineDims, setOutlineDims] = useState<Dimension[]>([]);
-  // 选中的题材卡(含 flavors 分叉):按书持久化,刷新/回跳不丢(P1 口味定标依赖它回显)
-  const [pickedGenreCard, setPickedGenreCard] = useState<Chip | null>(() => {
-    try { return null; } catch { return null; }
-  });
-  const [chatInput, setChatInput] = useState("");
+  // 选中的题材卡(含 flavors 分叉):按书持久化,刷新/回跳不丢
+  const [pickedGenreCard, setPickedGenreCard] = useState<Chip | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const sparkRef = useRef<HTMLTextAreaElement | null>(null);
-  // 方向卡屏·轻偏好(P0-B 偏好前移 + P1 口味定标):全部可选、可跳过。零信号下模型只能给
-  // 流派平均值(=最套路的写法),这就是"选了方向生成的还不对味"的根因;偏好越具体,抽卡越准。
-  // 基调/元素/感情线/开局强度/主角底色/主角视角进 tendency(后端结构化注入);流派口味/画像
-  // 补充/避雷补充拼进 spark 文本(收敛层语义,不进贯穿全书的指令)。
+  // 轻偏好:基调/元素/流派口味/画像/避雷,全部可选可跳过,收窄对谈与生成的空间
   const [prefTone, setPrefTone] = useState<string[]>([]);
   const [prefElements, setPrefElements] = useState<string[]>([]);
   const [prefFlavors, setPrefFlavors] = useState<string[]>([]);
@@ -59,39 +58,36 @@ export function useOnboarding() {
   const [prefAvoid, setPrefAvoid] = useState<string[]>([]);
   const [prefAvoidText, setPrefAvoidText] = useState("");
 
-  // 概念屏
-  const [ideas, setIdeas] = useState<Concept[] | null>(null);
-  const [comparison, setComparison] = useState("");
-  const [ideaSig, setIdeaSig] = useState<string | null>(null); // 候选生成时的输入签名
+  // 简介屏(对话式确认流 L0):聊/提案 → 开书订单草稿 → 拍板
+  const [briefInput, setBriefInput] = useState("");   // 对谈输入框
+  const [briefDraft, setBriefDraft] = useState("");   // 订单手改草稿
+  const [ideaCards, setIdeaCards] = useState<Pitch[] | null>(null); // 🎲 提案(三选一兜底)
+  const [pitchFeedback, setPitchFeedback] = useState(""); // 对上一批提案的修改要求(带话重出)
+  // 开场只烧一次:想法路把灵感句自动发进对谈 / 空手路自动出提案
+  const briefAutoFor = useRef("");
+
+  // 概念屏:拍板订单深化的结果直接进打磨房;自己写概念是逃生口
   const [customOpen, setCustomOpen] = useState(false);
   const [customConcept, setCustomConcept] = useState<Concept>({ ...EMPTY_CONCEPT });
-  const brainstormedFor = useRef("");
-  // 两段式构思(P0-A):方向路先出便宜的引擎卡(FAST 档)收敛,选中 1-2 张才花强模型深化
-  const [engineCards, setEngineCards] = useState<EngineCard[] | null>(null);
-  const [enginePicked, setEnginePicked] = useState<string[]>([]);
-  // 引擎卡的常驻修改要求(P0 沟通修改):用户带话重出后一直生效(换一批/锚点重抽都带着),
-  // 直到点「不再带这条」;存进 wiz 缓存,刷新不丢
-  const [engineFeedback, setEngineFeedback] = useState("");
-  const engineFeedbackRef = useRef("");
-  function applyEngineFeedback(f: string) {
-    engineFeedbackRef.current = f;
-    setEngineFeedback(f);
-  }
+  const developedFor = useRef(""); // 已深化过的订单文本,防重复烧 token
+  const [developing, setDeveloping] = useState(false);
+  // 轮廓推荐(阅读手感+篇幅):概念深化完成后要一次,配置页签预填用
+  const [shapeSug, setShapeSug] = useState<ShapeSuggestion | null>(null);
 
-  // 题材屏
+  // 题材屏(配置页签)
   const [inferBusy, setInferBusy] = useState(false);
   const [genreSuggests, setGenreSuggests] = useState<Chip[]>([]);
   const [suggestPage, setSuggestPage] = useState(0);
   const [customGenre, setCustomGenre] = useState("");
 
-  // 书名屏
+  // 书名屏(配置页签)
   const [titleIdeas, setTitleIdeas] = useState<string[] | null>(null);
-  const [titleSig, setTitleSig] = useState<string | null>(null); // 同上,书名候选签名
+  const [titleSig, setTitleSig] = useState<string | null>(null);
   const [titleBusy, setTitleBusy] = useState(false);
   const [titleInput, setTitleInput] = useState("");
   const titleInputRef = useRef<HTMLInputElement | null>(null);
 
-  // 篇幅屏
+  // 篇幅屏(配置页签)
   const [chapters, setChapters] = useState("");
   const [words, setWords] = useState("");
   const [advOpen, setAdvOpen] = useState(false);
@@ -100,9 +96,8 @@ export function useOnboarding() {
   const [fly, setFly] = useState<{ step: SetupStep; text: string } | null>(null);
   const [pickedKey, setPickedKey] = useState<string | null>(null);
 
-  // 概念打磨房(确认链 L1):选定概念后进打磨而非直接飞走。
-  // forgeSeed 只在「换了一个概念」时自增(驱动 ConceptForge 重挂载),
-  // 打磨中的字段编辑向上同步不换 key,避免高亮/草稿被打断。
+  // 概念打磨房(确认链 L1):深化/自写出的概念在打磨房过目、改、拍板。
+  // forgeSeed 只在「换了一个概念」时自增(驱动 ConceptForge 重挂载)。
   const [forgeOpen, setForgeOpen] = useState(false);
   const [forgeSeed, setForgeSeed] = useState(0);
   const forgeDismissed = useRef("");
@@ -128,8 +123,9 @@ export function useOnboarding() {
     concept.logline, concept.hook, concept.protagonist, concept.setting,
   ].filter((s) => s?.trim()).join("\n") || project?.topic || "";
   const sparkText = spark.trim() || project?.topic?.trim() || "";
-  // 方向路标记:概念屏据此分流(引擎卡两段式 vs 直接出概念)
-  const genrePath = isGenrePath(sparkText);
+  const briefText = (project?.brief ?? "").trim();
+  const briefConfirmed = !!project?.brief_confirmed;
+  const chatLog: ChatTurn[] = project?.chat_log ?? [];
 
   // ---------- 建草稿 / 载入(含 localStorage 恢复) ----------
   // 只建一次草稿:StrictMode/重渲染下 effect 可能重入,无守卫会静默建出多个空项目
@@ -137,6 +133,14 @@ export function useOnboarding() {
   useEffect(() => {
     sweepLegacyWizKeys(); // v1 遗留键没有所有权标记,一次性清掉(见 storage.ts 注释)
     if (pid !== null) {
+      // 跨书状态重置(串档防线三):/new/1 → /new/2 是同路由参数变化,组件不卸载,
+      // 上一本书的屏级 state(灵感文字/提案/订单草稿/开场标记)会残留进新书——
+      // localStorage 有 v2 键隔离,React state 没有,必须在 pid 变化时显式清场。
+      setSpark(""); setEntry(null); setPickedGenreCard(null);
+      setIdeaCards(null); setBriefInput(""); setBriefDraft("");
+      briefAutoFor.current = ""; developedFor.current = "";
+      setCustomOpen(false); setForgeOpen(false); setForgeSeed(0);
+      forgeDismissed.current = "";
       api.getProject(pid).then((p) => {
         setProject(p);
         setTitleInput(p.title === "未命名新书" ? "" : p.title);
@@ -144,16 +148,13 @@ export function useOnboarding() {
         setWords(String(p.target_words_per_chapter));
         const c = loadJSON<WizCache>(wizKeys(pid).cache);
         // 所有权校验(开书串档防线二):缓存记录的项目创建时间与当前项目对不上,
-        // 说明这份缓存属于一个已删除的同号旧项目(库被回滚/多端同步等 id 复用场景),
-        // 整份丢弃——绝不能把上一个项目的提示文字和候选卡灌进新书。
-        // dirty 同判:旧项目的影响标记对新书毫无意义
+        // 说明这份缓存属于一个已删除的同号旧项目,整份丢弃
         const cacheOwned = !c?.createdAt || !p.created_at || c.createdAt === p.created_at;
         if (!c || cacheOwned) {
           if (c) {
-            setSpark(c.spark); setIdeas(c.ideas); setTitleIdeas(c.titleIdeas);
-            setIdeaSig(c.ideaSig ?? null); setTitleSig(c.titleSig ?? null);
-            setEngineCards(c.engineCards ?? null);
-            applyEngineFeedback(c.engineFeedback ?? "");
+            setSpark(c.spark); setTitleIdeas(c.titleIdeas);
+            setTitleSig(c.titleSig ?? null);
+            setIdeaCards(c.ideaCards ?? null);
           }
           setDirty(loadJSON<Dirty>(wizKeys(pid).dirty));
         }
@@ -177,7 +178,7 @@ export function useOnboarding() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pid]);
 
-  // 流派卡片墙 + 口味维度数据(想法屏/题材屏共用)
+  // 流派卡片墙 + 口味维度数据(想法屏/配置屏共用)
   useEffect(() => {
     api.tendencyCatalog("outline").then((cat) => {
       setGenreDim(cat.dimensions.find((d) => d.key === "genre") ?? null);
@@ -187,15 +188,14 @@ export function useOnboarding() {
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [project?.chat_log, busy]);
 
-  // 候选内容写入 localStorage:刷新后回到当前屏接着选。
-  // createdAt 随存:加载时校验所有权(见上方加载注释)
+  // 候选内容写入 localStorage:刷新后回到当前屏接着选。createdAt 随存(所有权校验)
   useEffect(() => {
     if (pid === null || !project) return;
     saveJSON(wizKeys(pid).cache, {
-      spark, ideas, titleIdeas, ideaSig, titleSig, engineCards, engineFeedback,
+      spark, titleIdeas, titleSig, ideaCards,
       createdAt: project.created_at ?? undefined,
     } satisfies WizCache);
-  }, [pid, project, spark, ideas, titleIdeas, ideaSig, titleSig, engineCards, engineFeedback]);
+  }, [pid, project, spark, titleIdeas, titleSig, ideaCards]);
 
   const patch = useCallback(async (updates: Partial<Project> & { setup_state?: string }) => {
     if (pid === null) return null;
@@ -230,25 +230,24 @@ export function useOnboarding() {
     nav(`/new/${pid}/${next}`);
   }
 
-  // 选用候选卡:PATCH 落库 + 卡片 FLIP 飞入顶部缩略位,稍作停留再进下一屏
+  // 选用/拍板卡:PATCH 落库 + FLIP 飞入顶部缩略位,稍作停留再进下一屏
   function flyTo(s: SetupStep, text: string, next: SetupStep) {
     setFly({ step: s, text });
     window.setTimeout(() => { setFly(null); setPickedKey(null); void goto(next); }, 420);
   }
 
   // ---------- 第 1 屏:想法 ----------
+  // 「和策划聊聊」:灵感/方向落库后进简介屏——对谈在那里发生,这里不再出任何卡
   async function submitSpark() {
     const t = spark.trim();
     if (!t) return;
-    try { await patch({ topic: t }); } catch { /* 灵感落库失败不阻塞出题 */ }
-    await goto("concept");
+    try { await patch({ topic: t }); } catch { /* 灵感落库失败不阻塞 */ }
+    await goto("brief");
   }
 
+  // 选流派出方案:流派+口味写成初始信号落库(对谈/提案的硬上下文),进简介屏开场
   async function pickGenreBrainstorm() {
     if (!pickedGenreCard) return;
-    // P0-B 偏好前移 + P1 口味定标:基调/元素/感情线/开局强度/主角底色/主角视角走
-    // tendency 结构化注入(后端渲染成【本次写作倾向】,全链路可见);流派口味/画像
-    // 补充/避雷补充无对应维度,拼进 spark 文本(收敛层最直接且零后端改动)。
     const t: Tendency = { ...tendency, genre: pickedGenreCard.label };
     if (prefTone.length) t.tone = prefTone;
     if (prefElements.length) t.elements = prefElements;
@@ -266,131 +265,134 @@ export function useOnboarding() {
         global_tendency: t, genre: pickedGenreCard.label, topic: text,
       });
     } catch { /* 同上 */ }
-    await goto("concept");
+    await goto("brief");
   }
 
-  async function sendChat() {
-    const text = chatInput.trim();
-    if (!text || !project) return;
-    const log: ChatTurn[] = [...(project.chat_log ?? []), { role: "user", content: text }];
-    setChatInput("");
+  // ---------- 第 2 屏:简介(对话式确认流) ----------
+  // 一轮对谈:乐观上屏(先显作者的话),成功落服务端线程+新订单草稿(自动重新上锁),
+  // 失败回滚本地线程。message 为空时不发(纯手改订单不经过这里)。
+  async function sendBrief(raw?: string) {
+    const text = (raw ?? briefInput).trim();
+    if (!text || !project || busy) return;
+    const log: ChatTurn[] = [...chatLog, { role: "user", content: text }];
+    setBriefInput("");
     setProject({ ...project, chat_log: log });
-    setBusy("策划思考中…"); setErr("");
+    setBusy("策划正在接住你的想法…"); setErr("");
     try {
-      const r = await api.chatConcept(log, conceptIsEmpty(concept) ? null : concept, tendency, project?.dna ?? null);
-      const newLog: ChatTurn[] = [...log, { role: "assistant", content: r.reply }];
-      await patch({
-        chat_log: newLog,
-        ...(conceptIsEmpty(r.concept) ? {} : { concept: r.concept }),
-      });
+      const r = await api.briefChat(pid!, text);
+      setProject(r.project);
+      setBriefDraft(r.brief);
+      setIdeaCards(null); // 已经聊起来了,提案区收起
     } catch (e) {
       setErr(errMsg(e));
-      await patch({ chat_log: log }).catch(() => undefined);
+      setProject((prev) => (prev ? { ...prev, chat_log: log.slice(0, -1) } : prev));
     } finally { setBusy(""); }
   }
 
-  // ---------- 第 2 屏:概念方案 ----------
-  // 方向路判定:spark 是 pickGenreBrainstorm 拼出来的「按「XX」的套路来」格式。
-  // 该路走两段式(先便宜引擎卡收敛);用户自写想法的路保持直接出概念(已有明确想法,不需要收敛层)。
-  function isGenrePath(text: string): boolean {
-    return text.startsWith("按「") && text.includes("套路来");
-  }
-
-  // 两段式·第一段:FAST 档出一批故事引擎卡(带差异轴);换一批传上一批引擎句当 avoid,不趋同;
-  // 锚点重抽传 anchorEngine——「方向对,照这张再来点」,沿这张卡出变体而非全盘否定;
-  // feedbackOverride = 用户对上一批的修改要求(带话重出)。常驻要求 engineFeedbackRef
-  // 在换一批/锚点重抽时也生效(「不要系统流」不会因为换了一批就失效)。
-  async function fetchEngines(avoidEngines: string[] = [], anchorEngine = "", feedbackOverride = "") {
-    const fb = (feedbackOverride || engineFeedbackRef.current).trim();
-    setErr(""); setEngineCards(null); setEnginePicked([]);
-    setBusy(anchorEngine ? "AI 正在照着锚点引擎出变体(几十秒)…"
-      : fb ? "AI 正在按你的要求重出一批(几十秒)…"
-      : "AI 正在快速出一批故事引擎(几十秒)…");
+  // 🎲 没灵感兜底:出 3 个方向提案(FAST 档);「再来一组」带上一批避免趋同;
+  // 带话重出把修改要求以最高优先级注入
+  async function fetchPitches(avoid: string[] = [], feedback = "") {
+    if (busy) return;
+    setErr("");
+    const fb = (feedback || pitchFeedback).trim();
+    setBusy(fb ? "AI 正在按你的要求重新出提案…" : "AI 正在出三个方向提案…");
     try {
-      const r = await runJob<{ engines: EngineCard[] }>(
-        () => api.enginesAsync(sparkText, tendency, 8, project?.dna ?? null, avoidEngines, anchorEngine, fb),
+      const r = await runJob<{ pitches: Pitch[] }>(
+        () => api.pitchesAsync(sparkText, tendency, project?.dna ?? null, avoid, fb),
         { kind: "inspire" },
       );
-      if (r) setEngineCards(r.engines);
-    } catch (e) { setErr(errMsg(e)); setEngineCards([]); } finally { setBusy(""); }
-  }
-
-  // 引擎卡点选:再点取消;最多 2 张(第 3 张挤掉最早选的),两张 = 混搭(A 的主角遇 B 的局面)
-  function pickEngine(engine: string) {
-    setEnginePicked((prev) => {
-      if (prev.includes(engine)) return prev.filter((x) => x !== engine);
-      return [...prev, engine].slice(-2);
-    });
-  }
-
-  // 两段式·第二段:选中的引擎 → 强模型深化成单个六字段概念
-  async function developConcept() {
-    if (!enginePicked.length) return;
-    setErr(""); setIdeas(null);
-    setBusy("AI 正在把选中的引擎深化成完整概念(约 1 分钟)…");
-    try {
-      const r = await runJob<{ concept: Concept }>(
-        () => api.developConceptAsync(enginePicked, sparkText, tendency, project?.dna ?? null),
-        { kind: "inspire" },
-      );
-      if (r) { setIdeas([r.concept]); setComparison(""); setEngineCards(null); }
+      if (r) setIdeaCards(r.pitches);
     } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); }
   }
 
-  async function brainstorm(feedback = "") {
-    const base = sparkText;
-    if (!base) return;
-    brainstormedFor.current = base + "|" + feedback;
-    const sig = conceptSig(base, tendency); // 与实际生成入参一致
-    setErr(""); setIdeas(null);
+  // 选中提案:提案变成作者的一句话,进对谈由策划接住聊实(提案不是方案,仍要拍板)
+  function pickPitch(p: Pitch) {
+    const text = `我选「${p.label || "这个方向"}」:${p.pitch}`;
+    void sendBrief(text);
+  }
+
+  // 订单手改:保存 = 新草稿,后端自动重新上锁(重新拍板才往下走)
+  async function saveBriefDraft() {
+    if (!project) return;
+    const t = briefDraft.trim();
+    if (!t) { setErr("订单不能为空"); return; }
+    if (t === briefText) return; // 没改就不落库
     try {
-      const r = await runJob<{ ideas: Concept[]; comparison?: string }>(
-        () => api.inspireAsync(
-          feedback ? `${base}\n补充要求:${feedback}` : base, tendency, 4, project?.dna ?? null),
+      const p = await patch({ brief: t });
+      if (p) toast.ok("订单已更新", "内容变了要重新拍板;继续聊也可以");
+    } catch (e) { setErr(errMsg(e)); }
+  }
+
+  // 拍板:这版订单就是全书的硬约束;飞入进度条进概念屏
+  async function confirmBrief() {
+    if (!briefText) return;
+    try {
+      await patch({ brief_confirmed: true });
+      toast.ok("开书订单已拍板", "接下来 AI 照单深化概念;订单仍是硬约束");
+      flyTo("brief", "订单已拍板 ✓", "concept");
+    } catch (e) { setErr(errMsg(e)); }
+  }
+
+  // 撤拍板:改主意了回简介屏继续聊/手改(确认是权利不是门槛)
+  async function unconfirmBrief() {
+    try {
+      await patch({ brief_confirmed: false });
+      toast.ok("已撤回拍板", "订单回到草稿态,聊/改完再拍");
+    } catch (e) { setErr(errMsg(e)); }
+  }
+
+  // 简介屏开场只烧一次:自写想法 → 自动把灵感句发进对谈;空手/方向路 → 自动出提案
+  useEffect(() => {
+    if (step !== "brief" || !project || busy) return;
+    if (chatLog.length > 0 || briefText) return; // 聊过了/已有草稿:自然续接
+    const key = sparkText || "(空手)";
+    if (briefAutoFor.current === key) return;
+    briefAutoFor.current = key;
+    if (sparkText) void sendBrief(sparkText);
+    else void fetchPitches();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, project]);
+
+  // ---------- 第 3 屏:概念(订单深化 → 打磨房) ----------
+  // 进屏自动把拍板订单交给强模型深化(一次);深化 prompt 里订单是最高约束。
+  // 手动「重新深化」走同一入口(developedFor 清掉即可)。
+  async function developFromBrief() {
+    if (!project || !briefConfirmed || !briefText || busy) return;
+    developedFor.current = briefText;
+    setErr(""); setDeveloping(true);
+    try {
+      const r = await runJob<{ concept: Concept }>(
+        () => api.conceptFromBriefAsync(pid!),
         { kind: "inspire" },
       );
-      if (r) { setIdeas(r.ideas); setComparison(r.comparison ?? ""); setIdeaSig(sig); }
-    } catch (e) { setErr(errMsg(e)); setIdeas([]); }
+      if (r) {
+        const p = await patch({ concept: r.concept });
+        if (p) {
+          setForgeOpen(true);
+          setForgeSeed((n) => n + 1);
+          toast.ok("概念已按订单深化", "进打磨房逐项过目、改、拍板");
+          // 方案定了 → 顺手要一份「阅读手感 + 篇幅」推荐(轻量调用,失败静默)
+          api.suggestShape(pid!).then((sug: ShapeSuggestion) => {
+            setShapeSug(sug);
+          }).catch(() => undefined);
+        }
+      }
+    } catch (e) { setErr(errMsg(e)); developedFor.current = ""; }
+    finally { setDeveloping(false); }
   }
 
-  // 进概念屏自动生成(有缓存候选则不重复生成):方向路出引擎卡,想法路直接出概念
+  // 概念屏自动深化(有概念则不重复烧):签名=订单文本,订单变了才允许再烧
   useEffect(() => {
     if (step !== "concept" || !project) return;
-    if (ideas !== null || engineCards !== null) return;
-    const key = sparkText;
-    if (!key || brainstormedFor.current === key) return;
-    brainstormedFor.current = key;
-    if (isGenrePath(key)) void fetchEngines();
-    else void brainstorm();
+    if (!conceptIsEmpty(concept) || developing) return;
+    if (!briefConfirmed || !briefText) return;
+    if (developedFor.current === briefText) return;
+    void developFromBrief();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, project, ideas, engineCards]);
+  }, [step, project]);
 
-  // 带反馈重新生成:有灵感文本 → 追加要求重出 4 个;对话捏出的概念 → refine 精修
-  async function regenWithFeedback(f: string) {
-    if (!sparkText && !conceptIsEmpty(concept)) {
-      const sig = conceptSig(sparkText, tendency);
-      setErr(""); setIdeas(null);
-      try {
-        const r = await runJob<RefineResult>(
-          () => api.refineConceptAsync(concept, f, tendency, project?.dna ?? null), { kind: "inspire" });
-        if (r) { setIdeas([r.concept]); setIdeaSig(sig); }
-      } catch (e) { setErr(errMsg(e)); setIdeas([]); }
-    } else {
-      await brainstorm(f);
-    }
-  }
-
-  async function pickConcept(c: Concept) {
-    if (pickedKey) return;
-    setPickedKey(conceptKey(c));
-    try {
-      await patch({ concept: c });
-    } catch (e) { setErr(errMsg(e)); }
-    // 确认链 L1:选定 → 进打磨房(不再直接飞走);血肉在那里面过目、改、拍板
-    setForgeOpen(true);
-    setForgeSeed((n) => n + 1);
-    toast.ok("已选定故事概念", "先打磨:逐项看/改/带话重捏,满意再拍板");
-  }
+  // 概念相对订单的过期提示:订单改过(签名对不上)但概念还在 → 标黄让作者决定
+  const conceptStaleVsBrief = !!briefText && developedFor.current !== "" && developedFor.current !== briefText;
 
   async function saveCustomConcept() {
     if (conceptIsEmpty(customConcept)) { setErr("至少填一个字段再保存"); return; }
@@ -479,7 +481,7 @@ export function useOnboarding() {
     } catch (e) { setErr(errMsg(e)); }
   }
 
-  // ---------- 第 6 屏:篇幅 ----------
+  // ---------- 篇幅(配置页签) ----------
   async function pickScale(preset: typeof SCALE_PRESETS[number]) {
     setChapters(String(preset.chapters)); setWords(String(preset.words));
     await patch({ target_chapters: preset.chapters, target_words_per_chapter: preset.words });
@@ -492,17 +494,17 @@ export function useOnboarding() {
     await patch({ target_chapters: ch, target_words_per_chapter: w });
   }
 
-  // 开放式连载开关(篇幅屏勾选):True=结局未定,架构只定长线引擎+首批方向,铺满可续订
+  // 开放式连载开关(篇幅页签勾选):True=结局未定,架构只定长线引擎+首批方向
   const openEnded = !!project?.open_ended;
   async function toggleOpenEnded(v: boolean) {
     await patch({ open_ended: v });
   }
 
-  // ---------- 第 8 屏:点火流水线 ----------
+  // ---------- 第 5 屏:点火流水线 ----------
   function reattach(kind: "arch" | "bp", jobId: string, stage: string) {
     const set = kind === "arch" ? setArch : setBp;
     set({ status: "run", stage: stage || "生成中", error: "" });
-      pollJob(jobId, { onStage: (s) => set((p) => (p.status === "run" ? { ...p, stage: s } : p)) })
+    pollJob(jobId, { onStage: (s) => set((p) => (p.status === "run" ? { ...p, stage: s } : p)) })
       .then(() => {
         set({ status: "done", stage: "", error: "" });
         // docs/20 两段式点火:默认架构完停在骨架墙;信任模式保持旧链路直通蓝图
@@ -543,9 +545,7 @@ export function useOnboarding() {
     }
   }
 
-  // 旧流水线屏恢复(信任模式专用;闸门模式的架构自举在 ArchGate 内):
-  // 优先接回仍在跑的任务,否则按已有产物推断完成态;
-  // 两手空空且首次进入 → 自动点火(仅一次,失败重跑由用户手动触发,避免刷新反复烧 token)
+  // 旧流水线屏恢复(信任模式专用;闸门模式的架构自举在 ArchGate 内)
   useEffect(() => {
     if (step !== "launch" || pid === null || pipeInit.current || !trustMode) return;
     pipeInit.current = true;
@@ -580,21 +580,18 @@ export function useOnboarding() {
   async function enterWorkbench() {
     if (pid === null) return;
     try { await patch({ setup_state: "" }); } catch { /* 不阻塞进台 */ }
-    // P1-5:刚点完火的心智是「开始写」——落写作区第 1 章,而不是开书区(架构卡)。
-    // 蓝图已铺好的书直接 ch=1;「先不生成,直接进工作台」的空书也会被 write 区
-    // 的空态引导到目录/生成,不会白屏。
+    // 刚点完火的心智是「开始写」——落写作区第 1 章,而不是开书区(架构卡)。
     nav(`/project/${pid}/write?ch=1`);
   }
 
   async function abandon() {
     if (pid === null || !project) return;
-    // 已有实质产出(起步流已过「想法」步,或进了流水线):删除前确认;
-    // 刚进来还没填东西(setup_state 仍是 idea)时不打扰
+    // 已有实质产出(起步流已过「想法」步,或进了流水线):删除前确认
     const progressed = !!project.setup_state && project.setup_state !== "idea";
     if (progressed) {
       const ok = await confirmDialog({
         title: "放弃创建并删除该项目?",
-        body: "将删除该项目及已生成内容(概念/架构/蓝图等),不可恢复。",
+        body: "将删除该项目及已生成内容(订单/概念/架构/蓝图等),不可恢复。",
         confirmText: "放弃并删除",
         danger: true,
       });
@@ -617,31 +614,39 @@ export function useOnboarding() {
     // 基础 / 路由
     project, err, step, pid, nav,
     // 派生
-    concept, tendency, sparkText, allGenreChips, shownSuggests,
-    // 各屏 state
-    spark, entry, genreDim, outlineDims, pickedGenreCard, chatInput, busy,
-    ideas, comparison, ideaSig, customOpen, customConcept,
+    concept, tendency, sparkText, briefText, briefConfirmed, chatLog,
+    conceptStaleVsBrief, allGenreChips, shownSuggests, shapeSug,
+    // 想法屏 state
+    spark, entry, genreDim, outlineDims, pickedGenreCard,
     prefTone, prefElements, prefFlavors, prefPersona, prefAvoid, prefAvoidText,
-    engineCards, enginePicked, genrePath, engineFeedback,
-    inferBusy, customGenre,
+    // 简介屏 state
+    briefInput, briefDraft, ideaCards, busy, pitchFeedback,
+    // 概念屏 state
+    customOpen, customConcept, developing,
+    // 配置屏 state
+    inferBusy, customGenre, genreSuggests, suggestPage,
     titleIdeas, titleSig, titleBusy, titleInput,
     chapters, words, advOpen, openEnded,
     fly, pickedKey, dirty, arch, bp, setBp, trustMode, setTrustMode,
     forgeOpen, forgeSeed, setForgeOpen,
-    forgeChanged, forgeConfirmed, forgeUnconfirmed, isForgeDismissedFor, dismissForge, reopenForge,
-    // 渲染需要的 setter
-    setSpark, setEntry, setPickedGenreCard, setChatInput,
-    setIdeaSig, setCustomOpen, setCustomConcept,
+    // setter
+    setSpark, setEntry, setPickedGenreCard,
     setPrefTone, setPrefElements, setPrefFlavors, setPrefPersona, setPrefAvoid, setPrefAvoidText,
+    setBriefInput, setBriefDraft, setIdeaCards, setPitchFeedback,
+    setCustomOpen, setCustomConcept,
     setGenreSuggests, setSuggestPage, setCustomGenre,
     setTitleSig, setTitleInput, setChapters, setWords, setAdvOpen, setDirty,
     // ref
     stepsRef, chatEndRef, sparkRef, titleInputRef,
     // handler
-    submitSpark, pickGenreBrainstorm, sendChat,
-    brainstorm, regenWithFeedback, pickConcept, saveCustomConcept,
-    fetchEngines, pickEngine, developConcept, applyEngineFeedback,
+    submitSpark, pickGenreBrainstorm,
+    sendBrief, fetchPitches, pickPitch, saveBriefDraft, confirmBrief, unconfirmBrief,
+    developFromBrief, saveCustomConcept,
+    forgeChanged, forgeConfirmed, forgeUnconfirmed, isForgeDismissedFor, dismissForge, reopenForge,
     setGenre, setDim, fetchTitles, pickTitle, pickScale, confirmScale, toggleOpenEnded,
     runArch, runBp, enterWorkbench, abandon, goto, editFrom, markDirtyOk,
   };
 }
+
+// 方向路判定留作语义说明:spark 以「按「XX」的套路来」开头即方向路
+// (选流派进来);现在对谈开场统一处理,不再据此分流。

@@ -114,6 +114,12 @@ class Project(Base, TimestampMixin):
     # 概念打磨屏,作者可带话重捏/手改;点「拍板」才置 True。概念内容再变(含 AI 重捏)
     # 自动复位 False——拍板永远对着看过、改过的那版概念。存量项目 False,行为零变化。
     concept_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 简介确认(对话式确认流 L0,2026-09-24):开书不再「选流派直接抽卡」——作者(哪怕
+    # 完全没灵感)先和策划聊:AI 出点子兜底/接住作者的想法,每轮补全一版完整故事简介;
+    # 每出新草稿 brief_confirmed 自动复位 False(重新上锁),作者点「✓ 简介就按这个来」
+    # 才置 True。它是 /concept-from-brief 深化的硬门(未拍板 409),概念/架构都排在它后面。
+    brief: Mapped[str] = mapped_column(Text, default="")
+    brief_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
 
     architecture: Mapped["Architecture | None"] = relationship(
         back_populates="project", uselist=False, cascade="all, delete-orphan"

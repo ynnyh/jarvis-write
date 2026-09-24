@@ -36,12 +36,14 @@ from app.llm.router import Task, get_adapter_for
 from app.prompts.dna_capsules import dna_capsule_choices, get_dna_capsule
 from app.prompts.story_patterns import pattern_choices
 from app.prompts.inspire import (
+    BOOK_BRIEF_CHAT_PROMPT,
     CHAT_DISTILL_PROMPT,
     CHAT_SYSTEM_PROMPT,
     DEVELOP_PROMPT,
     ENGINES_PROMPT,
     INSPIRE_PROMPT,
     MIRROR_DISTILL_PROMPT,
+    PITCHES_PROMPT,
     REFINE_PROMPT,
     _GENRE_BOUNDARY,
 )
@@ -267,7 +269,7 @@ class EngineCard(BaseModel):
 class EnginesRequest(BaseModel):
     spark: str = Field(default="", description="灵感碎片,可为空(选流派时为流派指令)")
     tendency: Tendency = Field(default_factory=dict)
-    count: int = Field(default=8, ge=4, le=10, description="引擎卡数量")
+    count: int = Field(default=8, ge=3, le=10, description="引擎卡数量(点子兜底=3,整批=8)")
     dna: StoryDNA | None = None
     # P1 顺手项:换一批时传上一批的引擎句,让重出的一批明显不同(同输入重跑天然趋同)
     avoid_engines: list[str] = Field(
@@ -364,9 +366,99 @@ async def engines_async(req: EnginesRequest):
     return {"job_id": spawn_job(f"inspire-engines-u{uid}", work)}
 
 
+# ============================= 方向提案(🎲 点子兜底) =============================
+# 开书对话式确认流(2026-09-24 重构)的发散层:没灵感时出 3 个 100-150 字提案勾起兴趣。
+# 提案不是方案——选中后仍进对谈聊实、仍要拍板;与引擎卡共用 avoid/feedback 的组装语义。
+class Pitch(BaseModel):
+    """一个方向提案:100-150 字浓缩介绍 + 差异标签。"""
+
+    pitch: str = Field(description="方向提案正文,100-150 字")
+    label: str = Field(default="", description="差异坐标:主角类型·冲突来源·味道")
+
+
+class PitchesRequest(BaseModel):
+    spark: str = Field(default="", description="灵感碎片/已选方向,可为空")
+    tendency: Tendency = Field(default_factory=dict)
+    count: int = Field(default=3, ge=2, le=5, description="提案数量(默认 3)")
+    dna: StoryDNA | None = None
+    avoid_pitches: list[str] = Field(
+        default_factory=list, description="上一批提案正文,本轮要明显区别于它们(再来一组)",
+    )
+    feedback: str = Field(default="", max_length=300, description="用户对上一批的修改要求")
+
+
+class PitchesResponse(BaseModel):
+    pitches: list[Pitch]
+
+
+async def _pitches_impl(req: PitchesRequest) -> PitchesResponse:
+    style_block = render_style_block(assemble_tendency("outline", req.tendency))
+    style_block += dna_block_of(_dna_of(req.dna))
+    clean_avoid = [a.strip() for a in req.avoid_pitches if a.strip()][:10]
+    avoid_block = ""
+    if clean_avoid:
+        avoid_block = (
+            "【上一批提案用户都没选中,本轮必须换方向:以下内核不要再现,主角类型/冲突来源至少换轴】\n"
+            + "\n".join(f"- {a}" for a in clean_avoid) + "\n"
+        )
+    feedback_block = ""
+    fb = (req.feedback or "").strip()
+    if fb:
+        feedback_block = (
+            "【用户看了上一批后的修改要求(本轮最高优先级,每个提案都必须遵守)】\n"
+            f"- {fb}\n"
+        )
+    prompt = PITCHES_PROMPT.format(
+        spark=req.spark.strip() or "(空白,按写作倾向自由发挥)",
+        count=req.count,
+        style_directives=style_block,
+        avoid_block=avoid_block,
+        feedback_block=feedback_block,
+        genre_boundary=_GENRE_BOUNDARY,
+    )
+    try:
+        data, parse_err = await ask_llm_json(
+            get_adapter_for(Task.SUMMARY), prompt, label="方向提案",
+            contract={"pitches": list},
+        )  # FAST 档:点子是发散道具,要快
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"方向提案生成失败: {exc}") from exc
+    if parse_err:
+        raise HTTPException(status_code=502, detail=f"方向提案解析失败:{parse_err}")
+    pitches = [
+        Pitch(pitch=str(p.get("pitch") or "").strip(), label=str(p.get("label") or "").strip())
+        for p in (data.get("pitches") or []) if isinstance(p, dict)
+    ]
+    pitches = [p for p in pitches if p.pitch][: req.count]
+    if not pitches:
+        raise HTTPException(status_code=502, detail="方向提案解析失败,请重试")
+    return PitchesResponse(pitches=pitches)
+
+
+@router.post("/pitches", response_model=PitchesResponse)
+async def pitches(req: PitchesRequest) -> PitchesResponse:
+    """🎲 点子兜底:没灵感 → 3 个方向提案(FAST 档)。选中后仍走对谈+拍板。"""
+    return await _pitches_impl(req)
+
+
+@router.post("/pitches/async")
+async def pitches_async(req: PitchesRequest):
+    """异步版方向提案:立即返回 job_id。"""
+    uid = current_user_id.get()
+
+    async def work(progress):
+        progress("AI 正在出三个方向提案")
+        return (await _pitches_impl(req)).model_dump()
+
+    return {"job_id": spawn_job(f"inspire-pitches-u{uid}", work)}
+
+
 class DevelopRequest(BaseModel):
     # 选中的引擎句(1 张深化 / 2 张混搭:A 的主角遇 B 的局面)
-    engines: list[str] = Field(min_length=1, max_length=2)
+    engines: list[str] = Field(default_factory=list, max_length=2)
+    # 对话式确认流(L0):已拍板的故事简介——与 engines 二选一(简介优先),
+    # 深化必须忠实于拍板内容
+    brief: str = Field(default="", max_length=2000)
     spark: str = Field(default="", description="灵感碎片(可选,深化参考)")
     tendency: Tendency = Field(default_factory=dict)
     dna: StoryDNA | None = None
@@ -378,11 +470,19 @@ class DevelopResponse(BaseModel):
 
 async def _develop_impl(req: DevelopRequest) -> DevelopResponse:
     picked = [e.strip() for e in req.engines if e.strip()]
-    if not picked:
-        raise HTTPException(status_code=400, detail="请先选至少一张引擎卡")
-    engines_block = "\n".join(
-        f"引擎{'一' if i == 0 else '二'}:{e}" for i, e in enumerate(picked[:2])
-    ) + ("\n(用户想混搭:融合两张卡的要素)" if len(picked) > 1 else "")
+    brief = (req.brief or "").strip()
+    if brief:
+        # 拍板订单是作者确认过的硬约束,深化不许偷换
+        engines_block = (
+            "【作者已拍板的开书订单(最高约束,深化必须忠实于它,不得偷换成另一个故事)】\n"
+            + brief
+        )
+    elif picked:
+        engines_block = "\n".join(
+            f"引擎{'一' if i == 0 else '二'}:{e}" for i, e in enumerate(picked[:2])
+        ) + ("\n(用户想混搭:融合两张卡的要素)" if len(picked) > 1 else "")
+    else:
+        raise HTTPException(status_code=400, detail="请先选引擎卡,或提供已拍板的简介")
     style_block = render_style_block(assemble_tendency("outline", req.tendency))
     style_block += dna_block_of(_dna_of(req.dna))
     prompt = DEVELOP_PROMPT.format(

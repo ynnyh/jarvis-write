@@ -5,14 +5,14 @@
 // 缓存就被灌进新书,表现为「删书重开,提示文字和卡片还是上一次的」(开书串档)。
 // v2 双保险:键升版甩开历史遗留 + createdAt 所有权校验(缓存属于已删除的
 // 同号新旧项目时丢弃)。服务端配套:projects.id 改 AUTOINCREMENT 只增不复用。
-import type { Concept, EngineCard } from "../../api";
+import type { Pitch } from "../../api";
 import type { SetupStep } from "./steps";
 
 export interface WizCache {
-  spark: string; ideas: Concept[] | null; titleIdeas: string[] | null;
-  ideaSig?: string | null; titleSig?: string | null;
-  engineCards?: EngineCard[] | null;   // 两段式第一段的引擎卡(恢复后不再自动 fetch)
-  engineFeedback?: string;             // 引擎卡的常驻修改要求(带话重出后一直生效)
+  spark: string; titleIdeas: string[] | null;
+  titleSig?: string | null;
+  // 简介屏的 🎲 提案(刷新回到当前屏接着挑;聊过天则以服务端 chat_log/brief 为准)
+  ideaCards?: Pitch[] | null;
   createdAt?: string;                  // 项目创建时间:所有权校验,对不上即弃
 }
 

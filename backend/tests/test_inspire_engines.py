@@ -158,8 +158,31 @@ def test_develop_two_engines_marks_mix(client, monkeypatch):
 
 
 def test_develop_rejects_empty_engines(client):
-    """空引擎列表直接被 pydantic 拦下(min_length=1),不烧 LLM。"""
+    """引擎与简介都为空:不烧 LLM,直接 400(引擎改为可选,与简介二选一)。"""
     u = _register(client, "eng_user5")
     r = client.post("/api/inspire/develop", headers=_auth(u["token"]),
                     json={"engines": []})
-    assert r.status_code == 422
+    assert r.status_code == 400
+
+
+def test_develop_from_brief_seed(client, monkeypatch):
+    """对话式确认流(L0):已拍板订单作为种子深化,订单必须以最高约束身份进 prompt。"""
+    u = _register(client, "eng_user6")
+    adapter = _patch_engines(monkeypatch, _CONCEPT_JSON)
+    r = client.post("/api/inspire/develop", headers=_auth(u["token"]), json={
+        "brief": "【故事内核】镖师护送前朝公主的险镖,规矩与良心相撞",
+        "tendency": {"genre": "武侠"},
+    })
+    assert r.status_code == 200, r.text
+    assert "镖师" in r.json()["concept"]["logline"]
+    assert "已拍板的开书订单" in adapter.last_prompt
+    assert "镖师护送前朝公主" in adapter.last_prompt
+
+
+def test_engines_count_three_for_ideas(client, monkeypatch):
+    """点子兜底(没灵感出三个点子):count=3 合法(下限从 4 放宽到 3)。"""
+    u = _register(client, "eng_user7")
+    _patch_engines(monkeypatch, _ENGINES_JSON)
+    r = client.post("/api/inspire/engines", headers=_auth(u["token"]),
+                    json={"spark": "按「武侠」的套路来", "count": 3})
+    assert r.status_code == 200, r.text
