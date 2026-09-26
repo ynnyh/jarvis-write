@@ -135,6 +135,8 @@ jobs:
 
       - name: 生成更新清单 latest.json
         shell: bash
+        env:
+          PYTHONIOENCODING: utf-8   # artifact 文件名含中文(productName=藏山),Windows runner 默认 cp1252 打印即炸
         run: |
           python - <<'PY'
           import json, pathlib, re, datetime
