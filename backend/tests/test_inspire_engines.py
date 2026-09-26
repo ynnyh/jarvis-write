@@ -52,7 +52,7 @@ def _patch_engines(monkeypatch, payload: str) -> "_FakeAdapter":
     from app.api import inspire as inspire_mod
 
     adapter = _FakeAdapter(payload)
-    monkeypatch.setattr(inspire_mod, "get_adapter_for", lambda task: adapter)
+    monkeypatch.setattr(inspire_mod, "get_adapter_for", lambda task, **kw: adapter)
     return adapter
 
 
@@ -85,7 +85,7 @@ def test_engines_parses_and_marks_fast_task(client, monkeypatch):
     seen_tasks: list = []
     real = inspire_mod.get_adapter_for
 
-    def spy(task):
+    def spy(task, **kw):
         seen_tasks.append(task)
         return adapter
 

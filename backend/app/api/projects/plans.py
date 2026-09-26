@@ -89,6 +89,8 @@ class ThreeQuestionsRequest(BaseModel):
     mode: str = Field(default="serial", max_length=10)
     topic: str = Field(default="", max_length=500)
     genre: str = Field(default="", max_length=100)
+    # 防趋同(docs/22「🎲换一批」):上一批已展示的候选文本,注入 prompt 要求换角度
+    avoid: list[str] = Field(default_factory=list)
 
 
 class QuestionCandidate(BaseModel):
@@ -149,21 +151,34 @@ def _sanitize_questions(data: dict, mode: str) -> list[Question]:
 async def three_questions(
     project_id: int, req: ThreeQuestionsRequest, db: Session = Depends(get_db)
 ) -> ThreeQuestionsResponse:
-    """三问定纲(FAST 档):每问 3-4 候选 + ★首推带理由,第 3 问随模式分叉。"""
+    """三问定纲(发散档,高温度):每问 3-4 候选 + ★首推带理由,第 3 问随模式分叉。
+
+    温度显式提到 0.9:三问是纯发散创意任务,SUMMARY 档默认 0.3(忠实压缩)
+    会让「🎲换一批」每次出同一批(2026-09-26 作者实测反馈);avoid 注入上一批
+    候选防趋同——与提案通道(avoid_block)同一套机制。
+    """
     project = _get_project_or_404(db, project_id)
     mode = "short" if req.mode == "short" else "serial"
     context = req.topic.strip() or "(空白——按你的判断给方向)"
     if req.genre.strip():
         context += f"\n[已选题材: {req.genre.strip()}]"
+    avoid_block = ""
+    if req.avoid:
+        avoid_block = (
+            "【避开清单(作者已看过的上一批候选,本次严禁再出同义或换皮版本)】\n- "
+            + "\n- ".join(a.strip()[:60] for a in req.avoid[:12] if a.strip())
+        )
     prompt = THREE_QUESTIONS_PROMPT.format(
         context=context,
         style_directives=_style_block_of(project),
+        avoid_block=avoid_block,
         q3_title=_q3_title(mode),
         genre_boundary=_GENRE_BOUNDARY if req.genre.strip() else (
             "题材未定,方向可自由发挥;但同样不吃老套路(觉醒/系统/重生/穿越,除非作者明确要求)。"
         ),
     )
-    adapter = get_adapter_for(Task.SUMMARY)
+    # 发散任务借道 SUMMARY 档(FAST)但强制高温度——0.3 的摘要档「换一批」必出同批
+    adapter = get_adapter_for(Task.SUMMARY, temperature=0.9)
     try:
         questions = _sanitize_questions(parse_llm_json(await adapter.ask(prompt)), mode)
     except Exception as exc:  # noqa: BLE001
@@ -177,7 +192,8 @@ class BookPlansRequest(BaseModel):
     topic: str = Field(default="", max_length=500)
     genre: str = Field(default="", max_length=100)
     answers: dict[str, str] = Field(default_factory=dict)
-    # 再来三套时的反馈(可空);avoid 为上一批的 label/title 清单(防趋同)
+    # 再来三套时的反馈(可空);avoid 为上一批的 label/title/kernel 摘要(防趋同,
+    # 2026-09-26 作者实测「换汤不换药」:标签级避开会被换皮绕过,须给到内核结构)
     feedback: str = Field(default="", max_length=_DIRECTIVE_MAX)
     avoid: list[str] = Field(default_factory=list)
 
@@ -240,7 +256,13 @@ async def book_plans(
     if req.feedback.strip():
         topic += f"\n[作者对上一批的反馈: {req.feedback.strip()}]"
     if req.avoid:
-        topic += "\n[避开:与上一批同质——上一批是 " + "、".join(req.avoid[:6]) + "]"
+        topic += (
+            "\n【避开清单——作者已看过上一批,严禁换皮重出】\n- "
+            + "\n- ".join(a.strip()[:80] for a in req.avoid[:6] if a.strip())
+            + "\n新一批的每一套,其主角身份/行业/地域、冲突来源、内核结构、破局反差"
+            "都必须与避开清单里的每一套明显不同;严禁只换人名与措辞的「换皮」;"
+            "上一批出现过的味道组合不得原样复用。"
+        )
     answers = "\n".join(
         f"{k}: {str(v).strip()[:_ANSWER_MAX]}"
         for k, v in sorted(req.answers.items())

@@ -377,9 +377,12 @@ export function useOnboarding() {
     if (pid === null) return;
     setPlanBusy("AI 正在出三问候选…");
     try {
+      // 「🎲换一批」防趋同:上一批已展示的候选文本进 avoid,要求换角度换人群
+      const avoid = (questions ?? []).flatMap((q) => q.candidates.map((c) => c.text));
       const r = await api.threeQuestions(pid, {
         mode: planMode, topic: sparkText,
         genre: (tendency.genre as string) || project?.genre || "",
+        avoid,
       });
       setQuestions(r.questions);
     } catch (e) { setErr(errMsg(e)); } finally { setPlanBusy(""); }
@@ -401,9 +404,10 @@ export function useOnboarding() {
     if (pid === null) return;
     setPlanBusy("AI 正在出三套整书方案…");
     try {
-      // 再来三套:上一批差异坐标进 avoid 防趋同
+      // 再来三套:上一批的差异坐标 + 内核进 avoid 防趋同(标签级避开会被换皮绕过,
+      // 2026-09-26 作者实测;内核首句让模型在结构层面避开)
       const avoid = (plans ?? [])
-        .map((p) => `${p.label ?? ""}·${p.title}`)
+        .map((p) => `${p.label ?? ""}·${p.title}·${(p.kernel ?? "").slice(0, 40)}`)
         .map((s) => s.replace(/^[·\s]+|[·\s]+$/g, ""))
         .filter(Boolean);
       const r = await api.bookPlans(pid, {
@@ -568,12 +572,15 @@ export function useOnboarding() {
   async function fetchTitles(feedback = "") {
     // 签名只取规范字段(不含一次性反馈词),与 suggestTitle 的语义入参一致
     const sig = calcTitleSig(project?.topic ?? "", (tendency.genre as string) ?? "", concept);
-    setTitleBusy(true); setErr(""); setTitleIdeas(null);
+    setTitleBusy(true); setErr("");
     try {
+      // 「换一批」防趋同:上一批候选书名进 avoid,严禁复用(2026-09-26 全链路排查)
+      const avoid = titleIdeas ?? [];
       const { job_id } = await api.suggestTitleAsync(
         (project?.topic ?? "") + (feedback ? `(命名偏好:${feedback})` : ""),
         (tendency.genre as string) ?? "",
         conceptIsEmpty(concept) ? null : concept,
+        avoid,
       );
       const r = await pollJob<{ titles: string[] }>(job_id, { intervalMs: 1500 });
       setTitleIdeas(r.titles);

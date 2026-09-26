@@ -296,3 +296,51 @@ def test_patch_mode_dirty_value_falls_back(client):
     assert r.json()["mode"] == "short"
     r = client.patch(f"/api/projects/{p['id']}", headers=headers, json={"mode": "宇宙无敌"})
     assert r.json()["mode"] == "serial"  # 脏值收敛
+
+
+_QUESTIONS_B_JSON = json.dumps({
+    "questions": [{"key": "q1", "title": "写什么味道", "candidates": [
+        {"text": "东方奇幻·诡谲瑰丽", "recommended": True, "reason": "避开上一批"},
+        {"text": "历史权谋·苍凉厚重", "recommended": False, "reason": ""},
+    ]}]
+}, ensure_ascii=False)
+
+
+def test_three_questions_injects_avoid(client, monkeypatch):
+    """「🎲换一批」防趋同:上一批候选进 prompt 避开清单(温度 0.9 发散档)。"""
+    headers = _auth(client, "plans_3q_avoid_user")
+    p = _create_project(client, headers, "三问防趋同书")
+    from app.api.projects import plans as plans_mod
+
+    adapter = _FakeAdapter(_QUESTIONS_B_JSON)
+    monkeypatch.setattr(plans_mod, "get_adapter_for", lambda task, **kw: adapter)
+    r = client.post(f"/api/projects/{p['id']}/three-questions", headers=headers,
+                    json={"mode": "serial", "topic": "都市悬疑",
+                          "avoid": ["都市异闻·冷峻悬疑", "口吃档案员女警,过目不忘却无人信"]})
+    assert r.status_code == 200, r.text
+    # 上一批候选必须注入避开清单
+    assert "避开清单" in adapter.last_prompt
+    assert "都市异闻·冷峻悬疑" in adapter.last_prompt
+    assert "同义或换皮" in adapter.last_prompt
+
+
+def test_book_plans_avoid_includes_kernel_and_hard_rules(client, monkeypatch):
+    """再来三套:avoid 升级为 label·title·kernel,并带「严禁换皮」硬约束。"""
+    headers = _auth(client, "plans_avoid_kernel_user")
+    p = _create_project(client, headers, "方案防趋同书")
+    from app.api.projects import plans as plans_mod
+
+    monkeypatch.setattr(plans_mod, "get_adapter_for", lambda task, **kw: _FakeAdapter(_PLANS_JSON))
+    r = client.post(f"/api/projects/{p['id']}/book-plans", headers=headers, json={"mode": "serial"})
+    assert r.status_code == 200
+
+    captured = _FakeAdapter(_PLANS_JSON)
+    monkeypatch.setattr(plans_mod, "get_adapter_for", lambda task, **kw: captured)
+    # 第二次带 avoid(前端会拼 label·title·kernel 首句)
+    r = client.post(f"/api/projects/{p['id']}/book-plans", headers=headers,
+                    json={"mode": "serial",
+                          "avoid": ["小人物·体制·冷·第七份笔录·口吃女警靠背诵旧案笔录串并七起悬案"]})
+    assert r.status_code == 200
+    assert "严禁换皮重出" in captured.last_prompt
+    assert "口吃女警靠背诵旧案笔录串并七起悬案" in captured.last_prompt
+    assert "味道组合不得原样复用" in captured.last_prompt

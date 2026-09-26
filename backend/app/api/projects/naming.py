@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -28,9 +28,11 @@ _TITLE_PROMPT = """\
 【主题/灵感】{topic}
 【类型】{genre}
 {concept_block}
+{avoid_block}
 要求:
 1. 网文书名风格,有记忆点,2-12 字
-2. 4 个候选风格尽量拉开差异
+2. 4 个候选风格尽量拉开差异(意象/句式/用字都换);若给了【避开清单】,
+   清单里的书名与同结构变体一律不得再出
 3. 只输出书名,一行一个,不要序号、不要书名号、不要任何解释
 """
 
@@ -40,6 +42,8 @@ class TitleSuggestRequest(BaseModel):
     genre: str = ""
     # 新建向导已捏出概念时传入,给起名更多上下文
     concept: Concept | None = None
+    # 防趋同:「换一批」时传入上一批候选书名,严禁复用(2026-09-26 全链路防趋同排查)
+    avoid: list[str] = Field(default_factory=list)
 
 
 class TitleSuggestResponse(BaseModel):
@@ -51,10 +55,17 @@ def _title_prompt(req: TitleSuggestRequest) -> str:
     concept_block = ""
     if req.concept is not None and not req.concept.is_empty():
         concept_block = f"【故事概念】\n{req.concept.render()}\n"
+    avoid_block = ""
+    if req.avoid:
+        avoid_block = (
+            "【避开清单——作者已看过的上一批书名,严禁复用或出同结构变体】\n- "
+            + "\n- ".join(a.strip()[:30] for a in req.avoid[:8] if a.strip())
+        )
     return _TITLE_PROMPT.format(
         topic=req.topic.strip() or "(自由发挥)",
         genre=req.genre.strip() or "不限",
         concept_block=concept_block,
+        avoid_block=avoid_block,
     )
 
 

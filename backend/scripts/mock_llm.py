@@ -238,6 +238,26 @@ def reply_for(prompt: str) -> str:
                 for i, (t, r) in enumerate(cands)
             ]}
         short = "结尾想落在什么感觉" in prompt
+        avoid = "避开清单" in prompt
+        if avoid:
+            # 「🎲换一批」防趋同:mock 换 B 组候选(角度/人群/张力全换),供走查断言
+            return json.dumps({"questions": [
+                _q("q1", "写什么味道", [
+                    ("东方奇幻·诡谲瑰丽", "避开上一批的现实向,开奇幻位面"),
+                    ("历史权谋·苍凉厚重", "换个时代换群人"),
+                    ("武侠诡事·侠气森然", "江湖夜雨,快意与谜"),
+                ]),
+                _q("q2", "主角是谁", [
+                    ("刻薄账房先生,算无遗策却算不透人心", "与上一批的体制内女警完全换人"),
+                    ("哑女刀客,以刀代言", "沉默型主角,张力在刀上"),
+                    ("过气影帝,戏里戏外分不清", "职业反差新颖"),
+                ]),
+                _q("q3", "结尾想落在什么感觉上" if short else "最大的坎是什么", [
+                    ("苍凉·回甘" if short else "至亲即是局中人", "情感钩最深"),
+                    ("荒诞·大笑" if short else "天道本身在撒谎", "立意反转"),
+                    ("温柔·释怀" if short else "救命恩人是仇人", "撕裂感最强"),
+                ]),
+            ]}, ensure_ascii=False)
         return json.dumps({"questions": [
             _q("q1", "写什么味道", [
                 ("都市异闻·冷峻悬疑", "贴你给的题材,悬念密度最高"),
@@ -285,6 +305,35 @@ def reply_for(prompt: str) -> str:
     if "一次给出 3 套完整的「整书方案」" in prompt:
         # 整书方案×3(docs/22 P0):方案一直读作者想法,另两套发散;差异轴拉开
         fb = _feedback_of(prompt)
+        avoid = "避开清单" in prompt
+        if avoid:
+            # 防趋同:mock 换 B 组三套(主角身份/冲突来源/味道全换),供走查断言
+            plans = [
+                {"title": "漕河账", "kernel": "漕帮账房先生用一本暗账搅动三省盐铁",
+                 "protagonist": "秦九思,四十四岁,算无遗策却算不透人心",
+                 "world": "清中期漕运盛景,江湖与官面在码头交汇",
+                 "arc": "暗账失窃;三省追账;卷尾账主竟是自己",
+                 "engine": "每翻一页账就倒一个人",
+                 "flavor": ["权谋", "苍凉"], "scale": "长篇",
+                 "scale_reason": "三省三案", "label": "账房·暗账·权"},
+                {"title": "哑刀", "kernel": "哑女刀客替村庄讨还十年前的血债",
+                 "protagonist": "阿盐,十九岁,以刀代言",
+                 "world": "塞北边镇,刀是唯一的法律",
+                 "arc": "血债现形;寻仇北上;卷尾仇人是师父",
+                 "engine": "每一站一个债主",
+                 "flavor": ["武侠", "冷冽"], "scale": "中篇",
+                 "scale_reason": "单线复仇", "label": "刀客·血债·冷"},
+                {"title": "谢幕", "kernel": "过气影帝在戏里戏外间追查一场旧案的真相",
+                 "protagonist": "陆沉,五十岁,戏里戏外分不清",
+                 "world": "当代影视圈,镜头是照妖镜",
+                 "arc": "旧案入戏;戏假成真;卷尾导演喊咔后无人下场",
+                 "engine": "每部戏一层真相",
+                 "flavor": ["悬疑", "荒诞"], "scale": "长篇",
+                 "scale_reason": "戏中案连环", "label": "影帝·旧案·诡"},
+            ]
+            if fb:
+                plans[0]["kernel"] = f"按你的要求重出:『{fb}』——" + plans[0]["kernel"]
+            return json.dumps({"plans": plans}, ensure_ascii=False)
         plans = [
             {"title": "死人镖",
              "kernel": "替死人讨公道的瘸腿老镖师,押着装活人的棺材去边关,靠一本黑账把七座城的贪官全拖下水",

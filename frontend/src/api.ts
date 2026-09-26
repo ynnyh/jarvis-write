@@ -1361,15 +1361,15 @@ export const api = {
   deleteChapterOrder: (pid: number, n: number) =>
     req<{ deleted: number }>("DELETE", `/api/projects/${pid}/chapters/${n}/order`),
 
-  suggestTitleAsync: (topic: string, genre: string, concept?: Concept | null) =>
+  suggestTitleAsync: (topic: string, genre: string, concept?: Concept | null, avoid?: string[]) =>
     req<{ job_id: string }>("POST", "/api/projects/title-suggestion-async",
-      { topic, genre, concept: concept ?? null }),
+      { topic, genre, concept: concept ?? null, avoid: avoid ?? [] }),
 
   listProjects: () => req<Project[]>("GET", "/api/projects"),
   createProject: (p: Partial<Project>) => req<Project>("POST", "/api/projects", p),
   // 开书方案流(docs/22 P0,确认链 L0 新形态):三问定纲 → 整书方案×3 → 定向修订 → 拍板
   threeQuestions: (pid: number, body: {
-    mode: string; topic?: string; genre?: string;
+    mode: string; topic?: string; genre?: string; avoid?: string[];
   }) => req<{ questions: ThreeQuestions[] }>(
     "POST", `/api/projects/${pid}/three-questions`, body),
   bookPlans: (pid: number, body: {

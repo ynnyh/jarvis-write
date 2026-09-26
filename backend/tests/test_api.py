@@ -198,8 +198,10 @@ class _TitleAdapter:
 
     def __init__(self, text: str):
         self._text = text
+        self.last_prompt = ""
 
     async def ask(self, prompt, system=None):
+        self.last_prompt = prompt
         return self._text
 
 
@@ -1455,3 +1457,25 @@ def test_revise_annotated_not_owner_404(client):
         json={"annotations": [{"para_idx": 0, "original": "他走进了城门。", "note": "改"}]},
     )
     assert r.status_code == 404
+
+
+def test_title_suggestion_injects_avoid(client):
+    """「换一批」防趋同(2026-09-26 全链路排查):上一批书名注入避开清单,严禁复用。"""
+    from unittest.mock import patch
+
+    headers = _setup_user_with_key(client, "title_avoid_user")
+    capture = _TitleAdapter("1. 另一个名字")
+    with patch(
+        "app.api.projects.naming.get_adapter_for",
+        return_value=capture,
+    ):
+        r = client.post(
+            "/api/projects/title-suggestion",
+            headers=headers,
+            json={"topic": "义体维修师", "genre": "赛博朋克",
+                  "avoid": ["霓虹深渊", "芯片猎人"]},
+        )
+    assert r.status_code == 200, r.text
+    assert "避开清单" in capture.last_prompt
+    assert "霓虹深渊" in capture.last_prompt
+    assert "严禁复用" in capture.last_prompt

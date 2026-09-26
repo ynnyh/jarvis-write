@@ -56,7 +56,7 @@ def _patch_pitches(monkeypatch, payload: str) -> _FakeAdapter:
     from app.api import inspire as inspire_mod
 
     adapter = _FakeAdapter(payload)
-    monkeypatch.setattr(inspire_mod, "get_adapter_for", lambda task: adapter)
+    monkeypatch.setattr(inspire_mod, "get_adapter_for", lambda task, **kw: adapter)
     return adapter
 
 
@@ -77,7 +77,7 @@ def test_pitches_parses_and_fast_task(client, monkeypatch):
     seen_tasks: list = []
     adapter = _FakeAdapter(_PITCHES_JSON)
 
-    def spy(task):
+    def spy(task, **kw):
         seen_tasks.append(task)
         return adapter
 

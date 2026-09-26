@@ -327,9 +327,9 @@ async def _engines_impl(req: EnginesRequest) -> EnginesResponse:
     )
     try:
         data, parse_err = await ask_llm_json(
-            get_adapter_for(Task.SUMMARY), prompt, label="故事引擎卡",
+            get_adapter_for(Task.SUMMARY, temperature=0.85), prompt, label="故事引擎卡",
             contract={"engines": list},
-        )  # FAST 档:收敛层要快
+        )  # FAST 档:收敛层要快;候选发散提温防重出同批
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"引擎卡生成失败: {exc}") from exc
     if parse_err:
@@ -418,7 +418,8 @@ async def _pitches_impl(req: PitchesRequest) -> PitchesResponse:
     )
     try:
         data, parse_err = await ask_llm_json(
-            get_adapter_for(Task.SUMMARY), prompt, label="方向提案",
+            # 发散道具强制高温:SUMMARY 档默认 0.3,「再来一组」会出同批(作者实测)
+            get_adapter_for(Task.SUMMARY, temperature=0.9), prompt, label="方向提案",
             contract={"pitches": list},
         )  # FAST 档:点子是发散道具,要快
     except Exception as exc:  # noqa: BLE001
