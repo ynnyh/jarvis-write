@@ -133,6 +133,18 @@ jobs:
           echo "--- bundle 目录 ---"
           ls -R src-tauri/target/release/bundle || true
 
+      # GitHub Release 上传中文文件名会被剥字符(藏山_0.53.0 → _0.53.0):
+      # 上传前统一改为 ASCII 名(cangshan_*),签名是对文件内容的、改名不受影响,
+      # latest.json 的 url 与上传名自然一致
+      - name: 产物重命名为 ASCII 文件名
+        shell: bash
+        run: |
+          cd src-tauri/target/release/bundle/nsis
+          for f in *-setup.exe.sig; do [ -e "$f" ] && mv "$f" "cangshan_${f#*_}"; done
+          for f in *-setup.exe; do [ -e "$f" ] && mv "$f" "cangshan_${f#*_}"; done
+          echo "--- 重命名后 ---"
+          ls -la
+
       - name: 生成更新清单 latest.json
         shell: bash
         env:
