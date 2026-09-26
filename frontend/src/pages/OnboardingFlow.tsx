@@ -102,6 +102,7 @@ export default function OnboardingFlow() {
     stepsRef, sparkRef, titleInputRef,
     // handler
     submitSpark, pickGenreBrainstorm,
+    dramaSkinList, pickedSkin, pickSkinGo,
     pickMode, fetchQuestions, answerQ, adoptAllRecommended,
     genPlans, reviseOnePlan, confirmChosenPlan,
     confirmBrief, unconfirmBrief,
@@ -250,13 +251,40 @@ export default function OnboardingFlow() {
                 {/* ---------- 想法 ---------- */}
                 {step === "idea" && (
                   <div className="card">
-                    <h2>这本书的核心是什么?</h2>
-                    <div className="card-desc">
-                      一句话、一个画面、一个设定都行——写下来,和策划把它聊成一份可拍板的开书订单。
-                    </div>
+                    {project.mode === "drama" ? (
+                      <>
+                        <h2>想让人追什么?</h2>
+                        <div className="card-desc">
+                          已选{project.audience === "female" ? "女频" : "男频"}漫剧——先挑个爽文题材(选完 AI 按它出三套爽点拉满的方案);
+                          已经有具体点子就直接写,挑不挑都行。
+                        </div>
+                        <div className="pref-row mt-2">
+                          <span className="pref-label">爽文题材<small>选一个,出方案/三问都围着它转</small></span>
+                          <div className="genre-cards">
+                            {dramaSkinList.map((sk) => (
+                              <button key={sk.key} type="button"
+                                className={"genre-card" + (pickedSkin === sk.label ? " on" : "")}
+                                onClick={() => void pickSkinGo(sk.label)}>
+                                <b>{sk.label}</b>
+                                <span>{sk.desc}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <h2>这本书的核心是什么?</h2>
+                        <div className="card-desc">
+                          一句话、一个画面、一个设定都行——写下来,和策划把它聊成一份可拍板的开书订单。
+                        </div>
+                      </>
+                    )}
                     <textarea ref={sparkRef} rows={3} className="mt-2" value={spark}
                       onChange={(e) => setSpark(e.target.value)}
-                      placeholder="如:落魄镖师接下一趟险镖,半路开箱验货时发现镖箱里藏着个大活人…"
+                      placeholder={project.mode === "drama"
+                        ? "有具体点子就写(如:废柴杂役被逐出宗门,捡到一本万妖图录…);不写也行,选好题材直接出方案"
+                        : "如:落魄镖师接下一趟险镖,半路开箱验货时发现镖箱里藏着个大活人…"}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && !e.shiftKey && spark.trim()) {
                           e.preventDefault();
@@ -264,15 +292,25 @@ export default function OnboardingFlow() {
                         }
                       }} />
                     <div className="actions mt-2">
-                      <button className="primary" disabled={!spark.trim()} onClick={submitSpark}>
-                        💬 按这个出方案 →
-                      </button>
-                      <button onClick={randomBook} disabled={!!busy}>
-                        🎴 随机开一本
-                      </button>
-                      <button onClick={() => setEntry(entry ? null : "more")}>
-                        {entry ? "收起" : "没有灵感?"}
-                      </button>
+                      {project.mode === "drama" ? (
+                        <button className="primary" onClick={() => void pickSkinGo(pickedSkin || null)}>
+                          {pickedSkin ? `按「${pickedSkin}」出方案 →` : "🎲 让 AI 按货架出三套爽文方案 →"}
+                        </button>
+                      ) : (
+                        <button className="primary" disabled={!spark.trim()} onClick={submitSpark}>
+                          💬 按这个出方案 →
+                        </button>
+                      )}
+                      {project.mode !== "drama" && (
+                        <>
+                          <button onClick={randomBook} disabled={!!busy}>
+                            🎴 随机开一本
+                          </button>
+                          <button onClick={() => setEntry(entry ? null : "more")}>
+                            {entry ? "收起" : "没有灵感?"}
+                          </button>
+                        </>
+                      )}
                       {hasConcept && (
                         <button onClick={() => goto("concept")}>概念已就绪,去打磨 →</button>
                       )}
@@ -442,10 +480,12 @@ export default function OnboardingFlow() {
                       </div>
                     )}
 
-                    <div className="actions mt-4 onboard-nav">
-                      <span className="grow" />
-                      <button onClick={() => goto("brief")}>先不定,直接出方案 →</button>
-                    </div>
+                    {project.mode !== "drama" && (
+                      <div className="actions mt-4 onboard-nav">
+                        <span className="grow" />
+                        <button onClick={() => goto("brief")}>先不定,直接出方案 →</button>
+                      </div>
+                    )}
                   </div>
                 )}
 

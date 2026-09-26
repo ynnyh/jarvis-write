@@ -48,6 +48,9 @@ export function useOnboarding() {
   const [outlineDims, setOutlineDims] = useState<Dimension[]>([]);
   // 选中的题材卡(含 flavors 分叉):按书持久化,刷新/回跳不丢
   const [pickedGenreCard, setPickedGenreCard] = useState<Chip | null>(null);
+  // 漫剧源书皮肤墙(docs/23 v2):按频道渲染爽文题材标签,选中即落 genre
+  const [dramaSkinList, setDramaSkinList] = useState<{ key: string; label: string; desc: string }[]>([]);
+  const [pickedSkin, setPickedSkin] = useState<string>(() => project?.genre || "");
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const sparkRef = useRef<HTMLTextAreaElement | null>(null);
   // 轻偏好:基调/元素/流派口味/画像/避雷,全部可选可跳过,收窄对谈与生成的空间
@@ -245,6 +248,31 @@ export function useOnboarding() {
     const t = spark.trim();
     if (!t) return;
     try { await patch({ topic: t }); } catch { /* 灵感落库失败不阻塞 */ }
+    await goto("brief");
+  }
+
+  // 皮肤目录:漫剧书进想法屏时拉一次(静态目录,失败静默退化)
+  useEffect(() => {
+    if (project?.mode !== "drama" || !project.audience || dramaSkinList.length) return;
+    api.dramaSkins().then((all) => {
+      setDramaSkinList(all[project.audience!] ?? []);
+    }).catch(() => { /* 拉不到就只显示「让 AI 定」 */ });
+  }, [project?.mode, project?.audience, dramaSkinList.length]);
+
+  // 选皮肤出方案(漫剧源书):皮肤落 genre,点子信号拼进 topic——三问/方案/对谈
+  // 都拿得到「已选题材: XX」;spark 有用户原话就带上,没有就用皮肤兜底文本。
+  async function pickSkinGo(skLabel: string | null) {
+    if (!project) return;
+    const audienceCn = project.audience === "female" ? "女频" : "男频";
+    const extra = spark.trim();
+    const topic = skLabel
+      ? (extra ? `${extra}——按「${skLabel}」的爽文套路来,${audienceCn}漫剧源书`
+               : `按「${skLabel}」的爽文套路来,${audienceCn}漫剧源书`)
+      : (extra || `按${audienceCn}爽文货架自选题材,漫剧源书`);
+    setPickedSkin(skLabel ?? "");
+    try {
+      await patch({ genre: skLabel ?? "", topic });
+    } catch { /* 落库失败不阻塞进方案 */ }
     await goto("brief");
   }
 
@@ -770,6 +798,7 @@ export function useOnboarding() {
     stepsRef, chatEndRef, sparkRef, titleInputRef,
     // handler
     submitSpark, pickGenreBrainstorm,
+    dramaSkinList, pickedSkin, setPickedSkin, pickSkinGo,
     sendBrief, fetchPitches, pickPitch, saveBriefDraft, confirmBrief, unconfirmBrief,
     pickMode, fetchQuestions, answerQ, adoptAllRecommended,
     genPlans, reviseOnePlan, confirmChosenPlan,

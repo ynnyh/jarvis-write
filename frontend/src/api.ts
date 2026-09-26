@@ -1372,6 +1372,9 @@ export const api = {
   listProjects: () => req<Project[]>("GET", "/api/projects"),
   createProject: (p: Partial<Project>) => req<Project>("POST", "/api/projects", p),
   // 开书方案流(docs/22 P0,确认链 L0 新形态):三问定纲 → 整书方案×3 → 定向修订 → 拍板
+  // 漫剧源书的频道皮肤目录(docs/23 v2):{ male: [{key,label,desc}], female: [...] }
+  dramaSkins: () => req<{ skins: Record<string, { key: string; label: string; desc: string }[]> }>(
+    "GET", "/api/projects/drama-skins").then((r) => r.skins),
   threeQuestions: (pid: number, body: {
     mode: string; topic?: string; genre?: string; avoid?: string[];
   }) => req<{ questions: ThreeQuestions[] }>(

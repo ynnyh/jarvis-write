@@ -290,7 +290,7 @@ THREE_QUESTIONS_PROMPT = """\
 {context}
 
 {style_directives}
-
+{skill_block}
 {avoid_block}
 
 要求:
@@ -325,6 +325,7 @@ BOOK_PLANS_PROMPT = """\
 {answers}
 
 {style_directives}
+{skill_block}
 要求:
 1. 每套方案包含以下字段:
    - title 书名(暂定,起个有钩子的)
@@ -363,6 +364,7 @@ BOOK_PLANS_SHORT_PROMPT = """\
 {answers}
 
 {style_directives}
+{skill_block}
 要求:
 1. 每套方案包含以下字段:
    - title 书名(暂定,起个有钩子的)

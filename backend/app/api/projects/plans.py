@@ -30,6 +30,8 @@ from app.db.models import Project
 from app.db.session import get_db
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.tendency import assemble_tendency
+from app.engines.skills.packs import render_project_skill_block
+from app.prompts.drama_skins import DRAMA_SKINS
 from app.engines.tendency.assembler import dna_block_of, render_style_block
 from app.llm.router import Task, get_adapter_for
 from app.prompts.inspire import (
@@ -147,6 +149,15 @@ def _sanitize_questions(data: dict, mode: str) -> list[Question]:
     return out
 
 
+@router.get("/drama-skins")
+async def drama_skins() -> dict:
+    """漫剧源书的频道皮肤目录(docs/23 v2):前端想法屏的皮肤墙数据源。
+
+    全局静态目录(不挂 project 前缀):想法屏在建书后但选皮肤前要用,
+    且目录与具体书无关。"""
+    return {"skins": DRAMA_SKINS}
+
+
 @router.post("/{project_id}/three-questions", response_model=ThreeQuestionsResponse)
 async def three_questions(
     project_id: int, req: ThreeQuestionsRequest, db: Session = Depends(get_db)
@@ -171,6 +182,7 @@ async def three_questions(
     prompt = THREE_QUESTIONS_PROMPT.format(
         context=context,
         style_directives=_style_block_of(project),
+        skill_block=render_project_skill_block(db, project, "idea"),
         avoid_block=avoid_block,
         q3_title=_q3_title(mode),
         genre_boundary=_GENRE_BOUNDARY if req.genre.strip() else (
@@ -273,6 +285,7 @@ async def book_plans(
         topic=topic,
         answers=answers,
         style_directives=_style_block_of(project),
+        skill_block=render_project_skill_block(db, project, "idea"),
         genre_boundary=_GENRE_BOUNDARY if req.genre.strip() else (
             "题材未定,方向可自由发挥;但同样不吃老套路(觉醒/系统/重生/穿越,除非作者明确要求)。"
         ),
