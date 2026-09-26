@@ -645,7 +645,7 @@ def test_stalled_dim_stops_rework():
     low_prose = dict(HIGH, prose=6)
     review_calls = {"n": 0}
 
-    async def _review_low_prose(content, outline_block):
+    async def _review_low_prose(content, outline_block, skill_block=""):
         review_calls["n"] += 1
         return {"scores": dict(low_prose), "comment": "", "suggestions": []}
 

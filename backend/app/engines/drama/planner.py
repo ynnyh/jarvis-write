@@ -160,9 +160,17 @@ async def plan_episodes(
     progress(f"AI 正在把 {material_count} 章切成漫剧集(钩子/卡点)…")
     ep_cap = _episode_cap(target_episodes)
     adapter = get_adapter_for(Task.DRAMA_PLAN, timeout=300)
+    mode_desc = MODE_DESC.get(mode, MODE_DESC["dialogue"])
+    # 漫剧源书(docs/23 §3.4):章本来就是按「一集一个爽点循环+章末钩子」写的,
+    # 切集从「从文学章里挖冲突」变成「对齐现成的钩子」——巧妇有米。
+    if getattr(project, "mode", "") == "drama":
+        mode_desc += (
+            "。本书是漫剧源书:每章≈一集,切集以一章一集为默认;"
+            "每章自带的章末钩子与爽点兑现优先升格为本集 cliffhanger,不从平淡处另造"
+        )
     prompt = EPISODE_PLAN_PROMPT.format(
         duration_target_s=duration_s,
-        mode_desc=MODE_DESC.get(mode, MODE_DESC["dialogue"]),
+        mode_desc=mode_desc,
         title=project.title,
         genre=project.genre.strip() or "不限",
         # 书级资产(本书基因/创作偏好)、作者雷区、既有事实并入 concept_block 收口:

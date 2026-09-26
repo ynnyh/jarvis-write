@@ -98,6 +98,11 @@ export default function DramaPanel({ pid }: Props) {
 
   return (
     <div className="wb-shell">
+      {proj?.mode === "drama" && (
+        <div className="fld-hint" style={{ marginBottom: 8 }}>
+          🎬 漫剧源书:本书按「一章≈一集」写作,集规划默认一章一集、章末钩子直接升格卡点。
+        </div>
+      )}
       <DramaGuide />
 
       <StepBar steps={steps} anchorPrefix="drama-step" allDone={<>

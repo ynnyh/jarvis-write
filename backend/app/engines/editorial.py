@@ -53,13 +53,14 @@ def judge_passed(scores: dict, threshold: int) -> bool:
     return base
 
 
-async def review_chapter(content: str, outline_block: str) -> dict:
+async def review_chapter(content: str, outline_block: str, skill_block: str = "") -> dict:
     """主审打分:调 LLM → 解析 → 分数钳制 → 建议幻觉过滤。不碰 db。
 
     返回 {scores, comment, suggestions}。是否达标由调用方用 judge_passed
     按项目阈值判定(引擎函数不持有阈值)。
+    skill_block: 书级 skill 包注入块(docs/23),空串零变化,由调用方渲染传入。
     """
-    prompt = REVIEW_PROMPT.format(outline_block=outline_block, content=content)
+    prompt = REVIEW_PROMPT.format(outline_block=outline_block, content=content, skill_block=skill_block)
     # 用 checked 版本:解析失败必须显式。过去 data={} → 四维全 0 → judge_passed
     # 判「不达标」→ 章节被当成「写得差」回炉重写。方向完全反了:其实根本没审成,
     # 重写多少次都是白烧钱。现在交给调用方按 degraded 走隔离,不回炉。
@@ -108,9 +109,9 @@ async def review_chapter(content: str, outline_block: str) -> dict:
     }
 
 
-async def proofread_chapter(content: str) -> dict:
+async def proofread_chapter(content: str, skill_block: str = "") -> dict:
     """校对硬伤:调 LLM → 解析 → 幻觉过滤。返回 {issues}。不碰 db。"""
-    prompt = PROOFREAD_PROMPT.format(content=content)
+    prompt = PROOFREAD_PROMPT.format(content=content, skill_block=skill_block)
     # 校对是辅助环节:解析失败(重试后仍失败)沿用旧的宽容语义—— issues 空列表,
     # 但先经 ask_llm_json 重试一次,不再被中转截断一击致命。
     data, _err = await ask_llm_json(

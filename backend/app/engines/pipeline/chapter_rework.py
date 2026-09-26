@@ -44,6 +44,7 @@ from app.engines.consistency.checker import (
     continuity_score,
     triage_issues,
 )
+from app.engines.skills.packs import render_project_skill_block
 from app.engines.editorial import (
     CONTINUITY_DIM,
     DIMS,
@@ -309,7 +310,7 @@ async def _review_step(ctx: _Ctx) -> str:
     st = ctx.state
     ctx.notify(ctx.review_label())
     # 校对硬伤:错字/语病/标点/重复,精确替换自修(幻觉片段已在引擎里过滤)
-    proof = await _proofread(ctx.final)
+    proof = await _proofread(ctx.final, render_project_skill_block(ctx.db, ctx.project, "polish"))
     round_fixed: list[dict] = []
     if proof["issues"]:
         ctx.final, _applied, _failed = apply_proofread_fixes(ctx.final, proof["issues"])
@@ -320,7 +321,10 @@ async def _review_step(ctx: _Ctx) -> str:
     st.last_fixed_issues = round_fixed
 
     # 主审打分(四维);continuity 已由门禁段写入(干净 → 9)
-    rr = await _review(ctx.final, ctx.outline_block)
+    rr = await _review(
+        ctx.final, ctx.outline_block,
+        render_project_skill_block(ctx.db, ctx.project, "polish"),
+    )
     ctx.review_result = rr
     st.review_result = rr
     rr["scores"]["continuity"] = continuity_score(ctx.gate_issues)

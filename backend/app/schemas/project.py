@@ -21,7 +21,11 @@ class ProjectCreate(BaseModel):
     target_chapters: int = Field(default=30, ge=1, le=5000)
     target_words_per_chapter: int = Field(default=3000, ge=200, le=20000)
     # 开书模式(docs/22 屏 0):serial=开书连载(默认)/ short=短故事
-    mode: Literal["serial", "short"] = "serial"
+    # / drama=漫剧源书(docs/23:爽文体裁,一章≈一集,建书自动挂对应频道爽文包)
+    mode: Literal["serial", "short", "drama"] = "serial"
+    # 漫剧源书的频道(docs/23):male=男频 / female=女频;仅 mode=drama 时有意义。
+    # 决定自动挂哪个爽文包,字段值本身不进生成提示词。
+    audience: Literal["", "male", "female"] = ""
     # 开放式连载(结局未定):架构只定长线引擎+首批方向,蓝图铺满后自动续订续写
     open_ended: bool = False
     global_tendency: Tendency = Field(default_factory=dict)
@@ -91,8 +95,12 @@ class ProjectOut(BaseModel):
     # 是概念深化(/concept-from-brief)的硬门。每出新草稿自动复位 False(重新上锁)。
     brief: str = ""
     brief_confirmed: bool = False
-    # 开书模式(docs/22 屏 0):serial=开书连载(默认)/ short=短故事
+    # 开书模式(docs/22 屏 0):serial/short/drama(漫剧源书,docs/23)
     mode: str = "serial"
+    # 漫剧源书频道(docs/23):male/female/空
+    audience: str = ""
+    # 书级挂载的 skill 包 pack_key 清单(docs/23);清空即恢复普通口径
+    mounted_packs: list[str] = []
     # 整书方案卡墙(docs/22 屏 C):当前工作集(含定向修订版);NULL=未出方案
     book_plans: list[Any] | None = None
 

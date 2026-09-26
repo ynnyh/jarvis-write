@@ -234,7 +234,7 @@ def test_review_is_self_reviewing_returns_bool():
 
 def test_review_degraded_quarantines_without_rework():
     """主审没审成 → 隔离待人工,绝不因「四维 0 分」回炉重写(重写解决不了解析问题)。"""
-    async def _degraded_review(content, outline_block):
+    async def _degraded_review(content, outline_block, skill_block=""):
         return {
             "scores": {"plot": 0, "prose": 0, "pacing": 0, "character": 0},
             "score_reasons": {},

@@ -355,14 +355,24 @@ export function useOnboarding() {
   // (docs/22)拍板档位语义:手选档位即时落库,无独立 UI 瞬态——拍板时「非建库默认
   // 30×3000」的现值尊重为用户选择,默认值才用方案推荐档。见 confirmChosenPlan。
 
-  const planMode = project?.mode === "short" ? "short" : "serial";
+  // drama(漫剧源书)必须原样透传:后端三问/方案把它归连载形态,但 mode 本身
+  // 不能被覆写成 serial——工坊集规划按 mode==drama 切「一章一集」源书档(docs/23)。
+  const planMode = project?.mode === "short" ? "short"
+    : project?.mode === "drama" ? "drama" : "serial";
 
   // 屏 0「开哪种书」:模式级分叉,连载可顺手选档位(明示,替代旧版静默自动选档)。
   // 手选档位即时落库——拍板时「非建库默认」的现值会被尊重(见 confirmChosenPlan)。
-  async function pickMode(m: "short" | "serial", preset?: { chapters: number; words: number }) {
+  // 漫剧源书(docs/23):mode=drama 时必带 audience(男频/女频)——后端按频道
+  // 自动挂对应爽文包(drama_source_male/female),生成链全走爽文口径。
+  async function pickMode(
+    m: "short" | "serial" | "drama",
+    preset?: { chapters: number; words: number },
+    audience?: "male" | "female",
+  ) {
     try {
       await patch({
         mode: m,
+        ...(m === "drama" && audience ? { audience } : {}),
         ...(preset ? { target_chapters: preset.chapters, target_words_per_chapter: preset.words } : {}),
       });
       if (preset) {

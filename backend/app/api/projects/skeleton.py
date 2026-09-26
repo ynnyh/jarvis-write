@@ -24,6 +24,7 @@ from app.db.models import Outline, Project
 from app.db.session import SessionLocal, get_db
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.pipeline.blueprint import generate_blueprint, save_blueprint
+from app.engines.skills.packs import render_project_skill_block
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import dna_block_of, render_style_block
 from app.jobs import (
@@ -315,6 +316,7 @@ async def pave_segment_async(
                     ctx_lines.append(f"上一段收束于第{prev['end']}章《{tail.title}》:{tail.summary}")
             chapters, warnings = await generate_blueprint(
                 core_premise=_core_premise_text(session, p.id),
+                skill_block=render_project_skill_block(session, p, "outline"),
                 novel_architecture=_arch_text(p) + _sequel_prev_block(session, p.id) + "\n" + "\n".join(ctx_lines),
                 number_of_chapters=p.target_chapters,
                 tendency=req.tendency,

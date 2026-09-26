@@ -71,6 +71,13 @@ router.include_router(plans.router)
 
 
 # —— 项目 CRUD ——
+def _apply_drama_invariants(audience: str) -> str:
+    """漫剧源书的频道校验:必须是 male/female,否则 400(向导一定带,这是关键拍板参数)。"""
+    if audience not in ("male", "female"):
+        raise HTTPException(
+            status_code=400, detail="漫剧源书要选频道:男频(male)或女频(female)"
+        )
+    return audience
 # 空 path 的 create/list 必须挂在带 prefix 的 router 上(见模块 docstring);
 # /{project_id} 通配放在所有子路由之后,方法+段数各异,不遮蔽上面任何字面/多段路由。
 @router.post("", response_model=ProjectOut)
@@ -84,6 +91,14 @@ async def create_project(req: ProjectCreate, db: Session = Depends(get_db)) -> P
             topic = req.concept.logline.strip()
     if req.dna is not None and not req.dna.is_empty():
         dna_dict = req.dna.model_dump()
+    # 漫剧源书不变式(docs/23):建书与向导 PATCH 改模式共用同一套
+    audience = req.audience or ""
+    mounted: list[str] = []
+    open_ended = req.open_ended
+    if req.mode == "drama":
+        audience = _apply_drama_invariants(audience)
+        mounted = [f"drama_source_{audience}"]
+        open_ended = True
     project = Project(
         user_id=current_user_id.get(),
         title=req.title,
@@ -94,9 +109,11 @@ async def create_project(req: ProjectCreate, db: Session = Depends(get_db)) -> P
         genre=req.genre,
         target_chapters=req.target_chapters,
         target_words_per_chapter=req.target_words_per_chapter,
-        open_ended=req.open_ended,
+        open_ended=open_ended,
         global_tendency=req.global_tendency,
         mode=req.mode,
+        audience=audience,
+        mounted_packs=mounted,
     )
     db.add(project)
     db.commit()
@@ -191,8 +208,12 @@ class ProjectPatch(BaseModel):
     world_rules: str | None = Field(default=None, max_length=20000)
     # 出片模式:lite=轻量档(文+图出片)/ full=完整档;非法值在下方归一为 lite
     render_mode: str | None = Field(default=None, max_length=10)
-    # 开书模式(docs/22 屏 0):serial=开书连载 / short=短故事;非法值归一为 serial
+    # 开书模式(docs/22 屏 0):serial/short/drama;非法值归一为 serial
     mode: str | None = Field(default=None, max_length=10)
+    # 漫剧源书频道(docs/23):male/female/空;仅 drama 模式有意义
+    audience: str | None = Field(default=None, max_length=10)
+    # 书级挂载的 skill 包 pack_key 清单(docs/23);显式传数组才覆盖(空数组=清空挂载)
+    mounted_packs: list | None = None
 
 
 @router.patch("/{project_id}", response_model=ProjectOut)
@@ -272,8 +293,24 @@ async def patch_project(
         updates["chat_log"] = updates["chat_log"][-200:]  # 防膨胀:只留最近 200 条
     if "render_mode" in updates and updates["render_mode"] not in ("lite", "full"):
         updates["render_mode"] = "lite"  # 脏值收敛,不 400(开关打错不该炸整个保存)
-    if "mode" in updates and updates["mode"] not in ("serial", "short"):
+    if "mode" in updates and updates["mode"] not in ("serial", "short", "drama"):
         updates["mode"] = "serial"
+    # 频道/挂载(docs/23):脏值收敛;mode=drama 时套不变式——向导是「先建书再 PATCH 改
+    # 模式」,自动挂包/强制连载必须在这里也成立,否则挂载落空、生成链吃不到爽文包。
+    if "audience" in updates and updates["audience"] not in ("", "male", "female"):
+        updates["audience"] = ""
+    if "mounted_packs" in updates:
+        raw = updates["mounted_packs"]
+        updates["mounted_packs"] = [str(k)[:60] for k in raw if str(k or "").strip()][:10]             if isinstance(raw, list) else []
+    next_mode = updates.get("mode", project.mode)
+    if next_mode == "drama":
+        audience = updates.get("audience", project.audience or "")
+        audience = _apply_drama_invariants(audience)
+        updates["audience"] = audience
+        # 显式传了 mounted_packs 就尊重(书设置清挂载的退路),否则按频道自动挂
+        if "mounted_packs" not in updates:
+            updates["mounted_packs"] = [f"drama_source_{audience}"]
+        updates["open_ended"] = True
     for field, value in updates.items():
         setattr(project, field, value)
     db.commit()

@@ -37,10 +37,16 @@ def test_skill_packs_seed_and_list(client):
     headers = _headers(client)
     packs = client.get("/api/skill-packs", headers=headers).json()
     keys = {p["pack_key"] for p in packs}
-    assert {"storyboard-basics", "anime-shotcard-render"} <= keys
+    assert {"storyboard-basics", "anime-shotcard-render",
+            "drama_source_male", "drama_source_female"} <= keys
     builtin = [p for p in packs if p["is_builtin"]]
-    assert len(builtin) == 2
-    assert all(p["enabled"] for p in builtin)  # 首批试点包默认启用(docs/21 拍板 2)
+    assert len(builtin) == 4
+    # anime 试点包默认启用(docs/21);爽文双包默认停用——靠书级挂载生效(docs/23)
+    by_key = {p["pack_key"]: p for p in builtin}
+    assert by_key["storyboard-basics"]["enabled"] is True
+    assert by_key["anime-shotcard-render"]["enabled"] is True
+    assert by_key["drama_source_male"]["enabled"] is False
+    assert by_key["drama_source_female"]["enabled"] is False
     assert all(p["version"] == 1 and p["history"] == [] for p in builtin)
     # 幂等:重复拉取不重复种
     again = client.get("/api/skill-packs", headers=headers).json()

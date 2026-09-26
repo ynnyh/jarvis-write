@@ -86,6 +86,7 @@ SCENE_DRAFT_PROMPT = """\
 【本场的力度要求(按张力档下发,必须照此强弱下笔)】
 {tension_directive}
 {twist_prep}
+{skill_block}
 【本场需要核对的事实(只写与本场相关的,不要展开无关设定)】
 {hard_constraints}
 {resource_ledger}

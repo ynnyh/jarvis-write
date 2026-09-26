@@ -230,7 +230,11 @@ export interface Project {
   brief?: string;
   brief_confirmed?: boolean;
   // 开书模式(docs/22 屏 0):serial=开书连载(默认)/ short=短故事(一次讲完)
-  mode?: "serial" | "short" | string;
+  mode?: "serial" | "short" | "drama" | string;
+  // 漫剧源书频道(docs/23):male=男频/female=女频/空=非漫剧书
+  audience?: string;
+  // 书级挂载的 skill 包 pack_key 清单(docs/23);清空即恢复普通口径
+  mounted_packs?: string[];
   // 整书方案卡墙(docs/22 屏 C):当前工作集(含定向修订版);null=还没出方案
   book_plans?: BookPlan[] | null;
 }

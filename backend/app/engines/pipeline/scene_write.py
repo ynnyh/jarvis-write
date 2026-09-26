@@ -35,6 +35,7 @@ from app.engines.pipeline.retrieval import (
     retrieve_for_scene,
 )
 from app.engines.pipeline.scene_plan import tension_directive
+from app.engines.skills.packs import render_project_skill_block
 from app.llm.router import Task, get_adapter_for
 from app.prompts.scene import (
     SCENE_ACCEPT_PROMPT,
@@ -238,6 +239,7 @@ async def write_scene(
         ),
         style_directives=style_block or "",
         deai_rules=deai_rules or "",
+        skill_block=render_project_skill_block(db, project, "draft"),
     )
     scene.status = "drafting"
     db.flush()

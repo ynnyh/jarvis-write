@@ -196,7 +196,7 @@ BOOK_BRIEF_CHAT_PROMPT = """\
 {brief}
 
 {style_directives}
-
+{skill_block}
 【对话记录(含作者最新一句)】
 {chat_block}
 

@@ -21,6 +21,7 @@ from app.db.models import Outline, User
 from app.db.models.premise import Premise
 from app.db.session import SessionLocal, get_db
 from app.engines.consistency.extractor import parse_llm_json
+from app.engines.skills.packs import render_project_skill_block
 from app.jobs import list_running, spawn_job
 from app.llm.router import Task, get_adapter_for
 
@@ -35,7 +36,7 @@ _SUGGEST_PROMPT = """\
 【一句话主线】{logline}
 【设定】{setting}
 【题材】{genre}
-
+{skill_block}
 什么是核心梗:高概念是把读者点进来的钩子;兑现机制是这个梗为什么能反复产生
 冲突与满足(能力边界、代价累积、对手结构);边界禁忌是写什么会把梗写崩。
 拍 = 梗的兑现节拍,全书反复循环、逐级抬升,3-6 个,名字要短(2-8 字)。
@@ -157,6 +158,7 @@ async def suggest_premise(
         logline=logline or "(未填写)",
         setting=setting or "(未填写)",
         genre=project.genre or "不限",
+        skill_block=render_project_skill_block(db, project, "idea"),
     )
     adapter = get_adapter_for(Task.SUMMARY, max_tokens=500, timeout=60)
     try:

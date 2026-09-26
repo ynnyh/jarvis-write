@@ -188,7 +188,8 @@ export default function OnboardingFlow() {
 
   // 顶部步骤条:已确认项的缩略文本(FLIP 落点)
   const thumbOf: Partial<Record<SetupStep, string>> = {
-    mode: project.mode === "short" ? "📖 短故事" : "📚 连载",
+    mode: project.mode === "short" ? "📖 短故事"
+      : project.mode === "drama" ? "🎬 漫剧" : "📚 连载",
     brief: briefConfirmed ? "方案已拍板" : (plans ? "方案已出" : ""),
     concept: hasConcept ? (concept.logline || "已选定") : "",
     setup: [
@@ -243,7 +244,7 @@ export default function OnboardingFlow() {
                     mode={project.mode ?? "serial"}
                     chapters={Number(project.target_chapters)}
                     words={Number(project.target_words_per_chapter)}
-                    onPick={(m, preset) => void pickMode(m, preset)} />
+                    onPick={(m, preset, audience) => void pickMode(m, preset, audience)} />
                 )}
 
                 {/* ---------- 想法 ---------- */}
@@ -964,7 +965,9 @@ export default function OnboardingFlow() {
               <div className="dossier-rows">
                 <div className={"dossier-row" + (briefText ? " ok" : "")}>
                   <span className="dr-k">模式</span>
-                  <span className="dr-v">{project.mode === "short" ? "📖 短故事(一次讲完)" : "📚 开书连载"}</span>
+                  <span className="dr-v">{project.mode === "short" ? "📖 短故事(一次讲完)"
+                        : project.mode === "drama" ? `🎬 漫剧源书(${project.audience === "female" ? "女频" : "男频"})`
+                        : "📚 开书连载"}</span>
                 </div>
                 <div className={"dossier-row" + (briefText ? " ok" : "")}>
                   <span className="dr-k">订单</span>

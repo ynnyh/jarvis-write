@@ -59,11 +59,83 @@ BUILTIN_PACKS: list[dict] = [
                           "(定妆照或上一镜末帧);替换旧的分段长文模式。"},
         ],
     },
+    # ---- 漫剧源书爽文双包(docs/23 §3.2)。互斥挂载:开书选频道时由建书流程
+    # 按书的 audience 挂其一(mounted_packs);全局默认停用,普通书零污染。
+    # 公共骨架(outline/draft/polish)两包同文,刻意重复:改男频包不污染女频包。
+    {
+        "pack_key": "drama_source_male",
+        "name": "男频爽文包(漫剧源书)",
+        "description": "漫剧源书·男频口径:点子按爆款四件套出,章纲按爽点循环编,"
+                       "正文对话密集可拍,审校查爽点兑现。选「写漫剧剧本·男频」开书时自动挂载。",
+        "scope": ["novel"],
+        "enabled": False,
+        "entries": [
+            {"node": "idea", "kind": "directive",
+             "directive": "点子按爆款四件套出:①被低估的主角(身份/年龄/地位至少一层反差)"
+                          "②可视化金手指(图鉴/系统/阶位/清单——把变强变成看得见的收集进度)"
+                          "③正义动机(复仇/守护/讨公道,冲突要有理由)④信息差底牌(观众知道、"
+                          "剧中人不知道)。题材皮肤优先从清单选:扮猪吃虎/系统流/玄幻修仙/"
+                          "赶山狩猎/种田经营/末世求生/都市战神/职场打脸/历史权谋/高武御兽。"
+                          "爽点侧重:碾压感/收集感/权力感。骨架固定,血肉必须具体且互不雷同。"},
+            {"node": "outline", "kind": "directive",
+             "directive": "本书是漫剧源书,每章≈一集成片。章纲必须按爽点循环编:"
+                          "①开场即冲突/悬念,前三行进事②压抑或递进(被低估/受挫/加码,"
+                          "不超过半章)③爽点当章兑现(打脸/升级/揭示/反转,至少一次,"
+                          "禁止拖到下章)④章末钩子(新麻烦露头/新信息炸出/危机悬置,"
+                          "必须停在具体的动作或台词上,禁套话)。"},
+            {"node": "draft", "kind": "directive",
+             "directive": "漫剧源书正文口径:对话占比过半,单句台词≤25字;心理活动一律"
+                          "外化成台词或可视动作;场景写到「可拍」(人物位置/动作/物件具体,"
+                          "不写抽象氛围);禁连续两段纯环境描写;爽点兑现瞬间给足反应"
+                          "(对方的震惊/失态/围观哗然);章末最后一行必须是钩子的具体落点。"},
+            {"node": "polish", "kind": "directive",
+             "directive": "漫剧源书审校加查四项:本章爽点兑现了吗(兑现的是什么、在第几段);"
+                          "章末钩子具体吗(停在动作/台词还是停在套话);前三行有冲突/悬念吗;"
+                          "有没有连续三段无对话的文戏淤积。"},
+        ],
+    },
+    {
+        "pack_key": "drama_source_female",
+        "name": "女频爽文包(漫剧源书)",
+        "description": "漫剧源书·女频口径:点子按爆款四件套出,章纲按爽点循环编,"
+                       "正文对话密集可拍,审校查爽点兑现。选「写漫剧剧本·女频」开书时自动挂载。",
+        "scope": ["novel"],
+        "enabled": False,
+        "entries": [
+            {"node": "idea", "kind": "directive",
+             "directive": "点子按爆款四件套出:①被低估的主角(身份/年龄/地位至少一层反差)"
+                          "②可视化金手指(图鉴/系统/阶位/清单——把变强变成看得见的收集进度)"
+                          "③正义动机(复仇/守护/讨公道,冲突要有理由)④信息差底牌(观众知道、"
+                          "剧中人不知道)。题材皮肤优先从清单选:大女主复仇/重生虐渣/豪门恩怨/"
+                          "马甲大佬/追妻火葬场/年代空间/宅斗宫斗/先婚后爱/穿越种田/萌宝逆袭。"
+                          "爽点侧重:情感浓度/关系反转/自我救赎(不靠拯救者,自己破局)。"
+                          "骨架固定,血肉必须具体且互不雷同。"},
+            {"node": "outline", "kind": "directive",
+             "directive": "本书是漫剧源书,每章≈一集成片。章纲必须按爽点循环编:"
+                          "①开场即冲突/悬念,前三行进事②压抑或递进(被低估/受挫/加码,"
+                          "不超过半章)③爽点当章兑现(打脸/升级/揭示/反转,至少一次,"
+                          "禁止拖到下章)④章末钩子(新麻烦露头/新信息炸出/危机悬置,"
+                          "必须停在具体的动作或台词上,禁套话)。"},
+            {"node": "draft", "kind": "directive",
+             "directive": "漫剧源书正文口径:对话占比过半,单句台词≤25字;心理活动一律"
+                          "外化成台词或可视动作;场景写到「可拍」(人物位置/动作/物件具体,"
+                          "不写抽象氛围);禁连续两段纯环境描写;爽点兑现瞬间给足反应"
+                          "(对方的震惊/失态/围观哗然);章末最后一行必须是钩子的具体落点。"},
+            {"node": "polish", "kind": "directive",
+             "directive": "漫剧源书审校加查四项:本章爽点兑现了吗(兑现的是什么、在第几段);"
+                          "章末钩子具体吗(停在动作/台词还是停在套话);前三行有冲突/悬念吗;"
+                          "有没有连续三段无对话的文戏淤积。"},
+        ],
+    },
 ]
 
 
 def ensure_builtin_packs(db: Session) -> None:
-    """官方包 seed(幂等):缺哪条补哪条;已存在的(哪怕被用户改过)一律不覆盖。"""
+    """官方包 seed(幂等):缺哪条补哪条;已存在的(哪怕被用户改过)一律不覆盖。
+
+    spec 里 enabled 缺省 True;爽文双包显式 False——它们靠书级挂载生效
+    (Project.mounted_packs,docs/23),全局启用反而会污染普通书。
+    """
     existing = {p.pack_key for p in db.query(SkillPack).all()}
     for spec in BUILTIN_PACKS:
         if spec["pack_key"] in existing:
@@ -72,7 +144,8 @@ def ensure_builtin_packs(db: Session) -> None:
             pack_key=spec["pack_key"], name=spec["name"],
             description=spec["description"], scope=list(spec["scope"]),
             entries=[dict(e) for e in spec["entries"]],
-            version=1, history=[], enabled=True, is_builtin=True,
+            version=1, history=[], enabled=bool(spec.get("enabled", True)),
+            is_builtin=True,
         ))
         logger.info("seed 官方 Skill 包:%s", spec["pack_key"])
     db.commit()
@@ -115,11 +188,18 @@ def normalize_entries(entries: object) -> list[dict]:
     return out
 
 
-def render_pack_block(pack: SkillPack) -> str:
-    """单包 → 注入文本块(format 条目是工艺开关,不是 prompt 材料,不渲染)。"""
+def render_pack_block(pack: SkillPack, node: str | None = None) -> str:
+    """单包 → 注入文本块(format 条目是工艺开关,不是 prompt 材料,不渲染)。
+
+    node 非 None 时只渲染该节点的条目——docs/21 纪律 3「按节点分发」的条目级
+    落地:多节点包(如爽文双包的 idea/outline/draft/polish)注入哪行只出哪行,
+    其余节点绝不捎带(anime 首批包每包单节点,此前未暴露此缺陷)。
+    """
     lines: list[str] = [f"《{pack.name}》(v{pack.version})"]
     for e in pack.entries or []:
         if not isinstance(e, dict):
+            continue
+        if node is not None and e.get("node") != node:
             continue
         kind = e.get("kind")
         if kind == "directive" and (e.get("directive") or "").strip():
@@ -134,23 +214,33 @@ def render_pack_block(pack: SkillPack) -> str:
     return "\n".join(lines)
 
 
-def active_packs(db: Session, *, scope: str, node: str) -> list[SkillPack]:
-    """某线某节点当前生效的包:启用 + scope 命中 + 条目覆盖该节点;预算闸裁剪。
+def active_packs(
+    db: Session, *, scope: str, node: str, mounted_keys: list[str] | None = None
+) -> list[SkillPack]:
+    """某线某节点当前生效的包:scope 命中 + 条目覆盖该节点 + (启用或在书级挂载清单内);
+    预算闸裁剪。
+
+    mounted_keys 是**书级挂载清单**(Project.mounted_packs,docs/23):None=不管挂载、
+    只看全局 enabled(旧行为,anime 线等);传了则「enabled OR pack_key in mounted」——
+    漫剧源书的爽文包 seed 为 enabled=False,靠书级挂载生效,普通书(挂载为空)零污染。
+    想对某本书关掉挂载的包:清该书 mounted_packs,别动全局开关。
 
     裁剪顺序:先按单节点包数上限截断,再按整包字数粒度丢弃超预算的——
     宁可少注入一包,不把两条工艺各注一半(半截约束比没有更糟)。
     """
     ensure_builtin_packs(db)
-    packs = db.query(SkillPack).filter(SkillPack.enabled.is_(True)).all()
+    mounted = {str(k) for k in (mounted_keys or [])}
+    packs = db.query(SkillPack).all()
     hits = [
         p for p in packs
         if scope in (p.scope or [])
+        and (p.enabled or p.pack_key in mounted)
         and any(isinstance(e, dict) and e.get("node") == node for e in (p.entries or []))
     ][:MAX_PACKS_PER_NODE]
     within: list[SkillPack] = []
     used = 0
     for p in hits:
-        size = len(render_pack_block(p))
+        size = len(render_pack_block(p, node=node))
         if used + size > INJECT_CHAR_BUDGET:
             logger.warning("Skill 包《%s》超出注入预算(已用 %d/%d),本次未注入",
                            p.name, used, INJECT_CHAR_BUDGET)
@@ -160,10 +250,22 @@ def active_packs(db: Session, *, scope: str, node: str) -> list[SkillPack]:
     return within
 
 
-def render_skill_block(db: Session, *, scope: str, node: str) -> str:
+def render_skill_block(
+    db: Session, *, scope: str, node: str, mounted_keys: list[str] | None = None
+) -> str:
     """生效包 → 一块可注入文本;没有包生效时返回空串(模板槽吃空串零副作用)。"""
-    packs = active_packs(db, scope=scope, node=node)
+    packs = active_packs(db, scope=scope, node=node, mounted_keys=mounted_keys)
     if not packs:
         return ""
-    body = "\n".join(render_pack_block(p) for p in packs)
+    body = "\n".join(render_pack_block(p, node=node) for p in packs)
     return f"【创作 Skill(启用中的工艺包)】\n{body}"
+
+
+def render_project_skill_block(db: Session, project, node: str, *, scope: str = "novel") -> str:
+    """novel 线书级注入助手:按书的 mounted_packs 渲染某节点注入块。
+
+    各生成工序的组装处一行调用;书没挂包(普通书)返回空串,模板槽吃空串,
+    生成结果与接入前逐字一致(零污染)。
+    """
+    mounted = list(getattr(project, "mounted_packs", None) or [])
+    return render_skill_block(db, scope=scope, node=node, mounted_keys=mounted)

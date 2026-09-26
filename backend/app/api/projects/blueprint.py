@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Outline, Project
 from app.db.session import SessionLocal, get_db
 from app.engines.pipeline.blueprint import generate_blueprint, save_blueprint
+from app.engines.skills.packs import render_project_skill_block
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import dna_block_of, render_style_block
 from app.engines.title_style import resolve_title_directive
@@ -76,6 +77,7 @@ async def generate_project_blueprint(
     chapters, warnings = await generate_blueprint(
         novel_architecture=arch_text,
         core_premise=_core_premise_text(db, project.id),
+        skill_block=render_project_skill_block(db, project, "outline"),
         number_of_chapters=project.target_chapters,
         tendency=req.tendency,
         global_tendency=project.global_tendency,
@@ -126,6 +128,7 @@ async def generate_project_blueprint_async(
 
             chapters, warnings = await generate_blueprint(
                 core_premise=_core_premise_text(session, p.id),
+                skill_block=render_project_skill_block(session, p, "outline"),
                 novel_architecture=arch_text,
                 number_of_chapters=p.target_chapters,
                 tendency=req.tendency,
@@ -395,6 +398,7 @@ async def extend_blueprint_async(project_id: int, db: Session = Depends(get_db))
             )
             chapters, warnings = await generate_blueprint(
                 core_premise=_core_premise_text(session, p.id),
+                skill_block=render_project_skill_block(session, p, "outline"),
                 novel_architecture=_arch_text(p) + _sequel_prev_block(session, p.id) + context,
                 number_of_chapters=p.target_chapters,
                 global_tendency=p.global_tendency,

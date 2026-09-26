@@ -193,7 +193,7 @@ class _ScriptedReview:
         self._seq = list(score_sequence)
         self.calls = 0
 
-    async def __call__(self, content, outline_block):
+    async def __call__(self, content, outline_block, skill_block=""):
         self.calls += 1
         if self._seq:
             scores = self._seq.pop(0)
@@ -202,7 +202,7 @@ class _ScriptedReview:
         return {"scores": scores, "comment": "脚本意见", "suggestions": []}
 
 
-async def _fake_proofread(content):
+async def _fake_proofread(content, skill_block=""):
     return {"issues": []}
 
 

@@ -165,6 +165,87 @@ def _blueprint_text(prompt: str) -> str:
 
 
 def reply_for(prompt: str) -> str:
+    # ---- 小说章节链(草稿/定稿/主审/校对/抽取/契约):草稿 prompt 含「第N章」字样,
+    # 必须排在蓝图分支之前,否则被 _blueprint_text 截胡、正文为空、审校全降级 ----
+    if "请写出第" in prompt and "完整正文" in prompt:
+        return (
+            "柳三娘把最后一枚铜钱拍在柜台上,扭头就走。\n\n"
+            "「站住。」盐商的账房拦在门口,「柳姑娘,这趟镖你接了就得送到。」\n"
+            "她回头一笑:「送到可以,开箱验货。」\n"
+            "账房脸色一变:「镖规第一条,不问来路,不开箱。」\n"
+            "「那就别怪我不讲规矩。」柳三娘袖子一抖,钥匙串叮当作响——"
+            "那把黄铜钥匙,正是昨夜她从盐商别院顺出来的。\n"
+            "账房盯着钥匙,瞳孔缩成一点:「你……你是『空手柳』?」\n"
+            "码头方向忽然传来马蹄声。柳三娘吹了声口哨,压低帽檐:"
+            "「开箱吧。让诸位看看,这口棺材里装的到底是什么货。」"
+        )
+    if "请修订出定稿" in prompt or "修订出定稿" in prompt:
+        return (
+            "柳三娘把最后一枚铜钱拍在柜台上,扭头就走。\n\n"
+            "「站住。」账房拦在门口,「这趟镖,接了就得送到。」\n"
+            "她回头一笑:「送到可以——先开箱验货。」\n"
+            "「镖规第一条:不问来路,不开箱。」\n"
+            "「那就别怪我不讲规矩。」袖子一抖,黄铜钥匙叮当作响。\n"
+            "账房瞳孔缩成一点:「你是……『空手柳』?」\n"
+            "码头传来马蹄声。柳三娘吹了声口哨,压低帽檐:"
+            "「开箱。让诸位看看这口棺材里装的是什么货。」"
+        )
+    if "资深网文主编" in prompt and "四个维度打分" in prompt:
+        return json.dumps({
+            "scores": {"plot": 9, "prose": 8, "pacing": 9, "character": 8},
+            "score_reasons": {"plot": "冲突直接进事", "prose": "无套话",
+                              "pacing": "章末钩子有力", "character": "声音区分开"},
+            "comment": "章末钩子落在具体的台词上,合格。",
+            "suggestions": [],
+        }, ensure_ascii=False)
+    if "出版社校对" in prompt:
+        return json.dumps({"issues": []}, ensure_ascii=False)
+    if "事实抽取" in prompt or "facts" in prompt[:200]:
+        return json.dumps({"facts": [], "relationships": []}, ensure_ascii=False)
+    if "章末交接" in prompt or "交接契约" in prompt:
+        return json.dumps({"summary": "柳三娘亮出钥匙逼开棺验货", "next_setup": "马蹄声逼近码头"}, ensure_ascii=False)
+    # ---- 漫剧工坊链(集规划/剧本/分镜/三轨):这些 prompt 都含【书名】字段,
+    # 必须全部排在书名分支之前,否则被书名分支截胡(踩过:切集回书名列表→规划为空)。
+    if "切分成漫剧的「集」" in prompt or ("集数规划" in prompt and "hook" in prompt):
+        return json.dumps({"episodes": [{
+            "title": "开箱见活人", "source_chapters": [1],
+            "hook": "棺材铺夜半敲门,柳三娘开箱——箱里坐着个穿嫁衣的活人",
+            "recap": "柳三娘贪二十两接怪镖,验货夜发现箱中人,钥匙竟连着自己偷的账",
+            "cliffhanger": "箱底传来第二声敲响,而码头方向马蹄声已近",
+        }]}, ensure_ascii=False)
+    if "竖屏漫剧编剧" in prompt:
+        return json.dumps({"synopsis": "柳三娘接怪镖,验货夜开箱见嫁衣女,钥匙连着自己偷的账",
+                           "lines": [
+                               {"speaker": "旁白", "text": "运河码头的雨下到第三天,柳三娘接下了那口棺材镖。",
+                                "action": "雨夜码头,柳三娘与盐商账房交割,棺材抬上船"},
+                               {"speaker": "柳三娘", "text": "说好不开箱?那这二十两我退你。",
+                                "action": "柳三娘掂着钱袋转身要走,账房急拦"},
+                               {"speaker": "账房", "text": "送到边关再开!路上死了算你的!",
+                                "action": "账房死死按住棺材盖,指节发白"},
+                               {"speaker": "柳三娘", "text": "箱子在抖。",
+                                "action": "棺材缝里渗出水痕,柳三娘眯起眼"},
+                               {"speaker": "旁白", "text": "箱底传来第二声敲响,而码头方向马蹄声已近。",
+                                "action": "柳三娘握紧撬棍,回头望向码头灯火"},
+                           ]}, ensure_ascii=False)
+    if "漫剧分镜师" in prompt:
+        return json.dumps({"shots": [
+            {"seq": 1, "scene_name": "雨夜码头", "characters": ["柳三娘"],
+             "action_desc": "雨夜码头,柳三娘披蓑衣立在棺材旁,手按箱盖,灯笼光在水面晃。60-80 字的画面描述,具体到雨水从蓑衣边缘滴落的节奏。",
+             "shot_type": "中景", "camera": "固定", "dialogue": "箱子在抖。", "duration_s": 2},
+            {"seq": 2, "scene_name": "雨夜码头", "characters": ["柳三娘"],
+             "action_desc": "特写:棺材缝隙渗出水痕,柳三娘瞳孔收紧,握紧撬棍。雨水顺着撬棍木柄滑到她指缝。",
+             "shot_type": "特写", "camera": "推", "dialogue": "", "duration_s": 2},
+            {"seq": 3, "scene_name": "雨夜码头", "characters": ["柳三娘"],
+             "action_desc": "柳三娘猛地撬起一条缝,灯笼光斜切进箱内,她倒吸一口气后退半步,踩碎一枚铜钱。",
+             "shot_type": "近景", "camera": "跟随", "dialogue": "", "duration_s": 2},
+            {"seq": 4, "scene_name": "雨夜码头", "characters": ["柳三娘"],
+             "action_desc": "码头灯火方向传来马蹄声,柳三娘回望,灯笼在她脸上明暗交替,定格。",
+             "shot_type": "全景", "camera": "拉", "dialogue": "", "duration_s": 2},
+        ]}, ensure_ascii=False)
+    if "漫剧" in prompt and "prompt_cn" in prompt:
+        return json.dumps({"shots": [{"seq": 1, "prompt_cn": "柳三娘披蓑衣立于雨夜码头棺材旁,手按箱盖。中景,机位齐人眼,固定镜头。冷蓝主调,灯笼暖光点睛,雨水逆光成丝。国漫厚涂,笔触沉稳。",
+                                       "prompt_en": "1girl, rain, dock, coffin, lantern, cold blue palette, thick painting, vertical",
+                                       "negative": "文字水印,五官错位,多余肢体,低分辨率,模糊"}]}, ensure_ascii=False)
     # 路由顺序即判别顺序:蓝图/骨架提示词互含对方字样(「铺章节蓝图」/「情节架构」),
     # 用「请求章节约」的特征串判别蓝图,骨架再按 segments 关键字接住
     if re.search(r"继续生成第\s*\d+\s*章|生成第\s*1\s*章到第\s*\d+\s*章", prompt):
@@ -457,6 +538,10 @@ async def chat(body: dict):
     prompt = "".join(
         (m.get("content") or "") for m in body.get("messages", []) if isinstance(m, dict)
     )
+    # 注入探针(docs/23 走查):确认 skill 包条目真的进了 prompt,打印到日志供断言
+    if "创作 Skill" in prompt:
+        hit = [k for k in ("爽点循环", "对话占比过半", "四件套", "爽点兑现") if k in prompt]
+        print(f"[skill-probe] 注入命中: {hit} | prompt 长度: {len(prompt)}", flush=True)
     text = reply_for(prompt)
     if not body.get("stream"):
         return JSONResponse({

@@ -31,6 +31,7 @@ from app.api.inspire import DevelopRequest, _develop_impl
 from app.auth import current_user_id, get_current_user
 from app.db.models import Project
 from app.db.session import get_db
+from app.engines.skills.packs import render_project_skill_block
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import dna_block_of, render_style_block
 from app.jobs import spawn_job
@@ -112,6 +113,7 @@ async def brief_chat(
         style_directives=style_block,
         chat_block=_chat_block(thread),
         genre_boundary=_GENRE_BOUNDARY,
+        skill_block=render_project_skill_block(db, project, "idea"),
     )
     from app.engines.consistency.extractor import parse_llm_json
 

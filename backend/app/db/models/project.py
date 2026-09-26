@@ -121,8 +121,14 @@ class Project(Base, TimestampMixin):
     brief: Mapped[str] = mapped_column(Text, default="")
     brief_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
     # 开书模式(docs/22 屏 0):serial=开书连载(默认,存量行为不变)/ short=短故事
-    # (一次讲完)。P0 落库 + 方案生成分叉(短故事出故事弧形态),专用轻管线在 P1。
+    # (一次讲完)/ drama=漫剧源书(docs/23,爽文体裁:一章≈一集,走爽文包口径)。
     mode: Mapped[str] = mapped_column(String(10), default="serial", server_default="serial")
+    # 漫剧源书(docs/23)的频道:male=男频 / female=女频 / ""=未分(非 drama 书恒空)。
+    # 只用于建书时自动挂对应爽文包与工坊徽标,字段值本身不进生成提示词。
+    audience: Mapped[str] = mapped_column(String(10), default="", server_default="")
+    # 书级挂载的 skill 包 pack_key 清单(docs/23):与全局 enabled 取并集生效;
+    # 空清单=仅看全局启用包(普通书零污染)。想对某本书关掉:清空本清单。
+    mounted_packs: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
     # 整书方案卡墙(docs/22 屏 C,确认链 L0 新形态):三轮候选的当前工作集,含被定向
     # 修订过的版本;拍板时把选中方案渲染成开书订单写入 brief(brief_confirmed 复用)。
     # NULL=还没出方案(老项目)。见 app/api/projects/plans.py。

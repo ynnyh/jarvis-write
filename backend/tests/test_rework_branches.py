@@ -226,7 +226,7 @@ def test_improving_dim_is_not_treated_as_stalled():
 
 def test_proofread_report_keeps_only_applied_fixes():
     """正文里找不到的校对项不进回显清单:报告说"修了 N 处"就必须真有 N 处被改上去。"""
-    async def _proofread(text):
+    async def _proofread(text, skill_block=""):
         return {"issues": [
             {"type": "typo", "original": "睁开了眼", "suggestion": "睁开眼", "reason": "赘字"},
             {"type": "typo", "original": "查无此句", "suggestion": "x", "reason": "脏"},

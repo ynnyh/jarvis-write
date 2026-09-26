@@ -36,8 +36,10 @@ from app.engines.consistency.preflight import preflight_chapter
 from app.engines.consistency.repetition import avoid_block
 from app.engines.consistency.motifs import banned_block, ledger_avoid_block
 from app.engines.pipeline.handoff import load_handoff_block
+from app.engines.pipeline.tension_bus import tension_bus_block
 from app.engines.devices import devices_reminder_block
 from app.engines.polish import ai_flavor_report
+from app.engines.skills.packs import render_project_skill_block
 from app.engines.polish.polisher import (
     _flavor_hits_block,
     fatigue_block,
@@ -144,12 +146,17 @@ class PreparedContext:
     # 章节订单(docs/20):确认订单的 payload;None = 无订单,槽位走蓝图行(存量行为)
     order_payload: dict | None = None
 
-    def compose_context(self, *, project) -> "ChapterContext":
-        """转成 Composer 用的上下文(含运行时算出的 deai_rules)。"""
+    def compose_context(self, *, project, db: Session | None = None) -> "ChapterContext":
+        """转成 Composer 用的上下文(含运行时算出的 deai_rules)。
+
+        db 必传(有它书级 skill 包注入才会生效,docs/23):None 时草稿/定稿的
+        skill_block 为空串——静默退化,不报错,走查时靠 mock 探针抓到过这个洞。
+        """
         from app.engines.pipeline.chapter_compose import ChapterContext
 
         return ChapterContext(
             chapter_number=self.outline.chapter_number,
+            db=db,
             outline=self.outline,
             next_outline=self.next_outline,
             style_block=self.style_block,
@@ -472,6 +479,15 @@ async def generate_chapter(
             chapter_title=outline.title,
             chapter_purpose=outline.chapter_purpose,
             drama_task=_drama_task_block(outline),
+            premise_block=premise_block,
+            tension_bus_block=tension_bus_block(
+                chapter_number,
+                target_chapters=int(project.target_chapters or 0),
+                macro_plan=project.macro_plan,
+                chapter_role=str(outline.chapter_role or ""),
+                suspense_level=str(outline.suspense_level or ""),
+            ),
+            skill_block=render_project_skill_block(db, project, "draft"),
             foreshadowing=outline.foreshadowing,
             chapter_summary=outline.summary,
             rolling_summary=ctx.rolling,
@@ -488,7 +504,7 @@ async def generate_chapter(
             scene_result.stats.get("accepted", 0), scene_result.stats.get("rejected", 0),
         )
     composer = Composer(
-        ctx.compose_context(project=project),
+        ctx.compose_context(project=project, db=db),
         precomputed=(draft, final) if scene_result is not None else None,
     )
     if scene_result is None:

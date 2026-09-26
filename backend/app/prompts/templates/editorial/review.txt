@@ -3,6 +3,7 @@
 【本章蓝图】
 {outline_block}
 
+{skill_block}
 【正文】
 {content}
 

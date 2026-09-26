@@ -21,9 +21,17 @@ from app.engines.common import chapter_architecture_brief
 from app.engines.pipeline.tension_bus import tension_bus_block
 from app.engines.polish.polisher import _flavor_hits_block
 from app.engines.polish import ai_flavor_report
+from app.engines.skills.packs import render_project_skill_block
 from app.prompts.chapter import CHAPTER_DRAFT_PROMPT, CHAPTER_FINALIZE_PROMPT
 from app.prompts.style_capsules import pairwise_examples_block
 from app.llm.router import Task, get_adapter_for
+
+
+def _novel_skill_block(ctx) -> str:
+    """书级 skill 包注入(docs/23):普通书/无 db 返回空串,模板槽零副作用。"""
+    if not ctx.db or not ctx.project:
+        return ""
+    return render_project_skill_block(ctx.db, ctx.project, "draft")
 
 
 def _strip_meta(text: str) -> str:
@@ -162,6 +170,7 @@ class Composer:
             scene_words=project.target_words_per_chapter // max(2, project.target_words_per_chapter // 1000),
             style_directives=ctx.style_block,
             deai_rules=ctx.deai_rules,
+            skill_block=_novel_skill_block(ctx),
         )
 
     def _finalize_prompt(self, draft: str) -> str:
@@ -203,6 +212,7 @@ class Composer:
             # 定稿额外注入「AI 腔→人话」配对反例(给 pattern 比给 rule 有效);草稿不注入
             # 以控 token(草稿还没成文,无从对照,正向锚 voice 已在 style_block 里够用)
             style_directives=ctx.style_block + pairwise_examples_block(),
+            skill_block=_novel_skill_block(ctx),
         )
 
     async def __call__(
