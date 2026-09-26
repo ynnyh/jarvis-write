@@ -12,7 +12,7 @@ setup("登录并保存会话", async ({ page }) => {
   mkdirSync(dirname(STATE_FILE), { recursive: true });
   await page.goto("/app/");
   // 未登录会被 App 壳路由到登录页(带品牌字样兜底断言,防白屏假绿)
-  await expect(page.getByText("jarvis")).toBeVisible();
+  await expect(page.getByText("藏山")).toBeVisible();
   await page.getByPlaceholder("2-50 个字符").fill(USERNAME);
   await page.locator('input[type="password"]').fill(PASSWORD);
   // 「登录」tab 和提交按钮同名,scope 到表单里那颗
