@@ -36,7 +36,7 @@ export default function LoginPage({ onAuthed }: Props) {
     <div className="auth-wrap">
       <div className="card auth-card">
         <div className="auth-logo"><BrandMark size={44} /></div>
-        <h1 className="auth-brand">jarvis<span>·write</span></h1>
+        <h1 className="auth-brand">藏<span>山</span></h1>
         <div className="auth-sub">AI 长篇小说工作台 · 从一句灵感到一部成书</div>
 
         <div className="tabs auth-tabs">

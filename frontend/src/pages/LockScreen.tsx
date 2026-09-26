@@ -61,7 +61,7 @@ export default function LockScreen({ onUnlocked }: Props) {
       >
         {/* 品牌字标:安装器同款品牌色渐变上的 jW 缩写,纯 CSS 绘制不引新资源 */}
         <div className="lock-mark" aria-hidden="true">j<span>W</span></div>
-        <h1 className="lock-brand">jarvis<span>·write</span></h1>
+        <h1 className="lock-brand">藏<span>山</span></h1>
         <div className="lock-tag">AI 长篇小说工作台</div>
 
         <div className="card lock-card">

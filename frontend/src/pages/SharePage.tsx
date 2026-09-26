@@ -1,5 +1,5 @@
 // 公开分享阅读页:免登录只读(路由 /share/:token,挂在 HashRouter 外层保护之外)。
-// 牛皮纸底 + 衬线正文(阅读器同款排版),页脚一枚「来自 jarvis-write」的小徽章引流。
+// 牛皮纸底 + 衬线正文(阅读器同款排版),页脚一枚「来自藏山」的小徽章引流。
 // 数据全在服务端接口里,本页零敏感信息;链接可被作者撤销。
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
@@ -37,7 +37,7 @@ export default function SharePage() {
     return (
       <div className="pub-wrap">
         <div className="pub-err">这杯茶凉了——{err}</div>
-        <a className="pub-brand" href="https://ynnyh.github.io/jarvis-write/">了解 jarvis-write →</a>
+        <a className="pub-brand" href="https://ynnyh.github.io/jarvis-write/">了解藏山 →</a>
       </div>
     );
   }
@@ -72,7 +72,7 @@ export default function SharePage() {
       </article>
 
       <footer className="pub-foot">
-        <span className="pub-foot-line">本章由作者在 <b>jarvis-write</b> 里写作 —— AI 参与创作,但秩序属于作者。</span>
+        <span className="pub-foot-line">本章由作者在 <b>藏山</b> 里写作 —— AI 参与创作,但秩序属于作者。</span>
         <a className="pub-brand" href="https://ynnyh.github.io/jarvis-write/" target="_blank" rel="noreferrer">
           我也想写一本 →
         </a>

@@ -1,10 +1,11 @@
-# jarvis-write
+# Cangshan (藏山)
 
 **A controllable, revisable, consistency-first AI system for long-form novel writing.**
 
+
 [简体中文](README.md) | English
 
-The hard problem of AI-assisted novel writing isn't producing text — it's keeping a several-hundred-thousand-word story coherent: characters stay in character, foreshadowing gets paid off, and the outline stays editable. jarvis-write is not another "one-click novel generator." Text generation is delegated to the LLM; this project builds the **control layer** around it: a temporal story bible for facts, a foreshadowing scheduler for setups and payoffs, a cascading outline engine for edits, and a tag-based tendency system for style — so a long novel stays controllable, revisable, and traceable from the first chapter to the last.
+The hard problem of AI-assisted novel writing isn't producing text — it's keeping a several-hundred-thousand-word story coherent: characters stay in character, foreshadowing gets paid off, and the outline stays editable. Cangshan is not another "one-click novel generator." Text generation is delegated to the LLM; this project builds the **control layer** around it: a temporal story bible for facts, a foreshadowing scheduler for setups and payoffs, a cascading outline engine for edits, and a tag-based tendency system for style — so a long novel stays controllable, revisable, and traceable from the first chapter to the last.
 
 > 🎯 **The founding vision: a long-form web novel in the league of 《剑来》 and 《青山》 — readable first, binge-worthy next, and ultimately great.**
 > Readable: hundreds of thousands of words without breaking characters or dropping foreshadowing. Binge-worthy: hooks in every chapter, an outline you can always revise. Great: prose with texture that never reads like AI.

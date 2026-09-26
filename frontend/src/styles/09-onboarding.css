@@ -346,3 +346,26 @@
   .setup-tabs button { min-height: 44px; }
   .arch-layer-head button { min-height: 44px; }
 }
+
+/* ===== 方案屏(docs/22 P0:三问 → 整书方案×3 → 拍板) ===== */
+/* 屏 0 模式卡选中态(复用 entry-card 基座) */
+.entry-card.on { border-color: var(--brand); box-shadow: var(--shadow-md); background: var(--brand-weak); }
+.scale-card .scale-desc { font-size: 12px; color: var(--text-2); margin-top: 2px; text-align: left; }
+
+/* 方案墙:三张卡并排(窄屏单列) */
+.plans-wall { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.plan-card {
+  border: 1px solid var(--border); border-radius: 10px; padding: 12px;
+  background: var(--surface-1); text-align: left; display: flex; flex-direction: column; gap: 8px;
+}
+.plan-card.on { border-color: var(--brand); box-shadow: var(--shadow-md); background: var(--brand-weak); }
+.plan-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.plan-title { font-size: 15px; }
+.plan-field { display: flex; gap: 8px; font-size: 13px; line-height: 1.55; }
+.plan-k { flex: 0 0 60px; color: var(--text-2); }
+.plan-v { flex: 1; }
+@media (max-width: 767px) { .plans-wall { grid-template-columns: 1fr; } }
+
+/* 打磨房字段 auto-grow(ConceptForge):height 由 JS 按 scrollHeight 撑高,
+   这里只兜底 overflow 与行高,防移动端首行裁切(rows=1 时代的老毛病) */
+.forge-field textarea { overflow: hidden; resize: none; min-height: 44px; }

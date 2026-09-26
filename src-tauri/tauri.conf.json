@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "jarvis-write",
+  "productName": "藏山",
   "version": "0.1.0",
   "identifier": "com.jarviswrite.desktop",
   "build": {

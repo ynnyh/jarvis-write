@@ -8,7 +8,7 @@ const OFFICIAL_APP_ENTRY = 'http://111.228.10.230:8080/app/';
 
 const config: CapacitorConfig = {
   appId: 'com.ynnyh.jarviswrite',
-  appName: 'jarvis-write',
+  appName: '藏山',
   webDir: 'dist-app',
   server: {
     url: OFFICIAL_APP_ENTRY,

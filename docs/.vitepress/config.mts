@@ -1,11 +1,11 @@
 import { defineConfig } from 'vitepress'
 import { DEMO, demoReady } from './site'
 
-// jarvis-write 文档站配置。
+// 藏山(jarvis-write)文档站配置。
 // 站点直接以 docs/ 为源(与仓库内设计文档单一信息源),构建产物 docs/.vitepress/dist
 // 由 GitHub Actions 部署到 GitHub Pages(项目站,故 base 必须带 /jarvis-write/ 前缀)。
 export default defineConfig({
-  title: 'jarvis-write',
+  title: '藏山',
   description: '可控、改得动、不崩的 AI 长篇小说创作系统',
   lang: 'zh-CN',
   // 项目 Pages 部署在 https://ynnyh.github.io/jarvis-write/,资源路径需带前缀。
@@ -21,8 +21,8 @@ export default defineConfig({
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/jarvis-write/favicon.svg' }],
     ['meta', { name: 'theme-color', content: '#f2f1ec' }],
     ['meta', { property: 'og:type', content: 'website' }],
-    ['meta', { property: 'og:site_name', content: 'jarvis-write' }],
-    ['meta', { property: 'og:title', content: 'jarvis-write · AI 长篇小说创作系统' }],
+    ['meta', { property: 'og:site_name', content: '藏山' }],
+    ['meta', { property: 'og:title', content: '藏山 · AI 长篇小说创作系统' }],
     ['meta', { property: 'og:description', content: '可控、改得动、不崩的 AI 长篇小说创作系统——时序故事圣经、伏笔调度、大纲级联、去 AI 味门禁。' }],
     ['meta', { property: 'og:url', content: 'https://ynnyh.github.io/jarvis-write/' }],
     ['meta', { property: 'og:image', content: 'https://ynnyh.github.io/jarvis-write/og-cover.png' }],
@@ -30,7 +30,7 @@ export default defineConfig({
 
   themeConfig: {
     logo: undefined,
-    siteTitle: 'jarvis-write',
+    siteTitle: '藏山',
 
     nav: [
       { text: '首页', link: '/' },

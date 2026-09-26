@@ -169,7 +169,7 @@ export default function App() {
     return (
       <div className="auth-wrap">
         <div className="card auth-card">
-          <h1 className="auth-brand">jarvis<span>·write</span></h1>
+          <h1 className="auth-brand">藏<span>山</span></h1>
           <div className="auth-sub">本地后端服务没有响应</div>
           <div className="notice notice-err">
             后端可能仍在启动,或已异常退出。稍后点「重试」;
@@ -236,7 +236,7 @@ export default function App() {
           <>
             <div className="m-shellbar">
               <button className="m-shellbar-btn" title="菜单" onClick={() => setSideOpen(true)}>☰</button>
-              <Link to="/" className="side-brand">jarvis<span>·write</span></Link>
+              <Link to="/" className="side-brand">藏<span>山</span></Link>
               <div className="grow" />
               <TaskCenterBadge />
             </div>

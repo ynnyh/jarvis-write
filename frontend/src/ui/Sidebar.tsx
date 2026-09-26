@@ -98,7 +98,7 @@ export default function Sidebar({ me, isLocal, hasLock, tokens, onLock, onLogout
   return (
     <>
       <Link to="/" className="side-brand">
-        jarvis<span>·write</span>
+        藏<span>山</span>
         <small>AI 长篇小说工作台</small>
       </Link>
 
