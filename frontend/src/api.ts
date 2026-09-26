@@ -229,6 +229,37 @@ export interface Project {
   // 是概念深化的硬门(后端 409 把关),每出新草稿自动复位 False(重新上锁)
   brief?: string;
   brief_confirmed?: boolean;
+  // 开书模式(docs/22 屏 0):serial=开书连载(默认)/ short=短故事(一次讲完)
+  mode?: "serial" | "short" | string;
+  // 整书方案卡墙(docs/22 屏 C):当前工作集(含定向修订版);null=还没出方案
+  book_plans?: BookPlan[] | null;
+}
+
+// 三问定纲的候选(docs/22 屏 B):★首推带一句理由
+export interface QuestionCandidate {
+  text: string;
+  recommended: boolean;
+  reason: string;
+}
+export interface ThreeQuestions {
+  key: string;
+  title: string;
+  candidates: QuestionCandidate[];
+}
+
+// 整书方案卡(docs/22 屏 C):连载含 engine+scale 档位,短故事含 ending+篇幅
+export interface BookPlan {
+  title: string;
+  kernel: string;
+  protagonist: string;
+  world: string;
+  arc: string;
+  engine?: string;
+  ending?: string;
+  flavor: string[];
+  scale?: string;
+  scale_reason?: string;
+  label?: string;
 }
 export interface Architecture {
   core_seed: string; character_dynamics: string;
@@ -1336,6 +1367,23 @@ export const api = {
 
   listProjects: () => req<Project[]>("GET", "/api/projects"),
   createProject: (p: Partial<Project>) => req<Project>("POST", "/api/projects", p),
+  // 开书方案流(docs/22 P0,确认链 L0 新形态):三问定纲 → 整书方案×3 → 定向修订 → 拍板
+  threeQuestions: (pid: number, body: {
+    mode: string; topic?: string; genre?: string;
+  }) => req<{ questions: ThreeQuestions[] }>(
+    "POST", `/api/projects/${pid}/three-questions`, body),
+  bookPlans: (pid: number, body: {
+    mode: string; topic?: string; genre?: string; answers?: Record<string, string>;
+    feedback?: string; avoid?: string[];
+  }) => req<{ plans: BookPlan[]; project: Project }>(
+    "POST", `/api/projects/${pid}/book-plans`, body),
+  revisePlan: (pid: number, body: { index: number; directive: string }) =>
+    req<{ plans: BookPlan[]; project: Project }>(
+      "POST", `/api/projects/${pid}/revise-plan`, body),
+  confirmPlan: (pid: number, body: {
+    index: number; mode: string;
+    scale_override?: { chapters: number; words: number } | null;
+  }) => req<Project>("POST", `/api/projects/${pid}/plan-confirm`, body),
   // 整本旧书导入(TXT/DOCX):后端解析分卷/章节,建为可继续写作的新项目
   // 开续集:AI 出 8 个方向卡可选可重摇;建书继承文风/架构/梗卡/人物,
   // 前作分析(前情提要+文风技法画像)异步进行,字数按前作实际章节中位数对齐

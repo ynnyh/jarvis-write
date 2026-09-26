@@ -177,3 +177,46 @@ def test_concept_from_brief_job_develops(client, monkeypatch):
     # 拍板订单必须原文进 prompt(深化不许偷换的锚)
     assert "镖师护送前朝公主的险镖故事" in adapter.last_prompt
     assert "已拍板的开书订单" in adapter.last_prompt
+
+
+_REPLY_ONLY_JSON = json.dumps({
+    "reply": "订单我锁了,直接进大纲;活宝配角先埋着。",
+}, ensure_ascii=False)
+
+
+def test_brief_chat_missing_brief_falls_back_and_keeps_lock(client, monkeypatch):
+    """空壳兜底(线上高频 502 根因):模型只回 reply 漏 brief → 沿用库里当前订单,
+    不报错;订单内容没变不重新上锁(已拍板的订单不被模型漏字段解锁)。"""
+    headers = _auth(client, "brief_fallback_user")
+    p = _create_project(client, headers, "空壳书")
+    pid = p["id"]
+    # 先拍板一版订单
+    r = client.patch(f"/api/projects/{pid}", headers=headers,
+                     json={"brief": "【故事内核】落魄镖师的险镖故事", "brief_confirmed": True})
+    assert r.status_code == 200 and r.json()["brief_confirmed"] is True
+
+    from app.api.projects import brief as brief_mod
+
+    # 模型只回 reply(线上实锤形态):keys 只有 reply
+    monkeypatch.setattr(brief_mod, "get_adapter_for",
+                        lambda task: _FakeAdapter(_REPLY_ONLY_JSON))
+    r = client.post(f"/api/projects/{pid}/brief-chat", headers=headers,
+                    json={"message": "行,就这么定,进大纲吧"})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["reply"].startswith("订单我锁了")
+    assert data["brief"] == "【故事内核】落魄镖师的险镖故事"  # 沿用旧订单
+    assert data["project"]["brief_confirmed"] is True  # 内容没变,不重新上锁
+
+
+def test_brief_chat_missing_brief_first_round_is_502(client, monkeypatch):
+    """库里也没有旧订单(第一轮就空壳):如实 502,不给空白订单。"""
+    headers = _auth(client, "brief_fallback2_user")
+    p = _create_project(client, headers, "首轮空壳书")
+    from app.api.projects import brief as brief_mod
+
+    monkeypatch.setattr(brief_mod, "get_adapter_for",
+                        lambda task: _FakeAdapter(_REPLY_ONLY_JSON))
+    r = client.post(f"/api/projects/{p['id']}/brief-chat", headers=headers,
+                    json={"message": "想写个故事"})
+    assert r.status_code == 502 and "没出订单内容" in r.json()["detail"]

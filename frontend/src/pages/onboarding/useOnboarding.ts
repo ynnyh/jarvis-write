@@ -9,8 +9,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  api, ChatTurn, Chip, Concept, conceptIsEmpty, Dimension,
-  EMPTY_CONCEPT, Pitch, Project, ShapeSuggestion, Tendency,
+  api, BookPlan, ChatTurn, Chip, Concept, conceptIsEmpty, Dimension,
+  EMPTY_CONCEPT, Pitch, Project, ShapeSuggestion, ThreeQuestions, Tendency,
 } from "../../api";
 import { useJob } from "../../ui/useJob";
 import { pollJob, errMsg } from "../../pollJob";
@@ -138,11 +138,14 @@ export function useOnboarding() {
       // localStorage 有 v2 键隔离,React state 没有,必须在 pid 变化时显式清场。
       setSpark(""); setEntry(null); setPickedGenreCard(null);
       setIdeaCards(null); setBriefInput(""); setBriefDraft("");
+      setQuestions(null); setQAnswers({}); setSelectedPlan(null);
+      setPlanFeedback("");
       briefAutoFor.current = ""; developedFor.current = "";
       setCustomOpen(false); setForgeOpen(false); setForgeSeed(0);
       forgeDismissed.current = "";
       api.getProject(pid).then((p) => {
         setProject(p);
+        setPlans(p.book_plans?.length ? p.book_plans : null); // 方案墙续接(刷新不丢)
         setTitleInput(p.title === "未命名新书" ? "" : p.title);
         setChapters(String(p.target_chapters));
         setWords(String(p.target_words_per_chapter));
@@ -172,8 +175,8 @@ export function useOnboarding() {
     // /new 无 id:静默创建草稿项目,replace 进第一步(createdRef 防重复建)
     if (createdRef.current) return;
     createdRef.current = true;
-    api.createProject({ title: "未命名新书", setup_state: "idea" })
-      .then((p) => nav(`/new/${p.id}/idea`, { replace: true }))
+    api.createProject({ title: "未命名新书", setup_state: "mode" })
+      .then((p) => nav(`/new/${p.id}/mode`, { replace: true }))
       .catch((e) => { createdRef.current = false; setErr(errMsg(e)); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pid]);
@@ -339,6 +342,113 @@ export function useOnboarding() {
       await patch({ brief_confirmed: false });
       toast.ok("已撤回拍板", "订单回到草稿态,聊/改完再拍");
     } catch (e) { setErr(errMsg(e)); }
+  }
+
+  // ---------- 开书方案流(docs/22 P0,确认链 L0 新形态) ----------
+  // 三问定纲 → 整书方案×3 → 点选/定向修订 → 拍板(渲染成开书订单,复用 brief_confirmed)。
+  const [questions, setQuestions] = useState<ThreeQuestions[] | null>(null);
+  const [qAnswers, setQAnswers] = useState<Record<string, string>>({});
+  const [plans, setPlans] = useState<BookPlan[] | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<number | null>(null);
+  const [planBusy, setPlanBusy] = useState("");
+  const [planFeedback, setPlanFeedback] = useState("");
+  // (docs/22)拍板档位语义:手选档位即时落库,无独立 UI 瞬态——拍板时「非建库默认
+  // 30×3000」的现值尊重为用户选择,默认值才用方案推荐档。见 confirmChosenPlan。
+
+  const planMode = project?.mode === "short" ? "short" : "serial";
+
+  // 屏 0「开哪种书」:模式级分叉,连载可顺手选档位(明示,替代旧版静默自动选档)。
+  // 手选档位即时落库——拍板时「非建库默认」的现值会被尊重(见 confirmChosenPlan)。
+  async function pickMode(m: "short" | "serial", preset?: { chapters: number; words: number }) {
+    try {
+      await patch({
+        mode: m,
+        ...(preset ? { target_chapters: preset.chapters, target_words_per_chapter: preset.words } : {}),
+      });
+      if (preset) {
+        setChapters(String(preset.chapters));
+        setWords(String(preset.words));
+      }
+      await goto("idea");
+    } catch (e) { setErr(errMsg(e)); }
+  }
+
+  async function fetchQuestions() {
+    if (pid === null) return;
+    setPlanBusy("AI 正在出三问候选…");
+    try {
+      const r = await api.threeQuestions(pid, {
+        mode: planMode, topic: sparkText,
+        genre: (tendency.genre as string) || project?.genre || "",
+      });
+      setQuestions(r.questions);
+    } catch (e) { setErr(errMsg(e)); } finally { setPlanBusy(""); }
+  }
+
+  function answerQ(key: string, text: string) {
+    setQAnswers((prev) => ({ ...prev, [key]: text }));
+  }
+
+  // 「全部按推荐来」:三问一键全取 ★ 首推
+  function adoptAllRecommended() {
+    if (!questions) return;
+    const next: Record<string, string> = {};
+    for (const q of questions) next[q.key] = q.candidates.find((c) => c.recommended)?.text ?? "";
+    setQAnswers(next);
+  }
+
+  async function genPlans() {
+    if (pid === null) return;
+    setPlanBusy("AI 正在出三套整书方案…");
+    try {
+      // 再来三套:上一批差异坐标进 avoid 防趋同
+      const avoid = (plans ?? [])
+        .map((p) => `${p.label ?? ""}·${p.title}`)
+        .map((s) => s.replace(/^[·\s]+|[·\s]+$/g, ""))
+        .filter(Boolean);
+      const r = await api.bookPlans(pid, {
+        mode: planMode, topic: sparkText,
+        genre: (tendency.genre as string) || project?.genre || "",
+        answers: qAnswers, feedback: planFeedback.trim() || undefined, avoid,
+      });
+      setPlans(r.plans);
+      setProject(r.project);
+      setSelectedPlan(null);
+    } catch (e) { setErr(errMsg(e)); } finally { setPlanBusy(""); }
+  }
+
+  // 定向修订:一句话只改第 index 套,其余套与未要求字段不动(prompt 实验验证)
+  async function reviseOnePlan(index: number, directive: string) {
+    if (pid === null) return;
+    setPlanBusy(`AI 正在改第 ${index + 1} 套…`);
+    try {
+      const r = await api.revisePlan(pid, { index, directive });
+      setPlans(r.plans);
+      setProject(r.project);
+    } catch (e) { setErr(errMsg(e)); } finally { setPlanBusy(""); }
+  }
+
+  // 拍板:选中方案渲染成开书订单(后端写 brief + brief_confirmed=True),飞入概念屏。
+  // 档位语义:用户改过篇幅(非建库默认 30×3000,如屏 0 手选/配置屏自定)→ 尊重现值;
+  // 仍是默认(=未定)→ 采用方案卡上的 AI 推荐档。走查教训:手选档位靠 UI 瞬态传递
+  // 会在刷新后丢失,落库值才是真相源。
+  async function confirmChosenPlan(index: number) {
+    if (pid === null) return;
+    setPlanBusy("正在拍板…");
+    try {
+      const manualScale = Number(chapters) !== 30 || Number(words) !== 3000;
+      const p = await api.confirmPlan(pid, {
+        index, mode: planMode,
+        scale_override: manualScale
+          ? { chapters: Number(chapters), words: Number(words) }
+          : null,
+      });
+      setProject(p);
+      setChapters(String(p.target_chapters));
+      setWords(String(p.target_words_per_chapter));
+      toast.ok("方案已拍板", "AI 照单深化概念;方案仍是硬约束");
+      flyTo("brief", "方案已拍板 ✓", "concept");
+    } catch (e) { setErr(errMsg(e)); } finally { setPlanBusy(""); }
   }
 
   // 简介屏开场只烧一次:自写想法 → 自动把灵感句发进对谈;空手/方向路 → 自动出提案
@@ -621,6 +731,8 @@ export function useOnboarding() {
     prefTone, prefElements, prefFlavors, prefPersona, prefAvoid, prefAvoidText,
     // 简介屏 state
     briefInput, briefDraft, ideaCards, busy, pitchFeedback,
+    // 方案屏 state(docs/22 P0)
+    questions, qAnswers, plans, selectedPlan, planBusy, planFeedback, planMode,
     // 概念屏 state
     customOpen, customConcept, developing,
     // 配置屏 state
@@ -633,6 +745,7 @@ export function useOnboarding() {
     setSpark, setEntry, setPickedGenreCard,
     setPrefTone, setPrefElements, setPrefFlavors, setPrefPersona, setPrefAvoid, setPrefAvoidText,
     setBriefInput, setBriefDraft, setIdeaCards, setPitchFeedback,
+    setQAnswers, setSelectedPlan, setPlanFeedback,
     setCustomOpen, setCustomConcept,
     setGenreSuggests, setSuggestPage, setCustomGenre,
     setTitleSig, setTitleInput, setChapters, setWords, setAdvOpen, setDirty,
@@ -641,6 +754,8 @@ export function useOnboarding() {
     // handler
     submitSpark, pickGenreBrainstorm,
     sendBrief, fetchPitches, pickPitch, saveBriefDraft, confirmBrief, unconfirmBrief,
+    pickMode, fetchQuestions, answerQ, adoptAllRecommended,
+    genPlans, reviseOnePlan, confirmChosenPlan,
     developFromBrief, saveCustomConcept,
     forgeChanged, forgeConfirmed, forgeUnconfirmed, isForgeDismissedFor, dismissForge, reopenForge,
     setGenre, setDim, fetchTitles, pickTitle, pickScale, confirmScale, toggleOpenEnded,

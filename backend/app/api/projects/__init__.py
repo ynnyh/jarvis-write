@@ -41,7 +41,7 @@ from app.schemas.dna import StoryDNA
 from app.schemas.project import ProjectCreate, ProjectOut
 
 from . import architecture, blueprint, dashboard, naming, plot_map, premise, shape, sequel, skeleton, style_profile, style_profile_api
-from . import brief
+from . import brief, plans
 from ._common import _get_project_or_404
 
 # 向后兼容 re-export:tests/test_style_profile.py 与其他外部按
@@ -67,6 +67,7 @@ router.include_router(premise.router)
 router.include_router(plot_map.router)
 router.include_router(dashboard.router)
 router.include_router(brief.router)
+router.include_router(plans.router)
 
 
 # —— 项目 CRUD ——
@@ -95,6 +96,7 @@ async def create_project(req: ProjectCreate, db: Session = Depends(get_db)) -> P
         target_words_per_chapter=req.target_words_per_chapter,
         open_ended=req.open_ended,
         global_tendency=req.global_tendency,
+        mode=req.mode,
     )
     db.add(project)
     db.commit()
@@ -189,6 +191,8 @@ class ProjectPatch(BaseModel):
     world_rules: str | None = Field(default=None, max_length=20000)
     # 出片模式:lite=轻量档(文+图出片)/ full=完整档;非法值在下方归一为 lite
     render_mode: str | None = Field(default=None, max_length=10)
+    # 开书模式(docs/22 屏 0):serial=开书连载 / short=短故事;非法值归一为 serial
+    mode: str | None = Field(default=None, max_length=10)
 
 
 @router.patch("/{project_id}", response_model=ProjectOut)
@@ -268,6 +272,8 @@ async def patch_project(
         updates["chat_log"] = updates["chat_log"][-200:]  # 防膨胀:只留最近 200 条
     if "render_mode" in updates and updates["render_mode"] not in ("lite", "full"):
         updates["render_mode"] = "lite"  # 脏值收敛,不 400(开关打错不该炸整个保存)
+    if "mode" in updates and updates["mode"] not in ("serial", "short"):
+        updates["mode"] = "serial"
     for field, value in updates.items():
         setattr(project, field, value)
     db.commit()

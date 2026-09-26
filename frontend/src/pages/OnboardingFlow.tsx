@@ -14,8 +14,10 @@ import { ThinkingText } from "../ui/ThinkingText";
 import { ConfirmGate } from "../ui/confirmKit";
 import { isStale, titleSig as calcTitleSig, titleStaleText } from "./wizSig";
 import { SetupStep, STEP_ORDER, STEP_LABEL } from "./onboarding/steps";
+import ModeGate from "./onboarding/ModeGate";
+import PlanFlow from "./onboarding/PlanFlow";
 import SkeletonWall from "./onboarding/SkeletonWall";
-import { SCALE_PRESETS, THINK_TITLE } from "./onboarding/presets";
+import { SCALE_PRESETS, THINK_TITLE, scaleDisplay } from "./onboarding/presets";
 import { composeRandomSeed } from "./onboarding/randomSeeds";
 import { ConceptBrief, conceptKey } from "./onboarding/ConceptBrief";
 import ConceptForge from "./onboarding/ConceptForge";
@@ -71,34 +73,38 @@ export default function OnboardingFlow() {
     // 基础 / 路由
     project, err, step, pid, nav,
     // 派生
-    concept, tendency, briefText, briefConfirmed, chatLog,
+    concept, tendency, sparkText, briefText, briefConfirmed,
     conceptStaleVsBrief, allGenreChips, shownSuggests, shapeSug,
     // 想法屏
     spark, entry, genreDim, outlineDims, pickedGenreCard,
     prefTone, prefElements, prefFlavors, prefPersona, prefAvoid, prefAvoidText,
-    // 简介屏
-    briefInput, briefDraft, ideaCards, busy, pitchFeedback,
+    // 方案屏(docs/22 P0:三问 → 整书方案×3 → 拍板)
+    questions, qAnswers, plans, selectedPlan, planBusy, planFeedback,
+    planMode,
+    busy,
     // 概念屏
     customOpen, customConcept, developing,
     // 配置屏
     inferBusy, customGenre,
     titleIdeas, titleSig, titleBusy, titleInput,
     chapters, words,
-    fly, dirty, arch, bp,
+    fly, arch, bp,
     forgeOpen, forgeSeed, setForgeOpen,
     // setter
     setSpark, setEntry, setPickedGenreCard,
     setPrefTone, setPrefElements, setPrefFlavors, setPrefPersona, setPrefAvoid, setPrefAvoidText,
-    setBriefInput, setBriefDraft, setPitchFeedback,
+    setPlanFeedback, setSelectedPlan,
     setCustomOpen, setCustomConcept,
     setGenreSuggests, setSuggestPage, setCustomGenre,
     setTitleSig, setTitleInput, setChapters, setWords,
     openEnded, toggleOpenEnded,
     // ref
-    stepsRef, chatEndRef, sparkRef, titleInputRef,
+    stepsRef, sparkRef, titleInputRef,
     // handler
     submitSpark, pickGenreBrainstorm,
-    sendBrief, fetchPitches, pickPitch, saveBriefDraft, confirmBrief, unconfirmBrief,
+    pickMode, fetchQuestions, answerQ, adoptAllRecommended,
+    genPlans, reviseOnePlan, confirmChosenPlan,
+    confirmBrief, unconfirmBrief,
     developFromBrief, saveCustomConcept,
     forgeChanged, forgeConfirmed, forgeUnconfirmed, isForgeDismissedFor, reopenForge,
     setGenre, setDim, fetchTitles, pickTitle, pickScale, confirmScale,
@@ -108,8 +114,6 @@ export default function OnboardingFlow() {
 
   const [seedHint, setSeedHint] = useState(false);
   const [scaleMode, setScaleMode] = useState<"" | "auto" | "manual">("");
-  // 篇幅推荐已被「自动」档消化过一次(防止用户手改后被推荐覆盖)
-  const [scaleApplied, setScaleApplied] = useState(false);
   // 核心梗卡的未保存草稿(P0-1):编辑中每次变化上报到这里,点火前兜底落库,
   // 保证「向导里确认过的梗卡」一定进数据库——否则蓝图/对账/体检全部失锚
   const premiseDraftRef = useRef<Premise | null>(null);
@@ -117,10 +121,6 @@ export default function OnboardingFlow() {
   const [setupTab, setSetupTab] = useState<"taste" | "scale" | "review">("taste");
   // 架构闸门四层全拍板 → 亮骨架墙
   const [archGateDone, setArchGateDone] = useState(false);
-  // 🎲 提案的带话输入框(提交后转为常驻要求 pitchFeedback)
-  const [pitchInput, setPitchInput] = useState("");
-  // 订单手改框是否展开(默认收起,点「直接改」展开)
-  const [briefEditOpen, setBriefEditOpen] = useState(false);
 
   // 概念就绪 → 打磨房自动展开;用户显式收起后同一版概念不再自动弹开(换概念才会)。
   // 必须挂在「if (!project) 早退」之前:hook 顺序在两次渲染间要一致;
@@ -160,7 +160,7 @@ export default function OnboardingFlow() {
   }
 
   // 随机开一本·零成本阶段:类型卡、一句话灵感全部本地抽签,不调 LLM。
-  // 用户看着顺眼再点「和策划聊聊」——对谈在简介屏发生,LLM 只花在确认过的方向上。
+  // 用户看着顺眼再点「按这个出方案」——LLM 只花在确认过的方向上。
   function randomBook() {
     if (allGenreChips.length) {
       setPickedGenreCard(allGenreChips[Math.floor(Math.random() * allGenreChips.length)]);
@@ -169,27 +169,8 @@ export default function OnboardingFlow() {
     setSeedHint(true);
   }
 
-  // 🎲 提案带话重出:反馈常驻(之后的「再来一组」也带着),按反馈重出三个提案
-  function submitPitchFeedback() {
-    const f = pitchInput.trim();
-    if (!f || busy) return;
-    setPitchFeedback(f);
-    setPitchInput("");
-    fetchPitches((ideaCards ?? []).map((p) => p.pitch), f);
-  }
-
-
-  // 篇幅步:AI 有推荐且用户尚未改过章数(仍是建书默认 30)时,自动选中推荐档
-  // 体量「自动」:AI 轮廓推荐一到就生效(概念确认后到达;用户没指定过章数,默认 30 未改视为未指定)
-  useEffect(() => {
-    if (!shapeSug || scaleMode === "manual" || scaleApplied) return;
-    if (Number(chapters) !== 30 || dirty) return;
-    const preset = SCALE_PRESETS.find((p) => p.key === shapeSug.scale);
-    if (preset) {
-      setScaleApplied(true);
-      void pickScale(preset);
-    }
-  }, [shapeSug, scaleMode, scaleApplied, chapters, dirty, pickScale]);
+  // (docs/22 P0)篇幅档位已前置到屏 0 明示 + 方案卡带推荐档,旧版「AI 静默自动
+  // 选档」effect 删除——用户没选过就保持「未定」,拍板时按方案推荐档落库。
 
   if (!project) return <div className="muted">{err || "正在创建草稿…"}</div>;
 
@@ -202,14 +183,18 @@ export default function OnboardingFlow() {
   const curTitleSig = calcTitleSig(project.topic ?? "", (tendency.genre as string) ?? "", concept);
   const titlesStale = isStale(titleIdeas, titleSig, curTitleSig);
 
+  // 篇幅档位显示:预设反推档位名;建库默认 30×3000 视为未定,不再伪装成已选
+  const scale = scaleDisplay(Number(project.target_chapters), Number(project.target_words_per_chapter));
+
   // 顶部步骤条:已确认项的缩略文本(FLIP 落点)
   const thumbOf: Partial<Record<SetupStep, string>> = {
-    brief: briefConfirmed ? "订单已拍板" : (briefText ? "订单草稿" : ""),
+    mode: project.mode === "short" ? "📖 短故事" : "📚 连载",
+    brief: briefConfirmed ? "方案已拍板" : (plans ? "方案已出" : ""),
     concept: hasConcept ? (concept.logline || "已选定") : "",
     setup: [
       (tendency.genre as string) || "",
       project.title !== "未命名新书" ? project.title : "",
-      `${project.target_chapters} 章`,
+      scale.decided ? (scale.tag === "自定" ? `${project.target_chapters} 章` : scale.tag) : "",
     ].filter(Boolean).join(" · "),
   };
 
@@ -252,6 +237,15 @@ export default function OnboardingFlow() {
                 exit={{ opacity: 0, y: -24 }}
                 transition={{ duration: 0.28 }}>
 
+                {/* ---------- 屏 0:开哪种书(docs/22 P0,模式级分叉) ---------- */}
+                {step === "mode" && (
+                  <ModeGate
+                    mode={project.mode ?? "serial"}
+                    chapters={Number(project.target_chapters)}
+                    words={Number(project.target_words_per_chapter)}
+                    onPick={(m, preset) => void pickMode(m, preset)} />
+                )}
+
                 {/* ---------- 想法 ---------- */}
                 {step === "idea" && (
                   <div className="card">
@@ -270,7 +264,7 @@ export default function OnboardingFlow() {
                       }} />
                     <div className="actions mt-2">
                       <button className="primary" disabled={!spark.trim()} onClick={submitSpark}>
-                        💬 和策划聊聊 →
+                        💬 按这个出方案 →
                       </button>
                       <button onClick={randomBook} disabled={!!busy}>
                         🎴 随机开一本
@@ -383,7 +377,7 @@ export default function OnboardingFlow() {
                         )}
                     {seedHint && (
                       <div className="fld-hint">
-                        已抽到一句灵感(已填入上框,可随意改)——觉得方向对,就点「和策划聊聊」;
+                        已抽到一句灵感(已填入上框,可随意改)——觉得方向对,就点「按这个出方案」;
                         不对就再抽一次,重抽不花 token。
                       </div>
                     )}
@@ -439,7 +433,7 @@ export default function OnboardingFlow() {
                         <div className="actions mt-3">
                           <button className="primary" disabled={!pickedGenreCard}
                             onClick={() => void pickGenreBrainstorm()}>
-                            💬 按这个流派,和策划聊聊 →
+                            💬 按这个流派,出方案 →
                           </button>
                           <button onClick={randomizeDraft}>🎴 随机换一张</button>
                           <button onClick={() => setEntry(null)}>← 换个方式</button>
@@ -449,160 +443,36 @@ export default function OnboardingFlow() {
 
                     <div className="actions mt-4 onboard-nav">
                       <span className="grow" />
-                      <button onClick={() => goto("brief")}>先不定,去和策划聊聊 →</button>
+                      <button onClick={() => goto("brief")}>先不定,直接出方案 →</button>
                     </div>
                   </div>
                 )}
 
-                {/* ---------- 简介:对话式确认流 L0(聊/提案 → 开书订单 → 拍板) ---------- */}
+                {/* ---------- 方案:三问定纲 → 整书方案×3 → 拍板(确认链 L0,docs/22 P0) ---------- */}
                 {step === "brief" && (
-                  <div className="card">
-                    <h2>和策划聊聊,定一份开书订单</h2>
-                    <div className="card-desc">
-                      把你的想法告诉策划(哪怕只有一句),它补全成一版完整订单;改到满意点「拍板」——
-                      <b>拍板之前不会生成任何概念和架构</b>。完全没头绪就先挑一个 🎲 提案。
-                    </div>
-
-                    {/* 🎲 方向提案(没灵感兜底):三个方向勾起兴趣,选中仍走对谈+拍板 */}
-                    <div className="media-field mt-2">
-                      <div className="card-head mb-2">
-                        <span className="muted">🎲 没头绪?先挑个方向</span>
-                        <span className="grow" />
-                        <button className="btn-sm" disabled={busy !== ""}
-                          title="AI 按当前方向/流派出三个 100-150 字的方向提案"
-                          onClick={() => void fetchPitches()}>
-                          {busy === "AI 正在出三个方向提案…" ? "出提案中…" : ideaCards ? "再来一组" : "出三个提案"}
-                        </button>
-                      </div>
-                      {ideaCards === null && !busy && (
-                        <p className="hint">提案只是「值得聊的方向」:选中哪个,策划就接着和您把它聊实,不是定稿。</p>
-                      )}
-                      {ideaCards && (
-                        <>
-                          <div className="chips ideas mt-2">
-                            {ideaCards.map((p) => (
-                              <button key={p.pitch} type="button" className="chip pitch-card"
-                                disabled={!!busy}
-                                title="选中后策划接着和你聊实这个方向(仍要拍板)"
-                                onClick={() => pickPitch(p)}>
-                                {p.label && <span className="pitch-label">{p.label}</span>}
-                                <b className="pitch-text">{p.pitch}</b>
-                              </button>
-                            ))}
-                          </div>
-                          <div className="input-row mt-2">
-                            <input type="text" value={pitchInput} disabled={!!busy}
-                              onChange={(e) => setPitchInput(e.target.value)}
-                              placeholder="这批都不对味?直接说要什么,如:不要系统流,来个女主搞事业的"
-                              onKeyDown={(e) => e.key === "Enter" && submitPitchFeedback()} />
-                            <button className="btn-sm primary" disabled={!pitchInput.trim() || !!busy}
-                              onClick={submitPitchFeedback}>
-                              💬 带话重出提案
-                            </button>
-                          </div>
-                          {pitchFeedback && (
-                            <div className="fld-hint mt-2">
-                              本批已按你的要求「{pitchFeedback}」来出,再来一组也继续带着这条。
-                              <button className="btn-sm" disabled={!!busy}
-                                onClick={() => setPitchFeedback("")}>不再带这条</button>
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-
-                    {/* ① 对谈:策划接住想法,一次推进一个决策,每问带具体选项 */}
-                    <div className="media-field mt-3">
-                      <div className="card-head mb-2">
-                        <span className="muted">① 和策划对谈</span>
-                        {briefConfirmed && <span className="badge">订单已拍板,可继续聊(聊出新草稿会重新上锁)</span>}
-                      </div>
-                      <div className="chat-log">
-                        {chatLog.length === 0 && !briefText && !busy && (
-                          <div className="muted">说说你的想法,或先挑一个上面的提案。</div>
-                        )}
-                        {chatLog.map((m, i) => (
-                          <div key={i} className={"chat-msg " + m.role}>
-                            <span className="chat-who">{m.role === "user" ? "你" : "策划"}</span>
-                            <span className="chat-text">{m.content}</span>
-                          </div>
-                        ))}
-                        {busy && <div className="chat-msg assistant"><span className="chat-who">策划</span><span className="chat-text muted"><span className="spin" />思考中…</span></div>}
-                        <div ref={chatEndRef} />
-                      </div>
-                      <div className="input-row mt-2">
-                        <input type="text" value={briefInput} maxLength={500} disabled={!!busy}
-                          style={{ flex: 1 }}
-                          placeholder={chatLog.length === 0
-                            ? "说说这本书想讲什么(可留空,先挑提案)"
-                            : "接着说,或回答策划的问题(选项可以直接报编号)"}
-                          onChange={(e) => setBriefInput(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void sendBrief(); } }} />
-                        <button className="primary" disabled={!!busy || !briefInput.trim()} onClick={() => void sendBrief()}>
-                          {busy ? "策划接手中…" : "发送"}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* ② 当前订单:每轮对谈都更新成完整最新版;可手改;拍板才解锁概念 */}
-                    <div className="media-field mt-3">
-                      <div className="card-head mb-2">
-                        <span className="muted">② 当前订单{briefConfirmed ? "" : "(草稿,还没拍板)"}</span>
-                        <span className="grow" />
-                        <ConfirmGate confirmed={briefConfirmed}
-                          confirmText="✓ 简介就按这个来" confirmedText="已拍板 ✓"
-                          confirmTitle="拍板这份开书订单,解锁概念深化"
-                          unconfirmTitle="撤回拍板,回到可聊可改"
-                          disabled={!briefText}
-                          onConfirm={() => { void confirmBrief(); }}
-                          onUnconfirm={() => { void unconfirmBrief(); }} />
-                      </div>
-                      {!briefText ? (
-                        <p className="hint">还没有订单:聊一轮或挑一个提案,策划就给你出第一版。</p>
-                      ) : (
-                        <>
-                          {!briefEditOpen ? (
-                            <div className="sub-summary">
-                              <div style={{ whiteSpace: "pre-wrap" }}>{briefText}</div>
-                              <div className="actions mt-2">
-                                <button className="btn-sm" onClick={() => { setBriefDraft(briefText); setBriefEditOpen(true); }}>
-                                  ✍️ 直接改
-                                </button>
-                                <span className="hint">也可以继续在对话里说「把主角换成女的」这类修改。</span>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="sub-summary">
-                              <textarea rows={7} style={{ width: "100%" }} value={briefDraft}
-                                onChange={(e) => setBriefDraft(e.target.value)} />
-                              <div className="actions mt-2">
-                                <button className="btn-sm primary" disabled={briefDraft.trim() === briefText}
-                                  onClick={() => { void saveBriefDraft(); setBriefEditOpen(false); }}>
-                                  保存(存完需重新拍板)
-                                </button>
-                                <button className="btn-sm" onClick={() => setBriefEditOpen(false)}>收起</button>
-                              </div>
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-
-                    <div className="actions mt-4 onboard-nav">
-                      <button onClick={() => nav(`/new/${pid}/idea`)}>← 上一步</button>
-                      <span className="grow" />
-                      {briefText && !briefConfirmed && (
-                        <button className="primary" onClick={() => { void confirmBrief(); }}>
-                          ✓ 就按这个来,去深化概念 →
-                        </button>
-                      )}
-                      {briefConfirmed && (
-                        <button className="primary" onClick={() => goto("concept")}>
-                          去深化概念 →
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                  <PlanFlow
+                    pid={pid!}
+                    mode={planMode}
+                    topic={sparkText}
+                    briefText={briefText}
+                    briefConfirmed={briefConfirmed}
+                    questions={questions}
+                    qAnswers={qAnswers}
+                    plans={plans}
+                    selectedPlan={selectedPlan}
+                    planBusy={planBusy}
+                    planFeedback={planFeedback}
+                    onQuestions={() => void fetchQuestions()}
+                    onAnswer={answerQ}
+                    onAdoptAll={adoptAllRecommended}
+                    onGenPlans={() => void genPlans()}
+                    onRevise={(i, d) => void reviseOnePlan(i, d)}
+                    onConfirmPlan={(i) => void confirmChosenPlan(i)}
+                    onUnconfirm={() => void unconfirmBrief()}
+                    onFeedback={setPlanFeedback}
+                    onSelect={setSelectedPlan}
+                    onBack={() => nav(`/new/${pid}/idea`)}
+                    onGotoConcept={() => goto("concept")} />
                 )}
 
                 {/* ---------- 概念:拍板订单 → 深化 → 打磨房拍板 ---------- */}
@@ -831,10 +701,10 @@ export default function OnboardingFlow() {
                                 </button>
                               ))}
                             </div>
-                            {shapeSug && scaleApplied && (
+                            {shapeSug && (
                               <div className="card card-info mt-2">
                                 <b>🎴 AI 按概念推荐篇幅:{shapeSug.scale === "short" ? "短篇" : shapeSug.scale === "long" ? "长篇" : shapeSug.scale === "serial" ? "连载" : "中篇"}</b>
-                                <div className="card-desc mt-1">{shapeSug.scale_reason} 已帮你选好(点其他卡可改)。</div>
+                                <div className="card-desc mt-1">{shapeSug.scale_reason}(docs/22:不再静默替你选——要就用,点上面对应的卡)。</div>
                               </div>
                             )}
                           </>
@@ -958,8 +828,8 @@ export default function OnboardingFlow() {
                               go: () => setSetupTab("scale"),
                             },
                             {
-                              label: "篇幅", set: true, body: null,
-                              text: `${project.target_chapters} 章 × ${project.target_words_per_chapter} 字,合计约 ${project.target_chapters * project.target_words_per_chapter} 字`,
+                              label: "篇幅", set: scale.decided, body: null,
+                              text: scale.text,
                               go: () => setSetupTab("scale"),
                             },
                           ]).map((c) => (
@@ -982,7 +852,7 @@ export default function OnboardingFlow() {
                           <button className="primary" onClick={async () => {
                             // P0-1:向导里看过的梗卡必须落库(展示即所得)
                             try {
-                              if (premiseDraftRef.current) {
+                              if (premiseDraftRef.current?.high_concept?.trim()) {
                                 await api.savePremise(pid!, premiseDraftRef.current);
                                 premiseDraftRef.current = null;
                               }
@@ -1093,6 +963,10 @@ export default function OnboardingFlow() {
               </div>
               <div className="dossier-rows">
                 <div className={"dossier-row" + (briefText ? " ok" : "")}>
+                  <span className="dr-k">模式</span>
+                  <span className="dr-v">{project.mode === "short" ? "📖 短故事(一次讲完)" : "📚 开书连载"}</span>
+                </div>
+                <div className={"dossier-row" + (briefText ? " ok" : "")}>
                   <span className="dr-k">订单</span>
                   <span className="dr-v wrap">
                     {briefText
@@ -1112,9 +986,9 @@ export default function OnboardingFlow() {
                   <span className="dr-k">书名</span>
                   <span className="dr-v">{project.title === "未命名新书" ? "未定" : project.title}</span>
                 </div>
-                <div className="dossier-row ok">
+                <div className={"dossier-row" + (scale.decided ? " ok" : "")}>
                   <span className="dr-k">篇幅</span>
-                  <span className="dr-v">{project.target_chapters} 章 × {project.target_words_per_chapter} 字,合计约 {project.target_chapters * project.target_words_per_chapter} 字</span>
+                  <span className="dr-v">{scale.text}</span>
                 </div>
               </div>
               {hasConcept && (

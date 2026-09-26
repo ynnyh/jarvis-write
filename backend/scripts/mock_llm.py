@@ -121,12 +121,19 @@ def _feedback_of(prompt: str) -> str:
     两个块都能命中(2026-09-24 开书方向提案复用同一提取)。
     """
     j = prompt.find("【用户看了上一批后的修改要求")
-    if j < 0:
-        return ""
-    k = prompt.find("\n- ", j)
-    if k < 0:
-        return ""
-    return prompt[k + 3:].split("\n", 1)[0].strip()
+    if j >= 0:
+        k = prompt.find("\n- ", j)
+        if k >= 0:
+            return prompt[k + 3:].split("\n", 1)[0].strip()
+    # docs/22 方案流:再来三套的带话以 [作者对上一批的反馈: ...] 注入 topic 块
+    j = prompt.find("作者对上一批的反馈: ")
+    if j >= 0:
+        return prompt[j + len("作者对上一批的反馈: "):].split("]", 1)[0].split("\n", 1)[0].strip()
+    # docs/22 定向修订:指令在【作者的修改要求】块下一行
+    j = prompt.find("【作者的修改要求】")
+    if j >= 0:
+        return prompt[j + len("【作者的修改要求】"):].strip().split("\n", 1)[0].strip()
+    return ""
 
 
 _BLUEPRINT_DIRECTIVE_MARKER = "【用户对这版蓝图的修改要求(最高优先级,规划每一章时都必须遵守)】\n- "
@@ -223,6 +230,90 @@ def reply_for(prompt: str) -> str:
                          "嗡鸣、罐子滚过木架的闷响、短促鼻息。",
             "negative": "畸变,多手多脚,文字,水印",
         }, ensure_ascii=False)
+    if "先用三个问题把方向定住" in prompt:
+        # 开书方案流(docs/22 P0):三问定纲,每问 3 候选 + ★首推带理由
+        def _q(key: str, title: str, cands: list) -> dict:
+            return {"key": key, "title": title, "candidates": [
+                {"text": t, "recommended": i == 0, "reason": r}
+                for i, (t, r) in enumerate(cands)
+            ]}
+        short = "结尾想落在什么感觉" in prompt
+        return json.dumps({"questions": [
+            _q("q1", "写什么味道", [
+                ("都市异闻·冷峻悬疑", "贴你给的题材,悬念密度最高"),
+                ("都市温情·治愈日常", "反差候选,暖着来"),
+                ("都市黑幕·冷硬写实", "冲突更狠,后劲大"),
+            ]),
+            _q("q2", "主角是谁", [
+                ("口吃档案员女警,过目不忘却无人信", "反差最强,憋屈感自带引擎"),
+                ("跑单王骑手,市井江湖气", "接地气,情绪共鸣快"),
+                ("失眠电台主持,对声音变态敏感", "题材新颖,氛围独"),
+            ]),
+            _q("q3", "结尾想落在什么感觉上" if short else "最大的坎是什么", [
+                ("释然·微光" if short else "泄密者就在身边",
+                 "短故事收在情绪上" if short else "内部敌人张力最大"),
+                ("酸楚·余味" if short else "体制本身是共谋", "后劲长,回味久"),
+                ("灼热·滚烫" if short else "真凶偏偏是恩人", "情感撕裂最狠"),
+            ]),
+        ]}, ensure_ascii=False)
+    if "只按修改要求修订" in prompt:
+        # 定向修订(docs/22 P0):一句话只改这一套——mock 固定改 protagonist 并回显要求
+        fb = _feedback_of(prompt) or "你的要求"
+        return json.dumps({
+            "title": "死人镖", "kernel": "替死人讨公道的瘸腿老镖师,押着装活人的棺材去边关",
+            "protagonist": f"赵铁衣,{fb}(已按你的一句话修订)",
+            "world": "架空大梁朝末年,低武写实,只有刀法暗器和人心算计",
+            "arc": "接暗镖开箱见活人;十五天活着送到边关;卷尾揭当年死镖真相",
+            "engine": "每一站都是一场验货式反转", "flavor": ["硬派江湖", "冷冽"],
+            "scale": "长篇", "scale_reason": "七城七案,值得铺", "label": "老镖师·旧案·冷",
+        }, ensure_ascii=False)
+    if "3 套完整的「短故事方案」" in prompt:
+        return json.dumps({"plans": [
+            {"title": "最后一课", "kernel": "代课老师用最后一节课送走想辍学的学生",
+             "protagonist": "陈默,58岁,想体面退场;嘴硬心软",
+             "world": "县城中学,冬天,教室后墙贴着褪色的奖状",
+             "arc": "开端在作业堆里发现辍学信;转折家访撞见真相;结尾空座位上放着一封没寄出的信",
+             "ending": "怅然·微光", "flavor": ["温情"], "scale": "8千字",
+             "scale_reason": "单一事件一次讲透", "label": "老师·挽留·温情"},
+            {"title": "夜班公交", "kernel": "末班车司机每晚多等一个不存在的乘客",
+             "protagonist": "老周,50岁,寡言;方向盘磨得发亮",
+             "world": "城市深夜,末班车,车厢空得能听见报站声",
+             "arc": "开端末班总多一人;转折揭出是亡妻;结尾空站台灯还亮着",
+             "ending": "酸楚·释然", "flavor": ["都市传说"], "scale": "3千字",
+             "scale_reason": "一个反转就够", "label": "司机·执念·传说"},
+        ]}, ensure_ascii=False)
+    if "一次给出 3 套完整的「整书方案」" in prompt:
+        # 整书方案×3(docs/22 P0):方案一直读作者想法,另两套发散;差异轴拉开
+        fb = _feedback_of(prompt)
+        plans = [
+            {"title": "死人镖",
+             "kernel": "替死人讨公道的瘸腿老镖师,押着装活人的棺材去边关,靠一本黑账把七座城的贪官全拖下水",
+             "protagonist": "赵铁衣,五十二岁,威远镖局总镖头出身,断过左腿;想赎回祖宅,更想知道当年谁出卖了兄弟;认死理,欠命还一辈子",
+             "world": "架空大梁朝末年,官道匪患交织;低武写实——只有刀法暗器毒药和人心算计",
+             "arc": "接暗镖开箱发现被捆的年轻女子;十五天内活着送到边关,边军县令同行三方追杀;卷尾女子说出当年死镖的真相",
+             "engine": "每一站都是一场验货式反转,读者追下一个开箱开出什么",
+             "flavor": ["硬派江湖", "公路悬疑"], "scale": "长篇",
+             "scale_reason": "七城七案,值得铺", "label": "老镖师·旧案·冷"},
+            {"title": "箱中娇",
+             "kernel": "只想赚够棺材本跑路的市井女骗子,被迫押着装活人的镖箱,在盐商水匪之间反复横跳",
+             "protagonist": "柳三娘,二十七岁,账房丫头出身,一身假身份混饭;想赚一百两去岭南开茶摊;精明怕死,但见不得女人被当货物",
+             "world": "架空南陈朝,运河盐铁走私猖獗;规则是谁掌握假路引假账本谁穿行黑白两道",
+             "arc": "贪二十两接怪镖开箱见嫁衣盐商女;想扔箱跑却发现钥匙连着自己偷的那箱真账;芦苇荡里箱底还有第三个人",
+             "engine": "假身份套假身份的骗中骗,每码头换一层皮",
+             "flavor": ["市井狡黠", "黑色幽默"], "scale": "中篇",
+             "scale_reason": "单线骗局节奏快", "label": "女骗子·骗局·趣"},
+            {"title": "失眠者电台",
+             "kernel": "重度失眠的深夜电台主持,陷进听众来电预告的真实谋杀,靠对声音的敏感反杀真凶",
+             "protagonist": "苏晚,三十一岁,靠药物才能睡两小时;想睡个整觉,不想再被台里边缘化;温柔的偏执",
+             "world": "当代都市,广播被短视频挤压;直播间是最后几个匿名倾诉的公共空间",
+             "arc": "来电预告三天后的谋杀居然字字应验;直播间变成预告杀人秀场,警方怀疑她炒作;卷尾她从背景音听出凶手就在电台大楼里",
+             "engine": "每期节目一场声音猫鼠,读者听声猜凶",
+             "flavor": ["心理惊悚", "声音美学"], "scale": "连载",
+             "scale_reason": "单元案可无限续", "label": "主持·声音·惊悚"},
+        ]
+        if fb:
+            plans[0]["kernel"] = f"按你的要求重出:『{fb}』——" + plans[0]["kernel"]
+        return json.dumps({"plans": plans}, ensure_ascii=False)
     if "可以拍板的「开书订单」" in prompt:
         # 开书对话式确认流(L0):单次调用回 reply + 当前开书订单(五段)草稿
         return json.dumps({

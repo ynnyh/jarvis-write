@@ -120,6 +120,13 @@ class Project(Base, TimestampMixin):
     # 才置 True。它是 /concept-from-brief 深化的硬门(未拍板 409),概念/架构都排在它后面。
     brief: Mapped[str] = mapped_column(Text, default="")
     brief_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 开书模式(docs/22 屏 0):serial=开书连载(默认,存量行为不变)/ short=短故事
+    # (一次讲完)。P0 落库 + 方案生成分叉(短故事出故事弧形态),专用轻管线在 P1。
+    mode: Mapped[str] = mapped_column(String(10), default="serial", server_default="serial")
+    # 整书方案卡墙(docs/22 屏 C,确认链 L0 新形态):三轮候选的当前工作集,含被定向
+    # 修订过的版本;拍板时把选中方案渲染成开书订单写入 brief(brief_confirmed 复用)。
+    # NULL=还没出方案(老项目)。见 app/api/projects/plans.py。
+    book_plans: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
 
     architecture: Mapped["Architecture | None"] = relationship(
         back_populates="project", uselist=False, cascade="all, delete-orphan"

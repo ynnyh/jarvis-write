@@ -12,6 +12,15 @@ import { DirectiveBar } from "../../ui/confirmKit";
 import { useJob } from "../../ui/useJob";
 import { ThinkingText } from "../../ui/ThinkingText";
 
+// 概念字段普遍 2-4 行,固定 rows 的小 textarea 在移动端会把首行裁掉半截
+// (实测 scrollHeight 102 vs clientHeight 76):auto-grow 按内容撑高,
+// 挂载/重渲染(重捏回填、异步加载)/输入时都会重算。
+function autoGrow(el: HTMLTextAreaElement | null) {
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight}px`;
+}
+
 export default function ConceptForge({ pid, concept, confirmed, tendency, dna, onChanged, onConfirmed, onUnconfirm }: {
   pid: number;
   concept: Concept;
@@ -114,8 +123,9 @@ export default function ConceptForge({ pid, concept, confirmed, tendency, dna, o
                 {changed && <span className="forge-changed-flag">已按你的要求更新</span>}
                 <span className="hint"> · {f.hint}</span>
               </label>
-              <textarea rows={f.key === "logline" ? 2 : 1} disabled={busy}
+              <textarea ref={autoGrow} rows={1} disabled={busy}
                 value={draft[f.key] ?? ""} placeholder={f.hint}
+                onInput={(e) => autoGrow(e.currentTarget)}
                 onChange={(e) => { setChangedKeys((ks) => ks.filter((k) => k !== f.key)); upd(f.key, e.target.value); }} />
             </div>
           );

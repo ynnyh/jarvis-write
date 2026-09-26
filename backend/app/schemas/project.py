@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -20,6 +20,8 @@ class ProjectCreate(BaseModel):
     genre: str = ""
     target_chapters: int = Field(default=30, ge=1, le=5000)
     target_words_per_chapter: int = Field(default=3000, ge=200, le=20000)
+    # 开书模式(docs/22 屏 0):serial=开书连载(默认)/ short=短故事
+    mode: Literal["serial", "short"] = "serial"
     # 开放式连载(结局未定):架构只定长线引擎+首批方向,蓝图铺满后自动续订续写
     open_ended: bool = False
     global_tendency: Tendency = Field(default_factory=dict)
@@ -89,6 +91,10 @@ class ProjectOut(BaseModel):
     # 是概念深化(/concept-from-brief)的硬门。每出新草稿自动复位 False(重新上锁)。
     brief: str = ""
     brief_confirmed: bool = False
+    # 开书模式(docs/22 屏 0):serial=开书连载(默认)/ short=短故事
+    mode: str = "serial"
+    # 整书方案卡墙(docs/22 屏 C):当前工作集(含定向修订版);NULL=未出方案
+    book_plans: list[Any] | None = None
 
     model_config = {"from_attributes": True}
 

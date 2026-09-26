@@ -91,8 +91,13 @@ async def brief_chat(
 ) -> BriefChatResponse:
     """一轮简介对话:回一句引导(reply)+ 当前完整版简介草稿(brief)。
 
-    草稿落库即重新上锁(brief_confirmed=False)——聊得再好,作者没点头,
+    新草稿落库即重新上锁(brief_confirmed=False)——聊得再好,作者没点头,
     概念深化按钮就不亮(后端 409 同口径把关)。
+
+    空壳兜底(2026-09-26 线上高频 502 的根因修复,spark 实测三次复现):
+    对谈越到后期(订单接近拍板),模型越容易只回 reply、漏掉 brief 字段——
+    订单没变就不该报错:brief 缺失沿用库里当前版(reply 照常进对话),
+    且内容没变不重新上锁(作者已拍板的订单不能被一次没输出 brief 的对话解锁)。
     """
     project = _get_project_or_404(db, project_id)
     clean = req.message.strip()[:_CHAT_USER_MAX]
@@ -113,17 +118,24 @@ async def brief_chat(
     adapter = get_adapter_for(Task.ARCHITECTURE)
     try:
         data = parse_llm_json(await adapter.ask(prompt))
-        reply = str(data.get("reply") or "").strip()[:1000]
-        brief = str(data.get("brief") or "").strip()[:2000]
-        if not reply or not brief:
-            raise ValueError("模型回了空 reply/brief(空壳)")
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"这轮没接住:{exc}") from exc
 
+    prev_brief = (project.brief or "").strip()
+    reply = str(data.get("reply") or "").strip()[:1000]
+    brief = str(data.get("brief") or "").strip()[:2000] or prev_brief
+    if not brief:
+        # 库里也没有旧订单(第一轮就空壳):这才是真没接住
+        raise HTTPException(status_code=502, detail="这轮没接住:模型没出订单内容,再发一次试试")
+    if not reply:
+        reply = "订单还是上面这版,哪里要调直接说;满意就点「✓ 简介就按这个来」。"
+
     # 拷贝-改-赋回:JSON 列原地改 SQLAlchemy 不认,commit 会空转(踩过的坑)
+    changed = brief != prev_brief
     project.chat_log = (thread + [{"role": "assistant", "content": reply}])[-_CHAT_KEEP:]
     project.brief = brief
-    project.brief_confirmed = False  # 每出新草稿自动重新上锁
+    if changed:
+        project.brief_confirmed = False  # 订单内容真变了才重新上锁
     db.commit()
     db.refresh(project)
     return BriefChatResponse(
