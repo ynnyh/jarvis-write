@@ -99,6 +99,20 @@ export interface DramaEpisode {
     mode?: string;
     synopsis?: string;
     lines?: DramaScriptLine[];
+    // v2 场次制:分组层(展示/导出用);lines 恒为平铺兼容层
+    scenes?: {
+      slug: string;
+      characters?: string[];
+      purpose?: string;
+      lines: DramaScriptLine[];
+    }[];
+    // v2 爽点地图:开场钩子/小爽点/大爽点/结尾卡点(承接源书双爽点结构)
+    payoff_map?: {
+      opening_hook?: string;
+      small_payoff?: string;
+      big_payoff?: string;
+      cliffhanger?: string;
+    };
     // 后端内部状态(快照/契约):前端只读展示,不参与编辑
     _end_state?: { status?: string; state?: DramaEndState | null; error?: string };
     _versions?: unknown[];
@@ -393,7 +407,7 @@ export const dramaApi = {
   exportTrailer: (pid: number, format: "md" | "srt") =>
     downloadFile(`/api/projects/${pid}/drama/trailer/export?format=${format}`, `trailer.${format}`),
 
-  exportEpisode: (pid: number, eid: number, format: "md" | "csv" | "json" | "pack" | "srt") =>
+  exportEpisode: (pid: number, eid: number, format: "md" | "csv" | "json" | "pack" | "srt" | "script" | "jianying") =>
     downloadFile(`/api/projects/${pid}/drama/episodes/${eid}/export?format=${format}`,
       `drama-export.${format}`),
 };

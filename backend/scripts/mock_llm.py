@@ -214,19 +214,45 @@ def reply_for(prompt: str) -> str:
             "cliffhanger": "箱底传来第二声敲响,而码头方向马蹄声已近",
         }]}, ensure_ascii=False)
     if "竖屏漫剧编剧" in prompt:
-        return json.dumps({"synopsis": "柳三娘接怪镖,验货夜开箱见嫁衣女,钥匙连着自己偷的账",
-                           "lines": [
-                               {"speaker": "旁白", "text": "运河码头的雨下到第三天,柳三娘接下了那口棺材镖。",
-                                "action": "雨夜码头,柳三娘与盐商账房交割,棺材抬上船"},
-                               {"speaker": "柳三娘", "text": "说好不开箱?那这二十两我退你。",
-                                "action": "柳三娘掂着钱袋转身要走,账房急拦"},
-                               {"speaker": "账房", "text": "送到边关再开!路上死了算你的!",
-                                "action": "账房死死按住棺材盖,指节发白"},
-                               {"speaker": "柳三娘", "text": "箱子在抖。",
-                                "action": "棺材缝里渗出水痕,柳三娘眯起眼"},
-                               {"speaker": "旁白", "text": "箱底传来第二声敲响,而码头方向马蹄声已近。",
-                                "action": "柳三娘握紧撬棍,回头望向码头灯火"},
-                           ]}, ensure_ascii=False)
+        return json.dumps({
+            "synopsis": "柳三娘接怪镖,验货夜开箱见嫁衣女,钥匙连着自己偷的账",
+            "scenes": [
+                {"slug": "外·雨夜码头·夜", "characters": ["柳三娘", "账房"],
+                 "purpose": "开场钩子",
+                 "lines": [
+                     {"speaker": "旁白", "text": "运河码头的雨下到第三天,柳三娘接下了那口棺材镖。",
+                      "action": "雨夜码头,柳三娘与盐商账房交割,棺材抬上船"},
+                     {"speaker": "柳三娘", "text": "说好不开箱?那这二十两我退你。",
+                      "action": "柳三娘掂着钱袋转身要走,账房急拦"},
+                     {"speaker": "账房", "text": "送到边关再开!路上死了算你的!",
+                      "action": "账房死死按住棺材盖,指节发白"}]},
+                {"slug": "外·雨夜码头·夜", "characters": ["柳三娘"],
+                 "purpose": "小爽点",
+                 "lines": [
+                     {"speaker": "柳三娘", "text": "箱子在抖。",
+                      "action": "棺材缝里渗出水痕,柳三娘眯起眼,袖中滑出黄铜钥匙"},
+                     {"speaker": "旁白", "text": "那把钥匙,正是昨夜她从盐商别院顺出来的。",
+                      "action": "特写:钥匙在雨里泛着冷光"}]},
+                {"slug": "外·雨夜码头·夜", "characters": ["柳三娘", "账房"],
+                 "purpose": "大爽点",
+                 "lines": [
+                     {"speaker": "账房", "text": "你……你是『空手柳』?!",
+                      "action": "账房瞳孔骤缩,踉跄后退半步,撞翻灯笼"},
+                     {"speaker": "柳三娘", "text": "现在知道,晚了。",
+                      "action": "柳三娘撬棍已抵箱缝,火光映着她毫无波澜的脸"}]},
+                {"slug": "外·雨夜码头·夜", "characters": ["柳三娘"],
+                 "purpose": "结尾卡点",
+                 "lines": [
+                     {"speaker": "旁白", "text": "箱底传来第二声敲响,而码头方向马蹄声已近。",
+                      "action": "柳三娘握紧撬棍,回头望向码头灯火,定格"}]},
+            ],
+            "payoff_map": {
+                "opening_hook": "雨夜交割棺材镖,「不开箱」规矩当场被顶(外·雨夜码头·夜)",
+                "small_payoff": "柳三娘亮出黄铜钥匙——正是昨夜顺手偷的(外·雨夜码头·夜)",
+                "big_payoff": "账房认出『空手柳』,瞳孔骤缩撞翻灯笼(外·雨夜码头·夜)",
+                "cliffhanger": "箱底第二声敲响+马蹄声逼近,定格(外·雨夜码头·夜)",
+            },
+        }, ensure_ascii=False)
     if "漫剧分镜师" in prompt:
         return json.dumps({"shots": [
             {"seq": 1, "scene_name": "雨夜码头", "characters": ["柳三娘"],

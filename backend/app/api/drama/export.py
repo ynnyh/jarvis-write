@@ -68,6 +68,27 @@ async def export_episode(
         content = export_csv(ep, shots, style, cards)
         media = "text/csv; charset=utf-8"
         name = f"{base}-分镜.csv"
+    elif format == "jianying":
+        from app.engines.drama.jianying_export import build_jianying_draft_zip
+
+        if not shots:
+            raise HTTPException(400, detail="先拆分镜:草稿的台词轨按分镜时间码排布。")
+        content = build_jianying_draft_zip(project.title, ep, shots)
+        media = "application/zip"
+        name = f"{base}-剪映草稿.zip"
+        return Response(
+            content=content,
+            media_type=media,
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"},
+        )
+    elif format == "script":
+        from app.engines.drama.exporter import export_script_txt
+
+        if not (ep.script or {}).get("lines"):
+            raise HTTPException(400, detail="这一集还没剧本,先点「写剧本」。")
+        content = export_script_txt(project, ep)
+        media = "text/plain; charset=utf-8"
+        name = f"{base}-场次剧本.txt"
     elif format == "json":
         content = export_json(project, ep, shots, style, cards, scenes)
         media = "application/json; charset=utf-8"

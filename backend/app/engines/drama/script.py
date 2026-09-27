@@ -143,7 +143,12 @@ async def write_episode_script(
 
     # 格式门禁 + 整发重试:只挡「没写成」(空壳/JSON 崩/台词被截断/说话人全空),
     # 不评判文笔。中转网关截断尾巴是常态不是意外,一次不成重试一次再报错。
+    # v2 场次制:优先解析 scenes(平铺出 lines 兜全下游);模型偶尔回旧版
+    # 纯 lines 结构时降级单场(slug 空、purpose 空),不让格式偏好卡死生成。
     lines_out: list[dict] = []
+    scenes_out: list[dict] = []
+    payoff_out: dict = {}
+    data: dict = {}
     last_err = "模型返回空内容"
     for attempt in range(1, _ATTEMPTS + 1):
         try:
@@ -158,7 +163,11 @@ async def write_episode_script(
             last_err = why or err or "输出不可用"
             progress(f"第 {episode.ep_index} 集剧本第 {attempt}/{_ATTEMPTS} 次输出不可用({last_err}),重试中…")
             continue
-        lines_out = _clean_lines(data.get("lines"))
+        scenes_out = _clean_scenes(data.get("scenes"))
+        if scenes_out:
+            lines_out = _flatten_scenes(scenes_out)
+        else:
+            lines_out = _clean_lines(data.get("lines"))
         if not lines_out:
             last_err = "台词清洗后为空"
             continue
@@ -174,6 +183,14 @@ async def write_episode_script(
     script["mode"] = episode.mode
     script["synopsis"] = clip(data.get("synopsis"), 300)
     script["lines"] = lines_out
+    # 场次制 v2:scenes 只有真解析到才落(降级路径不造空壳);payoff_map
+    # 四项独立落——手改台词不影响它,回退/手改会丢 scenes(见各自端点)。
+    if scenes_out:
+        script["scenes"] = scenes_out
+        script["payoff_map"] = _clean_payoff_map(data.get("payoff_map"))
+    else:
+        script.pop("scenes", None)
+        script.pop("payoff_map", None)
     episode.script = script
     episode.status = "scripted"
 
@@ -209,6 +226,63 @@ def _clean_lines(raw_lines) -> list[dict]:
         if len(out) >= _MAX_LINES:
             break
     return out
+
+
+# ---- 场次制 v2(2026-09-27,对标业界场次剧本):scenes 分组层 + payoff_map 爽点地图 ----
+# 落库双写:scenes(分组,给展示/导出用)+ lines(scenes 平铺,兼容分镜/成片包/
+# 校验/集末契约/手改等全部既有下游——它们继续只读平铺层,零改动)。
+_MAX_SCENES = 6
+_PURPOSES = ("开场钩子", "小爽点", "大爽点", "推进", "结尾卡点")
+
+
+def _clean_scenes(raw_scenes) -> list[dict]:
+    """原始 scenes → 干净场次(逐场清洗内嵌 lines;整场无台词则丢场)。
+
+    lines 逐场复用 _clean_lines 的截长/清洗口径;全局台词封顶仍以平铺后
+    的 _MAX_LINES 为准(平铺时截断,场内不单独设限)。
+    """
+    out: list[dict] = []
+    for item in (raw_scenes or []):
+        if not isinstance(item, dict):
+            continue
+        scene_lines = _clean_lines(item.get("lines"))
+        if not scene_lines:
+            continue
+        purpose = clip(item.get("purpose"), 20)
+        if purpose and not any(p in purpose for p in _PURPOSES):
+            purpose = "推进"
+        chars = [
+            clip(c, 30) for c in (item.get("characters") or [])
+            if str(c or "").strip()
+        ][:6]
+        out.append(
+            {
+                "slug": clip(item.get("slug"), 40) or f"第{len(out) + 1}场",
+                "characters": chars,
+                "purpose": purpose,
+                "lines": scene_lines,
+            }
+        )
+        if len(out) >= _MAX_SCENES:
+            break
+    return out
+
+
+def _flatten_scenes(scenes: list[dict]) -> list[dict]:
+    """场次 → 平铺 lines(封顶 _MAX_LINES,与旧口径一致)。"""
+    flat: list[dict] = []
+    for sc in scenes:
+        flat.extend(sc.get("lines") or [])
+    return flat[:_MAX_LINES]
+
+
+def _clean_payoff_map(raw: object) -> dict:
+    """payoff_map 四项清洗:只收四键,截长;缺项给空串(展示层跳过空项)。"""
+    src = raw if isinstance(raw, dict) else {}
+    return {
+        k: clip(src.get(k), 120)
+        for k in ("opening_hook", "small_payoff", "big_payoff", "cliffhanger")
+    }
 
 
 async def _store_end_state(episode: DramaEpisode, adapter) -> None:

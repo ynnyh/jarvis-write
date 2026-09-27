@@ -98,7 +98,7 @@ export function EpisodeDetail({ pid, eid, hasStyle, ratio, renderMode, onEpisode
     } catch (e) { setErr(errMsg(e)); } finally { setBusy(""); setStage(""); }
   }
 
-  async function exp(fmt: "md" | "csv" | "json" | "pack" | "srt") {
+  async function exp(fmt: "md" | "csv" | "json" | "pack" | "srt" | "script" | "jianying") {
     try { await dramaApi.exportEpisode(pid, eid, fmt); }
     catch (e) { toast.err("导出失败", errMsg(e)); }
   }
@@ -171,6 +171,10 @@ export function EpisodeDetail({ pid, eid, hasStyle, ratio, renderMode, onEpisode
         <span className="grow" />
         <button className="btn-sm" disabled={!shots.length} onClick={() => exp("md")}>导出手册</button>
         <button className="btn-sm" disabled={!pack} onClick={() => exp("pack")}>成片包</button>
+        <button className="btn-sm" disabled={!hasScript} title="场次制纯文本:可粘贴进任何漫剧工作台的「上传剧本」"
+          onClick={() => exp("script")}>场次剧本.txt</button>
+        <button className="btn-sm" disabled={!shots.length} title="解压到剪映草稿目录:台词轨已按分镜时间码排好"
+          onClick={() => exp("jianying")}>剪映草稿.zip</button>
         <button className="btn-sm" disabled={!shots.length} onClick={() => exp("srt")}>字幕SRT</button>
         <button className="btn-sm" disabled={!shots.length} onClick={() => exp("csv")}>CSV</button>
         <button className="btn-sm" disabled={!shots.length} onClick={() => exp("json")}>JSON</button>
@@ -183,17 +187,51 @@ export function EpisodeDetail({ pid, eid, hasStyle, ratio, renderMode, onEpisode
       {busy && <Banner stage={stage} text="AI 正在处理…" />}
       {boardNotice && !busy && <div className="notice notice-warn">分镜说明:{boardNotice}</div>}
 
-      {/* 剧本 */}
+      {/* 剧本(v2 场次制:有 scenes 按场分组+爽点地图;旧数据回落平铺) */}
       {episode?.script?.lines?.length ? (
         <div className="sub-summary">
-          <div className="card-head mb-2"><b>剧本({episode.script.lines.length} 条)</b>
+          <div className="card-head mb-2">
+            <b>剧本({episode.script.lines.length} 条{episode.script.scenes?.length ? ` · ${episode.script.scenes.length} 场` : ""})</b>
             <span className="muted">{episode.script.synopsis}</span></div>
-          {episode.script.lines.map((l, i) => (
-            <div key={i} className="script-line">
-              <b>{l.speaker}</b>:{l.text}
-              {l.action && <span className="muted">(画面:{l.action})</span>}
-            </div>
-          ))}
+          {(() => {
+            const payoff = episode.script.payoff_map;
+            const items = [
+              ["开场钩子", payoff?.opening_hook], ["小爽点", payoff?.small_payoff],
+              ["大爽点", payoff?.big_payoff], ["结尾卡点", payoff?.cliffhanger],
+            ].filter(([, v]) => !!v) as [string, string][];
+            if (!items.length) return null;
+            return (
+              <div className="pref-quick mb-2" data-testid="payoff-map">
+                <span className="pref-label">爽点地图<small>本集节奏对账</small></span>
+                <div className="title-chips">
+                  {items.map(([k, v]) => (
+                    <span key={k} className="title-chip on" title={v}><b>{k}</b>{v}</span>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+          {(episode.script.scenes?.length
+            ? episode.script.scenes.flatMap((sc, si) => [
+              <div key={`sc-${si}`} className="card-head mt-2">
+                <b>第 {si + 1} 场 · {sc.slug}</b>
+                {sc.purpose && <span className="badge">{sc.purpose}</span>}
+                {!!sc.characters?.length && <span className="muted">出场:{sc.characters.join("、")}</span>}
+              </div>,
+              ...sc.lines.map((l, i) => (
+                <div key={`sc-${si}-${i}`} className="script-line">
+                  <b>{l.speaker}</b>:{l.text}
+                  {l.action && <span className="muted">(画面:{l.action})</span>}
+                </div>
+              )),
+            ])
+            : episode.script.lines.map((l, i) => (
+              <div key={i} className="script-line">
+                <b>{l.speaker}</b>:{l.text}
+                {l.action && <span className="muted">(画面:{l.action})</span>}
+              </div>
+            ))
+          )}
           {/* 集末交接契约(§5.2):写剧本时自动提取,下一集开场据此接住 */}
           <EndStateNote episode={episode} />
           {/* 历史版本:重写/手改前自动存一版,改坏了能退回去 */}

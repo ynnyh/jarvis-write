@@ -154,6 +154,16 @@ async def restore_episode_version(
     script["lines"] = target["lines"]
     if target.get("synopsis"):
         script["synopsis"] = target["synopsis"]
+    # v2 场次制:回退只恢复平铺层时,旧场次要跟着回退才不误导(快照存了整份
+    # script,场景/爽点地图有就一起恢复;旧版没有就清掉)。
+    if isinstance(target.get("scenes"), list) and target["scenes"]:
+        script["scenes"] = target["scenes"]
+    else:
+        script.pop("scenes", None)
+    if isinstance(target.get("payoff_map"), dict) and target["payoff_map"]:
+        script["payoff_map"] = target["payoff_map"]
+    else:
+        script.pop("payoff_map", None)
     ep.script = script
     if ep.status == "planned":
         ep.status = "scripted"

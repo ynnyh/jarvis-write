@@ -73,6 +73,90 @@ def _refs_by_seq(shots: list[DramaShot], cards: list[DramaCharacterCard]) -> dic
     return shot_refs_by_seq(shots, cards)
 
 
+# ---- v2 场次制剧本 TXT(业界可粘贴:任何漫剧工作台都吃纯文本剧本) ----
+_PAYOFF_CN = {
+    "opening_hook": "开场钩子",
+    "small_payoff": "小爽点",
+    "big_payoff": "大爽点",
+    "cliffhanger": "结尾卡点",
+}
+
+
+def export_script_txt(project: Project, episode: DramaEpisode) -> str:
+    """场次制纯文本剧本:场头(内/外·地点·时辰+功能)/出场人物/台词行。
+
+    拿去知漫剧/海艺等「上传剧本」入口直接粘贴;旧版无 scenes 的集回落为
+    平铺台词(无场头),内容不丢。
+    """
+    script = episode.script if isinstance(episode.script, dict) else {}
+    lines = script.get("lines") if isinstance(script.get("lines"), list) else []
+    scenes_v2 = script.get("scenes") if isinstance(script.get("scenes"), list) else []
+    payoff = script.get("payoff_map") if isinstance(script.get("payoff_map"), dict) else {}
+
+    out: list[str] = []
+    out.append(f"《{project.title}》第 {episode.ep_index} 集《{episode.title}》")
+    out.append(
+        f"模式:{MODE_DESC.get(episode.mode, episode.mode)}"
+        f" | 目标时长:{episode.duration_target_s} 秒"
+        f" | 源:{source_chapter_label(episode)}"
+    )
+    if episode.hook:
+        out.append(f"开场钩子:{episode.hook}")
+    if episode.cliffhanger:
+        out.append(f"结尾卡点:{episode.cliffhanger}")
+    payoff_lines = [
+        f"{cn}:{str(payoff.get(k) or '').strip()}"
+        for k, cn in _PAYOFF_CN.items() if str(payoff.get(k) or "").strip()
+    ]
+    if payoff_lines:
+        out.append("")
+        out.append("【爽点地图】")
+        out.extend(payoff_lines)
+
+    def _scene_block(idx: int, sc: dict) -> list[str]:
+        head = str(sc.get("slug") or "").strip() or "未命名场"
+        purpose = str(sc.get("purpose") or "").strip()
+        cast = "、".join(c for c in (sc.get("characters") or []) if str(c or "").strip())
+        block = [""]
+        title = f"第 {idx} 场 {head}"
+        if purpose:
+            title += f"({purpose})"
+        block.append(title)
+        if cast:
+            block.append(f"出场:{cast}")
+        for ln in sc.get("lines") or []:
+            if not isinstance(ln, dict):
+                continue
+            who = str(ln.get("speaker") or "旁白").strip()
+            text = str(ln.get("text") or "").strip()
+            action = str(ln.get("action") or "").strip()
+            if not text:
+                continue
+            act = f"({action})" if action else ""
+            block.append(f"　　{who}:{act}{text}")
+        return block
+
+    if scenes_v2:
+        for i, sc in enumerate(scenes_v2, 1):
+            if isinstance(sc, dict) and sc.get("lines"):
+                out.extend(_scene_block(i, sc))
+    elif lines:
+        out.append("")
+        out.append("(旧版剧本,未分场)")
+        for ln in lines:
+            if not isinstance(ln, dict):
+                continue
+            who = str(ln.get("speaker") or "旁白").strip()
+            text = str(ln.get("text") or "").strip()
+            if not text:
+                continue
+            action = str(ln.get("action") or "").strip()
+            act = f"({action})" if action else ""
+            out.append(f"　　{who}:{act}{text}")
+    out.append("")
+    return "\n".join(out)
+
+
 def export_markdown(
     project: Project,
     episode: DramaEpisode,
@@ -157,10 +241,35 @@ def export_markdown(
                 md.bullet(f"英文锚段:{sc.appearance_en}")
         md.add("")
 
-    lines = (episode.script or {}).get("lines") or []
+    script = episode.script if isinstance(episode.script, dict) else {}
+    lines = script.get("lines") or []
+    scenes_v2 = script.get("scenes") if isinstance(script.get("scenes"), list) else []
+    payoff = script.get("payoff_map") if isinstance(script.get("payoff_map"), dict) else {}
     if lines:
         md.h2("剧本", blank=False)
-        md.speech(lines, numbered=True)
+        if scenes_v2:
+            # v2 场次制:按场分组渲染,场头带功能标注
+            for sc in scenes_v2:
+                if not isinstance(sc, dict):
+                    continue
+                head = str(sc.get("slug") or "").strip() or "(未命名场)"
+                purpose = str(sc.get("purpose") or "").strip()
+                cast = "、".join(c for c in (sc.get("characters") or []) if str(c or "").strip())
+                label = f"【{head}】" + (f"({purpose})" if purpose else "")
+                md.h3(label + (f" 出场:{cast}" if cast else ""), blank=False)
+                md.speech(sc.get("lines") or [], numbered=True)
+        else:
+            md.speech(lines, numbered=True)
+    if any(str(v or "").strip() for v in payoff.values()):
+        md.h2("爽点地图(本集节奏对账)", blank=False)
+        _PAYOFF_CN = {
+            "opening_hook": "开场钩子", "small_payoff": "小爽点",
+            "big_payoff": "大爽点", "cliffhanger": "结尾卡点",
+        }
+        for k, cn in _PAYOFF_CN.items():
+            v = str(payoff.get(k) or "").strip()
+            if v:
+                md.bullet(f"{cn}:{v}")
 
     if shots:
         md.h2("分镜表", blank=False)

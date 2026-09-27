@@ -57,8 +57,15 @@ def validate_drama_script(data: Any) -> tuple[bool, str]:
     if not isinstance(data, dict):
         return False, "输出不是 JSON 对象(多半被截断或模型没按格式写)"
     raw_lines = data.get("lines")
+    # v2 场次制:顶层无 lines 时从 scenes 逐场平铺再校验(判据不变,只换取数路径)
     if not isinstance(raw_lines, list) or not raw_lines:
-        return False, "缺少 lines 字段或台词为空"
+        flat: list = []
+        for sc in data.get("scenes") or []:
+            if isinstance(sc, dict) and isinstance(sc.get("lines"), list):
+                flat.extend(sc["lines"])
+        raw_lines = flat
+    if not isinstance(raw_lines, list) or not raw_lines:
+        return False, "缺少 lines/scenes 台词或均为空"
     usable = [
         ln for ln in raw_lines
         if isinstance(ln, dict) and str(ln.get("text") or "").strip()
@@ -177,6 +184,9 @@ def push_version(episode: Any, source: str = "generated") -> int:
         "version": version,
         "lines": old_lines,
         "synopsis": str(old.get("synopsis") or ""),
+        # v2 场次制:快照带上场景与爽点地图,回退时整份还原
+        "scenes": old.get("scenes") if isinstance(old.get("scenes"), list) else [],
+        "payoff_map": old.get("payoff_map") if isinstance(old.get("payoff_map"), dict) else {},
         "line_count": len(old_lines),
         "source": source,
         "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -202,6 +212,8 @@ def version_list(episode: Any) -> list[dict]:
             "saved_at": str(v.get("saved_at") or ""),
             "synopsis": str(v.get("synopsis") or ""),
             "lines": v.get("lines") if isinstance(v.get("lines"), list) else [],
+            "scenes": v.get("scenes") if isinstance(v.get("scenes"), list) else [],
+            "payoff_map": v.get("payoff_map") if isinstance(v.get("payoff_map"), dict) else {},
         }
         for v in rows
     ]
