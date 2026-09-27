@@ -218,7 +218,7 @@ button.head { height: auto; margin-left: 0; padding: 0; border: 0; background: n
 }
 /* 概念行不再 nowrap 硬截,最多两行省略 */
 .dossier-row .dr-v.wrap {
-  white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  white-space: normal; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical;
 }
 
 .concept-edit { margin-top: 10px; }

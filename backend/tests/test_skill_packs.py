@@ -47,7 +47,7 @@ def test_skill_packs_seed_and_list(client):
     assert by_key["anime-shotcard-render"]["enabled"] is True
     assert by_key["drama_source_male"]["enabled"] is False
     assert by_key["drama_source_female"]["enabled"] is False
-    assert all(p["version"] == 1 and p["history"] == [] for p in builtin)
+    assert all(p["version"] >= 1 and p["history"] == [] for p in builtin)  # 版本可随官方升级推进
     # 幂等:重复拉取不重复种
     again = client.get("/api/skill-packs", headers=headers).json()
     assert len([p for p in again if p["is_builtin"]]) == len(builtin)

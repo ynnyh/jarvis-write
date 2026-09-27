@@ -146,9 +146,9 @@ def test_seeded_drama_packs_inject_all_four_nodes():
     draft = render_project_skill_block(db, book, "draft")
     polish = render_project_skill_block(db, book, "polish")
     assert "四件套" in idea and "扮猪吃虎" in idea
-    assert "爽点循环" in outline
-    assert "对话占比过半" in draft
-    assert "爽点兑现" in polish
+    assert "双爽点" in outline          # v2 剧本体工艺:章纲双爽点
+    assert "对话占七成" in draft and "打脸现场三件套" in draft  # v2:剧本体+示范
+    assert "至少两个" in polish          # v2 审校:爽点密度检查
     # 注入预算闸:单节点不超限
     assert all(len(b) <= 1500 for b in (idea, outline, draft, polish))
 
@@ -244,3 +244,42 @@ def test_create_plain_book_unchanged():
         body = r.json()
         assert body["mounted_packs"] == [] and body["audience"] == ""
         assert body["mode"] == "serial"
+
+
+# ---------- v2:官方包条目升级(未被用户改过的内置包随版本推进) ----------
+
+def test_builtin_pack_upgrade_for_untouched_pack():
+    """v1 已 seed 且从未被用户编辑的包:再跑 seed 升到 v2 条目,旧版进 history。"""
+    db = _db()
+    from app.engines.skills.packs import ensure_builtin_packs
+    ensure_builtin_packs(db)  # v2 种入(新库直接是新条目)
+    male = next(p for p in db.query(SkillPack).all() if p.pack_key == "drama_source_male")
+    # 模拟线上 v1 状态:压回旧条目再 seed,应升级回 v2
+    old_entries = [{"node": "draft", "kind": "directive",
+                    "directive": "漫剧源书正文口径:对话占比过半(旧版条目)。"}]
+    male.entries = old_entries
+    male.version = 1
+    male.history = []
+    db.commit()
+    ensure_builtin_packs(db)
+    db.refresh(male)
+    assert male.version == 2
+    joined = "".join(e.get("directive", "") for e in male.entries)
+    assert "对话占七成" in joined  # 新条目已就位
+    assert any("旧版条目" in str(h.get("entries")) for h in male.history)  # 旧版留痕
+
+
+def test_builtin_pack_upgrade_skips_user_edited():
+    """用户改过的包(history 非空):官方升级不覆盖,版本不动。"""
+    db = _db()
+    from app.engines.skills.packs import ensure_builtin_packs
+    ensure_builtin_packs(db)
+    male = next(p for p in db.query(SkillPack).all() if p.pack_key == "drama_source_male")
+    # 模拟用户编辑过:history 有记录
+    male.history = [{"version": 1, "entries": male.entries}]
+    male.version = 2
+    kept = str(male.entries)
+    db.commit()
+    ensure_builtin_packs(db)
+    db.refresh(male)
+    assert str(male.entries) == kept  # 未被覆盖

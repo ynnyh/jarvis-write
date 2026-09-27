@@ -540,7 +540,7 @@ async def chat(body: dict):
     )
     # 注入探针(docs/23 走查):确认 skill 包条目真的进了 prompt,打印到日志供断言
     if "创作 Skill" in prompt:
-        hit = [k for k in ("爽点循环", "对话占比过半", "四件套", "爽点兑现") if k in prompt]
+        hit = [k for k in ("双爽点", "对话占七成", "打脸现场三件套", "四件套", "文体示范") if k in prompt]
         print(f"[skill-probe] 注入命中: {hit} | prompt 长度: {len(prompt)}", flush=True)
     text = reply_for(prompt)
     if not body.get("stream"):

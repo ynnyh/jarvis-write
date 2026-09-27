@@ -353,7 +353,13 @@
 .scale-card .scale-desc { font-size: 12px; color: var(--text-2); margin-top: 2px; text-align: left; }
 
 /* 方案墙:三张卡并排(窄屏单列) */
-.plans-wall { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+/* 方案卡是内容密集卡(每套 7-8 个字段、每字段可达百字):多列会把每卡压到
+   300px 以下的瘦高条(820-950px 半屏窗口/平板实测 292px,读感=「被截断」)。
+   默认单列让卡片全宽可读;真宽屏(≥1000px)才放宽多列,且每卡保底 360px。 */
+.plans-wall { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 1000px) {
+  .plans-wall { grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
+}
 .plan-card {
   border: 1px solid var(--border); border-radius: 10px; padding: 12px;
   background: var(--surface-1); text-align: left; display: flex; flex-direction: column; gap: 8px;
@@ -364,7 +370,7 @@
 .plan-field { display: flex; gap: 8px; font-size: 13px; line-height: 1.55; }
 .plan-k { flex: 0 0 60px; color: var(--text-2); }
 .plan-v { flex: 1; }
-@media (max-width: 767px) { .plans-wall { grid-template-columns: 1fr; } }
+
 
 /* 打磨房字段 auto-grow(ConceptForge):height 由 JS 按 scrollHeight 撑高,
    这里只兜底 overflow 与行高,防移动端首行裁切(rows=1 时代的老毛病) */
