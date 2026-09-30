@@ -233,6 +233,107 @@ def _upgrade_head() -> None:
     logger.info("Alembic 迁移完成")
 
 
+def _sql_default_literal(col) -> str | None:  # noqa: ANN001 — Column 类型注解见函数体
+    """把列默认值翻成 ALTER ADD COLUMN 可用的**常量**默认;翻不了返回 None。
+
+    优先 server_default(迁移里就是这么写的),其次 python 标量默认。
+    注意 SQLite 对 ADD COLUMN 的限制:默认值必须是常量——CURRENT_TIMESTAMP、
+    可调用默认(datetime.utcnow / list)都不行,这里一概返回 None,
+    由调用方决定退化(时间戳列)还是跳过(其余,告警)。
+    """
+    sd = col.server_default
+    if sd is not None:
+        arg = sd.arg
+        if isinstance(arg, str):
+            return f"'{arg.replace(chr(39), chr(39) * 2)}'"
+        text_clause = getattr(arg, "text", None)
+        if isinstance(text_clause, str) and text_clause.upper().strip("() ") not in (
+            "CURRENT_TIMESTAMP", "CURRENT_DATE", "CURRENT_TIME",
+        ):
+            return text_clause  # 其余 sa.text(...) 字面量原样透传
+    pd = col.default
+    if pd is not None and pd.is_scalar:
+        v = pd.arg
+        if isinstance(v, bool):
+            return "1" if v else "0"
+        if isinstance(v, (int, float)):
+            return str(v)
+        if isinstance(v, str):
+            return f"'{v.replace(chr(39), chr(39) * 2)}'"
+    from sqlalchemy import JSON
+
+    if isinstance(col.type, JSON):
+        # JSON 列的工厂默认(dict/list/lambda)是纯函数,调用一次序列化成常量;
+        # 调不动(签名要上下文等)就退 '{}'——JSON 列缺省几乎都是空容器。
+        import json
+
+        payload = "{}"
+        if pd is not None and pd.is_callable:
+            try:
+                payload = json.dumps(pd.arg(), ensure_ascii=False, separators=(",", ":"))
+            except Exception:  # noqa: BLE001 — 工厂签名不合适就用兜底空容器
+                payload = "{}"
+        return f"'{payload.replace(chr(39), chr(39) * 2)}'"
+    return None
+
+
+def heal_missing_columns(target_engine=None) -> list[str]:
+    """把「模型已声明、库里还没有」的列补上(幂等,只加不删不改)。
+
+    为什么需要这道兜底:alembic 可能在某个历史版本上楔死——典型成因是
+    create_all 曾把表建到比版本戳新(迁移失败回退时只建了表),之后那条
+    create_table 迁移每次启动都报 already exists,**永远走不到后面的加列迁移**。
+    回退路径里 create_all 只建缺失的表、不补已有表的缺列,于是「表都在、
+    新列永远建不出来」,ORM 查询 500,界面表现为进不到首页。本函数按模型
+    元数据与库内实际列做差集,纯 ALTER ADD COLUMN 补齐(2026-09-30 在
+    本地 19 章真实书库上实测楔死过一次,九列缺失)。
+
+    语义约束:NOT NULL 列必须能翻出 SQL 默认值才补(SQLite 的要求),翻不出
+    的告警跳过——宁可少补一列让人看见日志,不写坏 DDL。
+    返回补上的 "表.列" 清单;空库/齐全库返回 []。
+    """
+    from app.db.base import Base
+    import app.db.models  # noqa: F401 — 注册全部模型
+
+    eng = target_engine or engine
+    insp = inspect(eng)
+    added: list[str] = []
+    with eng.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not insp.has_table(table.name):
+                continue  # 表都不在,交给 create_all 按 whole 建出
+            existing = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name in existing:
+                    continue
+                coltype = col.type.compile(eng.dialect)
+                suffix = ""
+                if not col.nullable:
+                    literal = _sql_default_literal(col)
+                    if literal is None:
+                        from sqlalchemy import DateTime
+
+                        if isinstance(col.type, DateTime):
+                            # SQLite 不许 ADD COLUMN 带非常量默认,时间戳列退化成
+                            # 可空补列:查询立刻能用,新写入由 ORM 的 python 默认补值,
+                            # 历史行的 NULL 留给后续正常迁移收口。
+                            suffix = ""
+                        else:
+                            logger.warning(
+                                "自愈补列跳过 %s.%s:NOT NULL 且无可翻译的常量默认,需人工迁移",
+                                table.name, col.name,
+                            )
+                            continue
+                    else:
+                        suffix = f" NOT NULL DEFAULT {literal}"
+                conn.execute(text(
+                    f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {coltype}{suffix}'
+                ))
+                added.append(f"{table.name}.{col.name}")
+                logger.info("自愈补列:%s.%s", table.name, col.name)
+    return added
+
+
 def run_alembic_migrations() -> None:
     """启动时调用:运行 Alembic 数据库迁移。
 

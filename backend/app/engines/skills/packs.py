@@ -29,7 +29,14 @@ HISTORY_KEEP = 10           # 每包保留的编辑历史版本数
 VALID_KINDS = {"directive", "param", "ban", "format"}
 VALID_NODES = {"idea", "outline", "draft", "polish", "shots", "render"}
 
+# 线的标识:既是包的 scope 值,也决定 active_packs 查哪条线的包。
+# 门禁 test_pack_scopes_are_known 拿它当白名单——新增一条线必须先加进来,
+# 否则包会写了个谁都不认的 scope 静默永不生效。
+VALID_SCOPES = {"novel", "anime", "drama", "promo", "clips", "birthday", "series"}
+
 ANIME_SHOTCARD_PACK_KEY = "anime-shotcard-render"
+DRAMA_SHOTCARD_PACK_KEY = "drama-shotcard-render"
+CLIPS_COMPACT_PACK_KEY = "clips-compact-render"
 
 # ---- 首批官方包(docs/21 §4;seed 幂等,用户改过的一律不覆盖) ----
 BUILTIN_PACKS: list[dict] = [
@@ -37,7 +44,10 @@ BUILTIN_PACKS: list[dict] = [
         "pack_key": "storyboard-basics",
         "name": "分镜功底包",
         "description": "分镜工序的工艺下限:单镜一个主动作、时长纪律、景别交替、镜间衔接。作用于分镜生成。",
-        "scope": ["anime"],
+        # 三条出片线的分镜在犯同一个错:一格里塞多个动作、镜与镜硬跳。
+        # 那是「正确性下限」不是「审美偏好」——写错就会出片跳戏,所以默认开、
+        # 三线共用一份(而不是 drama/promo 各抄一个改版,抄一遍口径必分叉)。
+        "scope": ["anime", "drama", "promo"],
         "entries": [
             {"node": "shots", "kind": "directive",
              "directive": "每镜只安排一个主动作,把动作写到「怎么做」(肢体/视线/节奏);"
@@ -59,6 +69,109 @@ BUILTIN_PACKS: list[dict] = [
                           "(定妆照或上一镜末帧);替换旧的分段长文模式。"},
         ],
     },
+    # ==================== 出片线三包(docs/25 §2) ====================
+    # 共同约定:**内容口径类包默认 enabled=False**,靠用户到「设置 → Skill 包」
+    # 显式开启(或书级 mounted_packs 挂载)。理由与爽文双包同源——包一开就改写
+    # 生成结果,默认开等于让老用户无预警换口径;而"看得见、改得了、关得掉"
+    # 是 docs/21 给这套机制的承诺,兑现它就得默认不打扰。
+    # 例外是**工艺收口类**包(下面 drama-shotcard-render / clips-compact-render):
+    # 它们要么只是把已经正确的口径单点化,要么是作者 2026-09-28 明确拍板要默认开的。
+    {
+        "pack_key": DRAMA_SHOTCARD_PACK_KEY,
+        "name": "漫剧镜头卡渲染工艺包",
+        "description": "漫剧渲染工艺的单点化:一格一卡 + 身份靠锚段与首帧图钉死 + 负面词逐格独立。"
+                       "关闭时回落分段长文工艺(仅提示词形态不同,不影响导出)。",
+        "scope": ["drama"],
+        "entries": [
+            {"node": "render", "kind": "format",
+             "directive": "一格一卡:每格只出一个镜头、只写一个主动作。身份靠锚段与首帧图钉死——"
+                          "运动指令里一个外貌词都不要写(长相已由首帧图定死,复述会让模型"
+                          "重画脸、人物一致性当场报废)。负面词逐格独立:共享基座 + 本格规避。"},
+        ],
+    },
+    {
+        "pack_key": "drama-scene-punch",
+        "name": "漫剧场次爽点包",
+        "description": "只管「能不能拍」:爽点落在哪一句台词/哪一个动作上(要能标秒)、"
+                       "冲突双方各自的短句、场末留未解决的麻烦。与爽文包的分工见下。",
+        "scope": ["drama"],
+        # 内容口径类默认关(docs/25 §2.2):包一开就改写生成结果,默认开等于让
+        # 老用户无预警换口径;用户在「设置 → Skill 包」显式开启。
+        "enabled": False,
+        # 与 drama_source_* 爽文包不重复:爽文包管小说文体(对话七成/打脸三件套/face-slap),
+        # 本包管分场后的可拍性(标秒/禁心理独白/禁特效写法)。两者可同时挂载。
+        "entries": [
+            {"node": "draft", "kind": "directive",
+             "directive": "每场戏必须写明三件事:①爽点落在哪一句台词或哪一个动作上(要能标出秒数)"
+                          "②冲突双方是谁、双方各自的短句台词 ③场末留一个未解决的麻烦,禁套话收尾。"},
+            {"node": "draft", "kind": "param",
+             "params": {"单场时长": "≤50 秒", "每场爽点数": "1 个(多则都不响)",
+                        "可拍性": "禁心理独白/禁环境渲染段/禁必须特效才能实现的写法"}},
+        ],
+    },
+    {
+        "pack_key": "promo-hook-3s",
+        "name": "宣传片前3秒钩子包",
+        "description": "口播类短视频的开工纪律:前 3 秒必有钩子、每镜一个信息点、按语速配字数。",
+        "scope": ["promo"],
+        "enabled": False,
+        "entries": [
+            {"node": "outline", "kind": "directive",
+             "directive": "前 3 秒必须有一个钩子:反常识结论/具体数字/现场冲突三选一,"
+                          "不许用背景铺垫开场。每个镜头只推进一个信息点,不许一句话塞两个意思。"},
+            {"node": "outline", "kind": "param",
+             "params": {"前3秒钩子": "必有", "单镜信息点": "1 个", "解说词语速": "≤4.5 字/秒"}},
+        ],
+    },
+    {
+        "pack_key": "promo-landmark-guard",
+        "name": "宣传片素材点红线包",
+        "description": "解说词里的事实必须能在素材点里找到出处——治编造数字与机构名。",
+        "scope": ["promo"],
+        "enabled": False,
+        "entries": [
+            {"node": "draft", "kind": "directive",
+             "directive": "解说词里的每一个事实、数字、机构名、时间,必须能在【素材点】里找到出处;"
+                          "找不到就改成不依赖具体事实的表述,禁编造。素材点为空时只写观点不写数据。"},
+            {"node": "draft", "kind": "ban",
+             "ban_list": ["未提供出处的具体数字", "未提供出处的机构或产品名", "绝对化用语(第一/唯一/最)"]},
+        ],
+    },
+    {
+        "pack_key": "clips-emotion-curve",
+        "name": "情绪短片情绪曲线包",
+        "description": "一个本子只讲一个情绪转折:前段压抑→中段爆发→尾段留钩,峰值落在 60% 之后。",
+        "scope": ["clips"],
+        "enabled": False,
+        "entries": [
+            {"node": "draft", "kind": "param",
+             "params": {"情绪曲线": "前1/3压抑 → 中段爆发 → 尾段留钩",
+                        "单本时长": "15/30 秒", "情绪峰值出现点": "≥60% 处"}},
+            {"node": "draft", "kind": "directive",
+             "directive": "一个本子只讲一个情绪转折,禁平铺直叙;结尾停在最锋利的一句台词上,不收总结。"},
+        ],
+    },
+    # 作者 2026-09-28 拍板(甲方案):默认开,把视频提示词从「只设下限、上不封顶」
+    # 改成「紧凑封顶 + 必填五项清单」。详见 docs/25 §3.2 与 docs/24 裁定。
+    # 为什么默认开而上面几个默认关:这条改的是一条**已被实测证伪**的口径
+    # (作者原话「提示词很长,生成的内容很差」),且与 clips 自己的台词口径
+    # 「宁少勿多」直接冲突——留着等于让同一份提示词里两个相反指令打架。
+    # 仍保留关闭入口:用户可回落到旧长文口径自己对比。
+    {
+        "pack_key": CLIPS_COMPACT_PACK_KEY,
+        "name": "短片紧凑封顶渲染包",
+        "description": "视频提示词由「只设下限、上不封顶」改为「紧凑封顶 + 必填五项清单」。"
+                       "细节靠字段化清单保,不靠字数保。关闭即回落旧长文口径。",
+        "scope": ["clips"],
+        "entries": [
+            {"node": "render", "kind": "format",
+             "directive": "画面描述紧凑封顶,不设下限:宁少勿多——视频模型对长提示词是抽样执行,"
+                          "写得越满丢得越多,凑字数只会稀释有效指令。必写五项缺一不可:"
+                          "主体动作 / 景别运镜 / 光线氛围 / 人物一致性 / 结尾定格。"},
+            {"node": "render", "kind": "param",
+             "params": {"画面描述字数": "封顶(见 length_guide)", "必填项": "5 项缺一不可"}},
+        ],
+    },
     # ---- 漫剧源书爽文双包(docs/23 §3.2)。互斥挂载:开书选频道时由建书流程
     # 按书的 audience 挂其一(mounted_packs);全局默认停用,普通书零污染。
     # 公共骨架(outline/draft/polish)两包同文,刻意重复:改男频包不污染女频包。
@@ -67,7 +180,7 @@ BUILTIN_PACKS: list[dict] = [
         "name": "男频爽文包(漫剧源书)",
         "description": "漫剧源书·男频口径:点子按爆款四件套出,章纲按爽点循环编,"
                        "正文对话密集可拍,审校查爽点兑现。选「写漫剧剧本·男频」开书时自动挂载。",
-        "scope": ["novel"],
+        "scope": ["novel", "drama"],
         "enabled": False,
         "entries_version": 2,  # 剧本体工艺(双爽点/打脸三件套/文体示范):v1→v2 官方升级
         "entries": [
@@ -114,7 +227,7 @@ BUILTIN_PACKS: list[dict] = [
         "name": "女频爽文包(漫剧源书)",
         "description": "漫剧源书·女频口径:点子按爆款四件套出,章纲按爽点循环编,"
                        "正文对话密集可拍,审校查爽点兑现。选「写漫剧剧本·女频」开书时自动挂载。",
-        "scope": ["novel"],
+        "scope": ["novel", "drama"],
         "enabled": False,
         "entries_version": 2,  # 剧本体工艺(双爽点/打脸三件套/文体示范):v1→v2 官方升级
         "entries": [

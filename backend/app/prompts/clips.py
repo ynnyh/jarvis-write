@@ -155,6 +155,8 @@ CLIPS_TAKES_PROMPT = """\
 {context_block}
 先只做两件事:**定一套三条本子共用的画风**,再给 **3 条切入方向**。
 这一步不要写分镜、不要写提示词(下一步再展开)。
+
+{skill_block}
 {structure_rules}
 {cliche_blacklist}{feedback_block}
 严格按 JSON 输出(不要 markdown 围栏,不要任何解释):
@@ -211,6 +213,8 @@ def takes_rule(mode: str) -> str:
 # =============== ② 单条切入展开成分镜(三发并行) ===============
 CLIPS_EXPAND_PROMPT = """\
 你是爆款情绪短视频的导演兼分镜师。
+
+{skill_block}
 {context_block}
 {structure_rules}
 {cliche_blacklist}

@@ -85,11 +85,15 @@ class AdminUserOut(BaseModel):
 
 
 @router.get("/users", response_model=list[AdminUserOut])
-async def list_users(
+def list_users(
     db: Session = Depends(get_db),
     _admin: User = Depends(get_current_admin),
 ):
-    """全部用户 + 项目数 + LLM 用量汇总(llm_usage 按 user_id 记账)。"""
+    """全部用户 + 项目数 + LLM 用量汇总(llm_usage 按 user_id 记账)。
+
+    同步 def(不是 async):里面是同步 SQLAlchemy,写成 async 会在事件循环里
+    直接跑 SQL,把整个服务卡住。FastAPI 会把同步路由丢进 threadpool。
+    """
     users = list(db.query(User).order_by(User.id))
     project_counts = dict(
         db.query(Project.user_id, func.count(Project.id))

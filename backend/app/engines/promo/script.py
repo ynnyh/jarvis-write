@@ -11,6 +11,7 @@ from app.engines.promo.assets import _brief_block
 from app.engines.promo.common import clip
 from app.llm.router import Task, get_adapter_for
 from app.prompts.promo import PROMO_SCRIPT_PROMPT
+from app.engines.skills.packs import render_skill_block
 
 _MAX_LINES = 24
 
@@ -26,6 +27,9 @@ async def write_script(db: Session, plan: PromoPlan, progress=lambda s: None) ->
     progress("AI 正在按简报写解说词(事实只用素材点)…")
     adapter = get_adapter_for(Task.PROMO_SCRIPT, timeout=300)
     prompt = PROMO_SCRIPT_PROMPT.format(
+        # 创作 Skill 包注入(docs/25 §2.4):按工序节点取生效包,无包时是空串。
+        skill_block=render_skill_block(db, scope="promo", node="draft"),
+
         duration_s=plan.duration_s,
         subject=plan.subject.strip() or "(未定)",
         brief_block=_brief_block(plan),

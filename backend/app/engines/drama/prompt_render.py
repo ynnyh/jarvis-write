@@ -24,8 +24,10 @@ from app.engines.drama.common import (
 from app.engines.drama.gender import gender_paren, gender_tag
 from app.engines.drama.video import motion_fallback
 from app.engines.media.anchors import ensure_style_anchors, merge_negative
+from app.engines.media.negative import ensure_base
 from app.llm.router import Task, get_adapter_for
 from app.prompts.drama import SHOT_PROMPT_PROMPT
+from app.engines.skills.packs import render_project_skill_block
 
 _CHUNK = 8
 
@@ -123,7 +125,9 @@ def _write_prompts(
     # 兜底注入:画风锚 + 角色锚(中文);英文画风锚;负面词基座(口径见 media.anchors)
     prompt_cn, prompt_en = ensure_style_anchors(prompt_cn, prompt_en, style.style_cn, style.style_en)
     prompt_cn = _ensure_character_anchors(shot, prompt_cn, char_by_name, char_by_alias)
-    negative = merge_negative(negative, style.negative)
+    # 缺了才补共享基座(media/negative.ensure_base):风格卡里作者自己写的
+    # 负面词更贴合这片子,不该被基座覆盖或加权(重复否定会过度压制主体)。
+    negative = ensure_base(merge_negative(negative, style.negative), "drama")
     shot.prompt_cn = prompt_cn
     shot.prompt_en = prompt_en
     shot.negative = negative
@@ -173,6 +177,9 @@ async def render_shot_prompts(
             chunk, char_by_name, char_by_alias, scene_by_name
         )
         prompt = SHOT_PROMPT_PROMPT.format(
+        # 创作 Skill 包注入(docs/25 §2.4):按工序节点取生效包,无包时是空串。
+        skill_block=render_project_skill_block(db, project, "render", scope="drama"),
+
             style_cn=style.style_cn,
             style_en=style.style_en,
             style_negative=style.negative,
@@ -219,6 +226,9 @@ async def render_single_shot_prompt(
     )
     adapter = get_adapter_for(Task.DRAMA_PROMPT, timeout=300)
     prompt = SHOT_PROMPT_PROMPT.format(
+        # 创作 Skill 包注入(docs/25 §2.4):按工序节点取生效包,无包时是空串。
+        skill_block=render_project_skill_block(db, project, "render", scope="drama"),
+
         style_cn=style.style_cn,
         style_en=style.style_en,
         style_negative=style.negative,

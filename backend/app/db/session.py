@@ -9,6 +9,8 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+import os
+
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -26,11 +28,36 @@ _connect_args = (
     else {}
 )
 
+# ---- 连接池:必须是显式的,不能吃 SQLAlchemy 默认值 ----
+#
+# 为什么这是 P0(2026-09-28 压测实测,scripts/loadcheck.py):
+# 不传 pool_size / max_overflow 时 SQLAlchemy 默认是 5 + 10 = **全站 15 条连接**。
+# 而每个已鉴权请求光 `get_current_user` 就要 `db.get(User)` 占一条,于是 50 并发
+# 一上来就 30/50 个请求在排队等连接,抛:
+#   sqlalchemy.exc.TimeoutError: QueuePool limit of size 5 overflow 10 reached,
+#   connection timed out, timeout 30.00
+# 更糟的是这些端点是 `async def` 里跑同步 SQLAlchemy —— **等连接发生在事件循环
+# 线程上**,一卡就是全站卡死:压测里连零 DB 的 /api/health 都跟着 20s 超时。
+#
+# 给多少:SQLite 读并发不受写锁限制(WAL),这里要抗的是「同时等连接」的请求数。
+# 20 常驻 + 40 突发 ≈ 能扛住一台机器上几十个并发用户;再高就该换 Postgres,
+# 而不是继续调这个数字(单写者的天花板在 SQLite 本身,不在连接池)。
+POOL_SIZE = int(os.environ.get("DB_POOL_SIZE", "20"))
+MAX_OVERFLOW = int(os.environ.get("DB_MAX_OVERFLOW", "40"))
+POOL_TIMEOUT = int(os.environ.get("DB_POOL_TIMEOUT", "30"))
+POOL_RECYCLE = int(os.environ.get("DB_POOL_RECYCLE", "1800"))
+
 engine = create_engine(
     settings.database_url,
     connect_args=_connect_args,
     echo=False,
     future=True,
+    pool_size=POOL_SIZE,
+    max_overflow=MAX_OVERFLOW,
+    pool_timeout=POOL_TIMEOUT,
+    # 回收长连接:SQLite 文件句柄与中间代理的空闲连接都可能过期
+    pool_recycle=POOL_RECYCLE,
+    pool_pre_ping=True,
 )
 
 if _is_sqlite:

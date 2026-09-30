@@ -39,6 +39,8 @@ PROMO_BRIEF_PROMPT = """\
 你是宣传片策划总监。下面是你和客户的研讨记录,请把共识收敛成一份**创作简报**——
 它是后续解说词与分镜的契约,写得越准,片子越不容易跑偏。
 
+{skill_block}
+
 【主题】{subject}
 【角度】{angles_block}
 【时长】{duration_s} 秒 |【画风方向】{direction_block}
@@ -116,6 +118,8 @@ PROMO_SCRIPT_PROMPT = """\
 你是宣传片的文案指导,写过《航拍中国》式的解说词。根据锁定的创作简报写这条 {duration_s} 秒宣传片的
 **解说词脚本**——旁白为主,每句都要有对应的可拍画面。
 
+{skill_block}
+
 【主题】{subject}
 【创作简报(契约,按此执行)】
 {brief_block}
@@ -140,6 +144,8 @@ PROMO_SCRIPT_PROMPT = """\
 # =============== 分镜 ===============
 PROMO_STORYBOARD_PROMPT = """\
 你是宣传片分镜师。把解说词脚本拆成分镜:每格一张画面(之后生成静帧并加轻动),合计贴近 {duration_s} 秒。
+
+{skill_block}
 
 【时长】{duration_s} 秒
 【可用场景】(scene_name 从这里选){landmark_names}
@@ -167,6 +173,8 @@ PROMO_STORYBOARD_PROMPT = """\
 PROMO_SHOT_PROMPT_PROMPT = """\
 你是 AI 绘图/视频提示词工程师,为宣传片每一格分镜写即拿即用的提示词。
 锚段必须逐字保留,这是全片画风与场景统一的命门——不许改写、不许意译。
+
+{skill_block}
 
 【画风锚(中文,逐字包含进每条 prompt_cn)】{style_cn}
 【画风锚(英文,逐字包含进每条 prompt_en)】{style_en}

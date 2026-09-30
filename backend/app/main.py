@@ -15,11 +15,13 @@ import logging
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 # Windows 控制台默认 GBK,强制 stdout/stderr 用 UTF-8,避免中文日志乱码
 for _stream in (sys.stdout, sys.stderr):
@@ -116,13 +118,19 @@ def _assert_local_safe() -> None:
 
 
 def _assert_secure_config() -> None:
-    """生产环境(APP_ENV=prod)拒绝以弱默认 JWT 密钥启动。
+    """生产环境(APP_ENV=prod)拒绝以弱默认 JWT 密钥 / 弱默认管理员口令启动。
 
-    弱 jwt_secret 可被任何人用来伪造任意 user_id 的 JWT → 接管账号、读所有人的
-    小说与 per-user key。docker-compose 已用 ${JWT_SECRET:?} 强制,此处是「不走
-    compose、裸 uvicorn/docker run 起服务」时的兜底。dev 放行,不打扰本地开发/测试。
+    两处都是"人人都会先试一次"的凭据,裸奔即等于把钥匙挂在门上:
+    - 弱 jwt_secret 可被任何人用来伪造任意 user_id 的 JWT → 接管账号、读所有人的
+      小说与 per-user key;docker-compose 已用 ${JWT_SECRET:?} 强制,此处是「不走
+      compose、裸 uvicorn/docker run 起服务」时的兜底。
+    - 弱 admin_password(admin/admin12345)是初始管理员口令,任何扫到的人第一个
+      登录就进管理后台。
+
+    dev 放行,不打扰本地开发/测试。口令默认值取 Settings 的字段元数据,不在这里
+    复写一份字符串——两处漂移就等于这条自检形同虚设。
     """
-    from app.config import DEFAULT_JWT_SECRET, get_settings
+    from app.config import DEFAULT_JWT_SECRET, Settings, get_settings
 
     settings = get_settings()
     if settings.app_env != "dev" and settings.jwt_secret == DEFAULT_JWT_SECRET:
@@ -130,6 +138,46 @@ def _assert_secure_config() -> None:
             "JWT_SECRET 仍是弱默认值,拒绝在非 dev 环境启动:请用环境变量设一个随机长串"
             "(否则任何人都能伪造 JWT 接管账号)。见 docs/06-改造方案。"
         )
+    default_admin_password = Settings.model_fields["admin_password"].default
+    if settings.app_env != "dev" and settings.admin_password == default_admin_password:
+        raise RuntimeError(
+            "ADMIN_PASSWORD 仍是弱默认值,拒绝在非 dev 环境启动:请用环境变量设一个强口令"
+            "(初始管理员 admin 的默认口令人人都会试,不覆盖等于把管理后台敞开)。见 docs/06-改造方案。"
+        )
+
+
+# 单次请求体上限:整本旧书导入(engine/book_import.MAX_IMPORT_BYTES)120MB 量级,
+# 留一点余量给 multipart 包裹。超过就直接 413,不把超大 body 读进内存。
+MAX_REQUEST_BODY_BYTES = 128 * 1024 * 1024
+
+
+class MaxBodySizeMiddleware(BaseHTTPMiddleware):
+    """请求 Content-Length 超限直接 413:在读 body 之前就拒。
+
+    为什么放在全局而不是逐端点:端点自己读 body(`await file.read()` /
+    `await request.body()`)时,越大的请求越容易被"读完了才发现太大"——
+    先占满内存再报错。除了全局这道总闸,JSON 导入等端点还有更严的口径,
+    由端点给更具体的中文提示。
+    """
+
+    def __init__(self, app, max_bytes: int = MAX_REQUEST_BODY_BYTES) -> None:
+        super().__init__(app)
+        self._max_bytes = max_bytes
+
+    async def dispatch(self, request: Request, call_next: Any) -> Any:
+        raw = request.headers.get("content-length")
+        if raw:
+            try:
+                size = int(raw)
+            except ValueError:  # 畸形头:不在这误伤,交给下游自己判
+                size = 0
+            if size > self._max_bytes:
+                mb = self._max_bytes // (1024 * 1024)
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": f"请求体超过 {mb}MB 上限,请压缩或拆分后重试"},
+                )
+        return await call_next(request)
 
 
 @asynccontextmanager
@@ -141,6 +189,8 @@ async def lifespan(app: FastAPI):
        - 现有用户(pre-Alembic)自动 stamp 到基线,不重复建表
        - Alembic 失败时不阻断,回退到 create_all 兜底
     2. Base.metadata.create_all —— 安全兜底,确保缺失的表被建出
+       create_all 只建缺失的表、不补已有表的缺列;alembic 楔死时新列会永远
+       建不出来,所以紧跟着 heal_missing_columns 把缺列补齐(幂等,只加不删)
     3. app.migrate.run_migrations —— legacy 数据迁移(建 admin/归属 orphan/
        加密 key/provider_settings→configs 等数据逻辑),全部幂等
     """
@@ -151,11 +201,21 @@ async def lifespan(app: FastAPI):
     run_alembic_migrations()
     logger.info("建表中(SQLite)...")
     Base.metadata.create_all(bind=engine)
+    from app.db.migration import heal_missing_columns
+    healed = heal_missing_columns()
+    if healed:
+        logger.warning(
+            "自愈补列 %d 处(alembic 版本戳落后于实际 schema 的兜底,详见"
+            " app/db/migration.py::heal_missing_columns):%s",
+            len(healed), ", ".join(healed),
+        )
     logger.info("建表完成,运行多用户迁移...")
     from app.migrate import run_migrations
     run_migrations()
-    from app.jobs import cleanup_stuck_jobs
+    from app.jobs import cleanup_stuck_jobs, purge_old_jobs
     cleanup_stuck_jobs()
+    # 历史任务清洗放标失败之后:卡住不动的先标 error,再一起按保留期删。
+    purge_old_jobs()
     # AI 味检测热更配置(管理端在线调过的权重/门槛)载进内存;失败不拦启动
     from app.api.admin import load_ai_flavor_config
     load_ai_flavor_config()
@@ -175,6 +235,10 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    # 请求体总闸(最内层):CORS 在它外面,413 响应照样带跨域头,前端能读到提示。
+    # add_middleware 是"后加的在外层",所以这里先加,让它紧贴路由。
+    app.add_middleware(MaxBodySizeMiddleware, max_bytes=MAX_REQUEST_BODY_BYTES)
 
     # local(桌面)模式:前端由 Tauri 壳内嵌或后端自托管,放行 tauri 与本机源;
     # server 模式:放行本地开发前端 + Capacitor 安卓壳(默认源是 https://localhost,
@@ -213,7 +277,6 @@ def create_app() -> FastAPI:
     # 域名重绑定到 127.0.0.1 后发"同源"请求(Host 头是攻击者域名),CORS 白名单
     # 挡不住。校验 Host 必须是本机回环,否则 403——rebinding 请求进不来。
     if settings.is_local:
-        from fastapi import Request
         from fastapi.responses import PlainTextResponse
 
         @app.middleware("http")

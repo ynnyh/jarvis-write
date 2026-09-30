@@ -1,8 +1,9 @@
 # tests/test_config_security.py
 # -*- coding: utf-8 -*-
-"""P1-⑤ 启动自检:生产环境拒绝以弱默认 JWT 密钥启动(非 compose 启动的兜底)。
+"""P1-⑤ 启动自检:生产环境拒绝以弱默认 JWT 密钥 / 弱默认管理员口令启动。
 
-弱 jwt_secret 可被伪造任意 user_id 的 token 接管账号,故 APP_ENV=prod 下用默认值
+弱 jwt_secret 可被伪造任意 user_id 的 token 接管账号;弱 admin_password 是初始
+管理员口令(admin/admin12345),人人都会先试一次。故 APP_ENV=prod 下用默认值
 即拒启动;dev(默认,含本测试与全部单测)放行,不打扰本地开发。
 """
 from __future__ import annotations
@@ -29,7 +30,8 @@ def test_prod_accepts_custom_secret():
 
     settings = get_settings()
     with patch.object(settings, "app_env", "prod"), \
-         patch.object(settings, "jwt_secret", "a-long-random-production-secret-xyz"):
+         patch.object(settings, "jwt_secret", "a-long-random-production-secret-xyz"), \
+         patch.object(settings, "admin_password", "a-strong-admin-pw-xyz"):
         _assert_secure_config()  # 不抛
 
 

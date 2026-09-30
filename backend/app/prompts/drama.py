@@ -169,6 +169,8 @@ EPISODE_PLAN_PROMPT = """\
 下面是这部小说连续若干章的结构化素材(蓝图+节拍,不是全文),
 请把它们切分成漫剧的「集」:每集 {duration_target_s} 秒左右,竖屏,独立成章又环环相扣。
 
+{skill_block}
+
 【书名】{title}
 【类型】{genre}
 【改编模式】{mode_desc}
@@ -202,6 +204,8 @@ EPISODE_PLAN_PROMPT = """\
 EPISODE_SCRIPT_PROMPT = """\
 你是竖屏漫剧编剧。请把下面这一集的规划写成可执行的**场次制剧本**:后续会按剧本拆分镜,
 所以每句台词/旁白都要有对应的「可拍画面」。
+
+{skill_block}
 
 【书名】{title}
 【本集信息】第 {ep_index} 集《{ep_title}》| 模式:{mode_desc} | 目标时长 {duration_target_s} 秒
@@ -258,6 +262,8 @@ EPISODE_SCRIPT_PROMPT = """\
 STORYBOARD_PROMPT = """\
 你是漫剧分镜师。请把下面这一集的剧本拆成分镜:每一格是一张画面(之后会生成
 静帧图并轻微动起来),合计时长要贴近本集目标时长。
+
+{skill_block}
 
 【本集信息】第 {ep_index} 集《{ep_title}》| 目标时长 {duration_target_s} 秒 | 镜头数上限 {max_shots} 格
 【可用场景】(分镜的 scene_name 从这里选){scene_names}
@@ -404,6 +410,8 @@ SHOT_PROMPT_PROMPT = """\
 并顺带写一条「这一格怎么动」——后面那一步要把静帧丢进图生视频,靠它动起来。
 下面先给你本片的统一锚段(画风/出场角色/场景),它们必须逐字出现在对应提示词里,
 这是全片画风与人物一致性的关键——不许改写、不许意译锚段内容。
+
+{skill_block}
 
 【画风锚(中文,逐字包含进每条 prompt_cn)】{style_cn}
 【画风锚(英文,逐字包含进每条 prompt_en)】{style_en}

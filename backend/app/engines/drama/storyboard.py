@@ -26,6 +26,7 @@ from app.engines.consistency.extractor import parse_llm_json
 from app.engines.drama.common import coerce_int, episode_dict, shots_payload
 from app.llm.router import Task, get_adapter_for
 from app.prompts.drama import STORYBOARD_PROMPT
+from app.engines.skills.packs import render_project_skill_block
 
 # 镜头数上限:按「每格最短 1 秒」算够不够铺满目标时长,再夹在 [8, 120] 内
 # (下限保证短集也有基本镜头量,上限防 LLM 抽风吐几百格把一个调用打崩)。
@@ -91,6 +92,9 @@ async def build_storyboard(
 
     adapter = get_adapter_for(Task.DRAMA_STORYBOARD, timeout=300)
     prompt = STORYBOARD_PROMPT.format(
+        # 创作 Skill 包注入(docs/25 §2.4):按工序节点取生效包,无包时是空串。
+        skill_block=render_project_skill_block(db, project, "shots", scope="drama"),
+
         ep_index=episode.ep_index,
         ep_title=episode.title,
         duration_target_s=episode.duration_target_s,

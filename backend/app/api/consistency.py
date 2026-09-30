@@ -354,10 +354,15 @@ def _character_out(db: Session, project_id: int, ent: Entity, outlines: list[Out
 
 
 @router.get("/characters", response_model=CharactersOut)
-async def list_characters(
+def list_characters(
     project_id: int,
     db: Session = Depends(get_db),
 ):
+    """实体清单 + 每个角色的大纲上下文。
+
+    同步 def(不是 async):整条链是一次同步 SQL 聚合(实体全表 + 全量大纲),
+    写成 async 会占着事件循环跑 SQL。FastAPI 自动丢 threadpool,行为不变。
+    """
     get_project_or_404(db, project_id)
     entities = (
         db.query(Entity)
@@ -408,7 +413,7 @@ _TRACK_LIMIT = 15
 
 
 @router.get("/facts-timeline", response_model=FactsTimelineOut)
-async def facts_timeline(
+def facts_timeline(
     project_id: int,
     db: Session = Depends(get_db),
 ):
@@ -417,6 +422,9 @@ async def facts_timeline(
     「第 N 章时他是什么状态」的可视化版(与故事圣经·时间机同源同数据):
     区间条 = valid_from→valid_until,开区间画到 max_chapter。
     轨道按当前有效事实数排序,最多 15 条,塞不下靠 other_entities_count 提示。
+
+    同步 def(不是 async):要拉全量大纲 + 全量实体 + 全量事实做聚合,
+    同步 SQL 不该占着事件循环跑。FastAPI 自动丢 threadpool,行为不变。
     """
     get_project_or_404(db, project_id)
     outlines = db.query(Outline).filter(Outline.project_id == project_id).all()

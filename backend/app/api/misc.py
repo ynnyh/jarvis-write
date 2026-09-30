@@ -9,6 +9,10 @@ GET /api/projects/{id}/export/epub    整本导出 epub
 GET /api/projects/{id}/export/md      整本导出 Markdown
 GET /api/projects/{id}/export/docx    整本导出 Word(中文排版)
 GET /api/projects/{id}/export/chapters-zip  按章拆成多个 txt 打包 zip
+
+导出类路由一律是同步 def:内部拉全书正文 + 打包(zip/epub/docx 都是纯 CPU 的
+同步活儿),写成 async 会在事件循环里直接跑同步 SQL 与压缩,把整个服务卡住。
+FastAPI 会把同步路由丢进 threadpool 执行,行为不变。
 """
 from __future__ import annotations
 
@@ -282,7 +286,7 @@ def _disposition(project: Project, ext: str, suffix: str = "") -> str:
 
 
 @router.get("/api/projects/{project_id}/export/txt")
-async def export_txt(project_id: int, db: Session = Depends(get_db)):
+def export_txt(project_id: int, db: Session = Depends(get_db)):
     project, items = _book(db, project_id)
     parts = [f"《{project.title}》\n"]
     for title, text in items:
@@ -296,7 +300,7 @@ async def export_txt(project_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/api/projects/{project_id}/export/epub")
-async def export_epub(project_id: int, db: Session = Depends(get_db)):
+def export_epub(project_id: int, db: Session = Depends(get_db)):
     """最小可用 epub(纯标准库 zip 打包,无外部依赖)。"""
     project, items = _book(db, project_id)
 
@@ -393,7 +397,7 @@ async def export_epub(project_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/api/projects/{project_id}/export/md")
-async def export_md(project_id: int, db: Session = Depends(get_db)):
+def export_md(project_id: int, db: Session = Depends(get_db)):
     """整本导出 Markdown:书名做一级标题,每章做二级标题。"""
     project, items = _book(db, project_id)
     parts = [f"# 《{project.title}》\n"]
@@ -409,7 +413,7 @@ async def export_md(project_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/api/projects/{project_id}/export/chapters-zip")
-async def export_chapters_zip(project_id: int, db: Session = Depends(get_db)):
+def export_chapters_zip(project_id: int, db: Session = Depends(get_db)):
     """按章拆成多个 txt 打包 zip,方便分章发布。文件名带章号便于排序。"""
     project, items = _book(db, project_id)
     buf = io.BytesIO()
@@ -436,7 +440,7 @@ def _set_cjk(run, font_name: str = "宋体") -> None:
 
 
 @router.get("/api/projects/{project_id}/export/docx")
-async def export_docx(project_id: int, db: Session = Depends(get_db)):
+def export_docx(project_id: int, db: Session = Depends(get_db)):
     """整本导出 Word:中文排版(宋体、1.5倍行距、正文首行缩进2字符)。"""
     from docx import Document
     from docx.enum.text import WD_LINE_SPACING

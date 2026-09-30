@@ -8,9 +8,11 @@ from sqlalchemy.orm import Session
 from app.db.models import PromoPlan, PromoShot
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.media.anchors import ensure_style_anchors, merge_negative
+from app.engines.media.negative import ensure_base
 from app.engines.media.text import clip
 from app.llm.router import Task, get_adapter_for
 from app.prompts.promo import PROMO_SHOT_PROMPT_PROMPT
+from app.engines.skills.packs import render_skill_block
 
 _CHUNK = 8
 
@@ -57,6 +59,9 @@ async def render_shot_prompts(db: Session, plan: PromoPlan, progress=lambda s: N
         chunk = shots[start : start + _CHUNK]
         progress(f"AI 正在出提示词({start + 1}-{min(start + _CHUNK, total)}/{total} 格)…")
         prompt = PROMO_SHOT_PROMPT_PROMPT.format(
+        # 创作 Skill 包注入(docs/25 §2.4):按工序节点取生效包,无包时是空串。
+        skill_block=render_skill_block(db, scope="promo", node="render"),
+
             style_cn=plan.style_cn,
             style_en=plan.style_en,
             style_negative=plan.negative,
@@ -81,7 +86,7 @@ async def render_shot_prompts(db: Session, plan: PromoPlan, progress=lambda s: N
                 continue
             # 兜底注入:画风锚(中英)与负面基座,与漫剧同纪律(负面词合并只走 media.anchors 一处)
             prompt_cn, prompt_en = ensure_style_anchors(prompt_cn, prompt_en, plan.style_cn, plan.style_en)
-            negative = merge_negative(negative, plan.negative)
+            negative = ensure_base(merge_negative(negative, plan.negative), "promo")
             shot.prompt_cn = prompt_cn
             shot.prompt_en = prompt_en
             shot.negative = negative

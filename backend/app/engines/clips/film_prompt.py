@@ -14,7 +14,26 @@ from sqlalchemy.orm import Session
 
 from app.engines.media.text import clip as _clip, speaker_of, strip_fences
 from app.llm.router import Task, get_adapter_for
-from app.prompts.film_prompt import CLIP_FRAMINGS, WHOLE_CLIP_PROMPT_TEMPLATE
+from app.prompts.film_prompt import (
+    CLIP_FRAMINGS,
+    LENGTH_RULE_COMPACT,
+    LENGTH_RULE_LEGACY,
+    WHOLE_CLIP_PROMPT_TEMPLATE,
+)
+from app.engines.skills.packs import CLIPS_COMPACT_PACK_KEY, active_packs, render_skill_block
+
+
+def _length_rule(db: Session, total_s: int, length_guide: str) -> str:
+    """按「紧凑封顶渲染包」的开关选字数口径。
+
+    为什么要有这条分支:旧口径「不少于 N 字、上不封顶」对文本模型成立,对视频模型
+    恰恰相反——它对长提示词是抽样执行,写得越满丢得越多。这条改动会影响存量用户
+    的出片,所以做成包控开关而不是直接换掉,用户可自己 A/B(作者 2026-09-28 拍板甲方案)。
+    """
+    compact = any(p.pack_key == CLIPS_COMPACT_PACK_KEY
+                  for p in active_packs(db, scope="clips", node="render"))
+    tpl = LENGTH_RULE_COMPACT if compact else LENGTH_RULE_LEGACY
+    return tpl.format(total_s=total_s, length_guide=length_guide)
 
 _MODE_LABELS = {"mood": "情绪短片", "play": "灵感玩法短片", "free": "故事短片"}
 
@@ -92,6 +111,9 @@ async def build_clip_film_prompt(db: Session, row, progress=lambda s: None) -> d
     progress("AI 正在把分镜合并成一条整片提示词…")
     adapter = get_adapter_for(Task.CLIPS_BATCH, timeout=300)
     prompt = WHOLE_CLIP_PROMPT_TEMPLATE.format(
+        # 创作 Skill 包注入(docs/25 §2.4):按工序节点取生效包,无包时是空串。
+        skill_block=render_skill_block(db, scope="clips", node="render"),
+
         workshop_label=_MODE_LABELS[mode],
         title_line=_theme_line(row),
         total_s=total_s,
@@ -102,6 +124,9 @@ async def build_clip_film_prompt(db: Session, row, progress=lambda s: None) -> d
         characters_block=_characters_block(clip),
         storyboard_block=_storyboard_block(shots, lines),
         length_guide=length_guide,
+        # 字数口径二选一(docs/25 §3.2):紧凑封顶包开着就用封顶口径,
+        # 关掉逐字回落旧口径——这是「不挂包=今天的行为」承诺的兑现点。
+        length_rule=_length_rule(db, total_s, length_guide),
     )
     raw = await adapter.ask(prompt)
     text = strip_fences(raw)

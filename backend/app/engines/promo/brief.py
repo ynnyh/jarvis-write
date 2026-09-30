@@ -11,6 +11,7 @@ from app.engines.media.text import coerce_int
 from app.engines.promo.common import angles_block, direction_block
 from app.llm.router import Task, get_adapter_for
 from app.prompts.promo import PROMO_BRIEF_PROMPT
+from app.engines.skills.packs import render_skill_block
 
 _MAX_TURNS = 20
 _MAX_CHAT_CHARS = 6000
@@ -83,6 +84,9 @@ async def distill_brief(db: Session, plan: PromoPlan, progress=lambda s: None) -
     progress("AI 正在把研讨共识收敛成创作简报…")
     adapter = get_adapter_for(Task.PROMO_BRIEF, timeout=300)
     prompt = PROMO_BRIEF_PROMPT.format(
+        # 创作 Skill 包注入(docs/25 §2.4):按工序节点取生效包,无包时是空串。
+        skill_block=render_skill_block(db, scope="promo", node="idea"),
+
         subject=plan.subject.strip() or "(未定)",
         angles_block=angles_block(plan.angles),
         duration_s=plan.duration_s,

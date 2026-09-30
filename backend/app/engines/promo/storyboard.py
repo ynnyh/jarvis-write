@@ -11,6 +11,7 @@ from app.engines.media.text import coerce_int
 from app.engines.promo.common import shot_dict
 from app.llm.router import Task, get_adapter_for
 from app.prompts.promo import PROMO_STORYBOARD_PROMPT
+from app.engines.skills.packs import render_skill_block
 
 _MAX_SHOTS = 24
 
@@ -36,6 +37,9 @@ async def build_storyboard(db: Session, plan: PromoPlan, progress=lambda s: None
 
     adapter = get_adapter_for(Task.PROMO_STORYBOARD, timeout=300)
     prompt = PROMO_STORYBOARD_PROMPT.format(
+        # 创作 Skill 包注入(docs/25 §2.4):按工序节点取生效包,无包时是空串。
+        skill_block=render_skill_block(db, scope="promo", node="shots"),
+
         duration_s=plan.duration_s,
         landmark_names="、".join(landmark_names) or "(暂无地标卡,按解说词 action 自拟简短场景名)",
         lines_block=lines_block,

@@ -37,6 +37,7 @@ from app.engines.skills.packs import (
 )
 from app.llm.router import Task, get_adapter_for
 from app.prompts.anime import (
+    _SEGMENT_LENGTH_RULE_LEGACY,
     ANIME_CAST_PROMPT,
     ANIME_EPISODE_SUGGEST_PROMPT,
     ANIME_PREMISE_SUGGEST_PROMPT,
@@ -687,6 +688,9 @@ async def build_film_prompt(
     progress(f"AI 正在把 {len(groups)} 段分镜组装成分段提示词…")
     adapter = get_adapter_for(Task.ANIME_PROMPT, timeout=300)
     prompt = ANIME_SEGMENT_PROMPT_TEMPLATE.format(
+        # 字数口径来自具名常量而非模板正文:这条路径只在用户关闭镜头卡
+        # 包时才会走到,常量口径要能被审阅、能被将来的决策一次性改掉。
+        segment_length_rule=_SEGMENT_LENGTH_RULE_LEGACY.format(seg_floor=seg_floor),
         title=(episode.title or series.title or "动画短剧").strip()[:40],
         genre_label=g["label"],
         total_s=total_s,

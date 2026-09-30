@@ -87,7 +87,13 @@ class Settings(BaseSettings):
     # JWT 签名密钥:生产务必用环境变量覆盖成随机长串,否则 token 可被伪造
     jwt_secret: str = DEFAULT_JWT_SECRET
     jwt_expire_days: int = 30
-    # 初始管理员:首次启动/迁移时自动创建,存量数据归其名下
+    # 是否信任反代写下的 X-Forwarded-For:只在「后端确实在 Caddy/Nginx 后面,
+    # 且反代会覆盖该头」时才开。XFF 第一段完全由客户端自称,裸暴露时按它分桶
+    # 等于不限流(见 ratelimit.client_ip),所以默认关。
+    trust_proxy_headers: bool = False
+    # 初始管理员:首次启动/迁移时自动创建,存量数据归其名下。
+    # 弱默认值在非 dev 环境会被启动自检拒掉(见 main._assert_secure_config),
+    # 生产必须用环境变量覆盖;默认值本体不要在这里改,自检读的是字段元数据。
     admin_username: str = "admin"
     admin_password: str = "admin12345"  # 首次登录后请在设置页修改
 

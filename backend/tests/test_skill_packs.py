@@ -9,6 +9,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
+from app.engines.skills.packs import BUILTIN_PACKS, VALID_SCOPES
 from app.main import app
 
 INVITE = "test-invite"
@@ -37,22 +38,57 @@ def test_skill_packs_seed_and_list(client):
     headers = _headers(client)
     packs = client.get("/api/skill-packs", headers=headers).json()
     keys = {p["pack_key"] for p in packs}
-    assert {"storyboard-basics", "anime-shotcard-render",
-            "drama_source_male", "drama_source_female"} <= keys
+    # 首批 anime 两包(docs/21)+ 漫剧源书双包(docs/23)+ 出片线六包(docs/25 §2)
+    assert {
+        "storyboard-basics", "anime-shotcard-render",
+        "drama_source_male", "drama_source_female",
+        "drama-shotcard-render", "drama-scene-punch",
+        "promo-hook-3s", "promo-landmark-guard",
+        "clips-emotion-curve", "clips-compact-render",
+    } <= keys
     builtin = [p for p in packs if p["is_builtin"]]
-    assert len(builtin) == 4
-    # anime 试点包默认启用(docs/21);爽文双包默认停用——靠书级挂载生效(docs/23)
     by_key = {p["pack_key"]: p for p in builtin}
+
+    # 默认开关是设计决策,不是随手填的(docs/25 §2.2):
+    #   工艺收口类默认开——要么口径本来就对只是没单点化(drama-shotcard-render),
+    #   要么是作者 2026-09-28 明确拍板要默认开(clips-compact-render);
+    #   内容口径类默认关——包一开就改写生成结果,默认开等于让老用户无预警换口径;
+    #   爽文双包默认关——靠书级 mounted_packs 挂载,全局开反而污染普通书(docs/23)。
+    # 这些断言的作用是:谁把默认开关翻过去,测试立刻变红。
     assert by_key["storyboard-basics"]["enabled"] is True
     assert by_key["anime-shotcard-render"]["enabled"] is True
-    assert by_key["drama_source_male"]["enabled"] is False
-    assert by_key["drama_source_female"]["enabled"] is False
+    assert by_key["drama-shotcard-render"]["enabled"] is True
+    assert by_key["clips-compact-render"]["enabled"] is True
+    for off in ("drama-scene-punch", "promo-hook-3s", "promo-landmark-guard",
+                "clips-emotion-curve", "drama_source_male", "drama_source_female"):
+        assert by_key[off]["enabled"] is False, f"{off} 应默认停用"
+
+    # 分镜功底包三线共用一份(docs/25 §2.1:同义包合并 scope,不各写一份改版)
+    assert set(by_key["storyboard-basics"]["scope"]) == {"anime", "drama", "promo"}
+    # 爽文包扩到漫剧线:漫剧剧本工序复用小说那套爽点工艺(docs/25 拍板 1)
+    assert set(by_key["drama_source_male"]["scope"]) == {"novel", "drama"}
+    assert set(by_key["drama_source_female"]["scope"]) == {"novel", "drama"}
+
     assert all(p["version"] >= 1 and p["history"] == [] for p in builtin)  # 版本可随官方升级推进
     # 幂等:重复拉取不重复种
     again = client.get("/api/skill-packs", headers=headers).json()
     assert len([p for p in again if p["is_builtin"]]) == len(builtin)
     # 官方包排在前面
     assert again[0]["is_builtin"] is True
+
+
+def test_every_builtin_pack_scope_is_known():
+    """包 scope 必须在 packs.VALID_SCOPES 白名单里。
+
+    为什么钉:写错 scope 不报错,只是**永远不生效**——包静静躺在设置页里,
+    用户开了开关也没用。这类失效只能靠测试发现。
+    """
+    for spec in BUILTIN_PACKS:
+        assert spec["scope"], f"{spec['pack_key']} 没有 scope"
+        for scope in spec["scope"]:
+            assert scope in VALID_SCOPES, (
+                f"{spec['pack_key']} 的 scope {scope!r} 不在白名单 {sorted(VALID_SCOPES)}")
+        assert spec.get("pack_key"), "包必须有 pack_key"
 
 
 def test_skill_pack_toggle_edit_restore(client):

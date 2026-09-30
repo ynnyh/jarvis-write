@@ -35,6 +35,7 @@ from app.engines.drama.common import (
 )
 from app.llm.router import Task, get_adapter_for
 from app.prompts.drama import EPISODE_PLAN_PROMPT
+from app.engines.skills.packs import render_project_skill_block
 
 # 单次规划上限:防一次切出几百集
 _MAX_EPISODES = 40
@@ -169,6 +170,9 @@ async def plan_episodes(
             "每章自带的章末钩子与爽点兑现优先升格为本集 cliffhanger,不从平淡处另造"
         )
     prompt = EPISODE_PLAN_PROMPT.format(
+        # 创作 Skill 包注入(docs/25 §2.4):按工序节点取生效包,无包时是空串。
+        skill_block=render_project_skill_block(db, project, "outline", scope="drama"),
+
         duration_target_s=duration_s,
         mode_desc=mode_desc,
         title=project.title,

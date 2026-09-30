@@ -658,6 +658,11 @@ class LLMAdapter(abc.ABC):
                 resp.content = salvaged
                 return resp
         note = "" if (chunks or resp.reasoning) else "流式连上了但一个字节都没吐"
+        # 走到这里说明这次 attempt **白花了 token**(16k~32k 那种)却一个字没拿到。
+        # 记账原先只挂在调用方的成功分支上,于是最贵的失败恰恰不计费——用户看
+        # /api/usage 得到的成本系统性偏低,渠道健康度(truncated 率)也建在残缺数据上。
+        # 在抛错前补记:抛了就不会返回,和成功分支不构成重复记账。
+        self._record_usage(resp)
         if trapped:
             raise self._trap_retry_error(resp)
         raise self._empty_content_error(resp, note=note)
@@ -782,8 +787,10 @@ class LLMAdapter(abc.ABC):
                         duration_ms=duration_ms,
                     )
                 )
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            # 记账失败不能影响生成(主流程优先级更高),但**不能静默**:账目不完整
+            # 会让人以为成本没问题。要能查,就得留痕。
+            logger.warning("用量记账失败(不影响本次生成):%s", exc, exc_info=True)
 
     # ---- 便捷入口:直接传字符串 ----
     async def ask(self, prompt: str, system: str | None = None) -> str:

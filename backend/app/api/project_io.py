@@ -5,6 +5,11 @@
 导出:GET /api/projects/{id}/export → 下载 JSON 文件
 导入:POST /api/projects/import → 上传 JSON 文件,创建为新项目
 导入:POST /api/projects/import-book → 上传 TXT/DOCX 整本旧书,解析章节建为新项目
+
+上传体都有硬上限:JSON 导入用「限量读 + 判长」(MAX_IMPORT_JSON_BYTES),
+整本旧书用 120MB 上限(engine.book_import.MAX_IMPORT_BYTES),另有全局 128MB 的
+Content-Length 总闸(main.MaxBodySizeMiddleware)。「读多少都不设上限」等于没有
+上限——一次超大上传就能把进程内存打爆。
 """
 from __future__ import annotations
 
@@ -28,6 +33,11 @@ from app.engines.book_import import (
 from app.engines.project_io import export_project_to_json, import_project_from_json
 
 logger = logging.getLogger("jarvis-write.project_io")
+
+# JSON 导入的上限:导出 JSON 里含全书正文 + 全部设定,比 txt 旧书更"稠",
+# 64MB 已经远超任何一部正常长篇;再大就不是"导入项目"而是"灌数据"了。
+# 全局还有 128MB 的 Content-Length 总闸(见 main.MaxBodySizeMiddleware)。
+MAX_IMPORT_JSON_BYTES = 64 * 1024 * 1024
 
 router = APIRouter(
     prefix="/api/projects",
@@ -88,9 +98,15 @@ async def import_project_endpoint(
     Returns:
         新项目的 id 和标题
     """
-    # 读取文件内容
+    # 读取文件内容:限量读(上限+1 字节),超了当场拒,不给超大 body 进内存的机会
+    content = await file.read(MAX_IMPORT_JSON_BYTES + 1)
+    if len(content) > MAX_IMPORT_JSON_BYTES:
+        mb = MAX_IMPORT_JSON_BYTES // (1024 * 1024)
+        raise HTTPException(
+            status_code=413,
+            detail=f"JSON 文件超过 {mb}MB 上限,请确认上传的是本系统导出的项目包",
+        )
     try:
-        content = await file.read()
         data = json.loads(content.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
         raise HTTPException(status_code=400, detail=f"文件格式错误,不是有效的 JSON: {e}") from e

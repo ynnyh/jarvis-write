@@ -24,9 +24,11 @@ from app import live
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.clips.common import group_chunks, shot_hint, steering_block, theme_label
 from app.engines.media.anchors import ensure_style_anchors, merge_negative
+from app.engines.media.negative import ensure_base
 from app.engines.media.directions import direction_directive
 from app.engines.media.text import coerce_int, split_character_desc
 from app.llm.router import Task, get_adapter_for
+from app.engines.skills.packs import render_skill_block
 from app.prompts.clips import (
     CLIPS_CLICHE_BLACKLIST,
     CLIPS_EXPAND_PROMPT,
@@ -208,7 +210,7 @@ def _norm_shots(raw, style: dict, max_seq_cap: int) -> list[dict]:
         prompt_cn, prompt_en = ensure_style_anchors(
             prompt_cn, prompt_en, style.get("style_cn") or "", style.get("style_en") or ""
         )
-        negative = merge_negative(negative, style.get("negative") or "")
+        negative = ensure_base(merge_negative(negative, style.get("negative") or ""), "clips")
         out.append(
             {
                 "seq": len(out) + 1,
@@ -414,6 +416,7 @@ async def _expand_one(
     take: dict, style: dict, duration_s: int, context: str, grounding: str, excerpts: str,
     feedback: str = "", structure_rules: str = CLIPS_STRUCTURE_RULES,
     prompt_details: str = CLIPS_PROMPT_DETAILS,
+    skill_block: str = "",
 ) -> dict | None:
     """把一条切入展开成完整本子。整发重试 `_EXPAND_ATTEMPTS` 次,仍不成返回 None。
 
@@ -427,6 +430,10 @@ async def _expand_one(
     feedback:单条重拍时的用户意见,注入提示词(切入与画风不变,只重展开)。
     """
     prompt = CLIPS_EXPAND_PROMPT.format(
+        # 创作 Skill 包注入(docs/25 §2.4):按工序节点取生效包,无包时是空串。
+        # 由 generate_batch 算好传进来:这个内部辅助函数自己不持有 Session,不去查库。
+        skill_block=skill_block,
+
         context_block=context,
         structure_rules=structure_rules,
         cliche_blacklist=CLIPS_CLICHE_BLACKLIST,
@@ -468,6 +475,9 @@ async def generate_batch(
     feedback:换一批时的用户意见——连同上一批三条切入的摘要进①的提示词,
     这批要避开旧方向、落实意见;首跑传空。
     """
+    # 创作 Skill 包注入(docs/25 §2.4):本子生成与逐条展开同属 draft 节点,
+    # 在这里算一次块往下传——避免每个辅助函数各自查一次库。
+    skill_block = render_skill_block(db, scope="clips", node="draft")
     context, excerpts, grounding = _build_context(db, clip)
     is_play = (getattr(clip, "mode", "mood") or "mood") == "play"
     structure_rules = CLIPS_PLAY_STRUCTURE_RULES if is_play else CLIPS_STRUCTURE_RULES
@@ -482,6 +492,8 @@ async def generate_batch(
     head = parse_llm_json(
         await adapter.ask(
             CLIPS_TAKES_PROMPT.format(
+                # 创作 Skill 包注入(docs/25 §2.4):用本函数开头算好的块。
+                skill_block=skill_block,
                 context_block=context,
                 structure_rules=structure_rules,
                 cliche_blacklist=CLIPS_CLICHE_BLACKLIST,
@@ -513,6 +525,7 @@ async def generate_batch(
         cand = await _expand_one(
             take, style, duration_s, context, grounding, excerpts,
             structure_rules=structure_rules, prompt_details=prompt_details,
+            skill_block=skill_block,
         )
         if job_id:
             from app.jobs import record_step
@@ -562,6 +575,8 @@ async def generate_batch(
 async def reexpand_batch(
     db: Session, clip: MoodClip, index: int, feedback: str, progress=lambda s: None
 ) -> dict:
+    # 创作 Skill 包注入:与 generate_batch 同一个 draft 节点的口径(docs/25 §2.4)。
+    skill_block = render_skill_block(db, scope="clips", node="draft")
     """单条重拍:保持风格卡与该条切入不变,只重新展开分镜(可带用户意见)。
 
     换一批(整批重来)与单条重拍的分工:切入方向不对 → 换一批带意见;
@@ -597,6 +612,7 @@ async def reexpand_batch(
     cand = await _expand_one(
         take, style, clip.duration_s, context, grounding, excerpts, feedback=feedback,
         structure_rules=structure_rules, prompt_details=prompt_details,
+        skill_block=skill_block,
     )
     if cand is None:
         raise ClipBatchError(

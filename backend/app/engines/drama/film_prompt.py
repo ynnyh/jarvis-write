@@ -24,6 +24,7 @@ from app.db.models import (
 from app.engines.media.segments import group_by_limit
 from app.engines.media.text import speaker_of, strip_fences
 from app.llm.router import Task, get_adapter_for
+from app.engines.skills.packs import render_project_skill_block
 from app.prompts.film_prompt import (
     DRAMA_FRAMING,
     SEGMENTED_FILM_PROMPT_TEMPLATE,
@@ -127,6 +128,9 @@ async def build_episode_film_prompt(
     progress(f"AI 正在把 {len(groups)} 段分镜组装成分段提示词…")
     adapter = get_adapter_for(Task.DRAMA_PROMPT, timeout=300)
     prompt = SEGMENTED_FILM_PROMPT_TEMPLATE.format(
+        # 创作 Skill 包注入(docs/25 §2.4):按工序节点取生效包,无包时是空串。
+        skill_block=render_project_skill_block(db, project, "render", scope="drama"),
+
         workshop_label=f"漫剧第 {episode.ep_index} 集《{episode.title}》",
         title_line=f"《{project.title}》第 {episode.ep_index} 集",
         total_s=total_s,

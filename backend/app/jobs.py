@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import threading
 import uuid
@@ -396,6 +397,60 @@ def get_job_steps(job_id: str) -> list[dict[str, Any]]:
     except Exception:  # noqa: BLE001
         logger.debug("get_job_steps %s 失败", job_id, exc_info=True)
         return []
+
+
+# 任务历史保留天数:超过就删。设 0 或负数 = 永久保留(个人单机用户可能想看全部历史)。
+JOB_RETENTION_DAYS = max(0, int(os.environ.get("JOB_RETENTION_DAYS", "30")))
+
+
+def purge_old_jobs() -> int:
+    """删掉超过保留期的**已完成**任务与其步骤,返回删除条数。
+
+    为什么必须删:章节生成任务把 `final_content`/`draft_content` 两份整章正文
+    塞进 `jobs.result`(api/chapters/_job.py),于是一本书写完 100 章 = 任务表里
+    多出 200 份全文,且**从不清洗**。前端任务中心只需要近几天的历史,更早的
+    正文早就从 `chapters` 表读了,这份副本纯属浪费。
+
+    为什么只删已完成的:running/queued 的任务正在被前端轮询,删了页面会突然
+    404。卡住不动的那种由 cleanup_stuck_jobs 在启动时先标成 error,那次清理
+    跑在本函数之前,顺序上是安全的。
+
+    正文能不能干脆不进 result?能,但那要前后端一起改契约
+    (frontend/src/panels/write/useChapterGeneration.ts:71 直接读 result.final_content),
+    属于独立一轮改动;本函数先把「无上限增长」这个止血做了。
+    """
+    if JOB_RETENTION_DAYS <= 0:
+        return 0
+    from datetime import datetime, timedelta, timezone
+
+    from app.db.models import Job, JobStep
+
+    session = _db_session()
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=JOB_RETENTION_DAYS)
+        stale = (
+            session.query(Job)
+            .filter(Job.status.in_(["done", "error", "cancelled", "failed"]))
+            .filter(Job.updated_at < cutoff)
+            .all()
+        )
+        if not stale:
+            session.close()
+            return 0
+        ids = [j.id for j in stale]
+        steps = session.query(JobStep).filter(JobStep.job_id.in_(ids)).delete(
+            synchronize_session=False
+        )
+        session.query(Job).filter(Job.id.in_(ids)).delete(synchronize_session=False)
+        session.commit()
+        logger.info("任务清理:删除 %d 个超过 %d 天的任务、%d 条步骤",
+                    len(ids), JOB_RETENTION_DAYS, steps)
+        session.close()
+        return len(ids)
+    except Exception:  # noqa: BLE001 — 清理失败不阻塞启动
+        logger.debug("清理历史任务失败", exc_info=True)
+        session.close()
+        return 0
 
 
 def cleanup_stuck_jobs() -> None:
