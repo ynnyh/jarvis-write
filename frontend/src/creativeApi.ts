@@ -17,7 +17,7 @@ export interface CreativeGoal {
   enabled: boolean; expected_version?: number; version?: number; history?: CreativeGoal[];
   fetch_links?: boolean;
 }
-export type CreativeScope = "project" | "anime";
+export type CreativeScope = "project" | "anime" | "original";
 export const creativeApi = {
   get: (scope: CreativeScope, id: number) => req<{ goal: Partial<CreativeGoal> }>("GET", `/api/creative/${scope}/${id}`),
   analyze: (scope: CreativeScope, id: number, goal: CreativeGoal) => req<{ job_id: string }>("POST", `/api/creative/${scope}/${id}/analyze`, goal),

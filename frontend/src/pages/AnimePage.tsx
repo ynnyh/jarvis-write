@@ -3,25 +3,26 @@
 // 每集只管出梗;类型用户自选(节奏库后端下发),提示词逐段复制贴外部模型出片。
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { AnimeMeta, AnimeSeries, animeApi } from "../animeApi";
+import { AnimeMeta, AnimeSeries, AnimeWorkspace, animeApi } from "../animeApi";
 import { toast } from "../ui/Toaster";
 import { errMsg } from "../pollJob";
 import EmptyState from "../ui/EmptyState";
 import { confirmDialog } from "../ui/ConfirmDialog";
 import SeriesWorkspace from "../panels/anime/SeriesWorkspace";
 
-export default function AnimePage() {
+export default function AnimePage({ workspace = "anime" }: { workspace?: AnimeWorkspace }) {
   const { id } = useParams();
-  return id ? <SeriesWorkspace sid={Number(id)} /> : <SeriesList />;
+  return id ? <SeriesWorkspace key={`${workspace}-${id}`} sid={Number(id)} workspace={workspace} /> : <SeriesList key={workspace} workspace={workspace} />;
 }
 
 // ================= 系列列表 + 新建 =================
-function SeriesList() {
+function SeriesList({ workspace }: { workspace: AnimeWorkspace }) {
   const nav = useNavigate();
   const [meta, setMeta] = useState<AnimeMeta | null>(null);
   const [rows, setRows] = useState<AnimeSeries[] | null>(null);
   const [title, setTitle] = useState("");
   const [premise, setPremise] = useState("");
+  const original = workspace === "original";
   const [genre, setGenre] = useState("comedy");
   const [direction, setDirection] = useState("chibi");
   const [episodeS, setEpisodeS] = useState(60);
@@ -31,9 +32,9 @@ function SeriesList() {
   const [ideaBusy, setIdeaBusy] = useState(false);
 
   const reload = useCallback(async () => {
-    try { setRows((await animeApi.list()).series); }
+    try { setRows((await animeApi.list(workspace)).series); }
     catch (e) { toast.err("加载失败", errMsg(e)); }
-  }, []);
+  }, [workspace]);
   useEffect(() => {
     void reload();
     animeApi.meta().then(setMeta).catch(() => setMeta(null));
@@ -57,9 +58,10 @@ function SeriesList() {
       const r = await animeApi.create({
         title: title.trim() || "未命名系列",
         premise: premise.trim(), genre, direction, episode_s: episodeS,
+        workspace,
       });
       toast.ok("系列已建", "下一步:让 AI 设计固定卡司(1 主角 + 2-3 配角)");
-      nav(`/anime/${r.series.id}`);
+      nav(`${original ? "/original-drama" : "/anime"}/${r.series.id}`);
     } catch (e) { toast.err("创建失败", errMsg(e)); } finally { setCreating(false); }
   }
 
@@ -70,7 +72,7 @@ function SeriesList() {
       confirmText: "确认删除", danger: true,
     });
     if (!ok) return;
-    try { await animeApi.remove(s.id); await reload(); }
+    try { await animeApi.remove(s.id, workspace); await reload(); }
     catch (e) { toast.err("删除失败", errMsg(e)); }
   }
 
@@ -79,26 +81,26 @@ function SeriesList() {
   return (
     <>
       <div className="page-head">
-        <h1>动画短剧</h1>
+        <h1>{original ? "原创漫剧" : "动画短剧"}</h1>
       </div>
 
       <section className="card">
         <div className="card-head">
           <h3 className="grow">
-            新建一个系列
-            <span className="muted">卡司是资产:1 主角 + 2-3 配角定一次,每集只管出新梗</span>
+            {original ? "新建一部原创漫剧" : "新建一个系列"}
+            <span className="muted">{original ? "参考定方向 → 卡司 → 单集故事 → 完整剧本 → 分镜 → 视频提示词" : "卡司是资产:1 主角 + 2-3 配角定一次,每集只管出新梗"}</span>
           </h3>
         </div>
         <p className="card-desc">
-          像爆笑虫子那样的短集数系列动画:固定卡司、每集一个独立小故事。选好类型与画风,
-          AI 按你的一句话设定设计全班人马;之后每集给个情境命题,三选一梗纲 → 分镜 →
-          整集分段提示词,逐段复制贴进视频模型(即梦/可灵/Sora)就能出片。
+          {original
+            ? "从一个原创想法开始，用喜欢的作品片段校准方向。情景喜剧、悬疑、温情等独立单集均可；先读完整剧本，再拆分镜、拿视频提示词出片。这里的作品和参考独立管理。"
+            : "像爆笑虫子那样的短集数系列动画:固定卡司、每集一个独立小故事。选好类型与画风，AI 按设定设计卡司；之后每集给个命题，出梗纲、分镜和分段提示词，拿去即梦/可灵等工具出片。"}
         </p>
         <div className="form-grid">
           <div className="field">
             <label className="fl" htmlFor="an-title">系列名<span className="hint">可后改</span></label>
             <input id="an-title" value={title} maxLength={120}
-              onChange={(e) => setTitle(e.target.value)} placeholder="如「饭团小厨房」" />
+              onChange={(e) => setTitle(e.target.value)} placeholder={original ? "如「体面合租屋」" : "如「饭团小厨房」"} />
           </div>
           <div className="field">
             <label className="fl" htmlFor="an-dur">每集时长</label>
@@ -113,7 +115,7 @@ function SeriesList() {
               一句话设定<span className="hint">卡司与每集出梗都从它长出来</span>
             </label>
             <input id="an-premise" value={premise} maxLength={500}
-              placeholder="如「饭团精灵阿丸的厨房日常,认真撞上不靠谱」"
+              placeholder={original ? "如：三个合租室友总想维持体面，生活小事却不断让他们露馅" : "如「饭团精灵阿丸的厨房日常,认真撞上不靠谱」"}
               onChange={(e) => setPremise(e.target.value)} />
             <div className="form-actions" style={{ margin: 0, marginTop: 6 }}>
               <button className="btn-sm" disabled={ideaBusy} onClick={() => void askIdeas()}>
@@ -131,7 +133,7 @@ function SeriesList() {
             )}
           </div>
           <div className="field field-full">
-            <span className="fl">类型<span className="hint">决定每集的节奏套路,出梗时按库展开</span></span>
+            <span className="fl">类型<span className="hint">{original ? "先选大方向；建好后可用参考材料校准具体机制" : "决定每集的节奏套路,出梗时按库展开"}</span></span>
             <div className="chips">
               {(meta?.genres ?? []).map((g) => (
                 <button key={g.key} type="button"
@@ -169,7 +171,7 @@ function SeriesList() {
             <h3 className="grow">我的系列<span className="muted">点进去出梗、出分镜、出提示词</span></h3>
           </div>
           {rows.map((s) => (
-            <div key={s.id} className="sub-summary ep-row" onClick={() => nav(`/anime/${s.id}`)}>
+            <div key={s.id} className="sub-summary ep-row" onClick={() => nav(`${original ? "/original-drama" : "/anime"}/${s.id}`)}>
               <div className="card-head mb-2">
                 <b>{s.title}</b>
                 <span className="badge mute">{s.genre_label}</span>

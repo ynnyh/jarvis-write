@@ -29,6 +29,9 @@ class AnimeSeries(Base, TimestampMixin):
     __tablename__ = "anime_series"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # 工作区隔离:anime=泛用动画短剧; original=独立原创漫剧。
+    # 不与小说 Project 建关系,也不共享小说的 global_tendency。
+    workspace: Mapped[str] = mapped_column(String(30), default="anime", server_default="anime", index=True)
     user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), index=True
     )

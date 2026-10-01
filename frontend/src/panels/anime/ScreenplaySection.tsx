@@ -30,7 +30,7 @@ export default function ScreenplaySection({ series, episode, disabled, onBusy, o
   }
   async function generate() {
     await work(async () => {
-      const ep = await run<AnimeEpisode>(() => animeApi.buildScript(episode.id, feedback), { kind: `anime-script-${episode.id}`, onStage: setStage });
+      const ep = await run<AnimeEpisode>(() => animeApi.buildScript(episode.id, feedback, series.workspace), { kind: `anime-script-${episode.id}`, onStage: setStage });
       if (ep) onEpisode(ep);
     });
   }
@@ -46,7 +46,7 @@ export default function ScreenplaySection({ series, episode, disabled, onBusy, o
         <div className="form-actions"><button onClick={() => setGuests((list) => list.filter((_, j) => j !== i))}>移除</button></div>
       </fieldset>)}
       <div className="form-actions"><button disabled={locked || guests.length >= 3} onClick={() => setGuests((list) => [...list, { name: "", role: "客串", appearance: "", wardrobe: "", personality: "", catchphrase: "", locked: false }])}>添加客串</button>
-        <button disabled={locked} onClick={() => void work(async () => onEpisode((await animeApi.saveGuests(episode.id, guests)).episode))}>保存本集客串</button></div>
+        <button disabled={locked} onClick={() => void work(async () => onEpisode((await animeApi.saveGuests(episode.id, guests, series.workspace)).episode))}>保存本集客串</button></div>
     </details>
     {script && <>
       <p className="hint">{script.title} · 约{script.total_s}秒{stale ? " · 旧稿待更新" : ""}</p>
@@ -64,7 +64,7 @@ export default function ScreenplaySection({ series, episode, disabled, onBusy, o
           </fieldset></details>
         </div>)}
       </div>)}
-      {dirty && <div className="form-actions"><button className="primary" disabled={locked || stale} onClick={() => void work(async () => onEpisode((await animeApi.saveScript(episode.id, script)).episode))}>保存剧本修改</button></div>}
+      {dirty && <div className="form-actions"><button className="primary" disabled={locked || stale} onClick={() => void work(async () => onEpisode((await animeApi.saveScript(episode.id, script, series.workspace)).episode))}>保存剧本修改</button></div>}
       {!!script.history?.length && <details><summary>之前的剧本</summary>{script.history.map((s, i) => <details key={i}><summary>{s.title} · 方向{s.goal_version}</summary>{s.scenes.flatMap((sc) => sc.lines).map((l, j) => <p key={j}>{l.speaker}：{l.text} <span className="muted">{l.action}</span></p>)}</details>)}</details>}
     </>}
     <fieldset className="form-grid" disabled={locked}>

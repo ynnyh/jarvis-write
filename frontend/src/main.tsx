@@ -18,6 +18,7 @@ const ClipsPage = React.lazy(() => import("./pages/ClipsPage"));
 const BirthdayPage = React.lazy(() => import("./pages/BirthdayPage"));
 const SeriesPage = React.lazy(() => import("./pages/SeriesPage"));
 const AnimePage = React.lazy(() => import("./pages/AnimePage"));
+const OriginalDramaPage = React.lazy(() => import("./pages/OriginalDramaPage"));
 const ScriptsPage = React.lazy(() => import("./pages/ScriptsPage"));
 const AdminPage = React.lazy(() => import("./pages/AdminPage"));
 const SettingsPage = React.lazy(() => import("./pages/SettingsPage"));
@@ -60,6 +61,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="series/:id?" element={<SeriesPage />} />
             {/* 动画短剧:固定卡司的 60-90 秒原创系列,类型自选、按集出梗(资产制) */}
             <Route path="anime/:id?" element={<AnimePage />} />
+            <Route path="original-drama/:id?" element={<OriginalDramaPage />} />
             {/* 剧本工坊:独立写剧 + 小说改编共用集管线 */}
             <Route path="scripts/:id?" element={<ScriptsPage />} />
             <Route path="admin" element={<AdminPage />} />

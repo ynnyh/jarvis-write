@@ -199,40 +199,26 @@ def _auth(client):
     return {"Authorization": f"Bearer {r.json()['token']}"}
 
 
-def test_create_drama_book_mounts_pack_and_forces_open_ended():
+def test_novel_entry_rejects_new_drama_source_books():
     with _client() as client:
         headers = _auth(client)
-        r = client.post("/api/projects", headers=headers, json={
-            "title": "万妖新传", "mode": "drama", "audience": "male",
-            "target_chapters": 60, "target_words_per_chapter": 1500,
-        })
-        assert r.status_code == 200, r.text
-        body = r.json()
-        assert body["mode"] == "drama"
-        assert body["audience"] == "male"
-        assert body["mounted_packs"] == ["drama_source_male"]
-        # 透出的书在 draft 节点注入男频包(建书后简介聊天即按爽文口径引导)
-        from app.db.session import SessionLocal
-        from app.db.models import Project as P
-        with SessionLocal() as db:
-            proj = db.get(P, body["id"])
-            block = render_project_skill_block(db, proj, "idea")
-            assert "男频爽文包" in block and "扮猪吃虎" in block
-
-        r2 = client.post("/api/projects", headers=headers, json={
-            "title": "豪门新篇", "mode": "drama", "audience": "female",
-        })
-        assert r2.json()["mounted_packs"] == ["drama_source_female"]
+        for audience in ('male', 'female', ''):
+            r = client.post('/api/projects', headers=headers, json={
+                'title': '独立漫剧请走新入口', 'mode': 'drama', 'audience': audience,
+            })
+            assert r.status_code == 400
+            assert '原创漫剧' in r.json()['detail']
 
 
-def test_create_drama_book_requires_audience():
+def test_novel_cannot_be_converted_to_drama_source():
     with _client() as client:
         headers = _auth(client)
-        r = client.post("/api/projects", headers=headers, json={
-            "title": "缺频道", "mode": "drama",
-        })
+        novel = client.post('/api/projects', headers=headers, json={'title': '普通小说'}).json()
+        r = client.patch(f"/api/projects/{novel['id']}", headers=headers,
+                         json={'mode': 'drama', 'audience': 'male'})
         assert r.status_code == 400
-        assert "频道" in r.json()["detail"]
+        kept = client.get(f"/api/projects/{novel['id']}", headers=headers).json()
+        assert kept['mode'] == 'serial' and kept['mounted_packs'] == []
 
 
 def test_create_plain_book_unchanged():

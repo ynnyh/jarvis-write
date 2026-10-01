@@ -104,6 +104,7 @@ export default function Sidebar({ me, isLocal, hasLock, tokens, onLock, onLogout
 
       <nav className="side-nav">
         <SideLink e={MAIN} />
+        <SideLink e={{ to: "/original-drama", ico: "🎬", label: "原创漫剧" }} />
         {GROUPS.map((g) => <SideGroup key={g.title} {...g} />)}
         <div className="side-sep" role="presentation" />
         {FOOT_ENTRIES.map((e) => <SideLink key={e.to} e={e} />)}

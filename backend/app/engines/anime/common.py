@@ -129,6 +129,7 @@ def merge_cast_locked(old: list[dict], new: list[dict]) -> list[dict]:
 def series_dict(row) -> dict:
     return {
         "id": row.id, "title": row.title, "premise": row.premise,
+        "workspace": row.workspace or "anime",
         "genre": row.genre, "genre_label": genre_of(row.genre)["label"],
         "direction": row.direction, "style_cn": row.style_cn,
         "cast": list(row.cast or []), "episode_s": row.episode_s,

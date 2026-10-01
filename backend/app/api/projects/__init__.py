@@ -83,6 +83,8 @@ def _apply_drama_invariants(audience: str) -> str:
 # /{project_id} 通配放在所有子路由之后,方法+段数各异,不遮蔽上面任何字面/多段路由。
 @router.post("", response_model=ProjectOut)
 async def create_project(req: ProjectCreate, db: Session = Depends(get_db)) -> Project:
+    if req.mode == "drama":
+        raise HTTPException(400, "小说入口只创建短篇或连载；请从「原创漫剧」新建漫剧作品")
     concept_dict = None
     dna_dict = None
     topic = req.topic
@@ -92,14 +94,10 @@ async def create_project(req: ProjectCreate, db: Session = Depends(get_db)) -> P
             topic = req.concept.logline.strip()
     if req.dna is not None and not req.dna.is_empty():
         dna_dict = req.dna.model_dump()
-    # 漫剧源书不变式(docs/23):建书与向导 PATCH 改模式共用同一套
+    # 普通小说入口只保留短篇/连载；历史漫剧源书仍由兼容分支维护。
     audience = req.audience or ""
     mounted: list[str] = []
     open_ended = req.open_ended
-    if req.mode == "drama":
-        audience = _apply_drama_invariants(audience)
-        mounted = [f"drama_source_{audience}"]
-        open_ended = True
     project = Project(
         user_id=current_user_id.get(),
         title=req.title,
@@ -228,6 +226,8 @@ async def patch_project(
     """
     project = _get_project_or_404(db, project_id)
     updates = req.model_dump(exclude_none=True)
+    if updates.get("mode") == "drama" and project.mode != "drama":
+        raise HTTPException(400, "小说不能切换为漫剧源书；请从「原创漫剧」新建独立作品")
     if "global_tendency" in updates:
         # 普通标签编辑不得绕过参考方向的版本检查，也不能用旧前端快照覆盖新方向。
         tags = {k: v for k, v in updates["global_tendency"].items() if k != GOAL_KEY}

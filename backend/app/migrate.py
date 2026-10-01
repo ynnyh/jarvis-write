@@ -168,7 +168,7 @@ def _add_synopsis_column() -> None:
 def _add_creative_columns() -> None:
     """参考驱动短剧：可空目标/剧本/客串与过期标记，旧数据不强制迁移创作方向。"""
     additions = {
-        "anime_series": {"creative_goal": "JSON"},
+        "anime_series": {"creative_goal": "JSON", "workspace": "VARCHAR(30) NOT NULL DEFAULT 'anime'"},
         "anime_episodes": {"script": "JSON", "creative_stale": "BOOLEAN NOT NULL DEFAULT 0", "guests": "JSON"},
     }
     for table, columns in additions.items():

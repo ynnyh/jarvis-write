@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  AnimeCastMember, AnimeEpisode, AnimeMeta, AnimeSeries, AnimeShot, animeApi,
+  AnimeCastMember, AnimeEpisode, AnimeMeta, AnimeSeries, AnimeShot, AnimeWorkspace, animeApi,
 } from "../../animeApi";
 import { api, SkillPack } from "../../api";
 import { toast } from "../../ui/Toaster";
@@ -25,7 +25,7 @@ const EP_STATUS_CN: Record<string, string> = {
   script_ready: "剧本已出",
 };
 
-export default function SeriesWorkspace({ sid }: { sid: number }) {
+export default function SeriesWorkspace({ sid, workspace = "anime" }: { sid: number; workspace?: AnimeWorkspace }) {
   const nav = useNavigate();
   const [meta, setMeta] = useState<AnimeMeta | null>(null);
   const [series, setSeries] = useState<AnimeSeries | null>(null);
@@ -34,11 +34,11 @@ export default function SeriesWorkspace({ sid }: { sid: number }) {
 
   const reload = useCallback(async () => {
     try {
-      const r = await animeApi.get(sid);
+      const r = await animeApi.get(sid, workspace);
       setSeries(r.series);
       setEpisodes([...r.episodes].sort((a, b) => a.seq - b.seq));
     } catch (e) { toast.err("加载失败", errMsg(e)); }
-  }, [sid]);
+  }, [sid, workspace]);
   useEffect(() => {
     void reload();
     animeApi.meta().then(setMeta).catch(() => setMeta(null));
@@ -57,9 +57,9 @@ export default function SeriesWorkspace({ sid }: { sid: number }) {
     });
     if (!ok) return;
     try {
-      await animeApi.remove(sid);
+      await animeApi.remove(sid, workspace);
       toast.ok("系列已删除");
-      nav("/anime");
+      nav(workspace === "original" ? "/original-drama" : "/anime");
     } catch (e) { toast.err("删除失败", errMsg(e)); }
   }
 
@@ -69,20 +69,21 @@ export default function SeriesWorkspace({ sid }: { sid: number }) {
     <>
       <div className="page-head">
         <h1>{series.title}</h1>
+        {workspace === "original" && <span className="badge">原创漫剧</span>}
         <span className="badge mute">{series.genre_label}</span>
         <span className="badge mute">每集 {series.episode_s}s</span>
         <span className="grow" />
         <button className="btn-sm" onClick={() => void removeSeries()}>删除系列</button>
       </div>
 
-      <CastSection series={series} meta={meta} onSaved={setSeries} />
-      <CreativeReferenceCard scope="anime" targetId={sid} form="sketch" onSaved={reload} />
+      <CreativeReferenceCard scope={workspace} targetId={sid} form="sketch" onSaved={reload} />
+      <CastSection series={series} meta={meta} onSaved={async (next) => { setSeries(next); await reload(); }} />
 
       <section className="card">
         <div className="card-head">
           <h3 className="grow">剧集<span className="muted">每集一个独立小故事,互不接续</span></h3>
         </div>
-        <EpisodeCreator sid={sid} hasCast={series.cast.length > 0} onCreated={(ep) => {
+        <EpisodeCreator sid={sid} workspace={workspace} hasCast={series.cast.length > 0} onCreated={(ep) => {
           setEpisodes((list) => [...list, ep]);
           setSelId(ep.id);
         }} />
@@ -105,7 +106,7 @@ export default function SeriesWorkspace({ sid }: { sid: number }) {
                     });
                     if (!ok) return;
                     try {
-                      await animeApi.removeEpisode(ep.id);
+                      await animeApi.removeEpisode(ep.id, workspace);
                       setEpisodes((list) => list.filter((x) => x.id !== ep.id));
                       if (selId === ep.id) setSelId(null);
                     } catch (e2) { toast.err("删除失败", errMsg(e2)); }
@@ -133,7 +134,7 @@ export default function SeriesWorkspace({ sid }: { sid: number }) {
 function CastSection({ series, meta, onSaved }: {
   series: AnimeSeries;
   meta: AnimeMeta | null;
-  onSaved: (s: AnimeSeries) => void;
+  onSaved: (s: AnimeSeries) => void | Promise<void>;
 }) {
   const { run } = useJob();
   const [cast, setCast] = useState<AnimeCastMember[]>(series.cast);
@@ -148,15 +149,15 @@ function CastSection({ series, meta, onSaved }: {
   }
 
   async function save() {
-    try { onSaved((await animeApi.saveCast(series.id, cast)).series); }
+    try { await onSaved((await animeApi.saveCast(series.id, cast, series.workspace)).series); }
     catch (e) { toast.err("卡司保存失败", errMsg(e)); }
   }
 
   async function generate() {
     setBusy(true);
     try {
-      await run(() => animeApi.buildCast(series.id), { kind: `anime-cast-${series.id}` });
-      onSaved((await animeApi.get(series.id)).series);
+      await run(() => animeApi.buildCast(series.id, series.workspace), { kind: `anime-cast-${series.id}` });
+      await onSaved((await animeApi.get(series.id, series.workspace)).series);
       toast.ok("卡司已出", "锁定不想被覆盖的角色,再点「重出」可以只换其余的");
     } catch (e) { toast.err("卡司生成失败", errMsg(e)); } finally { setBusy(false); }
   }
@@ -237,8 +238,8 @@ function CastSection({ series, meta, onSaved }: {
 }
 
 // ================= 新开一集 =================
-function EpisodeCreator({ sid, hasCast, onCreated }: {
-  sid: number; hasCast: boolean; onCreated: (ep: AnimeEpisode) => void;
+function EpisodeCreator({ sid, workspace, hasCast, onCreated }: {
+  sid: number; workspace: AnimeWorkspace; hasCast: boolean; onCreated: (ep: AnimeEpisode) => void;
 }) {
   const [premise, setPremise] = useState("");
   const [busy, setBusy] = useState(false);
@@ -249,7 +250,7 @@ function EpisodeCreator({ sid, hasCast, onCreated }: {
   async function askIdeas() {
     setIdeaBusy(true);
     try {
-      setIdeas((await animeApi.suggestEpisode(sid)).premises);
+      setIdeas((await animeApi.suggestEpisode(sid, workspace)).premises);
       toast.ok("出了三个点子", "点一条填进命题框,也可以直接照它聊简介");
     } catch (e) { toast.err("出点子失败", errMsg(e)); } finally { setIdeaBusy(false); }
   }
@@ -258,7 +259,7 @@ function EpisodeCreator({ sid, hasCast, onCreated }: {
     if (!hasCast) { toast.err("先定卡司再开集", "卡司是每集出梗的班底;先点「AI 设计卡司」"); return; }
     setBusy(true);
     try {
-      const r = await animeApi.createEpisode(sid, premise.trim());
+      const r = await animeApi.createEpisode(sid, premise.trim(), workspace);
       toast.ok("新的一集已开", "把你的点子告诉 AI,聊出简介再往下走");
       onCreated(r.episode);
       setPremise("");
@@ -326,7 +327,7 @@ function EpisodePanel({ series, episode, meta, onEpisode }: {
 
   async function savePremise() {
     try {
-      onEpisode((await animeApi.patchEpisode(episode.id, { premise })).episode);
+      onEpisode((await animeApi.patchEpisode(episode.id, { premise }, series.workspace)).episode);
       toast.ok("命题已更新", "聊简介时 AI 会参考它");
     } catch (e) { toast.err("保存失败", errMsg(e)); }
   }
@@ -335,7 +336,7 @@ function EpisodePanel({ series, episode, meta, onEpisode }: {
     if (chatBusy) return;
     setChatBusy(true);
     try {
-      const r = await animeApi.chat(episode.id, text);
+      const r = await animeApi.chat(episode.id, text, series.workspace);
       onEpisode(r.episode);
       setMsg("");
       toast.ok("AI 出了一版简介", "不满意就接着改;满意点「确认简介」往下走");
@@ -344,7 +345,7 @@ function EpisodePanel({ series, episode, meta, onEpisode }: {
 
   async function confirmNow() {
     try {
-      onEpisode((await animeApi.confirmSynopsis(episode.id)).episode);
+      onEpisode((await animeApi.confirmSynopsis(episode.id, undefined, series.workspace)).episode);
       toast.ok("简介已确认", "分镜解锁了;再聊天或改简介会重新上锁");
     } catch (e) { toast.err("确认失败", errMsg(e)); }
   }
@@ -352,29 +353,29 @@ function EpisodePanel({ series, episode, meta, onEpisode }: {
   async function genTakes() {
     setBusy("takes");
     try {
-      await run(() => animeApi.buildTakes(episode.id), { kind: `anime-takes-${episode.id}` });
-      onEpisode((await animeApi.get(series.id)).episodes.find((e) => e.id === episode.id)!);
+      await run(() => animeApi.buildTakes(episode.id, series.workspace), { kind: `anime-takes-${episode.id}` });
+      onEpisode((await animeApi.get(series.id, series.workspace)).episodes.find((e) => e.id === episode.id)!);
       toast.ok("三个梗纲已出", "挑最对味的一版,选定即确认简介");
     } catch (e) { toast.err("出梗纲失败", errMsg(e)); } finally { setBusy(""); }
   }
 
   async function pick(index: number) {
-    try { onEpisode((await animeApi.pick(episode.id, index)).episode); }
+    try { onEpisode((await animeApi.pick(episode.id, index, series.workspace)).episode); }
     catch (e) { toast.err("选定失败", errMsg(e)); }
   }
 
   async function genShots() {
     setBusy("shots");
     try {
-      await run(() => animeApi.buildShots(episode.id), { kind: `anime-shots-${episode.id}` });
-      onEpisode((await animeApi.get(series.id)).episodes.find((e) => e.id === episode.id)!);
+      await run(() => animeApi.buildShots(episode.id, series.workspace), { kind: `anime-shots-${episode.id}` });
+      onEpisode((await animeApi.get(series.id, series.workspace)).episodes.find((e) => e.id === episode.id)!);
       toast.ok("分镜已出", "每镜 2-5 秒,台词动作全开;可直接改字后保存");
     } catch (e) { toast.err("出分镜失败", errMsg(e)); } finally { setBusy(""); }
   }
 
   async function saveShots() {
     try {
-      onEpisode((await animeApi.saveShots(episode.id, shots)).episode);
+      onEpisode((await animeApi.saveShots(episode.id, shots, series.workspace)).episode);
       setShotsDirty(false);
       toast.ok("分镜已保存", "整集提示词要按新分镜重新生成");
     } catch (e) { toast.err("分镜保存失败", errMsg(e)); }
@@ -561,9 +562,9 @@ function EpisodePanel({ series, episode, meta, onEpisode }: {
 
       {/* ---- ③ 整集分段提示词 ---- */}
       <FilmPromptCard
-        load={() => animeApi.getFilmPrompt(episode.id).then((r) => r.film_prompt)}
-        save={(t) => animeApi.saveFilmPrompt(episode.id, t).then((r) => r.film_prompt)}
-        generate={() => animeApi.buildFilmPrompt(episode.id, segS)}
+        load={() => animeApi.getFilmPrompt(episode.id, series.workspace).then((r) => r.film_prompt)}
+        save={(t) => animeApi.saveFilmPrompt(episode.id, t, series.workspace).then((r) => r.film_prompt)}
+        generate={() => animeApi.buildFilmPrompt(episode.id, segS, series.workspace)}
         jobKind={`anime-fp-${episode.id}`}
         ready={hasShots && !episode.creative_stale && !episode.script?.stale}
         readyHint="先确认简介并展开分镜,才有原料组装整集提示词"

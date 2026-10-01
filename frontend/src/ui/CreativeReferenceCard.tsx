@@ -59,13 +59,14 @@ export default function CreativeReferenceCard({ scope, targetId, form, disabled 
   }
   return <section className="card creative-reference">
     <h3>想写出什么感觉？</h3>
+    {scope === "original" && <p className="hint">先确定要借鉴的机制，再设计卡司与第一集。参考方向只用于本部原创漫剧。</p>}
     {saved.version && <p className="hint">已采用方向 {saved.version}{saved.enabled ? "" : " · 已停用"}：{saved.intent || "按所选参考要求创作"}</p>}
-    <details>
+    <details open={scope === "original" && !saved.references?.length}>
       <summary>给参考、调整理解</summary>
       <fieldset disabled={locked} className="form-grid">
         <label className="field field-full"><span className="fl">想要的体验</span>
           <textarea rows={3} maxLength={2000} value={goal.intent} onChange={(e) => change({ intent: e.target.value })}
-            placeholder="例如：一本正经的日常对白喜剧，误导后抖包袱；或者现实小说，人物有私心，读起来顺。" /></label>
+            placeholder={scope === "project" ? "例如：人物有私心，因果顺畅，详略自然，读起来耐读。" : "例如：一本正经的日常对白喜剧，误导后抖包袱；或线索公平的独立悬疑短剧。"} /></label>
         <label className="field"><span className="fl">故事形式</span><select value={goal.form} onChange={(e) => change({ form: e.target.value as CreativeGoal["form"] })}>
           {scope === "project" ? <option value={form}>{form === "short" ? "短故事，一次讲完" : form === "continuous" ? "连续剧情漫剧" : "连续小说"}</option>
             : <><option value="sketch">独立情景短剧</option><option value="anthology">多段子合集</option></>}

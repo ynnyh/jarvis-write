@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -65,7 +65,23 @@ from app.jobs import list_running, spawn_job
 
 logger = logging.getLogger("jarvis-write.anime")
 
-router = APIRouter(prefix="/api/anime", tags=["anime"], dependencies=[Depends(get_current_user)])
+VALID_WORKSPACES = {"anime", "original"}
+
+
+async def _workspace_boundary(request: Request, workspace: str = Query("anime"), db: Session = Depends(get_db)):
+    """每个读写/生成端点都校验工作区，不能靠隐藏列表实现隔离。"""
+    _check_workspace(workspace)
+    if "eid" in request.path_params:
+        _ep, series = _get_episode(db, int(request.path_params["eid"]))
+    elif "sid" in request.path_params:
+        series = _get_series(db, int(request.path_params["sid"]))
+    else:
+        return
+    if series.workspace != workspace:
+        raise HTTPException(404, "作品不属于当前工作区")
+
+
+router = APIRouter(prefix="/api/anime", tags=["anime"], dependencies=[Depends(get_current_user), Depends(_workspace_boundary)])
 
 
 # ---- 入参模型 ---------------------------------------------
@@ -81,6 +97,7 @@ class SeriesCreateIn(BaseModel):
     genre: str = "comedy"
     direction: str = "chibi"
     episode_s: int = 60
+    workspace: str = "anime"
 
 
 class SeriesPatchIn(BaseModel):
@@ -167,6 +184,12 @@ def _check_episode_s(episode_s: int) -> int:
     return episode_s
 
 
+def _check_workspace(workspace: str) -> str:
+    if workspace not in VALID_WORKSPACES:
+        raise HTTPException(status_code=400, detail="未知的动画工作区")
+    return workspace
+
+
 def _get_series(db: Session, sid: int) -> AnimeSeries:
     row = db.get(AnimeSeries, sid)
     if row is None:
@@ -233,12 +256,13 @@ async def suggest_series_premises_route(body: SuggestPremiseIn):
 
 
 @router.get("")
-def list_series(db: Session = Depends(get_db)):
+def list_series(workspace: str = Query("anime"), db: Session = Depends(get_db)):
     from app.auth import current_user_id
 
+    _check_workspace(workspace)
     rows = (
         db.query(AnimeSeries)
-        .filter(AnimeSeries.user_id == current_user_id.get())
+        .filter(AnimeSeries.user_id == current_user_id.get(), AnimeSeries.workspace == workspace)
         .order_by(AnimeSeries.updated_at.desc())
         .all()
     )
@@ -252,6 +276,9 @@ def create_series(body: SeriesCreateIn, db: Session = Depends(get_db)):
     genre = _check_genre(body.genre)
     direction = _check_direction(body.direction)
     episode_s = _check_episode_s(body.episode_s)
+    workspace = _check_workspace(body.workspace)
+    if workspace == "original" and not body.premise.strip():
+        raise HTTPException(400, "先写一句原创漫剧设定")
     row = AnimeSeries(
         user_id=current_user_id.get(),
         title=(body.title or "未命名系列").strip()[:TITLE_MAX],
@@ -261,6 +288,11 @@ def create_series(body: SeriesCreateIn, db: Session = Depends(get_db)):
         # 画风锚默认取方向硬约束,可手改——生成时逐字注入
         style_cn=direction_directive(direction),
         episode_s=episode_s,
+        workspace=workspace,
+        creative_goal={
+            "enabled": True, "version": 1, "form": "sketch", "intent": body.premise.strip(),
+            "references": [], "selected": [], "observations": [], "unknowns": [], "must": "", "avoid": "",
+        } if workspace == "original" else None,
         status="cast_empty",
     )
     db.add(row)

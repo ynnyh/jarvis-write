@@ -163,7 +163,14 @@ def test_episode_guests_are_isolated_and_settled_before_writing():
 def test_real_novel_entry_filter_retry_locks_and_goal_survives_tag_edit():
     with TestClient(app) as c:
         h = auth(c, "creative-plan")
-        project = c.post("/api/projects", headers=h, json={"title": "验收书", "mode": "drama", "audience": "male"}).json()
+        # 存量漫剧源书仍可编辑；新建接口不再允许把漫剧放进小说。
+        project = c.post("/api/projects", headers=h, json={"title": "验收书"}).json()
+        from app.db.models import Project
+        from app.db.session import SessionLocal
+        with SessionLocal() as db:
+            legacy = db.get(Project, project["id"])
+            legacy.mode, legacy.audience, legacy.mounted_packs = "drama", "male", ["drama_source_male"]
+            db.commit()
         pid = project["id"]
         goal = {**GOAL, "form": "continuous"}
         assert c.put(f"/api/creative/project/{pid}", headers=h, json=goal).status_code == 200

@@ -370,7 +370,7 @@ async def gen_shots(db: Session, series, episode, progress=lambda s: None) -> di
         raise AnimeError("还没确认简介:和 AI 聊完点「确认简介」,或选一个梗纲,再展开分镜。")
     if episode.creative_stale:
         raise AnimeError("方向已更新，先重新打磨本集简介")
-    enhanced = bool((series.creative_goal or {}).get("enabled") or episode.script)
+    enhanced = bool(series.workspace == "original" or (series.creative_goal or {}).get("enabled") or episode.script)
     if enhanced and (not episode.script or episode.script.get("stale") or episode.script.get("goal_version") != (series.creative_goal or {}).get("version", 0)):
         await gen_script(db, series, episode, progress)
     g = genre_of(series.genre)

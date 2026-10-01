@@ -13,13 +13,15 @@ router = APIRouter(prefix="/api/creative", tags=["creative"], dependencies=[Depe
 
 
 def _owner(db: Session, scope: str, target_id: int):
-    model = {"project": Project, "anime": AnimeSeries}.get(scope)
+    model = {"project": Project, "anime": AnimeSeries, "original": AnimeSeries}.get(scope)
     if model is None:
         raise HTTPException(404, "创作入口不存在")
     row = db.get(model, target_id)
     if row is None:
         raise HTTPException(404, "作品不存在")
     assert_project_owner(row)
+    if scope in ("anime", "original") and row.workspace != scope:
+        raise HTTPException(404, "作品不属于当前工作区")
     return row
 
 
@@ -28,7 +30,7 @@ def _goal(row, scope):
 
 
 def _validate_form(row, scope, body):
-    if scope == "anime" and body.form not in ("sketch", "anthology"):
+    if scope in ("anime", "original") and body.form not in ("sketch", "anthology"):
         raise HTTPException(400, "动画系列当前按独立单集创作，请选情景短剧或多段子合集")
     if scope == "project":
         expected = {"serial": "serial", "short": "short", "drama": "continuous"}.get(row.mode, "serial")
@@ -69,7 +71,7 @@ def save_goal(scope: str, target_id: int, body: GoalInput, db: Session = Depends
     if body.expected_version != old.get("version", 0):
         raise HTTPException(409, "创作方向已更新，请刷新后再保存")
     # 在作品生成中改方向会把新旧目标混写在同一集/章里，等待本轮完成再切换。
-    if scope == "anime":
+    if scope in ("anime", "original"):
         eids = [e.id for e in db.query(AnimeEpisode).filter_by(series_id=target_id)]
         kinds = {f"anime-cast-{target_id}"} | {f"anime-{k}-{eid}" for eid in eids for k in ("takes", "script", "shots", "fp")}
     else:
