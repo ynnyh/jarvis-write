@@ -16,6 +16,7 @@ import { isStale, titleSig as calcTitleSig, titleStaleText } from "./wizSig";
 import { SetupStep, STEP_ORDER, STEP_LABEL } from "./onboarding/steps";
 import ModeGate from "./onboarding/ModeGate";
 import PlanFlow from "./onboarding/PlanFlow";
+import CreativeReferenceCard from "../ui/CreativeReferenceCard";
 import SkeletonWall from "./onboarding/SkeletonWall";
 import { SCALE_PRESETS, THINK_TITLE, scaleDisplay } from "./onboarding/presets";
 import { composeRandomSeed } from "./onboarding/randomSeeds";
@@ -104,7 +105,7 @@ export default function OnboardingFlow() {
     submitSpark, pickGenreBrainstorm,
     dramaSkinList, pickedSkin, pickSkinGo,
     pickMode, fetchQuestions, answerQ, adoptAllRecommended,
-    genPlans, reviseOnePlan, confirmChosenPlan,
+    genPlans, reviseOnePlan, confirmChosenPlan, creativeSaved,
     confirmBrief, unconfirmBrief,
     developFromBrief, saveCustomConcept,
     forgeChanged, forgeConfirmed, forgeUnconfirmed, isForgeDismissedFor, reopenForge,
@@ -247,6 +248,11 @@ export default function OnboardingFlow() {
                     words={Number(project.target_words_per_chapter)}
                     onPick={(m, preset, audience) => void pickMode(m, preset, audience)} />
                 )}
+
+                {pid !== null && (step === "idea" || step === "brief" || step === "setup") && <CreativeReferenceCard
+                  key={pid} scope="project" targetId={pid} disabled={!!busy || !!planBusy}
+                  form={project.mode === "short" ? "short" : project.mode === "drama" ? "continuous" : "serial"}
+                  onSaved={creativeSaved} />}
 
                 {/* ---------- 想法 ---------- */}
                 {step === "idea" && (
@@ -507,7 +513,7 @@ export default function OnboardingFlow() {
                     onAnswer={answerQ}
                     onAdoptAll={adoptAllRecommended}
                     onGenPlans={() => void genPlans()}
-                    onRevise={(i, d) => void reviseOnePlan(i, d)}
+                    onRevise={(i, d, locked) => void reviseOnePlan(i, d, locked)}
                     onConfirmPlan={(i) => void confirmChosenPlan(i)}
                     onUnconfirm={() => void unconfirmBrief()}
                     onFeedback={setPlanFeedback}

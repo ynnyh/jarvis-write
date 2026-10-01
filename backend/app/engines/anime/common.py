@@ -26,6 +26,7 @@ STATUS_CN = {
     "cast_empty": "待定卡司", "cast_ready": "卡司就绪", "active": "连载中",
     "premise": "待聊简介", "takes_ready": "梗纲已出", "synopsis_ready": "简介已确认",
     "shots_ready": "分镜已出", "prompted": "提示词已出",
+    "script_ready": "剧本已出",
 }
 
 
@@ -132,6 +133,7 @@ def series_dict(row) -> dict:
         "direction": row.direction, "style_cn": row.style_cn,
         "cast": list(row.cast or []), "episode_s": row.episode_s,
         "status": row.status,
+        "creative_goal": row.creative_goal,
     }
 
 
@@ -141,6 +143,8 @@ def episode_dict(row) -> dict:
         "title": row.title, "premise": row.premise,
         "chat": list(row.chat or []),
         "synopsis": row.synopsis or "", "synopsis_ok": bool(row.synopsis_ok),
+        "script": row.script, "creative_stale": bool(row.creative_stale),
+        "guests": list(row.guests or []),
         "takes": list(row.takes or []), "chosen": row.chosen,
         "shots": list(row.shots or []), "film_prompt": row.film_prompt or "",
         "status": row.status,

@@ -16,10 +16,13 @@ import { FilmPromptCard } from "../../ui/FilmPromptCard";
 import EmptyState from "../../ui/EmptyState";
 import { useJob } from "../../ui/useJob";
 import { confirmDialog } from "../../ui/ConfirmDialog";
+import CreativeReferenceCard from "../../ui/CreativeReferenceCard";
+import ScreenplaySection from "./ScreenplaySection";
 
 const EP_STATUS_CN: Record<string, string> = {
   premise: "待聊简介", takes_ready: "梗纲已出", synopsis_ready: "简介已确认",
   shots_ready: "分镜已出", prompted: "提示词已出",
+  script_ready: "剧本已出",
 };
 
 export default function SeriesWorkspace({ sid }: { sid: number }) {
@@ -73,6 +76,7 @@ export default function SeriesWorkspace({ sid }: { sid: number }) {
       </div>
 
       <CastSection series={series} meta={meta} onSaved={setSeries} />
+      <CreativeReferenceCard scope="anime" targetId={sid} form="sketch" onSaved={reload} />
 
       <section className="card">
         <div className="card-head">
@@ -378,7 +382,7 @@ function EpisodePanel({ series, episode, meta, onEpisode }: {
 
   const chosen = episode.chosen >= 0 ? episode.takes[episode.chosen] : null;
   const hasShots = shots.length > 0;
-  const confirmed = episode.synopsis_ok;
+  const confirmed = episode.synopsis_ok && !episode.creative_stale;
 
   return (
     <section className="card">
@@ -489,6 +493,9 @@ function EpisodePanel({ series, episode, meta, onEpisode }: {
         )}
       </div>
 
+      <ScreenplaySection series={series} episode={episode} disabled={!!busy || chatBusy}
+        onBusy={(b) => setBusy(b ? "script" : "")} onEpisode={onEpisode} />
+
       {/* ---- ② 分镜(简介确认后解锁) ---- */}
       <div className="media-field">
         <div className="card-head mb-2">
@@ -558,7 +565,7 @@ function EpisodePanel({ series, episode, meta, onEpisode }: {
         save={(t) => animeApi.saveFilmPrompt(episode.id, t).then((r) => r.film_prompt)}
         generate={() => animeApi.buildFilmPrompt(episode.id, segS)}
         jobKind={`anime-fp-${episode.id}`}
-        ready={hasShots}
+        ready={hasShots && !episode.creative_stale && !episode.script?.stale}
         readyHint="先确认简介并展开分镜,才有原料组装整集提示词"
         generateDetail={shotcardOn
           ? "文档是逐镜镜头卡:每镜用「首帧」图+画面卡出片(2-5 秒/镜),按镜号拼接"

@@ -77,7 +77,7 @@ def assemble_tendency(
     applied: dict[str, Any] = {}
 
     for key, value in merged.items():
-        if key in (_CUSTOM_KEY, _PROFILE_KEY) or value in (None, "", []):
+        if key in (_CUSTOM_KEY, _PROFILE_KEY, "_creative_goal") or value in (None, "", []):
             continue
 
         # 归一成列表处理;单选维度只取第一个
@@ -111,6 +111,9 @@ def assemble_tendency(
             if val:
                 profile_lines.append(f"- {label}:{val}")
     profile_text = "\n".join(profile_lines)
+    # 共用既有 style 通道，选题、架构、蓝图、正文、润色都读同一份有效方向。
+    from app.engines.creative import GOAL_KEY, render_goal
+    profile_text += render_goal((global_tendency or tendency or {}).get(GOAL_KEY), node)
 
     directives_text = "\n".join(lines)
     return AssembledTendency(

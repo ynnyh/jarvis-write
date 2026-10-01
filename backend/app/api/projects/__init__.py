@@ -35,6 +35,7 @@ from app.api.deps import delete_project_cascade, reset_project_content
 from app.auth import current_user_id, get_current_user
 from app.db.models import Project
 from app.db.session import get_db
+from app.engines.creative import GOAL_KEY
 from app.schemas.canon import StoryCanon
 from app.schemas.concept import Concept
 from app.schemas.dna import StoryDNA
@@ -227,6 +228,13 @@ async def patch_project(
     """
     project = _get_project_or_404(db, project_id)
     updates = req.model_dump(exclude_none=True)
+    if "global_tendency" in updates:
+        # 普通标签编辑不得绕过参考方向的版本检查，也不能用旧前端快照覆盖新方向。
+        tags = {k: v for k, v in updates["global_tendency"].items() if k != GOAL_KEY}
+        old_goal = (project.global_tendency or {}).get(GOAL_KEY)
+        if old_goal is not None:
+            tags[GOAL_KEY] = old_goal
+        updates["global_tendency"] = tags
     # 完本防误改:已完本的书不允许再改标题(重命名),须先取消完本标记。
     if project.finished and "title" in updates:
         raise HTTPException(status_code=409, detail="已标记完本,如需重命名请先取消完本标记")

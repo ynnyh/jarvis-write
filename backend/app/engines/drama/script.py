@@ -29,6 +29,11 @@ from app.engines.drama.quality import (
 from app.llm.router import Task, get_adapter_for
 from app.prompts.drama import DRAMA_END_STATE_PROMPT, EPISODE_SCRIPT_PROMPT
 from app.engines.skills.packs import render_project_skill_block
+from app.engines.creative import project_goal, render_goal
+
+
+def _creative_block(project) -> str:
+    return render_goal(project_goal(project), "短剧剧本")
 
 # 源章节正文注入上限(字符):剧本只需要主体情节,超长正文截断防提示词爆炸。
 # 数章并一集时这是「总预算」,按章平分;超预算的章保头尾去中段(见
@@ -127,7 +132,7 @@ async def write_episode_script(
     adapter = get_adapter_for(Task.DRAMA_SCRIPT, timeout=300)
     prompt = EPISODE_SCRIPT_PROMPT.format(
         # 创作 Skill 包注入(docs/25 §2.4):按工序节点取生效包,无包时是空串。
-        skill_block=render_project_skill_block(db, project, "draft", scope="drama"),
+        skill_block=render_project_skill_block(db, project, "draft", scope="drama") + _creative_block(project),
 
         title=project.title,
         ep_index=episode.ep_index,

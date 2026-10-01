@@ -60,6 +60,7 @@ from app.engines.anime import (
     valid_genres,
 )
 from app.engines.media.directions import DIRECTIONS, VALID_DIRECTIONS, direction_directive
+from app.engines.anime.screenplay import episode_cast, gen_script, invalidate_script, save_script, validate_script_shots
 from app.jobs import list_running, spawn_job
 
 logger = logging.getLogger("jarvis-write.anime")
@@ -134,6 +135,15 @@ class FilmPromptIn(BaseModel):
     film_prompt: str = ""
 
 
+class ScriptIn(BaseModel):
+    script: dict = Field(default_factory=dict)
+    feedback: str = Field(default="", max_length=1000)
+
+
+class GuestsIn(BaseModel):
+    guests: list[dict] = Field(default_factory=list, max_length=3)
+
+
 # ---- 校验/取行 ---------------------------------------------
 
 def _check_genre(genre: str) -> str:
@@ -177,9 +187,19 @@ def _get_episode(db: Session, eid: int) -> tuple[AnimeEpisode, AnimeSeries]:
 def _episode_busy(eid: int) -> bool:
     """这集是否有生成任务在跑(删改前查)。"""
     return any(
-        job["kind"] in (f"anime-takes-{eid}", f"anime-shots-{eid}", f"anime-fp-{eid}")
+        job["kind"] in (f"anime-takes-{eid}", f"anime-script-{eid}", f"anime-shots-{eid}", f"anime-fp-{eid}")
         for _jid, job in list_running("anime-")
     )
+
+
+def _idle(eid: int):
+    if _episode_busy(eid):
+        raise HTTPException(409, "这一集正在生成，完成后再修改")
+
+
+def _current(ep):
+    if ep.creative_stale:
+        raise HTTPException(409, "方向或设定已更新，请先重新打磨本集")
 
 
 # ---- 端点:目录 / 系列 ---------------------------------------------
@@ -263,6 +283,10 @@ def get_series(sid: int, db: Session = Depends(get_db)):
 @router.patch("/{sid}")
 def patch_series(sid: int, body: SeriesPatchIn, db: Session = Depends(get_db)):
     row = _get_series(db, sid)
+    eps = db.query(AnimeEpisode).filter_by(series_id=sid).all()
+    if any(_episode_busy(e.id) for e in eps):
+        raise HTTPException(409, "系列中有一集正在生成，完成后再改设定")
+    changed = any(getattr(row, k) != v for k, v in body.model_dump(exclude_none=True).items())
     if body.title is not None:
         row.title = (body.title or "未命名系列").strip()[:TITLE_MAX]
     if body.premise is not None:
@@ -275,6 +299,10 @@ def patch_series(sid: int, body: SeriesPatchIn, db: Session = Depends(get_db)):
         row.style_cn = body.style_cn.strip()[:2000]
     if body.episode_s is not None:
         row.episode_s = _check_episode_s(body.episode_s)
+    if changed:
+        for ep in eps:
+            ep.creative_stale = True
+            ep.takes = [{**t, "_stale": True} for t in (ep.takes or [])]
     db.commit()
     return {"series": series_dict(row)}
 
@@ -282,6 +310,8 @@ def patch_series(sid: int, body: SeriesPatchIn, db: Session = Depends(get_db)):
 @router.delete("/{sid}")
 def delete_series(sid: int, db: Session = Depends(get_db)):
     row = _get_series(db, sid)
+    if any(_episode_busy(e.id) for e in db.query(AnimeEpisode).filter_by(series_id=sid)):
+        raise HTTPException(409, "剧集正在生成，完成后再删除系列")
     if any(job["kind"] == f"anime-cast-{sid}" for _jid, job in list_running("anime-")):
         raise HTTPException(status_code=409, detail="卡司正在生成,等它跑完再删。")
     db.delete(row)
@@ -295,6 +325,8 @@ def delete_series(sid: int, db: Session = Depends(get_db)):
 async def build_cast(sid: int, db: Session = Depends(get_db)):
     """AI 设计卡司(job):locked 角色原样保留,其余换新提案。"""
     series = _get_series(db, sid)
+    if any(_episode_busy(e.id) for e in db.query(AnimeEpisode).filter_by(series_id=sid)):
+        raise HTTPException(409, "剧集正在生成，完成后再重出卡司")
     kind = f"anime-cast-{sid}"
     for jid, job in list_running("anime-"):
         if job["kind"] == kind:
@@ -315,8 +347,16 @@ async def build_cast(sid: int, db: Session = Depends(get_db)):
 @router.put("/{sid}/cast")
 def put_cast(sid: int, body: CastIn, db: Session = Depends(get_db)):
     row = _get_series(db, sid)
+    eps = db.query(AnimeEpisode).filter_by(series_id=sid).all()
+    if any(_episode_busy(e.id) for e in eps) or any(j["kind"] == f"anime-cast-{sid}" for _, j in list_running("anime-")):
+        raise HTTPException(409, "系列正在生成，完成后再改卡司")
     try:
+        old_cast = row.cast
         row.cast = save_cast(row, body.cast)
+        if old_cast != row.cast:
+            for ep in eps:
+                ep.creative_stale = True
+                ep.takes = [{**t, "_stale": True} for t in (ep.takes or [])]
     except AnimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     db.commit()
@@ -371,6 +411,10 @@ def patch_episode(eid: int, body: EpisodePatchIn, db: Session = Depends(get_db))
     if _episode_busy(eid):
         raise HTTPException(status_code=409, detail="这一集有生成任务在跑,稍后再改。")
     if body.premise is not None:
+        if row.premise != body.premise.strip()[:PREMISE_MAX]:
+            row.synopsis_ok = 0
+            row.creative_stale = True
+            invalidate_script(row)
         row.premise = body.premise.strip()[:PREMISE_MAX]
     if body.title is not None:
         row.title = body.title.strip()[:60]
@@ -396,6 +440,7 @@ async def build_takes(eid: int, db: Session = Depends(get_db)):
     for jid, job in list_running("anime-"):
         if job["kind"] == kind:
             return {"job_id": jid}
+    _idle(eid)
 
     async def work(progress):
         from app.db.session import SessionLocal
@@ -413,6 +458,9 @@ async def build_takes(eid: int, db: Session = Depends(get_db)):
 @router.post("/episodes/{eid}/pick")
 def pick(eid: int, body: PickIn, db: Session = Depends(get_db)):
     row, _series = _get_episode(db, eid)
+    _idle(eid)
+    if row.creative_stale and (body.index >= len(row.takes or []) or row.takes[body.index].get("_stale") or row.takes[body.index].get("_goal_version") != (_series.creative_goal or {}).get("version", 0)):
+        raise HTTPException(409, "这些梗纲属于旧方向，请先重新出梗纲")
     try:
         ep = pick_take(row, body.index)
     except AnimeError as e:
@@ -437,6 +485,9 @@ async def chat(eid: int, body: ChatIn, db: Session = Depends(get_db)):
 def confirm_synopsis_route(eid: int, body: SynopsisIn | None = None, db: Session = Depends(get_db)):
     """用户拍板:简介定稿、分镜解锁;传了文本就一并替换(手改过的简介也走这里)。"""
     row, _series = _get_episode(db, eid)
+    _idle(eid)
+    if row.creative_stale and (not body or not body.synopsis):
+        raise HTTPException(409, "方向或命题已更新，请重新打磨简介，或提交按新方向修改的简介")
     try:
         ep = confirm_synopsis(row, body.synopsis if body else None)
     except AnimeError as e:
@@ -445,16 +496,77 @@ def confirm_synopsis_route(eid: int, body: SynopsisIn | None = None, db: Session
     return {"episode": ep}
 
 
+@router.post("/episodes/{eid}/script")
+async def build_script(eid: int, body: ScriptIn | None = None, db: Session = Depends(get_db)):
+    ep, series = _get_episode(db, eid)
+    kind = f"anime-script-{eid}"
+    for jid, job in list_running("anime-"):
+        if job["kind"] == kind:
+            return {"job_id": jid}
+    _idle(eid)
+    if ep.creative_stale or not ep.synopsis_ok:
+        raise HTTPException(409, "先按当前方向打磨并确认简介")
+    feedback = body.feedback if body else ""
+
+    async def work(progress):
+        from app.db.session import SessionLocal
+        with SessionLocal() as session:
+            row = session.get(AnimeEpisode, eid)
+            if row is None:
+                raise ValueError("这一集已删除")
+            sr = session.get(AnimeSeries, row.series_id)
+            return await gen_script(session, sr, row, progress, feedback)
+
+    return {"job_id": spawn_job(kind, work)}
+
+
+@router.put("/episodes/{eid}/script")
+def put_script(eid: int, body: ScriptIn, db: Session = Depends(get_db)):
+    ep, series = _get_episode(db, eid)
+    _idle(eid)
+    if ep.creative_stale or not ep.synopsis_ok:
+        raise HTTPException(409, "先按当前方向确认简介")
+    try:
+        result = save_script(ep, series, body.script)
+    except AnimeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    db.commit()
+    return {"episode": result}
+
+
+@router.put("/episodes/{eid}/guests")
+def put_guests(eid: int, body: GuestsIn, db: Session = Depends(get_db)):
+    ep, series = _get_episode(db, eid)
+    _idle(eid)
+    names = {c["name"] for c in series.cast or []}
+    guests = []
+    for guest in body.guests:
+        if not guest.get("name") or not guest.get("appearance"):
+            raise HTTPException(400, "客串角色需要名字与定妆描述")
+        item = norm_cast([guest])[0]
+        if item["name"] in names:
+            raise HTTPException(400, "客串与卡司名字不能重复")
+        names.add(item["name"])
+        item["role"] = "客串"
+        guests.append(item)
+    ep.guests = guests
+    invalidate_script(ep)
+    db.commit()
+    return {"episode": episode_dict(ep)}
+
+
 @router.post("/episodes/{eid}/shots")
 async def build_shots(eid: int, db: Session = Depends(get_db)):
     """确认后的简介 → 分镜(job)。"""
     episode, series = _get_episode(db, eid)
+    _current(episode)
     if not (episode.synopsis_ok and (episode.synopsis or "").strip()):
         raise HTTPException(status_code=400, detail="先确认简介(聊天拍板或选梗纲),再展开分镜。")
     kind = f"anime-shots-{eid}"
     for jid, job in list_running("anime-"):
         if job["kind"] == kind:
             return {"job_id": jid}
+    _idle(eid)
 
     async def work(progress):
         from app.db.session import SessionLocal
@@ -472,8 +584,12 @@ async def build_shots(eid: int, db: Session = Depends(get_db)):
 @router.put("/episodes/{eid}/shots")
 def put_shots(eid: int, body: ShotsIn, db: Session = Depends(get_db)):
     row, _series = _get_episode(db, eid)
+    _idle(eid)
+    _current(row)
     try:
         row.shots = save_shots(row, body.shots)
+        if row.script and not row.script.get("stale"):
+            validate_script_shots(row.shots, row.script, episode_cast(_series, row))
     except AnimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     db.commit()
@@ -486,6 +602,7 @@ def put_shots(eid: int, body: ShotsIn, db: Session = Depends(get_db)):
 async def build_film_prompt_route(eid: int, body: FilmPromptGenIn | None = None, db: Session = Depends(get_db)):
     """分镜 → 整集分段精准提示词(job):每段 ≤ 单段上限,逐段复制贴外部模型。"""
     episode, series = _get_episode(db, eid)
+    _current(episode)
     if not (episode.shots or []):
         raise HTTPException(status_code=400, detail="先展开分镜,再来出整集提示词。")
     segment_s = (body.segment_s if body else 15) or 15
@@ -495,6 +612,7 @@ async def build_film_prompt_route(eid: int, body: FilmPromptGenIn | None = None,
     for jid, job in list_running("anime-"):
         if job["kind"] == kind:
             return {"job_id": jid}
+    _idle(eid)
 
     async def work(progress):
         from app.db.session import SessionLocal

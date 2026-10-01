@@ -165,6 +165,21 @@ def _add_synopsis_column() -> None:
             logger.info("迁移:projects 补 synopsis 列")
 
 
+def _add_creative_columns() -> None:
+    """参考驱动短剧：可空目标/剧本/客串与过期标记，旧数据不强制迁移创作方向。"""
+    additions = {
+        "anime_series": {"creative_goal": "JSON"},
+        "anime_episodes": {"script": "JSON", "creative_stale": "BOOLEAN NOT NULL DEFAULT 0", "guests": "JSON"},
+    }
+    for table, columns in additions.items():
+        if table not in inspect(engine).get_table_names():
+            continue
+        for column, ddl in columns.items():
+            if not _column_exists(table, column):
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+
+
 def _add_project_style_profile_column() -> None:
     """给 projects 表补 style_profile 列(结构化文风画像,存量 NULL,幂等)。"""
     with engine.begin() as conn:
@@ -1196,6 +1211,7 @@ def run_migrations() -> None:
     _add_issue_payload_column()
     _add_setup_columns()
     _add_project_style_profile_column()
+    _add_creative_columns()
     _add_project_sequel_column()
     _add_job_owner_columns()
     _add_outline_locked_column()

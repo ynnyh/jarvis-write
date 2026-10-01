@@ -44,6 +44,8 @@ class AnimeSeries(Base, TimestampMixin):
     # 卡司:[{name, role:'主角'|'配角', appearance, wardrobe, personality,
     #        catchphrase, locked}]——主角恰好 1 个,配角 0-3 个;locked 字段重出不覆盖
     cast: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    # 可空：存量系列继续旧流程；新目标是一份生效的参考理解，不复制进卡司。
+    creative_goal: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # 每集时长档(秒):60 / 90(可扩)
     episode_s: Mapped[int] = mapped_column(Integer, default=60)
     # cast_empty(还没卡司)→ cast_ready → active(有集)
@@ -74,6 +76,11 @@ class AnimeEpisode(Base, TimestampMixin):
     synopsis: Mapped[str] = mapped_column(Text, default="")
     # 简介是否已确认:1=用户拍板,分镜按钮才解锁
     synopsis_ok: Mapped[int] = mapped_column(Integer, default=0)
+    # 完整剧本快照及其目标版本；变更保留旧稿，但不允许沿旧稿继续出片。
+    script: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    creative_stale: Mapped[bool] = mapped_column(default=False)
+    # 单集客串角色单独定妆，不污染系列固定卡司。
+    guests: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # 三个梗纲:[{logline, beats(节奏列表,按类型的节奏库展开), punchline}]
     takes: Mapped[list[Any]] = mapped_column(JSON, default=list)
     # 选中序号(-1 未选)

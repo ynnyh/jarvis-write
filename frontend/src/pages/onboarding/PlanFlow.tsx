@@ -28,7 +28,7 @@ interface Props {
   onAnswer: (key: string, text: string) => void;
   onAdoptAll: () => void;
   onGenPlans: () => void;
-  onRevise: (index: number, directive: string) => void;
+  onRevise: (index: number, directive: string, lockedFields: string[]) => void;
   onConfirmPlan: (index: number) => void;
   onUnconfirm: () => void;
   onFeedback: (text: string) => void;
@@ -39,6 +39,11 @@ interface Props {
 
 const PLAN_FIELDS: { key: keyof BookPlan; label: string }[] = [
   { key: "kernel", label: "内核" },
+  { key: "opening", label: "开场冲突" },
+  { key: "payoff", label: "第一回报" },
+  { key: "escalation", label: "后续困境/代价" },
+  { key: "mechanism", label: "故事机制" },
+  { key: "opening_sample", label: "开场试读" },
   { key: "protagonist", label: "主角" },
   { key: "world", label: "世界观" },
   { key: "arc", label: "首卷走向" },
@@ -50,6 +55,7 @@ export default function PlanFlow(p: Props) {
   // 每张卡的定向修订输入
   const [reviseOpen, setReviseOpen] = useState<number | null>(null);
   const [reviseText, setReviseText] = useState("");
+  const [lockedFields, setLockedFields] = useState<string[]>([]);
   const [regenFeedbackOpen, setRegenFeedbackOpen] = useState(false);
   const askedRef = useRef(false);
   const isShort = p.mode === "short";
@@ -193,10 +199,16 @@ export default function PlanFlow(p: Props) {
                   {on ? "✓ 就是这套" : "选这套"}
                 </button>
                 <button className="btn-sm" disabled={!!p.planBusy}
-                  onClick={() => { setReviseOpen(reviseOpen === i ? null : i); setReviseText(""); }}>
+                  onClick={() => { setReviseOpen(reviseOpen === i ? null : i); setReviseText(""); setLockedFields([]); }}>
                   ✎ 改改再选
                 </button>
               </div>
+              {reviseOpen === i && <details className="mt-2"><summary>这次保持不变的部分</summary>
+                <div className="form-grid">{PLAN_FIELDS.filter((f) => plan[f.key]).map((f) => <label className="field" key={f.key}>
+                  <span><input type="checkbox" disabled={!!p.planBusy} checked={lockedFields.includes(f.key)}
+                    onChange={(e) => setLockedFields((keys) => e.target.checked ? [...keys, f.key] : keys.filter((k) => k !== f.key))} /> {f.label}</span>
+                </label>)}</div>
+              </details>}
               {reviseOpen === i && (
                 <div className="input-row mt-2">
                   <input type="text" value={reviseText} maxLength={300} disabled={!!p.planBusy}
@@ -204,12 +216,12 @@ export default function PlanFlow(p: Props) {
                     onChange={(e) => setReviseText(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && reviseText.trim()) {
-                        p.onRevise(i, reviseText.trim());
+                        p.onRevise(i, reviseText.trim(), lockedFields);
                         setReviseOpen(null);
                       }
                     }} />
                   <button className="btn-sm primary" disabled={!reviseText.trim() || !!p.planBusy}
-                    onClick={() => { p.onRevise(i, reviseText.trim()); setReviseOpen(null); }}>
+                    onClick={() => { p.onRevise(i, reviseText.trim(), lockedFields); setReviseOpen(null); }}>
                     按这句改这张卡
                   </button>
                 </div>

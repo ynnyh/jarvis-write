@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
+import json
 
 from sqlalchemy.orm import Session
 
@@ -25,6 +26,8 @@ from app.engines.anime.common import (
     merge_cast_locked,
     norm_cast,
 )
+from app.engines.creative import render_goal, select_candidates
+from app.engines.anime.screenplay import episode_cast, gen_script, invalidate_script, validate_script_shots
 from app.engines.common import ask_llm_json, parse_llm_json_checked
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.media.segments import group_by_limit
@@ -75,6 +78,7 @@ async def generate_cast(db: Session, series, progress=lambda s: None) -> list[di
         direction_directive=direction_directive(series.direction),
         hints_block=_hints_block(series.style_cn),
     )
+    prompt += render_goal(series.creative_goal, "generate_cast")
     last_err = ""
     for attempt in range(1, _ATTEMPTS + 1):
         try:
@@ -82,6 +86,11 @@ async def generate_cast(db: Session, series, progress=lambda s: None) -> list[di
             data = parse_llm_json(await adapter.ask(prompt))
             fresh = norm_cast(data.get("cast"))
             merged = merge_cast_locked(list(series.cast or []), fresh)
+            if series.cast != merged:
+                from app.db.models import AnimeEpisode
+                for ep in db.query(AnimeEpisode).filter_by(series_id=series.id):
+                    ep.creative_stale = True
+                    ep.takes = [{**t, "_stale": True} for t in (ep.takes or [])]
             # 拷贝-改-赋回:JSON 列原地改 SQLAlchemy 不认,commit 会空转
             series.cast = merged
             series.status = "cast_ready"
@@ -157,6 +166,7 @@ async def suggest_episode_premises(
         cast_block=cast_block(series.cast),
         used_block=used_block,
     )
+    prompt += render_goal(series.creative_goal, "suggest_episode_premises")
     last_err = ""
     for attempt in range(1, _ATTEMPTS + 1):
         try:
@@ -203,9 +213,10 @@ async def anime_chat(
         beats=g["beats"],
         premise=(series.premise or "").strip() or "(未填)",
         premise_line=(episode.premise or "").strip() or "(空,按类型与卡司自拟)",
-        cast_block=cast_block(series.cast),
+        cast_block=cast_block(episode_cast(series, episode)),
         chat_block=_chat_block(thread),
     )
+    prompt += render_goal(series.creative_goal, "anime_chat")
     last_err = ""
     for attempt in range(1, _ATTEMPTS + 1):
         try:
@@ -219,6 +230,9 @@ async def anime_chat(
             thread_out = (thread + [{"role": "assistant", "content": reply}])[-CHAT_KEEP:]
             episode.chat = thread_out
             episode.synopsis = synopsis
+            invalidate_script(episode)
+            episode.creative_stale = False
+            episode.status = "premise"
             episode.synopsis_ok = 0  # 有新草稿,旧确认作废;重新拍板才往下走
             db.commit()
             return {"reply": reply, "synopsis": synopsis, "episode": episode_dict(episode)}
@@ -237,6 +251,8 @@ def confirm_synopsis(episode, synopsis: str | None = None) -> dict:
         raise AnimeError("还没有简介可确认:先聊一轮,或让 AI 出三个梗纲挑一个。")
     episode.synopsis = text
     episode.synopsis_ok = 1
+    episode.creative_stale = False
+    invalidate_script(episode)
     episode.shots = []
     episode.film_prompt = ""
     episode.status = "synopsis_ready"
@@ -259,15 +275,23 @@ async def gen_takes(db: Session, series, episode, progress=lambda s: None) -> di
         beats=g["beats"],
         premise=(series.premise or "").strip() or "(未填)",
         premise_line=premise_line,
-        cast_block=cast_block(series.cast),
+        cast_block=cast_block(episode_cast(series, episode)),
     )
+    prompt += render_goal(series.creative_goal, "gen_takes")
     last_err = ""
     for attempt in range(1, _ATTEMPTS + 1):
         try:
             adapter = get_adapter_for(Task.ANIME_TAKES, timeout=300)
             data = parse_llm_json(await adapter.ask(prompt))
             takes = _norm_takes(data.get("takes"))
+            if (series.creative_goal or {}).get("enabled"):
+                takes = await select_candidates(takes, series.creative_goal, "梗纲")
+            for take in takes:
+                take["_goal_version"] = (series.creative_goal or {}).get("version", 0)
             episode.takes = takes
+            invalidate_script(episode)
+            if episode.creative_stale:
+                episode.synopsis_ok = 0
             episode.chosen = -1
             episode.title = ""
             episode.shots = []
@@ -278,6 +302,7 @@ async def gen_takes(db: Session, series, episode, progress=lambda s: None) -> di
             return episode_dict(episode)
         except Exception as exc:  # noqa: BLE001 — 重试一次,再失败才上屏
             last_err = str(exc)
+        prompt += "\n本轮失败原因：" + last_err[:600] + "。按目标修正机制后重新输出。"
         logger.warning("梗纲生成第 %d/%d 次未成:%s", attempt, _ATTEMPTS, last_err)
     raise AnimeError(f"梗纲没出好({last_err}),再点一次试试。")
 
@@ -328,6 +353,8 @@ def pick_take(episode, index: int) -> dict:
     episode.chosen = index
     episode.synopsis = _take_synopsis(take)
     episode.synopsis_ok = 1
+    episode.creative_stale = False
+    invalidate_script(episode)
     episode.shots = []
     episode.film_prompt = ""
     episode.status = "synopsis_ready"
@@ -341,6 +368,11 @@ async def gen_shots(db: Session, series, episode, progress=lambda s: None) -> di
     """确认后的简介 → 分镜(每镜 2-5 秒,台词动作全开),存 shots。"""
     if not episode.synopsis_ok or not (episode.synopsis or "").strip():
         raise AnimeError("还没确认简介:和 AI 聊完点「确认简介」,或选一个梗纲,再展开分镜。")
+    if episode.creative_stale:
+        raise AnimeError("方向已更新，先重新打磨本集简介")
+    enhanced = bool((series.creative_goal or {}).get("enabled") or episode.script)
+    if enhanced and (not episode.script or episode.script.get("stale") or episode.script.get("goal_version") != (series.creative_goal or {}).get("version", 0)):
+        await gen_script(db, series, episode, progress)
     g = genre_of(series.genre)
     total_s = int(series.episode_s or 60)
     shot_count = max(10, round(total_s / 3.5))
@@ -350,18 +382,24 @@ async def gen_shots(db: Session, series, episode, progress=lambda s: None) -> di
         framing=g["framing"],
         direction_directive=direction_directive(series.direction),
         skill_block=render_skill_block(db, scope="anime", node="shots"),
-        cast_block=cast_block(series.cast),
+        cast_block=cast_block(episode_cast(series, episode)),
         title=(episode.title or series.title or "本集").strip()[:40],
-        synopsis_block=episode.synopsis.strip(),
+        synopsis_block=(json.dumps({k: v for k, v in episode.script.items() if k != "history"}, ensure_ascii=False) if enhanced else episode.synopsis.strip()),
         total_s=total_s,
         shot_count=shot_count,
     )
+    if enhanced:
+        prompt = prompt.replace("每镜 2-5 秒", "每镜 2-12 秒，按对白与停顿切镜，不强切句子")
+        prompt += render_goal(series.creative_goal, "分镜")
+        prompt += "\n上面的完整剧本是唯一对白来源：逐字保留对白与顺序，不另编台词。pause_s计入时长，保留铺垫和反应镜头。"
     last_err = ""
     for attempt in range(1, _ATTEMPTS + 1):
         try:
             adapter = get_adapter_for(Task.ANIME_SHOTS, timeout=300)
             data = parse_llm_json(await adapter.ask(prompt))
-            shots = _norm_shots(data.get("shots"), total_s)
+            shots = _norm_shots(data.get("shots"), total_s, max_duration=12 if enhanced else 5)
+            if enhanced:
+                validate_script_shots(shots, episode.script, episode_cast(series, episode))
             title = str(data.get("title") or "").strip()[:60]
             if title:
                 episode.title = title
@@ -370,15 +408,14 @@ async def gen_shots(db: Session, series, episode, progress=lambda s: None) -> di
             episode.status = "shots_ready"
             db.commit()
             return episode_dict(episode)
-        except AnimeError:
-            raise
         except Exception as exc:  # noqa: BLE001 — 重试一次,再失败才上屏
             last_err = str(exc)
+        prompt += "\n上一版未通过：" + last_err[:600] + "。按完整剧本修正。"
         logger.warning("分镜生成第 %d/%d 次未成:%s", attempt, _ATTEMPTS, last_err)
     raise AnimeError(f"分镜没出好({last_err}),再点一次试试。")
 
 
-def _norm_shots(shots: object, total_s: int) -> list[dict]:
+def _norm_shots(shots: object, total_s: int, max_duration: int = 5) -> list[dict]:
     """分镜归一:seq 重排、时长钳到 2-5 秒、字段裁剪;总时长偏出 ±8 秒算不合格(重试)。"""
     if not isinstance(shots, list) or not shots:
         raise ValueError("模型没有返回分镜数组")
@@ -390,7 +427,7 @@ def _norm_shots(shots: object, total_s: int) -> list[dict]:
             dur = int(s.get("duration_s") or 0)
         except (TypeError, ValueError):
             dur = 0
-        dur = min(5, max(2, dur or 3))
+        dur = min(max_duration, max(2, dur or 3))
         chars = s.get("characters")
         out.append({
             "seq": i,
@@ -430,7 +467,7 @@ def save_shots(episode, shots: list) -> list[dict]:
             "seq": i,
             "shot_type": str(s.get("shot_type") or "中景").strip()[:20],
             "camera": str(s.get("camera") or "固定").strip()[:40],
-            "duration_s": min(9, max(1, dur)),
+            "duration_s": min(12, max(1, dur)),
             "action_desc": str(s.get("action_desc") or "").strip()[:300],
             "dialogue": str(s.get("dialogue") or "").strip()[:200],
             "speaker": str(s.get("speaker") or "").strip()[:30],
@@ -475,7 +512,7 @@ def shotcard_doc_header(shot_count: int, total_s: int) -> str:
         f"【使用说明】本集共 {shot_count} 镜(全片约 {total_s} 秒),逐镜出片:\n"
         f"1. 先用下方「定妆照」提示词,给每位出场角色文生图一张定妆照;\n"
         f"2. 每镜:用「首帧」标明的图(定妆照或上一镜末帧)作首帧,贴上该镜画面卡,"
-        f"图生视频一次出这一镜(2-5 秒);\n"
+        f"图生视频一次出这一镜(按镜头标注时长);\n"
         f"3. 每段生成的末帧存下来作下一镜首帧;带台词的镜交给音频原生模型直接出声;"
         f"全部按镜号拼接即成片。\n"
         f"跨镜角色一致靠首帧钉死——运动卡故意不带外貌词,别手动加回去。\n"
@@ -563,13 +600,13 @@ _SHOTCARD_REPAIR_INSTRUCTION = (
 
 
 def _assemble_shotcard_doc(
-    series, shots: list[dict], cards: list[dict], refs: list[str]
+    series, shots: list[dict], cards: list[dict], refs: list[str], cast: list[dict] | None = None
 ) -> str:
     """卡 → 整集文档(确定性拼装):台词/音效/首帧/负面词基座都不靠模型自觉。"""
     style = (series.style_cn or "").strip() or direction_directive(series.direction)
     total_s = sum(int(s.get("duration_s") or 0) for s in shots)
     lines: list[str] = [shotcard_doc_header(len(shots), total_s)]
-    for c in norm_cast(series.cast) if series.cast else []:
+    for c in (cast if cast is not None else norm_cast(series.cast) if series.cast else []):
         ref = f"【定妆照·{c['name']}】{c['appearance']}"
         if c.get("wardrobe"):
             ref += f" 服装:{c['wardrobe']}"
@@ -615,7 +652,7 @@ async def _build_shotcard_prompt(
         ratio="9:16 竖屏",
         framing=g["framing"],
         style_anchor=style,
-        cast_block=cast_block(norm_cast(series.cast)) if series.cast else "(无卡司档案)",
+        cast_block=cast_block(episode_cast(series, episode)),
         shots_block=_shotcard_material_block(shots),
     )
     data, err = await ask_llm_json(adapter, prompt, label="镜头卡", contract={"cards": list})
@@ -637,7 +674,7 @@ async def _build_shotcard_prompt(
             logger.warning("镜头卡定向修复调用失败:%s", exc)
     if problems:
         raise AnimeError(f"镜头卡没拼好({problems}),再点一次试试。")
-    doc = _assemble_shotcard_doc(series, shots, cards, refs)
+    doc = _assemble_shotcard_doc(series, shots, cards, refs, episode_cast(series, episode))
     episode.film_prompt = doc
     episode.status = "prompted"
     db.commit()
@@ -671,6 +708,8 @@ async def build_film_prompt(
     db: Session, series, episode, progress=lambda s: None, segment_s: int = 15
 ) -> dict:
     """分镜 → 整集提示词:镜头卡包启用走镜头卡制,否则旧分段式(兜底)。"""
+    if episode.creative_stale or (episode.script and episode.script.get("stale")):
+        raise AnimeError("方向或剧本已变，先更新剧本与分镜")
     shots = [s for s in (episode.shots or []) if isinstance(s, dict)]
     if not shots:
         raise AnimeError("这集还没有分镜:先三选一梗纲并展开分镜,再来出提示词。")
@@ -699,7 +738,7 @@ async def build_film_prompt(
         ratio="9:16 竖屏",
         framing=g["framing"],
         style_block=series.style_cn or direction_directive(series.direction),
-        cast_block=cast_block(norm_cast(series.cast)) if series.cast else "(无卡司档案)",
+        cast_block=cast_block(episode_cast(series, episode)),
         segments_block=_segments_block(groups),
         seg_floor=seg_floor,
     )

@@ -29,6 +29,7 @@ from app.auth import get_current_user
 from app.db.models import Project
 from app.db.session import get_db
 from app.engines.consistency.extractor import parse_llm_json
+from app.engines.creative import project_goal, select_candidates
 from app.engines.tendency import assemble_tendency
 from app.engines.skills.packs import render_project_skill_block
 from app.prompts.drama_skins import DRAMA_SKINS
@@ -222,6 +223,11 @@ class PlanCard(BaseModel):
     scale: str = ""
     scale_reason: str = ""
     label: str = ""
+    opening: str = ""
+    payoff: str = ""
+    escalation: str = ""
+    mechanism: str = ""
+    opening_sample: str = ""
 
 
 class BookPlansResponse(BaseModel):
@@ -236,11 +242,15 @@ def _sanitize_plans(data: dict, mode: str) -> list[PlanCard]:
     fields = _PLAN_FIELDS_SHORT if mode == "short" else _PLAN_FIELDS_SERIAL
     out: list[PlanCard] = []
     for p in raw:
+        if not isinstance(p, dict):
+            continue
         if not all(str(p.get(f) or "").strip() for f in fields):
             continue
         flavor = p.get("flavor") or []
         if isinstance(flavor, str):
             flavor = [flavor]
+        if not isinstance(flavor, list):
+            flavor = []
         out.append(
             PlanCard(
                 **{f: str(p.get(f) or "").strip()[:600] for f in fields},
@@ -248,6 +258,7 @@ def _sanitize_plans(data: dict, mode: str) -> list[PlanCard]:
                 scale=str(p.get("scale") or "").strip()[:10],
                 scale_reason=str(p.get("scale_reason") or "").strip()[:150],
                 label=str(p.get("label") or "").strip()[:60],
+                **{f: str(p.get(f) or "").strip()[:600] for f in ("opening", "payoff", "escalation", "mechanism", "opening_sample")},
             )
         )
     if len(out) < 2:
@@ -292,7 +303,19 @@ async def book_plans(
     )
     adapter = get_adapter_for(Task.ARCHITECTURE)
     try:
-        plans = _sanitize_plans(parse_llm_json(await adapter.ask(prompt)), mode)
+        goal = project_goal(project)
+        for attempt in range(2):
+            try:
+                plans = _sanitize_plans(parse_llm_json(await adapter.ask(prompt)), mode)
+                if goal.get("enabled") or all(p.mechanism and p.opening and p.payoff for p in plans):
+                    effective = goal if goal.get("enabled") else {"enabled": True, "form": "short" if mode == "short" else "continuous" if project.mode == "drama" else "serial", "intent": topic}
+                    selected = await select_candidates([p.model_dump() for p in plans], effective, "开书方案")
+                    plans = [PlanCard(**p) for p in selected]
+                break
+            except ValueError as exc:
+                if attempt:
+                    raise
+                prompt += f"\n上一批未通过：{str(exc)[:800]}。修正因果和机制后重新输出整组方案。"
     except Exception as exc:  # noqa: BLE001
         logger.warning("book-plans 失败 pid=%s: %s", project_id, exc)
         raise HTTPException(status_code=502, detail=f"方案没出好:{exc}") from exc
@@ -306,6 +329,7 @@ async def book_plans(
 class RevisePlanRequest(BaseModel):
     index: int = Field(ge=0, le=9)
     directive: str = Field(min_length=1, max_length=_DIRECTIVE_MAX)
+    locked_fields: list[str] = Field(default_factory=list, max_length=20)
 
 
 class RevisePlanResponse(BaseModel):
@@ -324,7 +348,7 @@ async def revise_plan(
         raise HTTPException(status_code=400, detail="方案序号越界,先出一批方案")
     mode = "short" if project.mode == "short" else "serial"
     target = plans_raw[req.index]
-    shape_fields = _PLAN_FIELDS_SHORT if mode == "short" else _PLAN_FIELDS_SERIAL + ["engine"]
+    shape_fields = (_PLAN_FIELDS_SHORT if mode == "short" else _PLAN_FIELDS_SERIAL) + ["opening", "payoff", "escalation", "mechanism", "opening_sample"]
     json_shape = "{" + ", ".join(f'"{f}": ""' for f in shape_fields) + \
         ', "flavor": [""], "scale": "", "scale_reason": "", "label": ""}'
     prompt = REVISE_PLAN_PROMPT.format(
@@ -333,16 +357,23 @@ async def revise_plan(
         directive=req.directive.strip(),
         json_shape=json_shape,
     )
+    prompt += _style_block_of(project)
+    if req.locked_fields:
+        prompt += "\n以下字段逐字锁定，修改须与之兼容：" + ",".join(k for k in req.locked_fields if k in target)
     adapter = get_adapter_for(Task.POLISH, max_tokens=4096)
     try:
         revised = parse_llm_json(await adapter.ask(prompt))
     except Exception as exc:  # noqa: BLE001
         logger.warning("revise-plan 失败 pid=%s: %s", project_id, exc)
         raise HTTPException(status_code=502, detail=f"这轮没改好:{exc}") from exc
+    if not isinstance(revised, dict):
+        raise HTTPException(502, "修订结果不是完整方案，请重试")
     # 修订合并:模型返回的非空字段采纳,空/缺字段回填原值(不让模型丢格子);
     # 「未要求字段逐字保留」由 prompt 约束,实验验证服从度良好
     merged = dict(target)
     for k, v in revised.items():
+        if k in req.locked_fields:
+            continue
         if k in target and isinstance(target[k], str) and isinstance(v, str):
             if v.strip():
                 merged[k] = v.strip()
@@ -371,6 +402,8 @@ class PlanConfirmRequest(BaseModel):
 def _render_order(plan: dict, mode: str) -> str:
     """方案 → 开书订单文本。下游概念深化把它当「作者已拍板的最高约束」注入。"""
     flavor = " · ".join(plan.get("flavor") or [])
+    # 候选的具体兑现也进入开书订单；试读样稿只校准阅读感，不自动固化其新事实。
+    details = "\n".join(f"【{label}】{plan[k]}" for k, label in (("opening", "开场冲突"), ("payoff", "第一回报"), ("escalation", "后续困境与代价"), ("mechanism", "故事机制")) if plan.get(k))
     if mode == "short":
         return (
             f"书名(暂定):《{plan.get('title', '')}》(短故事,一次讲完)\n"
@@ -378,7 +411,7 @@ def _render_order(plan: dict, mode: str) -> str:
             f"【主角】{plan.get('protagonist', '')}\n"
             f"【故事弧】{plan.get('arc', '')}\n"
             f"【舞台】{plan.get('world', '')}\n"
-            f"【味道与结尾】{flavor} · 结尾落在:{plan.get('ending', '')}"
+            f"【味道与结尾】{flavor} · 结尾落在:{plan.get('ending', '')}\n{details}"
         )
     return (
         f"书名(暂定):《{plan.get('title', '')}》\n"
@@ -386,7 +419,7 @@ def _render_order(plan: dict, mode: str) -> str:
         f"【主角】{plan.get('protagonist', '')}\n"
         f"【首卷走向】{plan.get('arc', '')}\n"
         f"【世界观底盘】{plan.get('world', '')}\n"
-        f"【味道与连载引擎】{flavor} · {plan.get('engine', '')}"
+        f"【味道与连载引擎】{flavor} · {plan.get('engine', '')}\n{details}"
     )
 
 
@@ -402,7 +435,8 @@ async def plan_confirm(
     mode = "short" if req.mode == "short" else "serial"
     plan = plans[req.index]
 
-    project.mode = mode
+    # 漫剧源书复用连载方案形状，但不能在拍板时丢掉剧集模式与频道。
+    project.mode = "drama" if project.mode == "drama" else mode
     project.brief = _render_order(plan, mode)
     project.brief_confirmed = True
     if project.title in ("", _TITLE_SENTINEL) and str(plan.get("title") or "").strip():

@@ -388,6 +388,15 @@ export function useOnboarding() {
   const planMode = project?.mode === "short" ? "short"
     : project?.mode === "drama" ? "drama" : "serial";
 
+  async function creativeSaved() {
+    if (pid === null) return;
+    setProject(await api.getProject(pid));
+    setQuestions(null);
+    setQAnswers({});
+    setPlans(null);
+    setSelectedPlan(null);
+  }
+
   // 屏 0「开哪种书」:模式级分叉,连载可顺手选档位(明示,替代旧版静默自动选档)。
   // 手选档位即时落库——拍板时「非建库默认」的现值会被尊重(见 confirmChosenPlan)。
   // 漫剧源书(docs/23):mode=drama 时必带 audience(男频/女频)——后端按频道
@@ -460,11 +469,11 @@ export function useOnboarding() {
   }
 
   // 定向修订:一句话只改第 index 套,其余套与未要求字段不动(prompt 实验验证)
-  async function reviseOnePlan(index: number, directive: string) {
+  async function reviseOnePlan(index: number, directive: string, lockedFields: string[] = []) {
     if (pid === null) return;
     setPlanBusy(`AI 正在改第 ${index + 1} 套…`);
     try {
-      const r = await api.revisePlan(pid, { index, directive });
+      const r = await api.revisePlan(pid, { index, directive, locked_fields: lockedFields });
       setPlans(r.plans);
       setProject(r.project);
     } catch (e) { setErr(errMsg(e)); } finally { setPlanBusy(""); }
@@ -801,7 +810,7 @@ export function useOnboarding() {
     dramaSkinList, pickedSkin, setPickedSkin, pickSkinGo,
     sendBrief, fetchPitches, pickPitch, saveBriefDraft, confirmBrief, unconfirmBrief,
     pickMode, fetchQuestions, answerQ, adoptAllRecommended,
-    genPlans, reviseOnePlan, confirmChosenPlan,
+    genPlans, reviseOnePlan, confirmChosenPlan, creativeSaved,
     developFromBrief, saveCustomConcept,
     forgeChanged, forgeConfirmed, forgeUnconfirmed, isForgeDismissedFor, dismissForge, reopenForge,
     setGenre, setDim, fetchTitles, pickTitle, pickScale, confirmScale, toggleOpenEnded,

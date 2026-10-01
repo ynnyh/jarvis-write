@@ -1,6 +1,7 @@
 // src/animeApi.ts — 动画短剧工坊 API 客户端(对齐 backend/app/api/anime.py)。
 // 独立模块(同 dramaApi/promoApi/clipsApi 的理由);传输层已统一到 ./http。
 import { req } from "./http";
+import { CreativeGoal } from "./creativeApi";
 
 const LLM_TIMEOUT = 900_000;
 
@@ -57,6 +58,13 @@ export interface AnimeSeries {
   cast: AnimeCastMember[];
   episode_s: number;
   status: string;
+  creative_goal?: CreativeGoal | null;
+}
+
+export interface AnimeScriptLine { speaker: string; text: string; action: string; duration_s: number; pause_s: number }
+export interface AnimeScript {
+  title: string; scenes: { slug: string; purpose: string; lines: AnimeScriptLine[] }[];
+  total_s: number; goal_version: number; synopsis: string; stale?: boolean; history?: AnimeScript[];
 }
 
 export interface AnimeEpisode {
@@ -76,6 +84,9 @@ export interface AnimeEpisode {
   shots: AnimeShot[];
   film_prompt: string;
   status: string;
+  script?: AnimeScript | null;
+  creative_stale?: boolean;
+  guests?: AnimeCastMember[];
 }
 
 export const animeApi = {
@@ -125,6 +136,12 @@ export const animeApi = {
       synopsis === undefined ? {} : { synopsis }),
   buildShots: (eid: number) =>
     req<{ job_id: string }>("POST", `/api/anime/episodes/${eid}/shots`, {}, LLM_TIMEOUT),
+  buildScript: (eid: number, feedback = "") =>
+    req<{ job_id: string }>("POST", `/api/anime/episodes/${eid}/script`, { feedback }),
+  saveScript: (eid: number, script: AnimeScript) =>
+    req<{ episode: AnimeEpisode }>("PUT", `/api/anime/episodes/${eid}/script`, { script }),
+  saveGuests: (eid: number, guests: AnimeCastMember[]) =>
+    req<{ episode: AnimeEpisode }>("PUT", `/api/anime/episodes/${eid}/guests`, { guests }),
   saveShots: (eid: number, shots: AnimeShot[]) =>
     req<{ episode: AnimeEpisode }>("PUT", `/api/anime/episodes/${eid}/shots`, { shots }),
 

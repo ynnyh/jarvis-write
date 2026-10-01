@@ -46,3 +46,11 @@
 .mirror-contradict ul { margin: 6px 0 0; padding-left: 20px; }
 .mirror-contradict li { font-size: var(--fs-sm); line-height: 1.7; color: var(--warn); }
 
+/* 参考与剧本使用 fieldset 禁用整组控件，去掉浏览器默认边框以沿用现有表单节奏。 */
+.creative-reference fieldset.form-grid,
+.anime-screenplay fieldset.form-grid {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}

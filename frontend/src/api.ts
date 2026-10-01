@@ -264,6 +264,11 @@ export interface BookPlan {
   scale?: string;
   scale_reason?: string;
   label?: string;
+  opening?: string;
+  payoff?: string;
+  escalation?: string;
+  mechanism?: string;
+  opening_sample?: string;
 }
 export interface Architecture {
   core_seed: string; character_dynamics: string;
@@ -1384,7 +1389,7 @@ export const api = {
     feedback?: string; avoid?: string[];
   }) => req<{ plans: BookPlan[]; project: Project }>(
     "POST", `/api/projects/${pid}/book-plans`, body),
-  revisePlan: (pid: number, body: { index: number; directive: string }) =>
+  revisePlan: (pid: number, body: { index: number; directive: string; locked_fields?: string[] }) =>
     req<{ plans: BookPlan[]; project: Project }>(
       "POST", `/api/projects/${pid}/revise-plan`, body),
   confirmPlan: (pid: number, body: {
