@@ -163,6 +163,32 @@ input:focus, textarea:focus, select:focus {
 }
 input::placeholder, textarea::placeholder { color: var(--text-3); }
 
+/* 选择控件统一口径:checkbox/radio 不跟随表单网格拉伸,在桌面和触屏端都保持可识别的尺寸。 */
+input[type="checkbox"],
+input[type="radio"] {
+  appearance: auto;
+  accent-color: var(--brand);
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  box-shadow: none;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+input[type="checkbox"]:focus-visible,
+input[type="radio"]:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+input[type="checkbox"]:disabled,
+input[type="radio"]:disabled { opacity: 0.55; cursor: not-allowed; }
+
 /* 浏览器自动填充的黄底会击穿圆角与主题,统一压成表面色 */
 input:-webkit-autofill {
   -webkit-box-shadow: 0 0 0 1000px var(--surface) inset;
@@ -174,6 +200,8 @@ input:-webkit-autofill {
 select {
   cursor: pointer;
   appearance: none;
+  min-width: 0;
+  max-width: 100%;
   background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='M4 6.5 8 10.5 12 6.5' fill='none' stroke='%23767a83' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
@@ -201,6 +229,12 @@ select {
 .input-row input { flex: 1; }
 .input-row input.input-md { flex: none; }
 .input-row button { flex-shrink: 0; margin-left: 0; }
+.input-row select { flex: 0 1 240px; width: auto; }
+
+/* 标题栏/动作栏的短选项不应抢满整行;字段里的 select 仍保持 100% 宽。 */
+.card-head > select,
+.form-actions > select,
+.media-field .card-head > select { width: auto; flex: 0 1 220px; }
 
 /* ---------- 表单区块(新建/编辑表单的统一骨架) ----------
    踩过的坑:表单曾拿 .card-head 拼行——那是「标题 + 按钮」的一行 flex,

@@ -43,7 +43,7 @@
 .guard-toggle span { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-sm); }
 .guard-toggle .hint { font-weight: 400; }
 .review-config { display: flex; align-items: center; gap: var(--sp-3); font-size: var(--fs-sm); }
-.review-config select { margin-left: 2px; }
+.review-config select { width: auto; max-width: min(180px, 100%); flex: 0 1 180px; margin-left: 2px; }
 
 /* ---------- 项目页标题行(桌面 + 窄屏统一 flex,标题可省略号截断) ---------- */
 .project-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }

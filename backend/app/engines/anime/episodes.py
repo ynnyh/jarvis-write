@@ -129,6 +129,33 @@ def _norm_premises(value: object) -> list[str]:
     return out
 
 
+def _norm_episode_ideas(value: object) -> list[dict[str, str]]:
+    """归一单集候选:保留命题卡所需的冲突、机制和收束信息。"""
+    if not isinstance(value, list) or not value:
+        raise ValueError("模型没有返回单集候选数组")
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in value[:8]:
+        if isinstance(item, dict):
+            premise = str(item.get("premise") or item.get("title") or "").strip()[:120]
+            idea = {
+                "premise": premise,
+                "conflict": str(item.get("conflict") or "").strip()[:240],
+                "mechanism": str(item.get("mechanism") or "").strip()[:160],
+                "ending": str(item.get("ending") or "").strip()[:240],
+                "setting": str(item.get("setting") or "").strip()[:100],
+            }
+        else:
+            premise = str(item or "").strip()[:120]
+            idea = {"premise": premise, "conflict": "", "mechanism": "", "ending": "", "setting": ""}
+        if premise and premise not in seen:
+            seen.add(premise)
+            out.append(idea)
+    if len(out) < 5:
+        raise ValueError(f"单集候选需要 5 个互不相同的,模型只给了能用的 {len(out)} 个")
+    return out[:5]
+
+
 async def suggest_series_premises(genre: str, progress=lambda s: None) -> list[str]:
     """系列设定点子三选一:没灵感也能开工,选中后仍走正常确认流。"""
     g = genre_of(genre)
@@ -149,8 +176,8 @@ async def suggest_series_premises(genre: str, progress=lambda s: None) -> list[s
 
 async def suggest_episode_premises(
     series, used: list[str] | None = None, progress=lambda s: None
-) -> list[str]:
-    """下一集点子三选一:贴卡司、贴类型节奏,避开已经用过的集命题。"""
+) -> list[dict[str, str]]:
+    """下一集点子五选一:贴卡司、贴类型节奏,避开已经用过的集命题。"""
     if not (series.cast or []):
         raise AnimeError("这个系列还没有卡司:先在系列工作台把班底定下来。")
     g = genre_of(series.genre)
@@ -171,7 +198,9 @@ async def suggest_episode_premises(
     for attempt in range(1, _ATTEMPTS + 1):
         try:
             adapter = get_adapter_for(Task.ANIME_SUGGEST, timeout=300)
-            return _norm_premises(parse_llm_json(await adapter.ask(prompt)).get("premises"))
+            data = parse_llm_json(await adapter.ask(prompt))
+            # 兼容旧字段名 premises,但单集命题仍要求五条以保证候选质量。
+            return _norm_episode_ideas(data.get("ideas") or data.get("premises"))
         except Exception as exc:  # noqa: BLE001 — 重试一次,再失败才上屏
             last_err = str(exc)
         logger.warning("集点子第 %d/%d 次未成:%s", attempt, _ATTEMPTS, last_err)

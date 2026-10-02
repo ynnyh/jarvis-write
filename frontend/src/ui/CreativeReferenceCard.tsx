@@ -57,9 +57,17 @@ export default function CreativeReferenceCard({ scope, targetId, form, disabled 
       await onSaved();
     } catch (e) { setError(errMsg(e)); } finally { setBusy(""); }
   }
+  function toggleDimension(key: CreativeDimension, checked: boolean) {
+    setGoal((g) => ({ ...g, selected: checked ? [...new Set([...g.selected, key])] : g.selected.filter((k) => k !== key) }));
+  }
+  const selectedObservations = goal.observations.filter((o) => goal.selected.includes(o.dimension));
+
   return <section className="card creative-reference">
-    <h3>想写出什么感觉？</h3>
-    {scope === "original" && <p className="hint">先确定要借鉴的机制，再设计卡司与第一集。参考方向只用于本部原创漫剧。</p>}
+    <div className="card-head creative-reference-head">
+      <h3 className="grow">参考方向<span className="muted">先确定整部漫剧的味道,再让 AI 帮你出每集命题</span></h3>
+      {saved.version && <span className="badge mute">方向 v{saved.version}</span>}
+    </div>
+    {scope === "original" && <p className="hint">参考作品只提取喜剧机制、节奏和人物语言，不会混入小说入口，也不会复制原作剧情。</p>}
     {saved.version && <p className="hint">已采用方向 {saved.version}{saved.enabled ? "" : " · 已停用"}：{saved.intent || "按所选参考要求创作"}</p>}
     <details open={scope === "original" && !saved.references?.length}>
       <summary>给参考、调整理解</summary>
@@ -93,17 +101,24 @@ export default function CreativeReferenceCard({ scope, targetId, form, disabled 
         <button className="primary" disabled={locked || (!goal.intent.trim() && !goal.references.length)} onClick={() => void analyze()}>理解参考与想法</button>
       </div>
       {analyzed && <>
-        <p>选取要借鉴的部分，再读样稿校准：</p>
-        <div className="form-grid">
-          {(Object.entries(CREATIVE_DIMS) as [CreativeDimension, string][]).map(([key, label]) => <label key={key} className="field">
-            <span><input type="checkbox" disabled={locked} checked={goal.selected.includes(key)} onChange={(e) => setGoal((g) => ({ ...g, selected: e.target.checked ? [...g.selected, key] : g.selected.filter((k) => k !== key) }))} /> {label}</span>
-          </label>)}
+        <div className="creative-readback">
+          <div className="creative-readback-title"><b>我理解的创作方向</b><span className="hint">默认已选适合当前形式的重点</span></div>
+          {selectedObservations.length > 0 ? selectedObservations.map((o, i) => <div key={i} className="creative-readback-item">
+            <b>{CREATIVE_DIMS[o.dimension]}{o.basis === "inferred" ? " · 待样稿确认" : ""}</b>
+            <p>{o.instruction}</p>
+            {o.evidence && <details><summary>查看依据</summary><p>参考 {o.source_index + 1} · {goal.references[o.source_index]?.locator || "所给材料"}</p><blockquote>{o.evidence}</blockquote></details>}
+          </div>) : <p className="hint">暂时没有可展示的分析摘要,可以打开高级设置调整重点。</p>}
         </div>
-        {goal.observations.filter((o) => goal.selected.includes(o.dimension)).map((o, i) => <div key={i} className="sub-summary">
-          <b>{CREATIVE_DIMS[o.dimension]}{o.basis === "inferred" ? " · 待样稿确认" : ""}</b>
-          <p>{o.instruction}</p>
-          {o.evidence && <details><summary>查看依据</summary><p>参考 {o.source_index + 1} · {goal.references[o.source_index]?.locator || "所给材料"}</p><blockquote>{o.evidence}</blockquote></details>}
-        </div>)}
+        <details className="creative-advanced">
+          <summary>调整借鉴重点（高级设置）</summary>
+          <p className="hint">不确定时保持默认即可。这里控制 AI 重点吸收哪些创作机制,不会改变系列名和本集命题。</p>
+          <div className="creative-dimensions">
+            {(Object.entries(CREATIVE_DIMS) as [CreativeDimension, string][]).map(([key, label]) => <label key={key} className="creative-dimension">
+              <input type="checkbox" disabled={locked} checked={goal.selected.includes(key)} onChange={(e) => toggleDimension(key, e.target.checked)} />
+              <span>{label}</span>
+            </label>)}
+          </div>
+        </details>
         {goal.unknowns.length > 0 && <details><summary>材料不足与待确认项</summary>{goal.unknowns.map((u, i) => <p key={i}>{u}</p>)}</details>}
         <p className="hint">采用新方向会让旧方案或剧集标为待更新；已有正文保留。</p>
         <div className="form-actions"><button className="primary" disabled={locked} onClick={() => void adopt(true)}>采用这个理解</button>

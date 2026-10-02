@@ -1,4 +1,29 @@
 /* ===== 漫剧工坊 ===== */
+/* 系列工作台标题固定在视口顶部:参考分析展开后仍能确认当前作品 */
+.anime-series-head {
+  position: sticky; top: 0; z-index: 6;
+  margin: -6px 0 18px;
+  padding: 8px 0;
+  background: var(--bg);
+}
+
+/* AI 单集命题候选:一张卡讲清冲突、机制和收尾,不再把长句挤成标签 */
+.episode-idea-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px; margin-top: 10px;
+}
+.episode-idea-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 5px;
+  padding: 12px; border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--surface-2); min-width: 0;
+}
+.episode-idea-card:hover { border-color: var(--brand-line); }
+.episode-idea-card-head { display: flex; align-items: center; gap: 8px; width: 100%; }
+.episode-idea-card h4 { margin: 2px 0 0; line-height: 1.5; font-size: var(--fs-sm); }
+.episode-idea-card p { margin: 0; color: var(--text-2); font-size: var(--fs-xs); line-height: 1.6; }
+.episode-idea-card p b { color: var(--text); }
+.episode-idea-card button { margin-top: 4px; }
+
 /* 集列表行:可点选,选中态高亮 */
 .ep-row { cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s; }
 .ep-row:hover { border-color: var(--brand); box-shadow: var(--shadow-sm); transform: translateY(-1px); }

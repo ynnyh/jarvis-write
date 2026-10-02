@@ -67,6 +67,25 @@
 @keyframes m-rise { from { transform: translateY(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
 
 @media (max-width: 767px) {
+  /* 手机端控件统一触摸尺寸,文本控件使用 16px 防止 iOS 聚焦时自动放大页面。 */
+  :root { --ctl-h: 44px; --ctl-h-sm: 40px; }
+  input:where(:not([type="checkbox"]):not([type="radio"]):not([type="range"])
+    :not([type="color"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"])),
+  textarea, select { font-size: 16px; }
+  input[type="checkbox"], input[type="radio"] { width: 20px; height: 20px; flex-basis: 20px; }
+  .card-head > select, .form-actions > select, .media-field .card-head > select {
+    width: 100%; flex: 1 1 100%;
+  }
+  .input-row { flex-wrap: wrap; }
+  .input-row input, .input-row select, .input-row button { flex: 1 1 100%; width: 100%; }
+  .review-config { flex-wrap: wrap; }
+  .review-config select { flex: 1 1 100%; max-width: 100%; margin-left: 0; }
+  .chips .chip, .title-chip, .pick-chip { min-height: 40px; }
+  .seg { max-width: 100%; overflow-x: auto; }
+  .seg button { min-height: 40px; white-space: nowrap; }
+  .gacha-modal .chip, .gacha-skin-dot { min-height: 40px; }
+  .gacha-close { min-width: 40px; min-height: 40px; }
+
   /* 外壳转竖排:m-shellbar 在上,内容在下(桌面横排的侧栏此时不渲染)。
      桌面壳「右栏自滚」的两条规则在移动端退回自然页面滚动,别造出双层滚动 */
   .app-shell { flex-direction: column; height: auto; }

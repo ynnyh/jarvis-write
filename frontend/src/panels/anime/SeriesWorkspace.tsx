@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  AnimeCastMember, AnimeEpisode, AnimeMeta, AnimeSeries, AnimeShot, AnimeWorkspace, animeApi,
+  AnimeCastMember, AnimeEpisode, AnimeEpisodeIdea, AnimeMeta, AnimeSeries, AnimeShot, AnimeWorkspace, animeApi,
 } from "../../animeApi";
 import { api, SkillPack } from "../../api";
 import { toast } from "../../ui/Toaster";
@@ -67,7 +67,7 @@ export default function SeriesWorkspace({ sid, workspace = "anime" }: { sid: num
 
   return (
     <>
-      <div className="page-head">
+      <div className="page-head anime-series-head">
         <h1>{series.title}</h1>
         {workspace === "original" && <span className="badge">原创漫剧</span>}
         <span className="badge mute">{series.genre_label}</span>
@@ -88,7 +88,7 @@ export default function SeriesWorkspace({ sid, workspace = "anime" }: { sid: num
           setSelId(ep.id);
         }} />
         {episodes.length === 0 ? (
-          <EmptyState>还没有一集。给个情境命题开新的一集。</EmptyState>
+          <EmptyState>还没有一集。可以自己写命题，也可以让 AI 先给你 5 个候选。</EmptyState>
         ) : (
           episodes.map((ep) => (
             <div key={ep.id} className="sub-summary ep-row" onClick={() => setSelId(selId === ep.id ? null : ep.id)}>
@@ -243,15 +243,16 @@ function EpisodeCreator({ sid, workspace, hasCast, onCreated }: {
 }) {
   const [premise, setPremise] = useState("");
   const [busy, setBusy] = useState(false);
-  // 没灵感:AI 出的下一集命题(点一条回填命题框)
-  const [ideas, setIdeas] = useState<string[]>([]);
+  // 没灵感:AI 出的下一集命题卡(选一条回填命题框)
+  const [ideas, setIdeas] = useState<AnimeEpisodeIdea[]>([]);
   const [ideaBusy, setIdeaBusy] = useState(false);
 
   async function askIdeas() {
     setIdeaBusy(true);
     try {
-      setIdeas((await animeApi.suggestEpisode(sid, workspace)).premises);
-      toast.ok("出了三个点子", "点一条填进命题框,也可以直接照它聊简介");
+      const result = await animeApi.suggestEpisode(sid, workspace);
+      setIdeas(result.ideas ?? result.premises.map((premise) => ({ premise, conflict: "", mechanism: "", ending: "", setting: "" })));
+      toast.ok("出了五个命题", "挑一个采用,也可以改几句后再聊简介");
     } catch (e) { toast.err("出点子失败", errMsg(e)); } finally { setIdeaBusy(false); }
   }
 
@@ -271,22 +272,31 @@ function EpisodeCreator({ sid, workspace, hasCast, onCreated }: {
     <div className="media-field" style={{ marginBottom: 10 }}>
       <div style={{ display: "flex", gap: 8 }}>
         <input value={premise} maxLength={500} style={{ flex: 1 }}
-          placeholder="本集情境命题,如「阿丸第一次掌勺年夜饭」(留空 = AI 自拟)"
+          placeholder="本集命题(可留空),如「员工为了省十块钱假装成老板」"
           onChange={(e) => setPremise(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void create(); } }} />
-        <button disabled={ideaBusy} title="没灵感?让 AI 按卡司与类型出三个下一集点子"
+        <button disabled={ideaBusy} title="让 AI 按系列设定和固定卡司出五个独立情景命题"
           onClick={() => void askIdeas()}>
-          {ideaBusy ? "AI 出点子中…" : "🎲 AI 出点子"}
+          {ideaBusy ? "AI 出命题中…" : "🎲 AI 帮我想 5 个命题"}
         </button>
         <button className="primary" disabled={busy} onClick={() => void create()}>
           {busy ? "开集中…" : "＋ 新开一集"}
         </button>
       </div>
       {ideas.length > 0 && (
-        <div className="chips ideas" style={{ marginTop: 6 }}>
-          {ideas.map((p, i) => (
-            <button key={i} type="button" className="chip" title={p}
-              onClick={() => setPremise(p)}>{p}</button>
+        <div className="episode-idea-grid" aria-label="AI 命题候选">
+          {ideas.map((idea, i) => (
+            <article key={`${idea.premise}-${i}`} className="episode-idea-card">
+              <div className="episode-idea-card-head">
+                <span className="badge mute">候选 {i + 1}</span>
+                {idea.setting && <span className="hint">{idea.setting}</span>}
+              </div>
+              <h4>{idea.premise}</h4>
+              {idea.conflict && <p><b>冲突：</b>{idea.conflict}</p>}
+              {idea.mechanism && <p><b>笑点：</b>{idea.mechanism}</p>}
+              {idea.ending && <p><b>收尾：</b>{idea.ending}</p>}
+              <button type="button" className="btn-sm primary" onClick={() => setPremise(idea.premise)}>采用这个命题</button>
+            </article>
           ))}
         </div>
       )}

@@ -102,7 +102,7 @@ ANIME_PREMISE_SUGGEST_PROMPT = """\
 """
 
 ANIME_EPISODE_SUGGEST_PROMPT = """\
-你是{genre_label}动画的编剧总监,给下面这个系列出 3 个「下一集」的点子。
+你是{genre_label}动画的编剧总监,给下面这个系列出 5 个「下一集」的独立情景命题。
 
 【类型定位】{framing}
 【类型节奏库(点子要自带这类节奏的钩子)】{beats}
@@ -114,11 +114,21 @@ ANIME_EPISODE_SUGGEST_PROMPT = """\
 
 严格按 JSON 输出(不要 markdown 围栏,不要任何解释):
 {{
-  "premises": ["点子1(15-40 字)", "点子2", "点子3"]
+  "ideas": [
+    {{"premise":"一句话情境命题(15-60字)","conflict":"主角想要什么,谁或什么阻碍了他","mechanism":"误会/反差/身份错位等笑点机制","ending":"最后的反转或尴尬收束","setting":"主要发生场景"}},
+    {{"premise":"点子2","conflict":"...","mechanism":"...","ending":"...","setting":"..."}},
+    {{"premise":"点子3","conflict":"...","mechanism":"...","ending":"...","setting":"..."}},
+    {{"premise":"点子4","conflict":"...","mechanism":"...","ending":"...","setting":"..."}},
+    {{"premise":"点子5","conflict":"...","mechanism":"...","ending":"...","setting":"..."}}
+  ]
 }}
 
-要求:每条是一句话情境命题,自带冲突或笑点/燃点/悬念钩子;3 条玩法互不相同
-(不同的事件、不同的套路组合);只出命题,不展开剧情。
+要求:
+- 每条都是一集即可讲完的独立情景,不能承接上一集;
+- 每条必须有开场钩子、冲突升级和结尾反转/尴尬收束,不能只是日常流水账;
+- 5 条使用不同场景、不同事件和不同笑点机制,不许换汤不换药;
+- 只能使用已有卡司,不引入新常驻角色;
+- 只写候选命题信息,不要展开成完整剧本或分镜。
 """
 
 

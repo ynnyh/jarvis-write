@@ -555,6 +555,7 @@ html, body { max-width: 100%; overflow-x: hidden; }
   .dossier-cover { width: 110px; max-height: 150px; }
   .genre-card { max-width: 100%; flex: 1 1 45%; }
   .entry-card { flex: 1 1 100%; }
+  .genre-card, .entry-card, .scale-card, .ed-tab { min-height: 44px; }
   .stat-strip { flex-wrap: wrap; }
   .toast-viewport { width: calc(100vw - 24px); right: 12px; }
 }

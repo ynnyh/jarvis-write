@@ -37,6 +37,14 @@ export interface AnimeTake {
   highlight: string;
 }
 
+export interface AnimeEpisodeIdea {
+  premise: string;
+  conflict: string;
+  mechanism: string;
+  ending: string;
+  setting: string;
+}
+
 /** 一镜:台词/动作全开(音频原生视频模型直接生成语音与动作) */
 export interface AnimeShot {
   seq: number;
@@ -110,7 +118,7 @@ export const animeApi = {
   suggestPremise: (genre: string) =>
     req<{ premises: string[] }>("POST", "/api/anime/suggest-premise", { genre }, LLM_TIMEOUT),
   suggestEpisode: (id: number, workspace: AnimeWorkspace = "anime") =>
-    req<{ premises: string[] }>("POST", `/api/anime/${id}/suggest-episode${workspaceQuery(workspace)}`, {}, LLM_TIMEOUT),
+    req<{ ideas?: AnimeEpisodeIdea[]; premises: string[] }>("POST", `/api/anime/${id}/suggest-episode${workspaceQuery(workspace)}`, {}, LLM_TIMEOUT),
 
   // ---- 卡司 ----
   buildCast: (id: number, workspace: AnimeWorkspace = "anime") =>

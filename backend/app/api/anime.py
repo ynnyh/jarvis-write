@@ -399,7 +399,7 @@ def put_cast(sid: int, body: CastIn, db: Session = Depends(get_db)):
 
 @router.post("/{sid}/suggest-episode")
 async def suggest_episode_premises_route(sid: int, db: Session = Depends(get_db)):
-    """没灵感:按卡司+类型出 3 个下一集命题(避开已用过的;不落库,选中由前端回填)。"""
+    """没灵感:按卡司+类型出 5 个单集命题卡(避开已用过的;不落库)。"""
     series = _get_series(db, sid)
     used = [
         row.premise
@@ -408,7 +408,9 @@ async def suggest_episode_premises_route(sid: int, db: Session = Depends(get_db)
         .all()
     ]
     try:
-        return {"premises": await suggest_episode_premises(series, used=used)}
+        ideas = await suggest_episode_premises(series, used=used)
+        # premises 保留给旧客户端,新客户端使用带冲突与收束信息的 ideas。
+        return {"ideas": ideas, "premises": [idea["premise"] for idea in ideas]}
     except AnimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

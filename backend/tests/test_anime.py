@@ -65,9 +65,13 @@ class _FakeAdapter:
             return json.dumps({"premises": [
                 "点子A:会做菜的饭团在深夜食堂", "点子B:怕水的茶壶在水族馆打工",
                 "点子C:退休扫帚在魔法快递站当学徒"]}, ensure_ascii=False)
-        if "「下一集」的点子" in prompt:
-            return json.dumps({"premises": [
-                "点子甲:停电夜做蛋糕", "点子乙:跳跳糖汤锅舞会", "点子丙:锅盖侠都市传说"]},
+        if "「下一集」" in prompt:
+            return json.dumps({"ideas": [
+                {"premise": "点子甲:停电夜做蛋糕", "conflict": "停电仍要交付蛋糕", "mechanism": "临时拼凑", "ending": "蜡烛点亮了错误的蛋糕", "setting": "厨房"},
+                {"premise": "点子乙:跳跳糖汤锅舞会", "conflict": "锅里食材突然跳起舞", "mechanism": "失控升级", "ending": "客人以为这是新式表演", "setting": "火锅店"},
+                {"premise": "点子丙:锅盖侠都市传说", "conflict": "主角被误认成英雄", "mechanism": "身份错位", "ending": "真正的英雄来收锅盖", "setting": "小区"},
+                {"premise": "点子丁:相亲简历写错人", "conflict": "普通员工被当成老板", "mechanism": "信息差", "ending": "老板来应聘他的岗位", "setting": "咖啡馆"},
+                {"premise": "点子戊:共享雨伞的秘密", "conflict": "每个人都想占便宜", "mechanism": "连续误会", "ending": "雨停后所有人都在还同一把伞", "setting": "地铁口"}]},
                 ensure_ascii=False)
         if "动画角色设计总监" in prompt:
             return json.dumps({"cast": _CAST_JSON}, ensure_ascii=False)
@@ -297,8 +301,11 @@ def test_anime_suggest_episode_premises(client):
     with patch("app.engines.anime.episodes.get_adapter_for", return_value=adapter):
         r = client.post(f"/api/anime/{sid}/suggest-episode", headers=headers)
     assert r.status_code == 200, r.text
-    premises = r.json()["premises"]
-    assert len(premises) == 3 and len(set(premises)) == 3
+    body = r.json()
+    premises = body["premises"]
+    ideas = body["ideas"]
+    assert len(premises) == 5 and len(set(premises)) == 5
+    assert len(ideas) == 5 and all(idea["mechanism"] and idea["ending"] for idea in ideas)
     # 原料注入:系列设定、卡司、已用命题(避重)都进提示词
     prompt = adapter.prompts[-1]
     assert "饭团小厨房" in prompt or "阿丸" in prompt

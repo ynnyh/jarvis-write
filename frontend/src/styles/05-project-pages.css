@@ -120,7 +120,20 @@
    (向导「开放式连载」复选框实测 310×44) */
 .row > * { flex: 1 1 200px; }
 .row > input[type="checkbox"],
-.row > input[type="radio"] { flex: 0 0 auto; width: auto; height: auto; align-self: center; }
+.row > input[type="radio"] { flex: 0 0 18px; width: 18px; height: 18px; align-self: center; }
+
+/* 批量章节选择:整块可点击,换行稳定,手机端不会把原生小方框拉满。 */
+.chapter-pick { display: flex; flex-wrap: wrap; gap: 8px; }
+.pick-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 34px; padding: 5px 10px;
+  border: 1px solid var(--line); border-radius: var(--r-full);
+  background: var(--surface-2); color: var(--text-2);
+  font-size: var(--fs-sm); cursor: pointer; user-select: none;
+}
+.pick-chip:hover { border-color: var(--brand-line); color: var(--brand); }
+.pick-chip.on { border-color: var(--brand); background: var(--brand-weak); color: var(--brand); }
+.pick-chip input[type="checkbox"] { flex: 0 0 16px; width: 16px; height: 16px; }
 
 .split { display: flex; gap: 14px; }
 .split > div { flex: 1; min-width: 0; }

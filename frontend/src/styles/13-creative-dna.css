@@ -54,3 +54,32 @@
   margin: 0;
   min-width: 0;
 }
+
+/* 参考分析先给普通用户看结论,维度选择收进高级设置 */
+.creative-reference-head { margin-bottom: 4px; }
+.creative-reference-head h3 { line-height: 1.4; }
+.creative-reference-head h3 .muted { display: block; margin-top: 2px; }
+.creative-readback {
+  margin: 10px 0 12px; padding: 12px 14px;
+  border: 1px solid var(--brand-line); border-radius: var(--r-md);
+  background: var(--brand-weak);
+}
+.creative-readback-title { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.creative-readback-item { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--brand-line); }
+.creative-readback-item:first-of-type { margin-top: 6px; }
+.creative-readback-item p { margin: 3px 0 0; color: var(--text-2); line-height: 1.7; }
+.creative-advanced { margin: 10px 0 12px; padding: 9px 12px; border: 1px solid var(--line); border-radius: var(--r-md); }
+.creative-advanced summary { cursor: pointer; color: var(--text-2); font-size: var(--fs-sm); }
+.creative-advanced > .hint { margin: 8px 0; display: block; }
+.creative-dimensions { display: flex; flex-wrap: wrap; gap: 8px; }
+.creative-dimension {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px;
+  border: 1px solid var(--line); border-radius: var(--r-full);
+  background: var(--surface); color: var(--text-2); font-size: var(--fs-xs);
+  cursor: pointer;
+}
+.creative-dimension input[type="checkbox"] {
+  appearance: auto;
+  width: 15px; height: 15px; margin: 0; accent-color: var(--brand); flex: 0 0 auto;
+}
+.creative-dimension:has(input:checked) { border-color: var(--brand-line); color: var(--brand); background: var(--brand-weak); }
