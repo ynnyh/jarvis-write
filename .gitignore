@@ -8,6 +8,10 @@ __pycache__/
 backend/jarvis_write.db
 backend/jarvis_write.db-shm
 backend/jarvis_write.db-wal
+# 代码评审/本地调试用运行库(曾误入库,2026-10-05 移出)
+backend/review.db
+backend/review.db-shm
+backend/review.db-wal
 backend/chroma_data/
 backend/.env
 backend/app.log
