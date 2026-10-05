@@ -1380,18 +1380,21 @@ export const api = {
   // 漫剧源书的频道皮肤目录(docs/23 v2):{ male: [{key,label,desc}], female: [...] }
   dramaSkins: () => req<{ skins: Record<string, { key: string; label: string; desc: string }[]> }>(
     "GET", "/api/projects/drama-skins").then((r) => r.skins),
+  // 开书方案流三件套都是后端同步等 LLM 的端点,不能用 req 默认 30s——慢模型
+  // (实测 Atria-Dawn-Preview ~11.4 tok/s)出三问 JSON 就要 1 分钟+,30s 必掐成
+  // 「请求超时:等了 30 秒没有响应」(2026-10-05 月哥实测)。按输出量分档给大超时。
   threeQuestions: (pid: number, body: {
     mode: string; topic?: string; genre?: string; avoid?: string[];
   }) => req<{ questions: ThreeQuestions[] }>(
-    "POST", `/api/projects/${pid}/three-questions`, body),
+    "POST", `/api/projects/${pid}/three-questions`, body, 300000),
   bookPlans: (pid: number, body: {
     mode: string; topic?: string; genre?: string; answers?: Record<string, string>;
     feedback?: string; avoid?: string[];
   }) => req<{ plans: BookPlan[]; project: Project }>(
-    "POST", `/api/projects/${pid}/book-plans`, body),
+    "POST", `/api/projects/${pid}/book-plans`, body, 600000),
   revisePlan: (pid: number, body: { index: number; directive: string; locked_fields?: string[] }) =>
     req<{ plans: BookPlan[]; project: Project }>(
-      "POST", `/api/projects/${pid}/revise-plan`, body),
+      "POST", `/api/projects/${pid}/revise-plan`, body, 300000),
   confirmPlan: (pid: number, body: {
     index: number; mode: string;
     scale_override?: { chapters: number; words: number } | null;
