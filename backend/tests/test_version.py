@@ -37,6 +37,27 @@ def test_latest_changelog_missing_file_returns_empty():
     assert _latest_changelog(Path("/nonexistent/CHANGELOG.md")) == {"title": "", "body": ""}
 
 
+def test_semantic_version_extracted_from_changelog_title(tmp_path):
+    """app_version 回落链第二档:从 CHANGELOG 标题抽语义版本——服务器不设
+    APP_VERSION,此前回落 40 位 commit 上屏像乱码(2026-10-05 月哥实测)。"""
+    from app.api.system import _semantic_version_from_changelog
+
+    f = tmp_path / "CHANGELOG.md"
+    f.write_text(
+        "# 更新日志\n\n## 2026-10-05 v0.56.1 开书方案流超时修复\n- 修复甲\n",
+        encoding="utf-8",
+    )
+    assert _semantic_version_from_changelog(f) == "0.56.1"
+
+
+def test_semantic_version_missing_title_returns_empty(tmp_path):
+    from app.api.system import _semantic_version_from_changelog
+
+    f = tmp_path / "CHANGELOG.md"
+    f.write_text("# 更新日志\n", encoding="utf-8")
+    assert _semantic_version_from_changelog(f) == ""
+
+
 def test_version_endpoint_shape(client):
     r = client.get("/api/version")
     assert r.status_code == 200

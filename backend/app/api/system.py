@@ -130,6 +130,17 @@ def _latest_changelog(path: Path = _CHANGELOG_PATH) -> dict:
     return {"title": title, "body": body}
 
 
+def _semantic_version_from_changelog(path: Path = _CHANGELOG_PATH) -> str:
+    """从 CHANGELOG 最新一条标题里抽语义版本(「2026-10-05 v0.56.1 …」→ 0.56.1)。
+
+    服务器部署不设 APP_VERSION 环境变量,此前会回落到 commit——Docker Image
+    workflow 烤的是 40 位完整 SHA,设置页「关于」显示 v+40位十六进制,用户看
+    就是一串乱码(2026-10-05 月哥实测)。CHANGELOG 每次发版必更新,从中抽版本
+    是比 commit 更可靠的回落。抽不到返回空串。"""
+    m = re.search(r"\bv?(\d+\.\d+\.\d+)\b", _latest_changelog(path)["title"])
+    return m.group(1) if m else ""
+
+
 @router.get("/version", include_in_schema=False)
 async def version() -> dict:
     """前端更新提醒用:返回当前部署的 git commit、应用版本号与最新一条更新日志。
@@ -137,12 +148,18 @@ async def version() -> dict:
     - commit:构建时 --build-arg GIT_COMMIT 烤进环境变量 APP_COMMIT;本地开发
       没烤则为 "dev",Web 端更新横幅据此跳过提示。
     - app_version:桌面版打包时(CI/build 脚本)烤进环境变量 APP_VERSION,对齐
-      发布标签(如 0.2.1);拿不到则回落 "dev"。设置页「关于」用来显示当前版本,
-      即便前端调不到 Tauri IPC 也能拿到版本号。
+      发布标签(如 0.2.1);服务器部署不设该变量,回落到 CHANGELOG 标题里的语义
+      版本,再拿不到才回落 "dev"(绝不到 commit——40 位 SHA 上屏就是乱码)。
+      设置页「关于」用来显示当前版本,即便前端调不到 Tauri IPC 也能拿到版本号。
     公开接口(不含敏感信息),登录前也能查。
     """
+    app_version = (
+        os.environ.get("APP_VERSION")
+        or _semantic_version_from_changelog()
+        or "dev"
+    )
     return {
         "commit": os.environ.get("APP_COMMIT", "dev"),
-        "app_version": os.environ.get("APP_VERSION", "dev"),
+        "app_version": app_version,
         "changelog": _latest_changelog(),
     }

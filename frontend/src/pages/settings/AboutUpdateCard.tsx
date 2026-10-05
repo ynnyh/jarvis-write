@@ -32,7 +32,10 @@ export function AboutUpdateCard() {
 
   useEffect(() => {
     api.getVersion()
-      .then((v) => setVersion(v.app_version && v.app_version !== "dev" ? v.app_version : v.commit))
+      .then((v) =>
+        // app_version 拿不到(或 dev)时回落 commit:workflow 烤的是 40 位完整
+        // SHA,整串上屏像乱码(2026-10-05 月哥实测)——只显示前 7 位短哈希。
+        setVersion(v.app_version && v.app_version !== "dev" ? v.app_version : v.commit.slice(0, 7)))
       .catch(() => setVersion(""));
   }, []);
 
