@@ -602,3 +602,23 @@ def test_shoot_permission_isolation_and_cleanup(client):
     from app import storage
     d = storage.upload_root() / "birthday" / str(wid)
     assert not d.exists() or not any(d.iterdir())
+
+
+def test_norm_character_cards_folds_tail_state_repeat():
+    """与 clips 同源:每格引用同一套定妆描述、尾部追加当格状态(『;此刻…』),
+    收敛成一段纯定妆描述——生日手卡的定妆图是标准形象,不画『此刻的状态』。"""
+    from app.engines.birthday.batch import _norm_character_cards
+
+    base = "老王:男/58岁,花白短发;穿旧蓝布衬衫。"
+    style = "【定妆照画风】胶片质感:暖色调"
+    shots = [
+        {"characters": ["老王"], "character_desc": base},
+        {"characters": ["老王"], "character_desc": base},  # 逐字重复
+        {"characters": ["老王"],
+         "character_desc": "老王:男/58岁,花白短发;穿旧蓝布衬衫;此刻眼里含着泪。"},
+    ]
+    cards = _norm_character_cards(shots, style_note=style)
+    assert len(cards) == 1
+    body = cards[0]["desc"].split("\n【定妆照画风】")[0]
+    assert body == base
+    assert "含着泪" not in cards[0]["desc"]

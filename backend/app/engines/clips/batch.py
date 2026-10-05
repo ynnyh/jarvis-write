@@ -26,7 +26,7 @@ from app.engines.clips.common import group_chunks, shot_hint, steering_block, th
 from app.engines.media.anchors import ensure_style_anchors, merge_negative
 from app.engines.media.negative import ensure_base
 from app.engines.media.directions import direction_directive
-from app.engines.media.text import coerce_int, split_character_desc
+from app.engines.media.text import coerce_int, fold_character_span, split_character_desc
 from app.llm.router import Task, get_adapter_for
 from app.engines.skills.packs import render_skill_block
 from app.prompts.clips import (
@@ -162,7 +162,17 @@ def _norm_character_cards(shots: list[dict], style_note: str = "") -> list[dict]
                 merged[name] = []
                 order.append(name)
             if span not in merged[name]:
-                merged[name].append(span)
+                # 每格引用同一套定妆描述、尾部追加当格状态(『;此刻…』)是常态,
+                # 整串精确匹配挡不住这种微差 → 先试收敛成纯定妆描述;
+                # 分叉处各有实质内容(真新信息)时 fold 返回 None,照旧追加
+                folded = (
+                    fold_character_span(merged[name][-1], span, name)
+                    if merged[name] else None
+                )
+                if folded:
+                    merged[name][-1] = folded
+                else:
+                    merged[name].append(span)
     cards = []
     for name in order:
         desc = "\n".join(merged[name])[:1200]

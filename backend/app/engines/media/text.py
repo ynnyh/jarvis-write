@@ -92,6 +92,37 @@ def split_character_desc(desc: str, characters: list[str]) -> dict[str, str]:
     return out
 
 
+def fold_character_span(kept: str, span: str, name: str) -> str | None:
+    """同角色跨镜头描段收敛:契约是每格引用同一套定妆描述,但模型常在尾部追加当格
+    状态(线上实测:『……好奇。』『……好奇;此刻尾巴尖沾满彩色水彩。』),整串
+    精确匹配的去重挡不住这种尾部微差,定妆卡里就躺着几段几乎全文重复的描述。
+    收敛规则:较短段剥掉收尾句读后是较长段的头部(= 同一套描述 + 尾部状态)→
+    收敛成较短段(即纯定妆描述)。状态不丢——它本来就在每格分镜的 character_desc
+    与提示词里;而带状态的描段拿去文生图会把『沾满颜料的尾巴』画进定妆图,污染
+    参考图。分叉处两段各有实质内容(是新信息,非重复引用)返回 None,调用方按
+    既有行为追加合并,不丢真补充。
+    返回值沿用 kept 的『名字:』引导形态;剥引导后为空不算收敛。"""
+    def _split_lead(s: str) -> tuple[str, str]:
+        for mark in (f"{name}：", f"{name}:"):
+            if s.startswith(mark):
+                return mark, s[len(mark):]
+        return "", s
+
+    kept_lead, kept_body = _split_lead(kept)
+    _, new_body = _split_lead(span)
+    if not kept_body or not new_body:
+        return None
+    if kept_body == new_body:
+        return kept
+    i = 0
+    while i < len(kept_body) and i < len(new_body) and kept_body[i] == new_body[i]:
+        i += 1
+    short_body = kept_body if len(kept_body) <= len(new_body) else new_body
+    if short_body[i:].strip("。;;,,、??!!..、 "):
+        return None
+    return f"{kept_lead}{short_body}"
+
+
 def speaker_of(dialogue: str, lines: list) -> str:
     """台词原文 → 说话人(按文本精确对齐剧本/本子 lines;对不上就空着不猜)。
 

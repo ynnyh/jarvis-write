@@ -32,7 +32,7 @@ from app.engines.birthday.common import (
 )
 from app.engines.media.anchors import ensure_style_anchors, merge_negative
 from app.engines.media.directions import direction_directive
-from app.engines.media.text import coerce_int, split_character_desc
+from app.engines.media.text import coerce_int, fold_character_span, split_character_desc
 from app.llm.router import Task, get_adapter_for
 from app.prompts.birthday import (
     BIRTHDAY_CLICHE_BLACKLIST,
@@ -89,7 +89,16 @@ def _norm_character_cards(shots: list[dict], style_note: str = "") -> list[dict]
                 merged[name] = []
                 order.append(name)
             if span not in merged[name]:
-                merged[name].append(span)
+                # 与 clips 同源:每格引用同一套定妆描述、尾部追加当格状态,
+                # 整串精确匹配挡不住 → 先试收敛成纯定妆描述,真新信息才追加
+                folded = (
+                    fold_character_span(merged[name][-1], span, name)
+                    if merged[name] else None
+                )
+                if folded:
+                    merged[name][-1] = folded
+                else:
+                    merged[name].append(span)
     cards = []
     for name in order:
         desc = "\n".join(merged[name])[:1200]

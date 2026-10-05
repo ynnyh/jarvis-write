@@ -776,3 +776,42 @@ def test_norm_character_cards_single_char_takes_whole_desc():
         style_note="",
     )
     assert cards == [{"name": "沈砚", "desc": "沈砚,黑短发,玄色劲装"}]
+
+
+def test_norm_character_cards_folds_tail_state_repeat():
+    """每格引用同一套定妆描述但尾部追加当格状态(线上实测 id=12 形态)必须收敛
+    成一段纯定妆描述:定妆卡拿去文生图出的是标准参考图,『尾巴沾满颜料』的状态
+    画进定妆图反而污染人物锚。状态不丢——它本来就在每格分镜里。"""
+    from app.engines.clips.batch import _norm_character_cards
+
+    base = "巧克力恐龙:小型恐龙,体长60厘米,憨拙;无着装;气质安静。"
+    style = "【定妆照画风】黏土定格:黏土质感"
+    shots = [
+        {"characters": ["巧克力恐龙"], "character_desc": base},
+        {"characters": ["巧克力恐龙"], "character_desc": base},  # 逐字重复
+        {"characters": ["巧克力恐龙"],
+         "character_desc": "巧克力恐龙:小型恐龙,体长60厘米,憨拙;无着装;气质安静;此刻尾巴尖沾满彩色水彩。"},
+        {"characters": ["巧克力恐龙"],
+         "character_desc": "巧克力恐龙:小型恐龙,体长60厘米,憨拙;无着装;气质安静;此刻身体边缘开始微微融化。"},
+    ]
+    cards = _norm_character_cards(shots, style_note=style)
+    assert len(cards) == 1
+    body = cards[0]["desc"].split("\n【定妆照画风】")[0]
+    assert body == base
+    assert "沾满彩色水彩" not in cards[0]["desc"]
+
+
+def test_norm_character_cards_folds_whatever_comes_first():
+    """带状态的描段先到也收敛:收敛看的是『短段是否为长段的头部』,与到达顺序无关;
+    剥『名字:』引导后比较,单角色无引导的形态不受影响。"""
+    from app.engines.clips.batch import _norm_character_cards
+
+    base = "小型恐龙,体长60厘米,憨拙;气质安静。"
+    shots = [
+        {"characters": ["巧克力恐龙"],
+         "character_desc": "巧克力恐龙:小型恐龙,体长60厘米,憨拙;气质安静;此刻正在融化。"},
+        {"characters": ["巧克力恐龙"], "character_desc": base},
+    ]
+    cards = _norm_character_cards(shots, style_note="")
+    # 收敛结果沿用先到段(带状态版)的『名字:』引导形态
+    assert [c["desc"] for c in cards] == ["巧克力恐龙:" + base]
