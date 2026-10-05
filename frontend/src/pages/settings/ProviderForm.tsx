@@ -165,6 +165,7 @@ export function ProviderForm({ editing, onSaved, onCancel }: {
               placeholder="0"
               spellCheck={false}
             />
+            <div className="fld-hint">输出预算,0=跟随全局。只用于抬高受限渠道的额度;填小值没有意义——低于 1024 会被视为未设置,仍走全局默认(防止静默截断)。</div>
           </div>
           <div className="fld">
             <label className="fl">并发上限</label>

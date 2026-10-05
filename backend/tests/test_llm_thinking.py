@@ -180,3 +180,41 @@ def test_factory_resolves_thinking_priority(monkeypatch):
     c = factory.create_llm_adapter(thinking_mode="low")
     assert c.thinking_mode == "low"
     assert c.thinking_forced is True
+
+
+def test_factory_clamps_absurd_max_tokens(monkeypatch):
+    """配置 max_tokens 小到荒谬(<1024)视为未设置,回落全局默认(8192)。
+
+    2026-10-05 实测:书生卡配 256,SUMMARY 等不在任务预算表里的短任务
+    直接吃进这个值,推理模型思考吃光预算 → 空正文 502。
+    """
+    import app.llm.factory as factory
+
+    fake = {
+        "id": None,
+        "name": "t",
+        "interface_format": "openai-compatible",
+        "api_key": "sk-x",
+        "base_url": "",
+        "model": "deepseek-v4-flash",
+        "timeout": 0,
+        "max_tokens": 256,
+        "thinking_mode": "",
+        "is_default": True,
+        "is_default_fast": False,
+    }
+    monkeypatch.setattr(factory, "_db_configs", lambda: [dict(fake)])
+
+    # 荒谬小值 → 全局默认
+    a = factory.create_llm_adapter()
+    assert a.max_tokens == 8192
+
+    # 合理配置值仍然生效
+    fake["max_tokens"] = 4096
+    b = factory.create_llm_adapter()
+    assert b.max_tokens == 4096
+
+    # 未设(0)→ 全局默认
+    fake["max_tokens"] = 0
+    c = factory.create_llm_adapter()
+    assert c.max_tokens == 8192

@@ -196,6 +196,20 @@ def resolve_provider_config(provider: str) -> dict:
     }
 
 
+# 配置里的 max_tokens 小到荒谬(0 < x < 1024)视为未设置,回落全局默认。
+# 写作应用里没有哪个任务的合理输出只值几百 token;小值只会带来静默截断和
+# 空正文重试(2026-10-05 实测:书生卡配 256,三问 JSON 连续 502,SUMMARY
+# 这类不在任务预算表里的短任务会吃进这个配置值)。这个字段的本意是给
+# 「上游限额低」的渠道抬高预算,不是压低——压低没有合理场景。
+_MIN_SANE_MAX_TOKENS = 1024
+
+
+def _sane_max_tokens(cfg_value: int | None) -> int:
+    """配置 max_tokens 兜底:未设(0/None)或小到荒谬(<1024)都用全局默认。"""
+    v = cfg_value or 0
+    return v if v >= _MIN_SANE_MAX_TOKENS else get_settings().default_max_tokens
+
+
 def create_llm_adapter(
     provider: str | None = None,
     *,
@@ -287,7 +301,7 @@ def create_llm_adapter(
         max_tokens=(
             max_tokens
             if max_tokens is not None
-            else (cfg.get("max_tokens") or settings.default_max_tokens)
+            else _sane_max_tokens(cfg.get("max_tokens"))
         ),
         timeout=(
             timeout
