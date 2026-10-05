@@ -92,6 +92,10 @@ class ThreeQuestionsRequest(BaseModel):
     mode: str = Field(default="serial", max_length=10)
     topic: str = Field(default="", max_length=500)
     genre: str = Field(default="", max_length=100)
+    # 作者的正向引导(大白话):avoid 只能排除「不要什么」,这句告诉 AI「想要
+    # 什么」——重选时带上,换一批才有方向感(2026-10-05 月哥实测「重选还是
+    # 选不到想要的」,根因就是只有排除没有引导)。
+    feedback: str = Field(default="", max_length=_DIRECTIVE_MAX)
     # 防趋同(docs/22「🎲换一批」):上一批已展示的候选文本,注入 prompt 要求换角度
     avoid: list[str] = Field(default_factory=list)
 
@@ -174,6 +178,8 @@ async def three_questions(
     context = req.topic.strip() or "(空白——按你的判断给方向)"
     if req.genre.strip():
         context += f"\n[已选题材: {req.genre.strip()}]"
+    if req.feedback.strip():
+        context += f"\n[作者补充(想要什么,候选方向的最高优先级): {req.feedback.strip()}]"
     avoid_block = ""
     if req.avoid:
         avoid_block = (

@@ -137,6 +137,13 @@ export default function PlanFlow(p: Props) {
                 </div>
               );
             })}
+            {/* 正向引导通道:avoid/换一批只能排除「不要什么」,这句告诉 AI「想要什么」。
+                换一批和出方案都会带上,重选才有方向感(2026-10-05 月哥实测痛点)。 */}
+            <div className="input-row mt-3">
+              <input type="text" value={p.planFeedback} maxLength={300}
+                placeholder="想引导方向?跟 AI 说一句想要什么(换一批和出方案都会带上)"
+                onChange={(e) => p.onFeedback(e.target.value)} />
+            </div>
             <div className="actions mt-3">
               <button className="btn-sm" onClick={p.onAdoptAll}>★ 全部按推荐来</button>
               <button className="btn-sm" onClick={p.onQuestions} disabled={!!p.planBusy}>🎲 换一批候选</button>

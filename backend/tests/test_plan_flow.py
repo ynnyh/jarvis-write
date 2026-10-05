@@ -324,6 +324,29 @@ def test_three_questions_injects_avoid(client, monkeypatch):
     assert "同义或换皮" in adapter.last_prompt
 
 
+def test_three_questions_injects_feedback_as_top_priority(client, monkeypatch):
+    """作者正向引导(feedback)注入:avoid 只能排除,这句告诉 AI「想要什么」,
+    且优先级标注为最高——重选/换一批时带上才有方向感(2026-10-05 月哥实测痛点)。"""
+    headers = _auth(client, "plans_3q_feedback_user")
+    p = _create_project(client, headers, "三问反馈书")
+    from app.api.projects import plans as plans_mod
+
+    adapter = _FakeAdapter(_QUESTIONS_B_JSON)
+    monkeypatch.setattr(plans_mod, "get_adapter_for", lambda task, **kw: adapter)
+    r = client.post(f"/api/projects/{p['id']}/three-questions", headers=headers,
+                    json={"mode": "serial", "topic": "都市悬疑",
+                          "feedback": "想要电台/声音类的点子,不要警察主角"})
+    assert r.status_code == 200, r.text
+    assert "作者补充" in adapter.last_prompt
+    assert "想要电台/声音类的点子,不要警察主角" in adapter.last_prompt
+    assert "最高优先级" in adapter.last_prompt
+    # feedback 为空时不得注入占位
+    r2 = client.post(f"/api/projects/{p['id']}/three-questions", headers=headers,
+                     json={"mode": "serial", "topic": "都市悬疑"})
+    assert r2.status_code == 200, r2.text
+    assert "作者补充" not in adapter.last_prompt
+
+
 def test_book_plans_avoid_includes_kernel_and_hard_rules(client, monkeypatch):
     """再来三套:avoid 升级为 label·title·kernel,并带「严禁换皮」硬约束。"""
     headers = _auth(client, "plans_avoid_kernel_user")

@@ -53,3 +53,24 @@ describe("PlanFlow 终止等待", () => {
     expect(screen.queryByRole("button", { name: "终止等待" })).toBeNull();
   });
 });
+
+describe("PlanFlow 三问正向引导", () => {
+  const questions = [
+    { key: "q1", title: "写什么味道", candidates: [
+      { text: "都市异闻·冷峻悬疑", recommended: true, reason: "贴题材" },
+    ] },
+  ];
+
+  it("三问屏有「跟 AI 说一句」引导输入,输入即回传 onFeedback", () => {
+    const onFeedback = vi.fn();
+    render(<PlanFlow {...baseProps({ questions, onFeedback })} />);
+    const input = screen.getByPlaceholderText(/跟 AI 说一句想要什么/);
+    fireEvent.change(input, { target: { value: "想要电台/声音类的点子" } });
+    expect(onFeedback).toHaveBeenCalledWith("想要电台/声音类的点子");
+  });
+
+  it("引导输入回显当前 planFeedback 值", () => {
+    render(<PlanFlow {...baseProps({ questions, planFeedback: "不要警察主角" })} />);
+    expect(screen.getByDisplayValue("不要警察主角")).toBeTruthy();
+  });
+});

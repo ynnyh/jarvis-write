@@ -293,6 +293,13 @@ def create_app() -> FastAPI:
         from app.ratelimit import RateLimitMiddleware
         app.add_middleware(RateLimitMiddleware)
 
+    # 客户端断开守卫(最外层,后加的在外层):用户点「终止等待」/关页面后,
+    # uvicorn 不会主动通知 handler,handler 会把 LLM 调用等完(token 照烧)。
+    # 这层监听 http.disconnect 并 cancel 请求任务,取消沿 await 链掐进 httpx
+    # ——真掐断(2026-10-05 v0.56.3 复盘的遗留)。见 app/disconnect_guard.py。
+    from app.disconnect_guard import ClientDisconnectedGuardMiddleware
+    app.add_middleware(ClientDisconnectedGuardMiddleware)
+
     app.include_router(system_router)
     app.include_router(auth_router)
     app.include_router(admin_router)

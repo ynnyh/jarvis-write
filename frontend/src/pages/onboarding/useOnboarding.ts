@@ -435,6 +435,9 @@ export function useOnboarding() {
       const r = await api.threeQuestions(pid, {
         mode: planMode, topic: sparkText,
         genre: (tendency.genre as string) || project?.genre || "",
+        // 正向引导:三问屏的「跟 AI 说一句」随换一批/出方案都带上——avoid 只能
+        // 排除,没有这句 AI 不知道用户「想要什么」(2026-10-05 月哥实测痛点)
+        feedback: planFeedback.trim() || undefined,
         avoid,
       }, ac.signal);
       setQuestions(r.questions);

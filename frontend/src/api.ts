@@ -1386,7 +1386,7 @@ export const api = {
   // 必掐成「请求超时:等了 30 秒没有响应」(2026-10-05 月哥实测)。signal 供页面
   // 「终止」按钮主动取消(http.ts 会抛 RequestCancelled)。
   threeQuestions: (pid: number, body: {
-    mode: string; topic?: string; genre?: string; avoid?: string[];
+    mode: string; topic?: string; genre?: string; feedback?: string; avoid?: string[];
   }, signal?: AbortSignal) => req<{ questions: ThreeQuestions[] }>(
     "POST", `/api/projects/${pid}/three-questions`, body, LLM_TIMEOUT, signal),
   bookPlans: (pid: number, body: {
