@@ -38,6 +38,11 @@
   font-size: var(--fs-md);
   cursor: pointer;
   transition: border-color 0.12s, background 0.12s;
+  /* 全局 button 是 nowrap(02-base),三问候选是完整一句话,窄屏不换行会撑出
+     容器被裁掉(2026-10-05 移动端实测「见硬就…」「意…」);必须放行换行 */
+  white-space: normal;
+  overflow-wrap: anywhere; /* 混排长串(英文/数字)兜底 */
+  text-align: left;
 }
 .title-chip:hover { border-color: var(--brand); background: var(--brand-weak); }
 .title-chip.on {

@@ -74,3 +74,24 @@ describe("PlanFlow 三问正向引导", () => {
     expect(screen.getByDisplayValue("不要警察主角")).toBeTruthy();
   });
 });
+
+describe("PlanFlow 方案墙拍板出口", () => {
+  const plan = {
+    title: "第七份笔录", kernel: "k", protagonist: "p", world: "w", arc: "a",
+    engine: "e", ending: "", flavor: [], scale: "", scale_reason: "", label: "",
+    opening: "", payoff: "", escalation: "", mechanism: "", opening_sample: "",
+  };
+
+  it("选中方案后,方案墙正下方出现主按钮拍板出口,点击回调 onConfirmPlan(0)", () => {
+    const onConfirmPlan = vi.fn();
+    render(<PlanFlow {...baseProps({ plans: [plan], selectedPlan: 0, onConfirmPlan })} />);
+    const btn = screen.getByRole("button", { name: /拍板进入概念深化/ });
+    fireEvent.click(btn);
+    expect(onConfirmPlan).toHaveBeenCalledWith(0);
+  });
+
+  it("未选中时不显示拍板行动条,主出口缺席", () => {
+    render(<PlanFlow {...baseProps({ plans: [plan], selectedPlan: null })} />);
+    expect(screen.queryByRole("button", { name: /拍板进入概念深化/ })).toBeNull();
+  });
+});

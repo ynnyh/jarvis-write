@@ -9,6 +9,8 @@ import { useState } from "react";
 export function ConfirmGate({
   confirmed, onConfirm, onUnconfirm,
   confirmText = "拍板", confirmedText = "✓ 已拍板", unconfirmText = "撤回",
+  /** 拍板钮的额外样式类(如 "primary" 升格为主按钮);向后兼容,缺省不变 */
+  confirmClass,
   locked, onToggleLock,
   disabled, confirmTitle, unconfirmTitle, lockTitleOn, lockTitleOff,
 }: {
@@ -20,6 +22,7 @@ export function ConfirmGate({
   confirmText?: string;
   confirmedText?: string;
   unconfirmText?: string;
+  confirmClass?: string;
   /** 锁定(可选):锁定的产物在批量重出时保留 */
   locked?: boolean;
   onToggleLock?: () => void;
@@ -41,7 +44,8 @@ export function ConfirmGate({
         </>
       ) : (
         onConfirm && (
-          <button className="btn-sm ck-confirm" disabled={disabled} title={confirmTitle ?? "这一版我认了"}
+          <button className={"btn-sm ck-confirm" + (confirmClass ? ` ${confirmClass}` : "")}
+            disabled={disabled} title={confirmTitle ?? "这一版我认了"}
             onClick={onConfirm}>{confirmText}</button>
         )
       )}

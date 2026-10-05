@@ -166,9 +166,9 @@ export default function PlanFlow(p: Props) {
     <div className="card">
       <h2>挑一套{isShort ? "短故事" : "整书"}方案</h2>
       <div className="card-desc">
-        三套都写满了细节——<b>方案一直读你的想法,另两套是发散</b>。点一张选中;
-        差点意思就用「改改再选」说一句话(只改这张卡);都不对味就再来三套。
-        "每套卡上带 AI 推荐篇幅档,拍板即用它(屏 0/配置屏手选过则以手选为准)。"
+        三套都写满了细节——<b>方案一直读你的想法,另两套是发散</b>。点一张选中,
+        选中后拍板即可进入概念深化;差点意思就用「改改再选」说一句话(只改这张卡);都不对味就再来三套。
+        每套卡上带 AI 推荐篇幅档,拍板即用它(屏 0/配置屏手选过则以手选为准)。
       </div>
 
       {p.planBusy && (
@@ -250,6 +250,19 @@ export default function PlanFlow(p: Props) {
         })}
       </div>
 
+      {/* 选中后的显眼出口:唯一的进阶动作是拍板,此前藏在底部一行 btn-sm 里,
+          移动端换行后极易漏看——用户反馈「选完没有按钮进入下一步」(2026-10-05)。
+          拍板可撤回,所以大胆把它升为主按钮放在方案墙正下方。 */}
+      {p.selectedPlan !== null && !p.planBusy && (
+        <div className="actions mt-3">
+          <button className="primary"
+            onClick={() => p.selectedPlan !== null && p.onConfirmPlan(p.selectedPlan)}>
+            ✓ 就写《{p.plans[p.selectedPlan].title}》,拍板进入概念深化 →
+          </button>
+          <button className="btn-sm" onClick={() => p.onSelect(null)}>再看看别的</button>
+        </div>
+      )}
+
       <div className="actions mt-3">
         <button className="btn-sm" disabled={!!p.planBusy} onClick={p.onGenPlans}>
           🎲 再来三套
@@ -261,6 +274,7 @@ export default function PlanFlow(p: Props) {
         <ConfirmGate
           confirmed={false}
           confirmText="✓ 就写这套,拍板"
+          confirmClass={p.selectedPlan !== null ? "primary" : ""}
           disabled={p.selectedPlan === null}
           confirmTitle={`拍板《${p.selectedPlan !== null ? p.plans[p.selectedPlan].title : ""}》,渲染成开书订单、解锁概念深化`}
           onConfirm={() => p.selectedPlan !== null && p.onConfirmPlan(p.selectedPlan)} />
