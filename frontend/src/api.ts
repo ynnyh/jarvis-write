@@ -1324,8 +1324,9 @@ export const api = {
   // 同步版(/title-suggestion)还在后端留着给旧客户端,但前端不再用它——一轮起名
   // 是分钟级 LLM 调用,把连接挂那么久,链路空闲超时一掐就只剩一句 Failed to fetch。
   // 方案轮廓推荐:概念确认后一次轻量调用,推荐阅读手感(tone/elements)与篇幅档位
+  // (后端同步等 LLM,轻量但慢模型下也会超 30s——统一 LLM_TIMEOUT,后端自有 60s 上限)
   suggestShape: (pid: number) =>
-    req<ShapeSuggestion>("POST", `/api/projects/${pid}/suggest-shape`),
+    req<ShapeSuggestion>("POST", `/api/projects/${pid}/suggest-shape`, undefined, LLM_TIMEOUT),
 
   // 核心梗卡:读(未建返回 null)/保存(作者保存即 human)/AI 提炼草稿(不落库)/存量章补标节拍
   getPremise: (pid: number) =>
@@ -1333,7 +1334,7 @@ export const api = {
   savePremise: (pid: number, p: PremiseInput) =>
     req<Premise>("PUT", `/api/projects/${pid}/premise`, p),
   suggestPremise: (pid: number) =>
-    req<Premise>("POST", `/api/projects/${pid}/suggest-premise`),
+    req<Premise>("POST", `/api/projects/${pid}/suggest-premise`, undefined, LLM_TIMEOUT),
   backfillPremiseBeats: (pid: number) =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/premise/backfill-beats`),
   // 情节推进图:全蓝图书的章×场景网格与伏笔埋收链(纯投影)
@@ -1380,21 +1381,22 @@ export const api = {
   // 漫剧源书的频道皮肤目录(docs/23 v2):{ male: [{key,label,desc}], female: [...] }
   dramaSkins: () => req<{ skins: Record<string, { key: string; label: string; desc: string }[]> }>(
     "GET", "/api/projects/drama-skins").then((r) => r.skins),
-  // 开书方案流三件套都是后端同步等 LLM 的端点,不能用 req 默认 30s——慢模型
-  // (实测 Atria-Dawn-Preview ~11.4 tok/s)出三问 JSON 就要 1 分钟+,30s 必掐成
-  // 「请求超时:等了 30 秒没有响应」(2026-10-05 月哥实测)。按输出量分档给大超时。
+  // 开书方案流三件套都是后端同步等 LLM 的端点,统一走 LLM_TIMEOUT——此前走 req
+  // 默认 30s,慢模型(实测 Atria-Dawn-Preview ~11.4 tok/s)出三问 JSON 就要 1 分钟+,
+  // 必掐成「请求超时:等了 30 秒没有响应」(2026-10-05 月哥实测)。signal 供页面
+  // 「终止」按钮主动取消(http.ts 会抛 RequestCancelled)。
   threeQuestions: (pid: number, body: {
     mode: string; topic?: string; genre?: string; avoid?: string[];
-  }) => req<{ questions: ThreeQuestions[] }>(
-    "POST", `/api/projects/${pid}/three-questions`, body, 300000),
+  }, signal?: AbortSignal) => req<{ questions: ThreeQuestions[] }>(
+    "POST", `/api/projects/${pid}/three-questions`, body, LLM_TIMEOUT, signal),
   bookPlans: (pid: number, body: {
     mode: string; topic?: string; genre?: string; answers?: Record<string, string>;
     feedback?: string; avoid?: string[];
-  }) => req<{ plans: BookPlan[]; project: Project }>(
-    "POST", `/api/projects/${pid}/book-plans`, body, 600000),
-  revisePlan: (pid: number, body: { index: number; directive: string; locked_fields?: string[] }) =>
+  }, signal?: AbortSignal) => req<{ plans: BookPlan[]; project: Project }>(
+    "POST", `/api/projects/${pid}/book-plans`, body, LLM_TIMEOUT, signal),
+  revisePlan: (pid: number, body: { index: number; directive: string; locked_fields?: string[] }, signal?: AbortSignal) =>
     req<{ plans: BookPlan[]; project: Project }>(
-      "POST", `/api/projects/${pid}/revise-plan`, body, 300000),
+      "POST", `/api/projects/${pid}/revise-plan`, body, LLM_TIMEOUT, signal),
   confirmPlan: (pid: number, body: {
     index: number; mode: string;
     scale_override?: { chapters: number; words: number } | null;
@@ -1441,7 +1443,7 @@ export const api = {
   listVoiceCapsules: (id: number) =>
     req<{ capsules: VoiceCapsule[] }>("GET", `/api/projects/${id}/style-profile/voice-capsules`),
   extractVoiceSample: (id: number) =>
-    req<StyleProfile>("POST", `/api/projects/${id}/style-profile/extract-voice`),
+    req<StyleProfile>("POST", `/api/projects/${id}/style-profile/extract-voice`, undefined, LLM_TIMEOUT),
   renameProject: (id: number, title: string) =>
     req<Project>("PATCH", `/api/projects/${id}`, { title }),
   deleteProject: (id: number) =>

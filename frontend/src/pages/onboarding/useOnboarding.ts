@@ -14,6 +14,7 @@ import {
 } from "../../api";
 import { useJob } from "../../ui/useJob";
 import { pollJob, errMsg } from "../../pollJob";
+import { RequestCancelled } from "../../http";
 import { toast } from "../../ui/Toaster";
 import { confirmDialog } from "../../ui/ConfirmDialog";
 import { titleSig as calcTitleSig } from "../wizSig";
@@ -379,6 +380,8 @@ export function useOnboarding() {
   const [plans, setPlans] = useState<BookPlan[] | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<number | null>(null);
   const [planBusy, setPlanBusy] = useState("");
+  // 当前方案流请求的取消器:三问/出方案/修订共用一位,新请求先 abort 旧请求
+  const planAbortRef = useRef<AbortController | null>(null);
   const [planFeedback, setPlanFeedback] = useState("");
   // (docs/22)拍板档位语义:手选档位即时落库,无独立 UI 瞬态——拍板时「非建库默认
   // 30×3000」的现值尊重为用户选择,默认值才用方案推荐档。见 confirmChosenPlan。
@@ -423,6 +426,9 @@ export function useOnboarding() {
   async function fetchQuestions() {
     if (pid === null) return;
     setPlanBusy("AI 正在出三问候选…");
+    planAbortRef.current?.abort();
+    const ac = new AbortController();
+    planAbortRef.current = ac;
     try {
       // 「🎲换一批」防趋同:上一批已展示的候选文本进 avoid,要求换角度换人群
       const avoid = (questions ?? []).flatMap((q) => q.candidates.map((c) => c.text));
@@ -430,9 +436,25 @@ export function useOnboarding() {
         mode: planMode, topic: sparkText,
         genre: (tendency.genre as string) || project?.genre || "",
         avoid,
-      });
+      }, ac.signal);
       setQuestions(r.questions);
-    } catch (e) { setErr(errMsg(e)); } finally { setPlanBusy(""); }
+    } catch (e) {
+      // 用户主动终止:回空闲态即可,不弹错误
+      if (!(e instanceof RequestCancelled)) setErr(errMsg(e));
+    } finally {
+      if (planAbortRef.current === ac) planAbortRef.current = null;
+      setPlanBusy("");
+    }
+  }
+
+  // 终止当前方案流等待(三问/出方案/修订共用同一 planBusy 位):abort 后端连着
+  // 的 HTTP 请求,回空闲态。LLM 超时放宽到 15 分钟后,干等没有出口——可终止
+  // 是放宽的前提(2026-10-05 月哥拍板)。终止是单方面放弃:后端可能仍在跑,
+  // 只是结果没人接(三问/方案均无副作用,浪费一次调用可接受)。
+  function cancelPlanBusy() {
+    planAbortRef.current?.abort();
+    planAbortRef.current = null;
+    setPlanBusy("");
   }
 
   function answerQ(key: string, text: string) {
@@ -450,6 +472,9 @@ export function useOnboarding() {
   async function genPlans() {
     if (pid === null) return;
     setPlanBusy("AI 正在出三套整书方案…");
+    planAbortRef.current?.abort();
+    const ac = new AbortController();
+    planAbortRef.current = ac;
     try {
       // 再来三套:上一批的差异坐标 + 内核进 avoid 防趋同(标签级避开会被换皮绕过,
       // 2026-09-26 作者实测;内核首句让模型在结构层面避开)
@@ -461,22 +486,35 @@ export function useOnboarding() {
         mode: planMode, topic: sparkText,
         genre: (tendency.genre as string) || project?.genre || "",
         answers: qAnswers, feedback: planFeedback.trim() || undefined, avoid,
-      });
+      }, ac.signal);
       setPlans(r.plans);
       setProject(r.project);
       setSelectedPlan(null);
-    } catch (e) { setErr(errMsg(e)); } finally { setPlanBusy(""); }
+    } catch (e) {
+      if (!(e instanceof RequestCancelled)) setErr(errMsg(e));
+    } finally {
+      if (planAbortRef.current === ac) planAbortRef.current = null;
+      setPlanBusy("");
+    }
   }
 
   // 定向修订:一句话只改第 index 套,其余套与未要求字段不动(prompt 实验验证)
   async function reviseOnePlan(index: number, directive: string, lockedFields: string[] = []) {
     if (pid === null) return;
     setPlanBusy(`AI 正在改第 ${index + 1} 套…`);
+    planAbortRef.current?.abort();
+    const ac = new AbortController();
+    planAbortRef.current = ac;
     try {
-      const r = await api.revisePlan(pid, { index, directive, locked_fields: lockedFields });
+      const r = await api.revisePlan(pid, { index, directive, locked_fields: lockedFields }, ac.signal);
       setPlans(r.plans);
       setProject(r.project);
-    } catch (e) { setErr(errMsg(e)); } finally { setPlanBusy(""); }
+    } catch (e) {
+      if (!(e instanceof RequestCancelled)) setErr(errMsg(e));
+    } finally {
+      if (planAbortRef.current === ac) planAbortRef.current = null;
+      setPlanBusy("");
+    }
   }
 
   // 拍板:选中方案渲染成开书订单(后端写 brief + brief_confirmed=True),飞入概念屏。
@@ -809,7 +847,7 @@ export function useOnboarding() {
     submitSpark, pickGenreBrainstorm,
     dramaSkinList, pickedSkin, setPickedSkin, pickSkinGo,
     sendBrief, fetchPitches, pickPitch, saveBriefDraft, confirmBrief, unconfirmBrief,
-    pickMode, fetchQuestions, answerQ, adoptAllRecommended,
+    pickMode, fetchQuestions, cancelPlanBusy, answerQ, adoptAllRecommended,
     genPlans, reviseOnePlan, confirmChosenPlan, creativeSaved,
     developFromBrief, saveCustomConcept,
     forgeChanged, forgeConfirmed, forgeUnconfirmed, isForgeDismissedFor, dismissForge, reopenForge,

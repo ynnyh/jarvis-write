@@ -115,6 +115,25 @@ describe("req 请求行为", () => {
     await expect(api.me()).rejects.toThrow("请求超时");
   });
 
+  // LLM 超时放宽到分钟级后,页面「终止等待」按钮 abort 外部 signal:必须抛
+  // RequestCancelled(调用方静默回空闲),而不是误报「请求超时/网络失败」。
+  it("外部 signal 取消 → RequestCancelled,不是超时/网络错误文案", async () => {
+    const { req, RequestCancelled } = await import("../http");
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((_url, opts) =>
+      new Promise((_resolve, reject) => {
+        opts.signal.addEventListener("abort", () =>
+          reject(new DOMException("The operation was aborted.", "AbortError")));
+      })));
+    const ac = new AbortController();
+    const p = expect(req("GET", "/api/me", undefined, 30000, ac.signal))
+      .rejects.toThrow(RequestCancelled);
+    ac.abort();
+    await p;
+    await expect(req("GET", "/api/me", undefined, 30000, ac.signal).catch(
+      (e) => { expect(e).toBeInstanceOf(RequestCancelled); expect(e.message).not.toContain("请求超时"); },
+    ));
+  });
+
   it("正文读一半断了 → 网络错误;服务端返非 JSON → 可解析提示", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,

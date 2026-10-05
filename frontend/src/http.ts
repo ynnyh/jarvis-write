@@ -76,6 +76,19 @@ export function authHeaders(): Record<string, string> {
   return tk ? { Authorization: `Bearer ${tk}` } : {};
 }
 
+/** 用户主动取消(页面终止按钮 abort)——与「超时/断网」不同,调用方应静默处理
+ *  (回空闲态,不弹错误)。ApiError 子类,`e instanceof Error` 判断不受影响。 */
+export class RequestCancelled extends Error {
+  constructor() {
+    super("已取消");
+    this.name = "RequestCancelled";
+  }
+}
+
+function isCancelled(external?: AbortSignal): boolean {
+  return external?.aborted ?? false;
+}
+
 /** 非 2xx 响应 → ApiError;401 顺带清 token 并跳登录。
  *  抽出来的原因:这段此前在 api.ts 内被 req / reqForm / postImage / sseStream 等
  *  抄了 5 遍,改一处文案必漏其余。 */
@@ -108,9 +121,20 @@ export async function reqForm<T>(path: string, form: FormData, timeoutMs = 12000
 }
 
 /** 唯一 JSON 请求入口。timeoutMs 默认 30s;LLM 长任务(生成/研讨)显式传大值。
- *  body 一律按 `!== undefined` 判定,故 `false` / `0` / `""` 也是合法载荷。 */
-export async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 30000): Promise<T> {
+ *  body 一律按 `!== undefined` 判定,故 `false` / `0` / `""` 也是合法载荷。
+ *  signal:调用方主动取消(页面「终止」按钮)。外部 abort 抛 RequestCancelled
+ *  (调用方静默处理),与自身超时(netError 的「等了 N 秒」)分开——LLM 超时
+ *  放宽到分钟级后,干等没有出口,可终止是放宽的前提。 */
+export async function req<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  timeoutMs = 30000,
+  signal?: AbortSignal,
+): Promise<T> {
   const ctrl = new AbortController();
+  const onExternalAbort = () => ctrl.abort();
+  signal?.addEventListener("abort", onExternalAbort);
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const headers: Record<string, string> = {};
@@ -126,6 +150,7 @@ export async function req<T>(method: string, path: string, body?: unknown, timeo
         signal: ctrl.signal,
       });
     } catch {
+      if (isCancelled(signal)) throw new RequestCancelled();
       // 连 HTTP 状态都没拿到:自己 abort 的(超时)/ 断网 / 连接被掐
       throw netError(ctrl.signal.aborted, timeoutMs);
     }
@@ -133,6 +158,7 @@ export async function req<T>(method: string, path: string, body?: unknown, timeo
     try {
       return (await res.json()) as T;
     } catch (e) {
+      if (isCancelled(signal)) throw new RequestCancelled();
       // 响应头到了但正文没读完:仍是连接层断的;SyntaxError 例外(服务端返了非 JSON)
       if (e instanceof SyntaxError) {
         throw new ApiError(res.status, "服务返回了无法解析的内容,请重试。");
@@ -141,6 +167,7 @@ export async function req<T>(method: string, path: string, body?: unknown, timeo
     }
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", onExternalAbort);
   }
 }
 

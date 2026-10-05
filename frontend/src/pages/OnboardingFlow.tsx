@@ -104,7 +104,7 @@ export default function OnboardingFlow() {
     // handler
     submitSpark, pickGenreBrainstorm,
     dramaSkinList, pickedSkin, pickSkinGo,
-    pickMode, fetchQuestions, answerQ, adoptAllRecommended,
+    pickMode, fetchQuestions, cancelPlanBusy, answerQ, adoptAllRecommended,
     genPlans, reviseOnePlan, confirmChosenPlan, creativeSaved,
     confirmBrief, unconfirmBrief,
     developFromBrief, saveCustomConcept,
@@ -510,6 +510,7 @@ export default function OnboardingFlow() {
                     planBusy={planBusy}
                     planFeedback={planFeedback}
                     onQuestions={() => void fetchQuestions()}
+                    onCancelPlan={cancelPlanBusy}
                     onAnswer={answerQ}
                     onAdoptAll={adoptAllRecommended}
                     onGenPlans={() => void genPlans()}

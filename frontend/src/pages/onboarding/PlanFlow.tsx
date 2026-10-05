@@ -25,6 +25,8 @@ interface Props {
   planBusy: string;
   planFeedback: string;
   onQuestions: () => void;
+  // 终止当前方案流等待(三问/出方案/修订):LLM 超时放宽后干等要有出口
+  onCancelPlan: () => void;
   onAnswer: (key: string, text: string) => void;
   onAdoptAll: () => void;
   onGenPlans: () => void;
@@ -98,7 +100,12 @@ export default function PlanFlow(p: Props) {
         </div>
 
         {p.planBusy ? (
-          <div className="sub-summary mt-3"><ThinkingText phrases={THINK_TITLE} />{p.planBusy}</div>
+          <div className="sub-summary mt-3">
+            <ThinkingText phrases={THINK_TITLE} />{p.planBusy}
+            <span style={{ marginLeft: 12 }}>
+              <button className="btn-sm" type="button" onClick={p.onCancelPlan}>终止等待</button>
+            </span>
+          </div>
         ) : !p.questions ? (
           <div className="sub-summary mt-3 muted">AI 正在准备三问…</div>
         ) : (
@@ -158,7 +165,12 @@ export default function PlanFlow(p: Props) {
       </div>
 
       {p.planBusy && (
-        <div className="sub-summary mt-2"><span className="spin" />{p.planBusy}</div>
+        <div className="sub-summary mt-2">
+          <span className="spin" />{p.planBusy}
+          <span style={{ marginLeft: 12 }}>
+            <button className="btn-sm" type="button" onClick={p.onCancelPlan}>终止等待</button>
+          </span>
+        </div>
       )}
 
       <div className="plans-wall mt-3">
