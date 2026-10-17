@@ -20,9 +20,12 @@ from typing import Any, Callable, Iterable
 
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.polish.ai_flavor import (
+    _BODY_REACTIONS_CATEGORY,
     _RULES,
     FlavorReport,
     ai_flavor_report,
+    body_reaction_families,
+    body_reaction_hits,
     gate_override,
 )
 from app.engines.tendency import assemble_tendency
@@ -35,6 +38,7 @@ from app.prompts.polish import (
     _OUTPUT_CONTRACT,
     CRAFT_MODES,
     DEAI_REWRITE_PROMPT,
+    DEAI_SEGMENT_PROMPT,
     DISCUSS_CHAPTER_SYSTEM_PROMPT,
     DISCUSS_SUGGESTION_MARK,
     DISCUSS_SYSTEM_PROMPT,
@@ -151,9 +155,17 @@ def fatigue_block(recent_texts: list[str], top_k: int = 3) -> str:
     agg: dict[str, dict] = {}
     for t in recent_texts:
         for name, cat in ai_flavor_report(t).categories.items():
+            if name == _BODY_REACTIONS_CATEGORY:
+                # 身体反应有自己那段措辞(换载体,不是禁词);混进「严禁再犯」的类别清单
+                # 会自相矛盾——同一个毛病两块话说两样,模型只会照更硬的那句办。
+                continue
             slot = agg.setdefault(name, {"count": 0, "weight": cat["weight"]})
             slot["count"] += cat["count"]
     lines = ["" + _FATIGUE_STATIC]
+    # 本书特有的身体反应复读(跨章):静态黑名单管不到的「这本书的毛病」
+    body_note = body_reaction_note(recent_texts)
+    if body_note:
+        lines.append(body_note)
     top = sorted(agg.items(), key=lambda kv: -kv[1]["count"] * kv[1]["weight"])[:top_k]
     if top:
         detail = "、".join(
@@ -164,6 +176,30 @@ def fatigue_block(recent_texts: list[str], top_k: int = 3) -> str:
             f"- {detail}\n"
         )
     return "\n".join(lines)
+
+
+def body_reaction_note(recent_texts: list[str], top_k: int = 3) -> str:
+    """本书最近几章的身体反应复读 → 生成端预防块(没复读返回空串,prompt 零变化)。
+
+    与静态黑名单的分工:黑名单管全站通用套话,这里管**这本书**已经用滥的那几种身体反应。
+    措辞刻意不用「禁止」——禁词会把写法逼成更空的「他握了握拳」;这里要的是换载体
+    (具体行为 / 环境 / 对话 / 别人的反应)承担同一份情绪。只列最近几章里出现在 ≥2 章的族。
+    """
+    per_family: dict[str, int] = {}
+    for text in recent_texts:
+        for family in body_reaction_families(text):
+            per_family[family] = per_family.get(family, 0) + 1
+    hot = [(f, n) for f, n in per_family.items() if n >= 2]
+    if not hot:
+        return ""
+    hot.sort(key=lambda kv: -kv[1])
+    lines = [f"- {family}:最近 {len(recent_texts)} 章里有 {n} 章用过" for family, n in hot[:top_k]]
+    return (
+        "【本章的身体反应该换载体了(本书已用滥;不是禁用,是换一种写法)】\n"
+        + "\n".join(lines)
+        + "\n这一章写紧张 / 隐忍 / 疼痛时,优先用具体行为、环境细节、对话或别人的反应来承担;"
+        "确实要用身体反应,只留最有力的那一处,其余换掉。\n"
+    )
 
 
 def _category_samples(name: str) -> str:
@@ -203,6 +239,99 @@ async def deai_rewrite(text: str, report: FlavorReport, style_block: str = "") -
     )
     raw = await get_adapter_for(Task.FINALIZE).ask(prompt)
     return _strip_rewrite_meta(raw)
+
+
+# ---- 身体反应复读的定点修复(段落级,不是整章重摇) ----
+# 为什么单独一道:deai_self_heal 是整章级的(总分超标才动),而「同一套身体反应在本章
+# 出现两次」对总分贡献很小,永远触发不了它——用户实测正是卡在这个缝里(2026-10-17:
+# 每章都写「攥紧拳头,指甲渗进肉里」,伤还没好又攥一次)。这一道只重写含重复的那几段:
+# 便宜、精准,也不会把没问题的段落改坏。
+_MAX_REPEAT_PARAS = 4      # 单次最多重写几段(更多留给作者手动改)
+_REPEAT_PARA_CHARS = 1500  # 单段太长不送(重写成本与跑偏风险都上去了)
+
+
+def _paragraph_spans(text: str) -> list[tuple[int, int]]:
+    """按空行切段,返回每段 (start, end)(段间空行不属于任何段)。"""
+    spans: list[tuple[int, int]] = []
+    for m in re.finditer(r"[^\n]+(?:\n(?!\s*\n)[^\n]+)*", text):
+        if m.group().strip():
+            spans.append((m.start(), m.end()))
+    return spans
+
+
+async def deai_heal_repeats(
+    text: str, style_block: str = "", progress: Callable[[str], None] | None = None
+) -> tuple[str, FlavorReport, FlavorReport]:
+    """身体反应复读定点修复:只重写含「多余命中」的段落,带安全阀。
+
+    返回 (正文, 修前报告, 修后报告)。没有多余命中时原样返回、**不调 LLM**(零成本短路)。
+    安全阀与 deai_self_heal 同款:段数对不上 / 空段 / 篇幅越界 / 未降分 / 判据倒退 /
+    过度矫正,一律丢弃本轮,绝不落一版比原稿更差的正文。
+    """
+    before = ai_flavor_report(text)
+    excess = body_reaction_hits(text)
+    if not excess:
+        return text, before, before
+    spans = _paragraph_spans(text)
+    targets: list[tuple[int, int]] = []
+    for hit in excess:
+        for span in spans:
+            if span[0] <= hit["start"] < span[1]:
+                if span not in targets and (span[1] - span[0]) <= _REPEAT_PARA_CHARS:
+                    targets.append(span)
+                break
+    targets.sort()
+    targets = targets[:_MAX_REPEAT_PARAS]
+    if not targets:
+        return text, before, before
+    families = "、".join(sorted({h["family"] for h in excess}))
+    if progress:
+        try:
+            progress("身体反应复读:定点重写重复段落")
+        except Exception:  # noqa: BLE001 — 进度上报绝不影响主流程
+            pass
+    prompt = DEAI_SEGMENT_PROMPT.format(
+        families=families,
+        para_count=len(targets),
+        paragraphs="\n\n".join(text[s:e] for s, e in targets),
+        style_directives=style_block,
+    )
+    try:
+        raw = await get_adapter_for(Task.FINALIZE).ask(prompt)
+        data = parse_llm_json(raw)
+    except Exception:  # noqa: BLE001 — LLM 失败不该毁掉已定稿的正文
+        logger.warning("身体反应定点重写调用失败,保留原稿", exc_info=True)
+        return text, before, before
+    new_paras = data.get("paragraphs") if isinstance(data, dict) else None
+    if not isinstance(new_paras, list) or len(new_paras) != len(targets):
+        logger.info(
+            "身体反应定点重写段数对不上(模型给 %s,期望 %d),丢弃本轮",
+            len(new_paras) if isinstance(new_paras, list) else type(new_paras).__name__,
+            len(targets),
+        )
+        return text, before, before
+    cleaned = [_strip_rewrite_meta(str(p)) for p in new_paras]
+    if any(not p.strip() for p in cleaned):
+        logger.info("身体反应定点重写出现空段,丢弃本轮")
+        return text, before, before
+    out = text
+    for (start, end), para in reversed(list(zip(targets, cleaned))):
+        out = out[:start] + para + out[end:]
+    ratio = len(out) / max(len(text), 1)
+    if not (_DEAI_LEN_LO <= ratio <= _DEAI_LEN_HI):
+        logger.info("身体反应定点重写篇幅越界(比例 %.2f),丢弃本轮", ratio)
+        return text, before, before
+    after = ai_flavor_report(out)
+    if after.score >= before.score:
+        logger.info("身体反应定点重写未降分(%.1f→%.1f),丢弃本轮", before.score, after.score)
+        return text, before, before
+    if judges_regress(before, after):
+        logger.info("身体反应定点重写统计判据倒退,丢弃本轮")
+        return text, before, before
+    if overcorrected(after):
+        logger.info("身体反应定点重写过度矫正,丢弃本轮")
+        return text, before, before
+    return out, before, after
 
 
 async def deai_self_heal(

@@ -141,6 +141,32 @@ _REPEAT_STEP = 100      # 重复扫描步长
 _REPEAT_MAX_CHECKS = 200  # 扫描窗口上限(防爆)
 _HIT_CAP_PER_CATEGORY = 20  # 每类命中明细上限
 
+# ---- 身体反应复读(频次维度,不是禁词表) ----
+# 用户实测痛点(2026-10-17):同一套身体反应被反复当情绪插件用——「攥紧拳头,指甲渗进肉里,
+# 流出血」这一章来一次、下一章再来一次,写到后来「伤还没好又攥拳流血」连事实都对不上。
+# 取证(线上 1868 章,只回计数):手部痛感族出现在 102 章、其中 29 章单章内 ≥2 次;按书差异
+# 极大(有的书 53% 的章都写,大书只有 2.5%)——所以判据是「这一章里重复了」,不是「出现了」。
+# 单独一次不罚:攥拳、咬唇本身没有错,错的是拿它代替情绪反复糊。
+# 阈值为「单章命中数」,只把超出的那几次计入得分(第一次不算)——这是「别限制过度」的落点。
+_BODY_REACTIONS: tuple[tuple[str, int, str], ...] = (
+    ("攥拳掐肉/掌心渗血", 2,
+     r"(?:攥|捏|握|攒)(?:紧|住|起)?了?(?:拳|拳头)"
+     r"|(?:指甲|指尖|指节)[^。!?\n]{0,6}(?:渗|陷|掐|抠|扎|嵌)"
+     r"|(?:渗|流|滴|涌)出[^。!?\n]{0,3}血"
+     r"|掌心[^。!?\n]{0,6}(?:血|疼|痛)"),
+    ("咬唇咬牙", 3, r"咬(?:紧|住|破)?了?(?:嘴唇|下唇|牙关|牙)"),
+    ("眼眶泛红/泪水打转", 2,
+     r"(?:眼眶|眼圈)[^。!?\n]{0,6}(?:泛红|发红|红了|湿润|发酸)"
+     r"|(?:泪水|眼泪)[^。!?\n]{0,6}(?:打转|打旋|涌上|滑落|滚落)"),
+    ("喉结滚动", 2, r"喉结[^。!?\n]{0,6}(?:滚动|滑动|上下|动了一下)"),
+    ("呼吸一滞/深吸气", 3,
+     r"(?:呼吸|气息)[^。!?\n]{0,4}(?:一滞|一窒|停滞|乱了一拍)|深吸(?:了)?一?口气"),
+    ("心跳/心脏猛跳", 2,
+     r"(?:心跳|心脏)[^。!?\n]{0,6}(?:漏|猛地|骤然|怦|加速|一紧|狂跳)"),
+)
+_BODY_REACTIONS_CATEGORY = "身体反应复读"
+_BODY_REACTIONS_WEIGHT = 1.5  # 与「空洞比喻堆砌」同档:比普通套话重,但不至于一击致命
+
 # =============== 对白/引用保护区间(zh-ai-flavor-refiner 的 protected-spans 思路) ===============
 # 引号(对白)/书名号(引用)内的命中按折扣计分:对白要保人物声线,
 # 神态词在对白里是"人物性格"不是 AI 腔;命中明细打 dialogue 标记,
@@ -222,9 +248,14 @@ class FlavorReport:
         parts: list[str] = []
         if self.categories:
             top = sorted(
-                self.categories.items(), key=lambda kv: -kv[1]["score"]
+                (
+                    kv for kv in self.categories.items()
+                    if kv[0] != _BODY_REACTIONS_CATEGORY  # 身体反应单列一行,不重复报
+                ),
+                key=lambda kv: -kv[1]["score"],
             )[:3]
-            parts.append("、".join(f"{k}×{v['count']}" for k, v in top))
+            if top:
+                parts.append("、".join(f"{k}×{v['count']}" for k, v in top))
         if self.metrics.get("burstiness_flag"):
             parts.append("句长过于均匀")
         if self.metrics.get("metronome_groups"):
@@ -233,6 +264,11 @@ class FlavorReport:
             parts.append(f"段尾总结句×{self.metrics['tail_summary_count']}")
         if self.metrics.get("repeats"):
             parts.append(f"长重复×{len(self.metrics['repeats'])}")
+        if self.metrics.get("body_reactions"):
+            detail = "、".join(
+                f"{k}×{v}" for k, v in self.metrics["body_reactions"].items()
+            )
+            parts.append(f"身体反应复读({detail})")
         if not parts:
             return f"AI 味指数 {self.score:.1f}/千字(未检出明显 AI 腔)"
         return f"AI 味指数 {self.score:.1f}/千字({';'.join(parts)})"
@@ -367,6 +403,61 @@ def _find_repeats(text: str) -> list[dict]:
     return repeats
 
 
+def _body_reaction_occurrences(text: str) -> dict[str, list[tuple[int, str]]]:
+    """每族 → 出现位置列表,按**句子**归并(同一句里命中多个子模式只算一次)。
+
+    为什么必须按句归并:用户举的「他攥紧拳头,指甲渗进肉里,流出血来」是**一次**拿身体
+    反应代替情绪,不是三次——正则按子模式匹配会数成三处,判据随即失真(本轮实测踩到,
+    单次出现被误判成复读)。同一句只保留第一个命中的原文片段作代表。
+    """
+    spans = _sentence_spans(text)
+    out: dict[str, list[tuple[int, str]]] = {}
+    for family, _threshold, pattern in _BODY_REACTIONS:
+        picked: list[tuple[int, str]] = []
+        seen: set[tuple[int, int]] = set()
+        for m in re.finditer(pattern, text):
+            span = next((sp for sp in spans if sp[0] <= m.start() < sp[1]), None)
+            if span is None or span in seen:
+                continue
+            seen.add(span)
+            picked.append((m.start(), m.group()))
+        if picked:
+            out[family] = sorted(picked)
+    return out
+
+
+def body_reaction_hits(text: str) -> list[dict]:
+    """身体反应族的「多余命中」:每族按阈值只保留超出的那几次(第一次不算)。
+
+    返回 [{family, index, start, text}](按位置排序);index 是该族在本文中的第几次(从 0 起)。
+    供段落级定点重写用:只改「重复出现的那几次」,第一次保留原样——它多半是必要的,
+    砍掉反而伤正文。
+    """
+    occurrences = _body_reaction_occurrences(text)
+    out: list[dict] = []
+    for family, threshold, _pattern in _BODY_REACTIONS:
+        for i, (start, snippet) in enumerate(occurrences.get(family, [])):
+            if i + 1 < threshold:
+                continue
+            out.append({
+                "family": family,
+                "index": i,
+                "start": start,
+                "text": snippet,
+            })
+    out.sort(key=lambda h: h["start"])
+    return out
+
+
+def body_reaction_families(text: str) -> set[str]:
+    """本文**出现过的**身体反应族(不论次数)。
+
+    与 body_reaction_hits 的分工:那个数「本章重复了几次」(判分 / 定点修复用),这个回答
+    「这本书哪几族用滥了」(生成端预防用)——跨章频次要的是出现过,不是超阈值。
+    """
+    return set(_body_reaction_occurrences(text))
+
+
 # =============== 权重/门槛热更(管理端在线调参,不重启) ===============
 # _RULES 里的权重是"出厂值":线上某类误伤/漏杀时,管理端把覆盖值写进
 # AppSetting(key=ai_flavor_config)并同步进这份内存覆盖,检测立即生效。
@@ -458,6 +549,35 @@ def ai_flavor_report(text: str) -> FlavorReport:
             }
             weighted += cat_weighted
 
+    # ---- 身体反应复读(频次维度):只计「多余的那几次」,第一次不算 ----
+    body_counts: dict[str, int] = {}
+    body_dialogue = 0
+    body_weighted = 0.0
+    body_hit_count = 0
+    for h in body_reaction_hits(text):
+        in_dlg = _in_protected(h["start"])
+        body_hit_count += 1
+        body_weighted += _BODY_REACTIONS_WEIGHT * (_DIALOGUE_DISCOUNT if in_dlg else 1.0)
+        body_counts[h["family"]] = body_counts.get(h["family"], 0) + 1
+        if in_dlg:
+            body_dialogue += 1
+        if body_hit_count <= _HIT_CAP_PER_CATEGORY:
+            hits.append(FlavorHit(
+                category=_BODY_REACTIONS_CATEGORY,
+                phrase=h["family"],
+                sentence=_find_sentence(spans, text, h["start"]),
+                start=h["start"],
+                dialogue=in_dlg,
+            ))
+    if body_hit_count:
+        categories[_BODY_REACTIONS_CATEGORY] = {
+            "count": body_hit_count,
+            "weight": _BODY_REACTIONS_WEIGHT,
+            "score": round(body_weighted, 2),
+            "dialogue_count": body_dialogue,
+        }
+        weighted += body_weighted
+
     # ---- 统计指标(第一裁判:节奏/结构)+ 第二裁判(用词统计) ----
     sent_lens = [e - s for s, e in spans]
     cv, burst_flag = _burstiness(sent_lens)
@@ -471,6 +591,7 @@ def ai_flavor_report(text: str) -> FlavorReport:
         "metronome_groups": metronome,
         **para,
         "repeats": repeats,
+        "body_reactions": body_counts,
         **_judges_metrics(text),
     }
 

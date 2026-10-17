@@ -32,7 +32,7 @@ from app.engines.editorial import (
     store_review_snapshot,
 )
 from app.engines.pipeline.word_guard import GuardResult, word_count_guard
-from app.engines.polish.polisher import deai_self_heal
+from app.engines.polish.polisher import deai_heal_repeats, deai_self_heal
 
 logger = logging.getLogger("jarvis-write.chapter")
 
@@ -124,6 +124,25 @@ async def finalize_and_persist(
         logger.info(
             "第 %d 章 AI 味自愈:%.1f → %.1f(去味前正文已存版本快照)",
             chapter_number, _deai_before.score, _deai_after.score,
+        )
+
+    # ---- 身体反应复读定点修复(段落级) ----
+    # 分工:上一道是整章级的(总分超标才动),而「同一套身体反应在本章出现两次」对总分
+    # 贡献极小,永远触发不了它——用户 2026-10-17 实测痛点正是卡在这个缝里(每章都写
+    # 「攥紧拳头,指甲渗进肉里」,伤还没好又攥一次)。这一道只重写含重复的那几段;
+    # 没有重复时零成本短路、不调 LLM,安全阀与上一道同款(未降分/越界一律丢弃)。
+    final, _rep_before, _rep_after = await deai_heal_repeats(
+        final, style_block, progress=_report
+    )
+    if _rep_after.score < _rep_before.score:
+        if pre_deai_final is None:
+            pre_deai_final = _heal_input  # 回退点始终是「去味前」那一版
+        review_result["deai_repeats"] = {
+            "before": _rep_before.score, "after": _rep_after.score,
+        }
+        logger.info(
+            "第 %d 章身体反应复读定点修复:%.1f → %.1f",
+            chapter_number, _rep_before.score, _rep_after.score,
         )
 
     # ---- 去重段落守卫:删掉模型复读出的整段重复(纯规则零成本,落库前末道加工) ----
