@@ -54,6 +54,7 @@ from app.db.models.series import SeriesCharacter, SeriesEpisode
 from app.db.models.anime import AnimeSeries, AnimeEpisode
 from app.db.models.skill_pack import SkillPack
 from app.db.models.render import RenderConfig, RenderTask, TtsTrack
+from app.db.models.evolution import EvolutionMemory, EvolutionPref
 
 __all__ = [
     "GenInput",
@@ -114,4 +115,6 @@ __all__ = [
     "RenderConfig",
     "RenderTask",
     "TtsTrack",
+    "EvolutionPref",
+    "EvolutionMemory",
 ]

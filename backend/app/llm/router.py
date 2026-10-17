@@ -70,6 +70,7 @@ class Task(str, Enum):
     ANTHEM = "anthem"                   # 主题曲提示词(Suno)
     SUBMISSION = "submission"           # 投稿包(标题/标签/金句/简介/封面)
     PATTERN_DERIVE = "pattern_derive"   # 故事骨架反推:概念/描述 → 结构配方(JSON)
+    EVOLUTION = "evolution"             # 写作复盘:证据包 → 记忆条目(JSON)
 
 
 class Tier(str, Enum):
@@ -101,6 +102,8 @@ _TASK_TIER: dict[Task, Tier] = {
     Task.IMPACT: Tier.QUALITY,
     Task.SETTING_IMPACT: Tier.QUALITY,
     Task.PATTERN_DERIVE: Tier.QUALITY,  # 配方质量决定整书的骨架,上强档
+    # 复盘是评审提炼活:读的是作者劳动成果,错记一条就污染下一本书,与主审同档
+    Task.EVOLUTION: Tier.REVIEW,
     Task.SETTING_PATCH: Tier.QUALITY,
     # 漫剧四步管线:改编质量优先,全部走强档(提示词锚段注入对模型服从性有要求)
     Task.DRAMA_ASSET: Tier.QUALITY,

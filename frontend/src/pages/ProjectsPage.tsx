@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, Project, ProjectTodo, SequelDirection } from "../api";
 import TitleSuggest from "../components/TitleSuggest";
+import RetrospectiveDialog from "../panels/RetrospectiveDialog";
 import { confirmDialog } from "../ui/ConfirmDialog";
 import EmptyState from "../ui/EmptyState";
 import { toast } from "../ui/Toaster";
@@ -40,6 +41,9 @@ export default function ProjectsPage() {
   const [dirBusy, setDirBusy] = useState(false);
   const [dirStage, setDirStage] = useState("");
   const seenDirTitlesRef = useRef<string[]>([]);
+
+  // 书级复盘(docs/36):从这部书提炼文风与教训,下一本开书时带上;档位与开关在设置页
+  const [retroFor, setRetroFor] = useState<Project | null>(null);
 
   // 重命名编辑态:editingId 为正在改名的项目
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -306,6 +310,13 @@ export default function ProjectsPage() {
         </div>
       )}
 
+      {retroFor && (
+        <RetrospectiveDialog
+          pid={retroFor.id} title={retroFor.title}
+          onClose={() => setRetroFor(null)}
+        />
+      )}
+
       <div className="proj-grid">
         {projects.map((p) => (
           <div key={p.id} className="proj-card">
@@ -380,6 +391,13 @@ export default function ProjectsPage() {
                   title="基于这部书开续集:继承文风/架构/人物,前情提要自动带进新书"
                   onClick={() => openSequel(p)}
                 >开续集</button>
+              )}
+              {(p.written_chapters ?? 0) > 0 && (
+                <button
+                  className="btn-sm"
+                  title="复盘这部书:提炼文风与教训,下一本开书时带上(可在设置里开关或删除)"
+                  onClick={() => setRetroFor(p)}
+                >复盘</button>
               )}
               <button
                 className="btn-sm"

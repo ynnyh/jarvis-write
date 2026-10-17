@@ -1310,6 +1310,28 @@ export interface AuditReport {
   };
 }
 
+// ---------- 进化系统(docs/36):三档自治旋钮 + 复盘记忆 ----------
+export type EvolutionLevel = "off" | "confirm" | "auto";
+export interface EvolutionConfig { level: EvolutionLevel; }
+export type EvolutionMemoryKind = "style" | "lesson" | "preference";
+export type EvolutionMemoryStatus = "pending" | "confirmed" | "dismissed";
+export interface EvolutionMemoryItem {
+  id: number;
+  kind: EvolutionMemoryKind;   // style=文风特征 / lesson=教训 / preference=偏好
+  content: string;             // 具体可执行的规则(写给下一次开书时的 AI 看)
+  evidence: string;            // 出处摘要(支撑这条的证据)
+  confidence: string;          // high / medium / low
+  status: EvolutionMemoryStatus;
+  project_id: number | null;
+  source: Record<string, unknown>;
+  created_at: string;
+}
+export interface RetrospectiveResult {
+  level: EvolutionLevel;
+  summary: string;
+  memories: EvolutionMemoryItem[];
+}
+
 // ---------- 接口 ----------
 export const api = {
   health: () => req<{ status: string; providers: ProviderState }>("GET", "/api/health"),
@@ -1990,4 +2012,20 @@ export const api = {
     req<{ job_id: string }>("POST", `/api/projects/${pid}/refresh/light`, { chapter_numbers, directive }),
   refreshHeavy: (pid: number, chapter_numbers: number[] = [], directive = "") =>
     req<{ job_id: string }>("POST", `/api/projects/${pid}/refresh/heavy`, { chapter_numbers, directive }),
+
+  // ---- 进化系统(docs/36):旋钮 + 记忆资产 + 书级复盘 ----
+  getEvolutionConfig: () => req<EvolutionConfig>("GET", "/api/evolution/config"),
+  saveEvolutionConfig: (level: EvolutionLevel) =>
+    req<EvolutionConfig>("PUT", "/api/evolution/config", { level }),
+  listEvolutionMemories: (status?: EvolutionMemoryStatus) =>
+    req<{ items: EvolutionMemoryItem[] }>(
+      "GET", `/api/evolution/memories${status ? `?status=${status}` : ""}`),
+  patchEvolutionMemory: (id: number, status: "confirmed" | "dismissed") =>
+    req<EvolutionMemoryItem>("PATCH", `/api/evolution/memories/${id}`, { status }),
+  deleteEvolutionMemory: (id: number) =>
+    req<{ ok: boolean }>("DELETE", `/api/evolution/memories/${id}`),
+  clearEvolutionMemories: () =>
+    req<{ ok: boolean; deleted: number }>("POST", "/api/evolution/memories/clear"),
+  runRetrospective: (pid: number) =>
+    req<RetrospectiveResult>("POST", `/api/projects/${pid}/retrospective`, undefined, LLM_TIMEOUT),
 };

@@ -23,9 +23,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.audit import record_gen_inputs
+from app.auth import current_user_id
 from app.db.models import Project
 from app.db.session import get_db
 from app.engines.consistency.extractor import parse_llm_json
+from app.engines.evolution.inject import load_confirmed_memories, render_memory_block
+from app.engines.evolution.prefs import get_user_level
 from app.engines.intent import clean_intent_card, intent_card_empty
 from app.engines.skills.packs import render_project_skill_block
 from app.llm.router import Task, get_adapter_for
@@ -114,12 +117,21 @@ async def intent_readback(
         if cleaned:
             avoid_block = "\n【作者已明确不要的方向(一律不得出现)】\n- " + "\n- ".join(cleaned) + "\n"
 
+    # 进化记忆回注(docs/36 §5):只在 confirm/auto 档注入,off 档零采集零注入。
+    # 只注这一处——教训进了理解卡,确认后随 render_intent_block 传遍下游。
+    uid = current_user_id.get()
+    memories = []
+    if uid is not None and get_user_level(db, uid) != "off":
+        memories = load_confirmed_memories(db, uid)
+    memory_block = render_memory_block(memories)
+
     prompt = INTENT_READBACK_PROMPT.format(
         topic=topic,
         genre=req.genre.strip() or project.genre or "(未定)",
         feedback_block=feedback_block,
         avoid_block=avoid_block,
         skill_block=render_project_skill_block(db, project, "idea"),
+        memory_block=memory_block,
     )
     adapter = get_adapter_for(Task.ARCHITECTURE)
     try:
@@ -138,6 +150,12 @@ async def intent_readback(
         },
         db=db,
     )
+    if memories:
+        record_gen_inputs(
+            kind="evolution-injection", project_id=project_id,
+            payload={"memory_ids": [m.id for m in memories], "count": len(memories)},
+            db=db,
+        )
     db.commit()
     return IntentReadbackResponse(
         card=IntentCard(**card),

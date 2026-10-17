@@ -37,6 +37,7 @@ from app.api.chapters import router as chapters_router
 from app.api.consistency import router as consistency_router
 from app.api.edit_directive import router as edit_directive_router
 from app.api.editorial import router as editorial_router
+from app.api.evolution import router as evolution_router
 from app.api.inspire import router as inspire_router
 from app.api.media import router as media_router
 from app.api.misc import router as misc_router
@@ -312,6 +313,7 @@ def create_app() -> FastAPI:
     app.include_router(tendency_router)
     app.include_router(writing_cards_router)
     app.include_router(settings_router)
+    app.include_router(evolution_router)
     app.include_router(chapters_router)
     app.include_router(scenes_router)
     app.include_router(consistency_router)

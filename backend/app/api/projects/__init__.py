@@ -44,7 +44,7 @@ from app.schemas.dna import StoryDNA
 from app.schemas.project import ProjectCreate, ProjectOut
 
 from . import architecture, blueprint, dashboard, naming, plot_map, premise, shape, sequel, skeleton, style_profile, style_profile_api
-from . import brief, chain, intent, plans
+from . import brief, chain, intent, plans, retrospective
 from ._common import _get_project_or_404
 
 # 向后兼容 re-export:tests/test_style_profile.py 与其他外部按
@@ -73,6 +73,7 @@ router.include_router(brief.router)
 router.include_router(plans.router)
 router.include_router(intent.router)
 router.include_router(chain.router)
+router.include_router(retrospective.router)
 
 
 # —— 项目 CRUD ——

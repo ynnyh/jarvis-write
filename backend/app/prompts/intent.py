@@ -21,7 +21,7 @@ INTENT_READBACK_PROMPT = """\
 {topic}
 
 【作者已选的题材/类型】{genre}
-{feedback_block}{avoid_block}{skill_block}
+{feedback_block}{avoid_block}{skill_block}{memory_block}
 请逐项填写(不确定的项也必须给一版你的判断,不要留空):
 
 1. world 世界坐标:故事发生在哪个时代、哪个空间,是**真实世界**(真实历史/当代/
