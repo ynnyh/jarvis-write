@@ -17,6 +17,8 @@ import { useQueryClient } from "@tanstack/react-query";
 // 每章目标字数的合法区间(前端自校验,后端 ProjectPatch 不设上下界;区间来自交互改造计划)
 const TARGET_WORDS_MIN = 200;
 const TARGET_WORDS_MAX = 20000;
+// 书名长度上限:与后端 ProjectPatch 的 100 字校验同口径(前端先拦一道,少一次 400 往返)
+const TITLE_MAX = 100;
 
 interface Props { pid: number; project: Project; }
 
@@ -28,6 +30,10 @@ export default function ProjectSettingsPanel({ pid, project }: Props) {
   // 世界观硬规则编辑态(整段覆盖,空串清空);初始值取自项目(进入本区时 project 已就绪)
   const [worldRules, setWorldRules] = useState(project.world_rules ?? "");
   const [rulesSaving, setRulesSaving] = useState(false);
+  // 书名编辑态:开书时书名由方向卡自动落库,成书后此前只能回项目列表页重命名——
+  // 写作区里想改个名字得先退出工作台(用户 2026-10-17 反馈),这里补上入口。
+  const [title, setTitle] = useState(project.title ?? "");
+  const [titleSaving, setTitleSaving] = useState(false);
   // 每章目标字数编辑态(字符串保存原始输入,允许清空重输;保存时校验区间)
   const [targetWords, setTargetWords] = useState(String(project.target_words_per_chapter));
   const [wordsSaving, setWordsSaving] = useState(false);
@@ -49,6 +55,23 @@ export default function ProjectSettingsPanel({ pid, project }: Props) {
       toast.ok(mode === "full" ? "已切到完整档" : "已切回轻量档",
         mode === "full" ? "完整档模块分期点亮中,当前行为与轻量档一致" : "逐镜手动出片与筛选");
     } catch (e) { toast.err("出片模式保存失败", errMsg(e)); }
+  }
+
+  // 保存书名:空值前端先拦(后端 ProjectPatch 也会 400);没改就原样返回,不白发一次 PATCH
+  async function saveTitle() {
+    const t = title.trim();
+    if (!t) {
+      toast.err("书名不能为空", `想改就写一个(最多 ${TITLE_MAX} 字);不想要这本书请回列表页删除`);
+      return;
+    }
+    if (t === (project.title ?? "").trim()) return;
+    setTitleSaving(true);
+    try {
+      await api.patchProject(pid, { title: t });
+      setTitle(t);
+      await invalidateProject();
+      toast.ok("书名已保存");
+    } catch (e) { toast.err("书名保存失败", errMsg(e)); } finally { setTitleSaving(false); }
   }
 
   // 保存每章目标字数:后端 ProjectPatch 已支持 target_words_per_chapter,纯前端接线
@@ -185,6 +208,30 @@ export default function ProjectSettingsPanel({ pid, project }: Props) {
 
   return (
     <>
+      {/* 书名:开书时默认取确认① 里那套方向卡的书名,这里给作者「后面自己改」的入口
+          (此前只能回项目列表页重命名)。用 .form-grid/.field 骨架,不拿 .card-head 拼表单行 */}
+      <div className="card card-compact">
+        <div className="form-grid">
+          <div className="field field-full">
+            <label className="fl" htmlFor="pj-title">书名</label>
+            <div className="input-row">
+              <input id="pj-title" type="text" maxLength={TITLE_MAX}
+                value={title} disabled={titleSaving}
+                placeholder="如:裁缝铺里的十年账"
+                onChange={(e) => setTitle(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") void saveTitle(); }} />
+              <button className="primary btn-sm" disabled={titleSaving} onClick={() => void saveTitle()}>
+                {titleSaving && <span className="spin spin-sm" />}保存
+              </button>
+            </div>
+            <p className="field-note">
+              开书时默认用你选的那套方向卡的书名;想换就改这里(最多 {TITLE_MAX} 字,不能为空)。
+              书名只影响展示与导出,不参与生成。
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* 核心梗卡(docs/19):梗是纲——蓝图逐章标「梗兑现」、交稿对账、体检健康度都以它为轴 */}
       <div className="card card-compact">
         <div className="card-head">
