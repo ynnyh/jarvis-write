@@ -40,3 +40,11 @@ src-tauri/target/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# 后端本地构建/评测产物:Dockerfile 是整目录 `COPY backend/ ./backend/`,不排掉就会烤进
+# 镜像层。实测后果(2026-10-17):本地镜像 1.76GB vs CI 镜像 1.13GB,差的 600MB 就是这些;
+# 更要紧的是 evals_out/ 里躺着**真实书稿的基线正文与采样 DB**,不该跟着镜像走。
+backend/dist_smoke/
+backend/build/
+backend/dist/
+backend/evals_out/
