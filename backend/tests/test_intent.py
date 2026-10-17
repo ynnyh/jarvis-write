@@ -295,3 +295,71 @@ def test_confirm_rejects_out_of_range_plan_index(client):
         json={"card": {"world": "真实历史", "genre": "历史"}, "mode": "serial", "index": 5},
     )
     assert r.status_code == 400 and "越界" in r.json()["detail"]
+
+
+# ---------- 书名规则:跟着方向卡走,但不覆盖作者自己写的名 ----------
+
+
+def _seed_plans(pid: int, titles: list[str]) -> None:
+    """多种方向卡(书名各不相同):验证「书名跟着选中的卡走」这条规则。"""
+    from app.db.models import Project
+    from app.db.session import SessionLocal
+
+    with SessionLocal() as db:
+        project = db.get(Project, pid)
+        project.book_plans = [
+            {"title": t, "kernel": f"{t}的内核", "protagonist": "主角",
+             "world": "真实历史", "arc": "首卷", "engine": "每朝一劫",
+             "scale": "中篇", "flavor": ["苍凉"], "label": "物语体"}
+            for t in titles
+        ]
+        db.commit()
+
+
+_TITLE_CARD = {"world": "真实历史·西汉末年", "viewpoint": "第一人称·玉玺",
+               "cast": "传国玉玺本身", "flavor": ["苍凉"], "must": [], "avoid": [],
+               "genre": "历史·物语体", "uncertain": []}
+
+
+def _confirm(client: TestClient, headers: dict, pid: int, index: int):
+    with patch("app.api.projects.intent.spawn_sample_chain", return_value="job-title"):
+        return client.post(
+            f"/api/projects/{pid}/intent-confirm",
+            headers=headers,
+            json={"card": _TITLE_CARD, "mode": "serial", "index": index},
+        )
+
+
+class TestTitleFollowsPlan:
+    """书名规则(2026-10-17 用户反馈:方案卡上有书名,后面又对不上)。
+
+    期望:确认① 用选中方向卡的书名;换一套卡重确认时书名跟着换;
+    作者自己写过的书名(不在任何方向卡里)不许被覆盖。
+    """
+
+    def test_first_confirm_takes_plan_title(self, client):
+        headers = _auth(_register(client, "title_take")["token"])
+        # 建库默认名(哨兵)才是「书名还没人定过」,与真实起步流一致
+        pid = _project(client, headers, title="未命名新书")
+        _seed_plans(pid, ["受命于天", "账房"])
+        r = _confirm(client, headers, pid, 0)
+        assert r.status_code == 200, r.text
+        assert r.json()["project"]["title"] == "受命于天"
+
+    def test_switching_plan_switches_title(self, client):
+        """换一套方向卡重确认:书名必须跟着换,不能停在上一套卡上。"""
+        headers = _auth(_register(client, "title_switch")["token"])
+        pid = _project(client, headers, title="未命名新书")
+        _seed_plans(pid, ["受命于天", "账房"])
+        assert _confirm(client, headers, pid, 0).json()["project"]["title"] == "受命于天"
+        assert _confirm(client, headers, pid, 1).json()["project"]["title"] == "账房"
+
+    def test_author_written_title_survives_reconfirm(self, client):
+        """作者自己在别处改过书名 → 重确认不许把它盖掉。"""
+        headers = _auth(_register(client, "title_keep")["token"])
+        pid = _project(client, headers, title="未命名新书")
+        _seed_plans(pid, ["受命于天", "账房"])
+        assert _confirm(client, headers, pid, 0).status_code == 200
+        r = client.patch(f"/api/projects/{pid}", headers=headers, json={"title": "我自己起的"})
+        assert r.status_code == 200, r.text
+        assert _confirm(client, headers, pid, 1).json()["project"]["title"] == "我自己起的"

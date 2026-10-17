@@ -176,7 +176,16 @@ async def intent_confirm(
     project.mode = mode
     if plan is not None:
         project.brief = _render_order(plan, "short" if mode == "short" else "serial")
-        if project.title in ("", _TITLE_SENTINEL) and str(plan.get("title") or "").strip():
+        # 书名跟着方向卡走,但**只在书名还是「自动落的那一版」时**才覆盖:
+        # 空 / 未命名新书 / 等于任何一张方向卡的书名(说明它上一次是自动落的)。
+        # 为什么不能只判「空/未命名」:作者换一套方向卡重确认时,书名已不是哨兵值,
+        # 旧写法会让书名停在上一套卡上——「卡上是《假账》,书名却是《账房》」,
+        # 正是旧链「方案卡的书名到了书名页又对不上」那类毛病的翻版(用户 2026-10-17 反馈)。
+        # 作者自己写过的书名不在这三种情形里,因此不会被覆盖。
+        plan_titles = {str(p.get("title") or "").strip() for p in plans}
+        plan_titles.discard("")
+        auto_titled = project.title in ("", _TITLE_SENTINEL) or project.title in plan_titles
+        if auto_titled and str(plan.get("title") or "").strip():
             project.title = str(plan["title"]).strip()[:100]
     if not (project.brief or "").strip():
         raise HTTPException(

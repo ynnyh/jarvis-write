@@ -462,7 +462,14 @@ async def plan_confirm(
     project.mode = "drama" if project.mode == "drama" else mode
     project.brief = _render_order(plan, mode)
     project.brief_confirmed = True
-    if project.title in ("", _TITLE_SENTINEL) and str(plan.get("title") or "").strip():
+    # 书名跟着选中的方案走,但**只在书名还是「自动落的那一版」时**才覆盖:
+    # 空 / 未命名新书 / 等于某张方案卡的书名(说明上一次是自动落的)。
+    # 与 intent-confirm 同一口径(新链走那边,这里只服务旧客户端):换一套方案重拍板时
+    # 书名要跟着换,作者自己写过的书名不许被覆盖(用户 2026-10-17 反馈:卡上有书名,后面又对不上)。
+    plan_titles = {str(p.get("title") or "").strip() for p in plans}
+    plan_titles.discard("")
+    if (project.title in ("", _TITLE_SENTINEL) or project.title in plan_titles) \
+            and str(plan.get("title") or "").strip():
         project.title = str(plan["title"]).strip()[:100]
     # 篇幅:屏 0 手选 > 方案推荐档;连载/短故事的档位映射见 _SERIAL/_SHORT_SCALE_MAP
     if req.scale_override and req.scale_override.get("chapters") and req.scale_override.get("words"):
