@@ -6,8 +6,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.audit import record_gen_inputs
 from app.db.models import Outline, Project
 from app.db.session import SessionLocal, get_db
+from app.engines.intent import render_intent_block
 from app.engines.pipeline.blueprint import generate_blueprint, save_blueprint
 from app.engines.skills.packs import render_project_skill_block
 from app.engines.tendency import assemble_tendency
@@ -93,6 +95,72 @@ async def generate_project_blueprint(
     )
 
 
+async def run_blueprint_pipeline(
+    session: Session,
+    p: Project,
+    *,
+    tendency: dict | None = None,
+    title_style: str = "",
+    title_directive: str = "",
+    directive: str = "",
+    report=None,
+    end_chapter_limit: int | None = None,
+    start_chapter: int = 1,
+    extra_block: str = "",
+) -> dict:
+    """全书蓝图流水线:滚动规划(长书先出卷纲)→ 分块生成 → 落库,返回 job 载荷。
+
+    从端点 runner 抽出来给「一键铺章」与「全链后台」(chain.py)共用——滚动规划
+    纪律只有一套,两条路不许分叉(docs/32 §2.2)。
+    end_chapter_limit:只铺到这一章为止(先小后大:样稿阶段先出前三章)。
+    start_chapter:从第几章开始铺(全链接着样稿章往下铺,已成文的前几章不重铺)。
+    extra_block:追加的硬约束块(如「已写前三章是既成事实」),空串零变化。
+    """
+    intent_block = render_intent_block(p) + (extra_block or "")
+    arch_text = _arch_text(p) + _sequel_prev_block(session, p.id)
+    end_chapter = end_chapter_limit
+    if end_chapter_limit is None and p.target_chapters > ROLLING_THRESHOLD:
+        style_block = render_style_block(
+            assemble_tendency("outline", tendency, p.global_tendency)
+        ) + dna_block_of(p.dna)
+        if report:
+            report("生成全书卷纲(指南针)")
+        segments = await _ensure_macro_plan(session, p, style_block + intent_block)
+        end_chapter = min(segments[0]["end"], p.target_chapters)
+
+    record_gen_inputs(
+        kind="blueprint", project_id=p.id,
+        payload={
+            "directive": directive, "title_style": title_style,
+            "title_directive": title_directive, "end_chapter": end_chapter,
+            "start_chapter": start_chapter, "target_chapters": p.target_chapters,
+        },
+        db=session,
+    )
+    chapters, warnings = await generate_blueprint(
+        core_premise=_core_premise_text(session, p.id),
+        skill_block=render_project_skill_block(session, p, "outline"),
+        novel_architecture=arch_text,
+        number_of_chapters=p.target_chapters,
+        tendency=tendency,
+        global_tendency=p.global_tendency,
+        progress=report,
+        start_chapter=start_chapter,
+        end_chapter=end_chapter,
+        title_directive=resolve_title_directive(title_style, title_directive),
+        word_number=p.target_words_per_chapter,
+        directive=directive,
+        intent_block=intent_block,
+    )
+    if report:
+        report("落库中")
+    outlines = save_blueprint(session, p, chapters)
+    return {
+        "outlines": [OutlineOut.model_validate(o).model_dump() for o in outlines],
+        "warnings": warnings,
+    }
+
+
 @router.post("/{project_id}/blueprint-async")
 async def generate_project_blueprint_async(
     project_id: int,
@@ -115,39 +183,16 @@ async def generate_project_blueprint_async(
         session = SessionLocal()
         try:
             p = session.get(Project, project_id)
-            arch_text = _arch_text(p) + _sequel_prev_block(session, p.id)
-            # 滚动规划:长书只铺第一卷,先出卷纲定全书方向;短书一次铺完
-            end_chapter = None
-            if p.target_chapters > ROLLING_THRESHOLD:
-                style_block = render_style_block(
-                    assemble_tendency("outline", req.tendency, p.global_tendency)
-                ) + dna_block_of(p.dna)
-                update_stage(job_id, "生成全书卷纲(指南针)")
-                segments = await _ensure_macro_plan(session, p, style_block)
-                end_chapter = min(segments[0]["end"], p.target_chapters)
-
-            chapters, warnings = await generate_blueprint(
-                core_premise=_core_premise_text(session, p.id),
-                skill_block=render_project_skill_block(session, p, "outline"),
-                novel_architecture=arch_text,
-                number_of_chapters=p.target_chapters,
+            result = await run_blueprint_pipeline(
+                session, p,
                 tendency=req.tendency,
-                global_tendency=p.global_tendency,
-                progress=lambda s: update_stage(job_id, s),
-                end_chapter=end_chapter,
-                title_directive=resolve_title_directive(req.title_style, req.title_directive),
-                word_number=p.target_words_per_chapter,
+                title_style=req.title_style,
+                title_directive=req.title_directive,
                 directive=req.directive,
+                report=lambda s: update_stage(job_id, s),
             )
-            update_stage(job_id, "落库中")
-            outlines = save_blueprint(session, p, chapters)
             session.commit()
-            finish_job(job_id, {
-                "outlines": [
-                    OutlineOut.model_validate(o).model_dump() for o in outlines
-                ],
-                "warnings": warnings,
-            })
+            finish_job(job_id, result)
         except Exception as exc:  # noqa: BLE001 — 任务失败进 job 状态
             session.rollback()
             fail_job(job_id, normalize_job_error(exc)[:500])

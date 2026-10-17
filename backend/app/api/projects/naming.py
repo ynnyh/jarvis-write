@@ -44,6 +44,9 @@ class TitleSuggestRequest(BaseModel):
     concept: Concept | None = None
     # 防趋同:「换一批」时传入上一批候选书名,严禁复用(2026-09-26 全链路防趋同排查)
     avoid: list[str] = Field(default_factory=list)
+    # 归属项目(可选):新前端带 pid,起名 job 归属可复盘(title-suggestion-{pid});
+    # 不传则退回无归属 kind,老调用方行为零变化
+    project_id: int | None = None
 
 
 class TitleSuggestResponse(BaseModel):
@@ -140,7 +143,9 @@ async def suggest_titles_async(req: TitleSuggestRequest):
             raise RuntimeError("模型没有返回可用书名,请重试。")
         return {"titles": titles}
 
-    return {"job_id": spawn_job("title-suggestion", work)}
+    # kind 带项目归属:复盘「这本书的书名怎么来的」时按 pid 能捞到(玉玺案例的坑)
+    kind = f"title-suggestion-{req.project_id}" if req.project_id else "title-suggestion"
+    return {"job_id": spawn_job(kind, work)}
 
 
 # 简介 prompt:网文简介风格,吸引人但不剧透结局

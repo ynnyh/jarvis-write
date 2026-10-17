@@ -492,16 +492,19 @@ def test_shot_paste_mentions_reference_only_when_uploaded(client):
 
 # =============== 删项目要清干净 ===============
 
-def test_delete_project_clears_drama_rows_and_files(client):
-    """删项目:漫剧七张表 + 已上传的定妆照文件一起清掉,不留幽灵占配额。
+def test_delete_project_soft_deletes_then_purges_drama_rows(client):
+    """删项目:磁盘占用**立刻**释放(配额不能被回收站占着),数据库行留到保留期满。
 
-    文件不清 = 每项目 80MB 配额被删掉的项目占着;库不清 = 表越滚越大,
-    而且项目号复用时(理论上不会,但别赌)会串到别人的资产上。
+    软删(docs/29 留痕)把「删」拆成两步:定妆照/草片是配额大头且没有复盘价值,
+    当时就删;行留 30 天供复盘,超期由启动清理任务物理删除(七张表一行不剩)。
     """
+    from datetime import datetime, timedelta, timezone
+
     from app import storage
+    from app.api.deps import PROJECT_TRASH_RETENTION_DAYS, purge_deleted_projects
     from app.db.models import (
         DramaCharacterCard, DramaEpisode, DramaProductionPack, DramaSceneCard,
-        DramaShot, DramaStyleCard, DramaTrailer,
+        DramaShot, DramaStyleCard, DramaTrailer, Project,
     )
     from app.db.session import SessionLocal
 
@@ -528,11 +531,24 @@ def test_delete_project_clears_drama_rows_and_files(client):
 
     assert client.delete(f"/api/projects/{pid}", headers=headers).status_code == 200
 
-    # 文件与目录都没了
+    # 文件与目录当场没了(配额立刻还回来)
     assert not (storage.upload_root() / rel).exists()
     assert not (storage.upload_root() / "drama" / str(pid)).exists()
     assert storage.project_usage_bytes(pid) == 0
-    # 七张表一行不剩
+    # 行还在(留痕),但前台已不可见
+    assert client.get(f"/api/projects/{pid}", headers=headers).status_code == 404
+    with SessionLocal() as s:
+        assert s.query(DramaStyleCard).filter(DramaStyleCard.project_id == pid).count() == 1
+
+    # 保留期满 → 物理清:七张表一行不剩
+    with SessionLocal() as s:
+        row = s.get(Project, pid)
+        row.deleted_at = datetime.now(timezone.utc) - timedelta(
+            days=PROJECT_TRASH_RETENTION_DAYS + 5
+        )
+        s.commit()
+    with SessionLocal() as s:
+        purge_deleted_projects(s)
     with SessionLocal() as s:
         for model in (DramaStyleCard, DramaCharacterCard, DramaSceneCard,
                       DramaEpisode, DramaTrailer):

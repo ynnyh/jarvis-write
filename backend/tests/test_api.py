@@ -120,8 +120,11 @@ def test_rename_project_not_owner_404(client):
     assert r.status_code == 404
 
 
-def test_delete_project_cascades(client):
-    """删除后项目、大纲、章节、摘要、事实库全部查不到。"""
+def test_delete_project_soft_deletes_and_hides(client):
+    """删除 = 软删(docs/29 留痕):前台一律不可见,数据留库供复盘,超期才物理清。"""
+    from datetime import datetime, timedelta, timezone
+
+    from app.api.deps import PROJECT_TRASH_RETENTION_DAYS, purge_deleted_projects
     from app.db.models import Chapter, ChapterSummary, Entity, Outline, Project
     from app.db.session import SessionLocal
 
@@ -145,12 +148,36 @@ def test_delete_project_cascades(client):
     r = client.delete(f"/api/projects/{p['id']}", headers=headers)
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["ok"] is True
-    assert body["deleted_chapters"] == 1
+    assert body["ok"] is True and body["soft_deleted"] is True
 
-    # 接口层:项目 404
+    # 接口层:详情 404、列表不含
     assert client.get(f"/api/projects/{p['id']}", headers=headers).status_code == 404
-    # 数据库层:关联数据全部清空
+    listed = client.get("/api/projects", headers=headers).json()
+    assert all(x["id"] != p["id"] for x in listed)
+    # 数据库层:行都在(留痕),只多了删除时间
+    db = SessionLocal()
+    try:
+        project = db.get(Project, p["id"])
+        assert project is not None and project.deleted_at is not None
+        assert db.query(Chapter).filter_by(project_id=p["id"]).count() == 1
+    finally:
+        db.close()
+
+    # 保留期满 → 物理清(级联语义不变:关联数据一行不剩)
+    db = SessionLocal()
+    try:
+        project = db.get(Project, p["id"])
+        project.deleted_at = datetime.now(timezone.utc) - timedelta(
+            days=PROJECT_TRASH_RETENTION_DAYS + 5
+        )
+        db.commit()
+    finally:
+        db.close()
+    db = SessionLocal()
+    try:
+        purge_deleted_projects(db)
+    finally:
+        db.close()
     db = SessionLocal()
     try:
         assert db.get(Project, p["id"]) is None
@@ -158,8 +185,6 @@ def test_delete_project_cascades(client):
             assert db.query(model).filter_by(project_id=p["id"]).count() == 0
     finally:
         db.close()
-
-
 def test_delete_project_not_owner_404(client):
     """非 owner 删他人项目 → 404,且数据不受影响。"""
     a = _auth(_register(client, "del_a")["token"])

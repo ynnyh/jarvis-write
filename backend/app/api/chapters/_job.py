@@ -20,6 +20,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.api.chapters._common import _flavor_dict, _gate_payload
+from app.audit import record_gen_inputs
 from app.db.models import ChapterOrder, Project
 from app.db.session import SessionLocal
 from app.engines.pipeline.chapter import generate_chapter
@@ -45,6 +46,14 @@ async def run_chapter_job(
     session: Session = SessionLocal()
     try:
         project = session.get(Project, project_id)
+        if revision:
+            # 带话重写留痕:作者说了什么才让这一章变成现在这样(docs/32 §2.4)
+            record_gen_inputs(
+                kind="chapter-revision", project_id=project_id,
+                payload={"chapter_number": chapter_number, "revision": revision},
+                db=session,
+            )
+            session.commit()
         chapter, issues, stats, guard_result, review_result, preflight = (
             await generate_chapter(
                 session, project, chapter_number, tendency,

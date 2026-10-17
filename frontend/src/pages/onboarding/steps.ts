@@ -1,33 +1,40 @@
 // 起步流的步骤定义:枚举 / 顺序 / 中文标签 / 服务端 setup_state 映射 / 路由解析。
 // 拆自 OnboardingFlow.tsx —— 纯常量与纯函数。
 //
-// 开书方案流(2026-09-26,docs/22 P0)后的主线六步:
-//   开哪种书(mode:短故事/连载+档位) → 想法(idea) → 方案(brief:三问定纲→整书方案×3→拍板)
-//   → 概念(concept:从拍板方案深化+打磨拍板) → 配置(setup:题材/口味/篇幅/书名/总检)
-//   → 点火(launch:架构闸门→骨架墙→铺章)
-// 方案拍板是概念深化的硬门(后端 409 把关)——「选个方向直接抽卡」的旧入口交互废除。
-// 旧八步路由(genre/tone/title/scale/confirm)由 parseStep 兼容映射进 setup,
-// setup_state 老值照常识别,存量书回访不断链(老书没有 mode 屏,默认 serial)。
-export type SetupStep = "mode" | "idea" | "brief" | "concept" | "setup" | "launch";
+// 开书前置重构(docs/30 / docs/32,2026-10-17)后的主线四步:
+//   开哪种书(mode)→ 想法(idea:灵感/流派/皮肤/参考方向)
+//   → 理解(intent:理解卡一次确认 + 方向卡墙)→ 样稿(sample:前三章试读,二次确认)
+// 为什么从六屏砍到四屏:旧链有五道签字(mode/brief/concept/setup/launch),每一道都
+// 要作者在**还没读到任何正文**时点头,而铺 150 章蓝图的 7.4 分钟就发生在这中间
+// (docs/29 传国玉玺案例)。现在只留两处确认:理解卡(我听到的对不对)与样稿(写出来
+// 对不对),产物层(概念/架构/骨架/大纲)退场为「可看可改」,在工作台里随手改。
+export type SetupStep = "mode" | "idea" | "intent" | "sample";
 
-export const STEP_ORDER: SetupStep[] = ["mode", "idea", "brief", "concept", "setup", "launch"];
+export const STEP_ORDER: SetupStep[] = ["mode", "idea", "intent", "sample"];
 
 export const STEP_LABEL: Record<SetupStep, string> = {
-  mode: "开书", idea: "想法", brief: "方案", concept: "概念", setup: "配置", launch: "点火",
+  mode: "开书", idea: "想法", intent: "理解", sample: "样稿",
 };
 
-// setup_state(服务端字符串字段,直接扩展取值):launch 屏记为 generating,语义更准
+// setup_state(服务端字符串字段,直接扩展取值):写库的就是这几步本身
 export const SETUP_STATE: Record<SetupStep, string> = {
-  mode: "mode", idea: "idea", brief: "brief", concept: "concept", setup: "setup", launch: "generating",
+  mode: "mode", idea: "idea", intent: "intent", sample: "sample",
 };
 
-// 旧八步 → 新六步:配置类屏全部落 setup;generating(旧流水线屏)落 launch
+// 旧步骤 → 新四步。存量书回访、列表页「继续创建」、ProjectPage 的 /new/:pid/:step
+// 都走 parseStep,这张表保证不断链:
+//   concept/setup/launch/generating = 旧链的产物层与点火屏 → 样稿屏
+//     (作者已经过了理解这一步,直接看/读样稿;旧书的样稿链按需手动补跑)
+//   brief = 旧的方向卡屏 → 理解屏(同一件事:定方向)
+//   genre/tone/title/scale/confirm = 更早的八步路由 → 理解屏
+//     (它们都是「生成前的配置」,理解屏正是改题材/换方向的地方)
 const LEGACY_STEP: Record<string, SetupStep> = {
-  genre: "setup", tone: "setup", title: "setup", scale: "setup",
-  confirm: "setup", generating: "launch",
+  concept: "sample", setup: "sample", launch: "sample", generating: "sample",
+  brief: "intent",
+  genre: "intent", tone: "intent", title: "intent", scale: "intent", confirm: "intent",
 };
 
-// 路由 step → 屏;兼容历史取值(旧八步与新六步都认)
+// 路由 step → 屏;兼容历史取值(旧八步/旧六步都认),未知或空 → 想法屏
 export function parseStep(p?: string): SetupStep {
   if (LEGACY_STEP[p ?? ""]) return LEGACY_STEP[p ?? ""];
   return (STEP_ORDER as string[]).includes(p ?? "") ? (p as SetupStep) : "idea";

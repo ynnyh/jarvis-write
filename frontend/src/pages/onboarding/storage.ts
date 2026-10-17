@@ -5,15 +5,11 @@
 // 缓存就被灌进新书,表现为「删书重开,提示文字和卡片还是上一次的」(开书串档)。
 // v2 双保险:键升版甩开历史遗留 + createdAt 所有权校验(缓存属于已删除的
 // 同号新旧项目时丢弃)。服务端配套:projects.id 改 AUTOINCREMENT 只增不复用。
-import type { Pitch } from "../../api";
 import type { SetupStep } from "./steps";
 
 export interface WizCache {
-  spark: string; titleIdeas: string[] | null;
-  titleSig?: string | null;
-  // 简介屏的 🎲 提案(刷新回到当前屏接着挑;聊过天则以服务端 chat_log/brief 为准)
-  ideaCards?: Pitch[] | null;
-  createdAt?: string;                  // 项目创建时间:所有权校验,对不上即弃
+  spark: string;          // 想法屏的灵感文字(刷新回到当前屏接着写)
+  createdAt?: string;     // 项目创建时间:所有权校验,对不上即弃
 }
 
 export interface Dirty { from: SetupStep; ok: SetupStep[]; }
@@ -21,6 +17,8 @@ export interface Dirty { from: SetupStep; ok: SetupStep[]; }
 // v1 -> v2:键里带版本,老库 id 复用时新键不可能命中旧缓存
 const KEY_VERSION = "v2";
 
+// dirty/pipe 两把键在四屏重构后已不再写入(确认墙与信任模式点火屏退场),
+// 但保留定义:放弃创建时要连带清掉老会话留下的残留键。
 export function wizKeys(pid: number) {
   return {
     cache: `wiz-cache:${KEY_VERSION}:${pid}`,

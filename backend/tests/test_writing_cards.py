@@ -164,9 +164,12 @@ def test_card_cross_project_isolation(client):
     assert len(client.get(f"/api/projects/{pid_a}/cards", headers=a).json()) == 1
 
 
-def test_delete_project_clears_cards(client):
-    """删项目后手法卡同步清空(级联元组已含 WritingCard)。"""
-    from app.db.models import WritingCard
+def test_delete_project_soft_keeps_cards_until_purge(client):
+    """删项目:手法卡随软删留库(留痕),超期物理清理时才真正删掉。"""
+    from datetime import datetime, timedelta, timezone
+
+    from app.api.deps import PROJECT_TRASH_RETENTION_DAYS, purge_deleted_projects
+    from app.db.models import Project, WritingCard
     from app.db.session import SessionLocal
 
     headers = _auth(_register(client, "cards_cascade")["token"])
@@ -178,14 +181,20 @@ def test_delete_project_clears_cards(client):
     assert client.delete(f"/api/projects/{pid}", headers=headers).status_code == 200
     db = SessionLocal()
     try:
+        assert db.query(WritingCard).filter_by(project_id=pid).count() == 1  # 软删留痕
+        project = db.get(Project, pid)
+        project.deleted_at = datetime.now(timezone.utc) - timedelta(
+            days=PROJECT_TRASH_RETENTION_DAYS + 5
+        )
+        db.commit()
+    finally:
+        db.close()
+    db = SessionLocal()
+    try:
+        purge_deleted_projects(db)
         assert db.query(WritingCard).filter_by(project_id=pid).count() == 0
     finally:
         db.close()
-
-
-# ---------- 注入回归(mock LLM,不需要 key) ----------
-
-
 def test_polish_prompt_carries_enabled_cards():
     """启用卡的正文进入润色 prompt,禁用卡不进(走 style_directives 通道)。"""
     import asyncio

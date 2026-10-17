@@ -27,11 +27,13 @@ empty"),故 CRUD 全部直接定义在主 router;/{project_id} 通配放在所�
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.deps import delete_project_cascade, reset_project_content
+from app.api.deps import release_project_files, reset_project_content
 from app.auth import current_user_id, get_current_user
 from app.db.models import Project
 from app.db.session import get_db
@@ -42,7 +44,7 @@ from app.schemas.dna import StoryDNA
 from app.schemas.project import ProjectCreate, ProjectOut
 
 from . import architecture, blueprint, dashboard, naming, plot_map, premise, shape, sequel, skeleton, style_profile, style_profile_api
-from . import brief, plans
+from . import brief, chain, intent, plans
 from ._common import _get_project_or_404
 
 # 向后兼容 re-export:tests/test_style_profile.py 与其他外部按
@@ -69,6 +71,8 @@ router.include_router(plot_map.router)
 router.include_router(dashboard.router)
 router.include_router(brief.router)
 router.include_router(plans.router)
+router.include_router(intent.router)
+router.include_router(chain.router)
 
 
 # —— 项目 CRUD ——
@@ -126,6 +130,7 @@ async def list_projects(db: Session = Depends(get_db)) -> list[ProjectOut]:
     projects = list(
         db.query(Project)
         .filter(Project.user_id == uid)
+        .filter(Project.deleted_at.is_(None))  # 软删的书前台不可见(docs/29 留痕)
         .order_by(Project.id.desc())
     )
     # 进度聚合:每项目已写章数/总字数,一条 group by 查询
@@ -213,6 +218,8 @@ class ProjectPatch(BaseModel):
     audience: str | None = Field(default=None, max_length=10)
     # 书级挂载的 skill 包 pack_key 清单(docs/23);显式传数组才覆盖(空数组=清空挂载)
     mounted_packs: list | None = None
+    # 理解卡(docs/32):整段覆盖式保存(作者在工作台改理解卡);不传=不动
+    intent_card: dict | None = None
 
 
 @router.patch("/{project_id}", response_model=ProjectOut)
@@ -328,12 +335,23 @@ async def patch_project(
 
 @router.delete("/{project_id}")
 async def delete_project(project_id: int, db: Session = Depends(get_db)) -> dict:
-    """删除项目及其全部关联数据(级联逻辑见 deps.delete_project_cascade)。"""
+    """删除项目:软删(docs/29 留痕),不再当场物理删。
+
+    为什么:用户「删掉重来」的那一刻恰是复盘价值最高的时刻——传国玉玺案例里
+    只能删了重建,事后想查「他到底跟 AI 说了什么、为什么偏」时证据已全没了。
+    置 deleted_at 后前台一律当它不存在(列表过滤 + get_project_or_404 返回 404),
+    保留期(PROJECT_TRASH_RETENTION_DAYS,默认 30 天)过后由启动任务真正级联物理
+    清理(app.api.deps.purge_deleted_projects);期间 admin 复盘通道仍读得到留痕。
+    """
     project = _get_project_or_404(db, project_id)
     if project.finished:
         raise HTTPException(status_code=409, detail="已标记完本,如需删除请先取消完本标记")
-    deleted_chapters = delete_project_cascade(db, project)
-    return {"ok": True, "deleted_chapters": deleted_chapters}
+    project.deleted_at = datetime.now(timezone.utc)
+    # 磁盘占用现在就走(定妆照/草片没有复盘价值,配额不能被回收站占着);
+    # 数据库行留到保留期满,复盘读得到
+    release_project_files(db, project)
+    db.commit()
+    return {"ok": True, "soft_deleted": True, "deleted_at": project.deleted_at.isoformat()}
 
 
 @router.delete("/{project_id}/content")

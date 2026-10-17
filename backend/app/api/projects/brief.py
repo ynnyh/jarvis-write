@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.inspire import DevelopRequest, _develop_impl
+from app.audit import record_gen_inputs
 from app.auth import current_user_id, get_current_user
 from app.db.models import Project
 from app.db.session import get_db
@@ -152,7 +153,13 @@ async def concept_from_brief_async(
     """已拍板简介 → 深化成六字段概念(强模型 job)。简介未拍板 409。"""
     project = _get_project_or_404(db, project_id)
     brief = _require_confirmed_brief(project)  # 硬门:拍板才算「照单生成」的订单
-    uid = current_user_id.get()
+
+    record_gen_inputs(
+        kind="concept-develop", project_id=project_id,
+        payload={"brief": brief, "topic": project.topic},
+        db=db,
+    )
+    db.commit()
 
     async def work(progress):
         progress("AI 正在把拍板的简介深化成完整概念")
@@ -164,4 +171,4 @@ async def concept_from_brief_async(
         ))
         return result.model_dump()
 
-    return {"job_id": spawn_job(f"inspire-develop-u{uid}", work)}
+    return {"job_id": spawn_job(f"inspire-develop-{project_id}", work)}

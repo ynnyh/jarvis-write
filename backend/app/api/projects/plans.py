@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.audit import record_gen_inputs
 from app.auth import get_current_user
 from app.db.models import Project
 from app.db.session import get_db
@@ -327,6 +328,14 @@ async def book_plans(
         raise HTTPException(status_code=502, detail=f"方案没出好:{exc}") from exc
     # 拷贝-改-赋回:JSON 列原地改 SQLAlchemy 不认
     project.book_plans = [p.model_dump() for p in plans]  # type: ignore[assignment]
+    record_gen_inputs(
+        kind="book-plans", project_id=project_id,
+        payload={
+            "topic": req.topic, "genre": req.genre, "mode": mode,
+            "answers": req.answers, "feedback": req.feedback, "avoid": req.avoid,
+        },
+        db=db,
+    )
     db.commit()
     db.refresh(project)
     return BookPlansResponse(plans=plans, project=ProjectOut.model_validate(project, from_attributes=True))
@@ -390,6 +399,14 @@ async def revise_plan(
     plans = plans_raw.copy()
     plans[req.index] = merged
     project.book_plans = plans  # type: ignore[assignment]
+    record_gen_inputs(
+        kind="revise-plan", project_id=project_id,
+        payload={
+            "index": req.index, "directive": req.directive,
+            "locked_fields": req.locked_fields,
+        },
+        db=db,
+    )
     db.commit()
     db.refresh(project)
     return RevisePlanResponse(

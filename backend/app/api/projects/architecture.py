@@ -9,8 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.audit import record_gen_inputs
 from app.db.models import Project
 from app.db.session import SessionLocal, get_db
+from app.engines.intent import render_intent_block
 from app.engines.consistency.persona import extract_cast_profiles
 from app.engines.pipeline.architecture import (
     LAYER_KEYS,
@@ -223,6 +225,11 @@ async def generate_architecture_layer_async(
         try:
             project = session.get(Project, project_id)
             arch = project.architecture
+            record_gen_inputs(
+                kind="arch-layer", project_id=project_id,
+                payload={"layer": layer, "directive": directive, "tendency": tendency},
+                db=session,
+            )
             text = await generate_architecture_layer(
                 layer=layer,
                 topic=project.topic,
@@ -238,6 +245,9 @@ async def generate_architecture_layer_async(
                 core_seed=arch.core_seed if arch else "",
                 character_dynamics=arch.character_dynamics if arch else "",
                 world_building=arch.world_building if arch else "",
+                # 理解卡硬约束 + 增量重出:带话时把当前层交给模型,未要求改的逐字保留
+                intent_block=render_intent_block(project),
+                current_text=(getattr(arch, layer, "") or "") if arch else "",
             )
             update_stage(job_id, "落库中")
             arch = save_architecture_layer(session, project, layer, text)

@@ -1,4 +1,4 @@
-// 起步流的静态预设与流水线步骤类型。拆自 OnboardingFlow.tsx。
+// 起步流的静态预设与思考微文案。拆自 OnboardingFlow.tsx。
 
 // 篇幅预设卡
 export const SCALE_PRESETS = [
@@ -8,9 +8,9 @@ export const SCALE_PRESETS = [
   { key: "serial", label: "连载", chapters: 500, words: 3000, desc: "百万字级连载体量;按卷滚动规划,写到卷尾自动展开下一卷,章数随时可调" },
 ];
 
-// 篇幅显示(本书档案/总检墙/步骤条缩略共用):按章数×字数反推档位。
+// 篇幅显示(本书档案/步骤条缩略共用):按章数×字数反推档位。
 // 建库默认 30×3000 不匹配任何预设——那是「还没人选过」,不是「定了 30 章」,
-// 如实显示未定,配置屏 AI 推荐档应用或用户点选后预设值落库才会命中档位。
+// 如实显示未定,方向卡推荐档应用或用户点选后预设值落库才会命中档位。
 export interface ScaleDisplay { tag: string; text: string; decided: boolean; }
 export function scaleDisplay(chapters: number, words: number): ScaleDisplay {
   const total = chapters * words;
@@ -22,19 +22,16 @@ export function scaleDisplay(chapters: number, words: number): ScaleDisplay {
       : { tag: preset.label, text: `${preset.label} · ${chapters} 章 × ${words} 字 ${wan}`, decided: true };
   }
   if (chapters === 30 && words === 3000) {
-    return { tag: "未定", text: "未定 · 配置屏 AI 按概念推荐", decided: false };
+    return { tag: "未定", text: "未定 · 按方向卡推荐档", decided: false };
   }
   return { tag: "自定", text: `自定 · ${chapters} 章 × ${words} 字 ${wan}`, decided: true };
 }
 
 // "AI 构思中"轮换微文案
-export const THINK_CONCEPT = [
-  "正在揣摩题材气质…", "正在搭建核心冲突…", "正在给主角找困境…", "正在埋藏反转的种子…",
-];
 export const THINK_TITLE = [
   "正在咀嚼故事的味儿…", "正在掂量每个字的分量…", "正在试着念出声来…",
 ];
-
-export type PipeStatus = "wait" | "run" | "done" | "err";
-export interface PipeStep { status: PipeStatus; stage: string; error: string; }
-export const PIPE_WAIT: PipeStep = { status: "wait", stage: "", error: "" };
+// 理解卡回读:这一次调用决定整本书的世界坐标,慢是正常的,微文案要说清在干什么
+export const THINK_INTENT = [
+  "正在把你说的话读成一张卡…", "正在确认世界坐标与视角…", "正在挑出拿不准的地方…",
+];

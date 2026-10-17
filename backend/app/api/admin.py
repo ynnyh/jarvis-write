@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.api.deps import delete_project_cascade
@@ -32,8 +32,11 @@ from app.db.models import (
     ChapterFeedback,
     ChapterIssue,
     FeatureUsage,
+    GenInput,
     InviteCode,
+    Job,
     LlmUsage,
+    Outline,
     Project,
     ProviderConfig,
     ProviderSetting,
@@ -724,3 +727,225 @@ async def get_quality_overview(
     这里回答「生成质量哪里在出问题」。
     """
     return quality_overview(db, days)
+
+
+# ---------- 作品复盘(留痕:docs/29 取证 / docs/32 §2.4) ----------
+# 用户少的时候,「谁试了什么、走到哪一步、为什么停下」是最贵的资产。软删只让书在
+# 前台消失,这里(default 带已删)是唯一能把它捞回来的通道——只读,不改任何状态。
+
+
+class AdminProjectItem(BaseModel):
+    id: int
+    title: str
+    user_id: int
+    owner: str = ""
+    mode: str = ""
+    genre: str = ""
+    topic: str = ""
+    target_chapters: int = 0
+    target_words_per_chapter: int = 0
+    setup_state: str | None = None
+    brief_confirmed: bool = False
+    concept_confirmed: bool = False
+    finished: bool = False
+    deleted: bool = False
+    deleted_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    chapters: int = 0
+    words: int = 0
+    outlines: int = 0
+    jobs: int = 0
+    job_errors: int = 0
+
+
+@router.get("/projects", response_model=list[AdminProjectItem])
+async def list_projects_admin(
+    include_deleted: bool = Query(default=True),
+    user_id: int | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    _admin: User = Depends(get_current_admin),
+):
+    """全部作品(默认含已软删):看「谁开过书、走到哪一步、停在哪」。
+
+    带已删的书是刻意的:用户「删掉重来」的那一刻正是最需要复盘的信号
+    (docs/29 传国玉玺案例——删完什么都没留下)。
+    """
+    q = db.query(Project)
+    if not include_deleted:
+        q = q.filter(Project.deleted_at.is_(None))
+    if user_id is not None:
+        q = q.filter(Project.user_id == user_id)
+    rows = q.order_by(Project.id.desc()).limit(limit).all()
+    ids = [p.id for p in rows] or [0]
+
+    owners = {
+        u.id: (getattr(u, "username", None) or getattr(u, "email", "") or "")
+        for u in db.query(User).all()
+    }
+    chapter_stats = {
+        pid: (int(cnt), int(words or 0))
+        for pid, cnt, words in db.query(
+            Chapter.project_id,
+            func.count(Chapter.id),
+            func.coalesce(func.sum(Chapter.word_count), 0),
+        )
+        .filter(Chapter.project_id.in_(ids), Chapter.final_content != "")
+        .group_by(Chapter.project_id)
+        .all()
+    }
+    outline_counts = {
+        pid: int(cnt)
+        for pid, cnt in db.query(Outline.project_id, func.count(Outline.id))
+        .filter(Outline.project_id.in_(ids))
+        .group_by(Outline.project_id)
+        .all()
+    }
+    job_stats = {
+        pid: (int(cnt), int(errs or 0))
+        for pid, cnt, errs in db.query(
+            Job.project_id,
+            func.count(Job.id),
+            func.sum(case((Job.status == "error", 1), else_=0)),
+        )
+        .filter(Job.project_id.in_(ids))
+        .group_by(Job.project_id)
+        .all()
+    }
+    out: list[AdminProjectItem] = []
+    for p in rows:
+        chapters, words = chapter_stats.get(p.id, (0, 0))
+        jobs, errors = job_stats.get(p.id, (0, 0))
+        out.append(AdminProjectItem(
+            id=p.id, title=p.title, user_id=p.user_id,
+            owner=owners.get(p.user_id, ""),
+            mode=p.mode or "", genre=p.genre or "", topic=p.topic or "",
+            target_chapters=p.target_chapters or 0,
+            target_words_per_chapter=p.target_words_per_chapter or 0,
+            setup_state=p.setup_state, brief_confirmed=bool(p.brief_confirmed),
+            concept_confirmed=bool(p.concept_confirmed), finished=bool(p.finished),
+            deleted=p.deleted_at is not None, deleted_at=p.deleted_at,
+            created_at=p.created_at, updated_at=p.updated_at,
+            chapters=chapters, words=words, outlines=outline_counts.get(p.id, 0),
+            jobs=jobs, job_errors=errors,
+        ))
+    return out
+
+
+@router.get("/projects/{project_id}/journey")
+async def project_journey(
+    project_id: int,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(get_current_admin),
+):
+    """单本书的旅程时间线:建书 → 每一次输入 → 每一个任务 → 每一章落库。
+
+    回答「他为什么用 / 为什么不用」:每一步用的哪个模型、烧了多少 token、卡在哪、
+    作者当时说了什么(gen_inputs)。软删的书照样读得到。只读,不改状态。
+    """
+    p = db.get(Project, project_id)
+    if p is None:
+        raise HTTPException(status_code=404, detail=f"项目 {project_id} 不存在")
+
+    jobs = (
+        db.query(Job).filter(Job.project_id == project_id).order_by(Job.created_at).all()
+    )
+    job_ids = [j.id for j in jobs]
+    usage_by_job: dict[str, dict] = {}
+    if job_ids:
+        for row in db.query(LlmUsage).filter(LlmUsage.job_id.in_(job_ids)).all():
+            agg = usage_by_job.setdefault(
+                row.job_id or "",
+                {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0,
+                 "truncated": 0, "models": []},
+            )
+            agg["calls"] += 1
+            agg["prompt_tokens"] += int(row.prompt_tokens or 0)
+            agg["completion_tokens"] += int(row.completion_tokens or 0)
+            if row.truncated:
+                agg["truncated"] += 1
+            if row.model and row.model not in agg["models"]:
+                agg["models"].append(row.model)
+
+    inputs = (
+        db.query(GenInput)
+        .filter(GenInput.project_id == project_id)
+        .order_by(GenInput.created_at)
+        .all()
+    )
+    chapters = (
+        db.query(Chapter)
+        .filter(Chapter.project_id == project_id, Chapter.final_content != "")
+        .order_by(Chapter.chapter_number)
+        .all()
+    )
+
+    timeline: list[dict] = [{
+        "at": p.created_at,
+        "kind": "project",
+        "title": "建书",
+        "detail": f"模式 {p.mode or '-'} / 目标 {p.target_chapters or 0} 章",
+    }]
+    for row in inputs:
+        timeline.append({
+            "at": row.created_at,
+            "kind": "input",
+            "title": f"作者输入 · {row.kind}",
+            "detail": json.dumps(row.payload or {}, ensure_ascii=False)[:1200],
+            "job_id": row.job_id,
+        })
+    for j in jobs:
+        duration_ms = None
+        if j.created_at is not None and j.updated_at is not None:
+            duration_ms = int((j.updated_at - j.created_at).total_seconds() * 1000)
+        timeline.append({
+            "at": j.created_at,
+            "kind": "job",
+            "title": f"任务 · {j.kind}",
+            "status": j.status,
+            "stage": j.stage,
+            "error": j.error,
+            "duration_ms": duration_ms,
+            "usage": usage_by_job.get(j.id),
+            "job_id": j.id,
+        })
+    for c in chapters:
+        timeline.append({
+            "at": getattr(c, "created_at", None),
+            "kind": "chapter",
+            "title": f"第 {c.chapter_number} 章落库",
+            "detail": f"{c.word_count or 0} 字 / 状态 {c.status}",
+        })
+    timeline.sort(key=lambda e: str(e.get("at") or ""))
+
+    return {
+        "project": {
+            "id": p.id, "title": p.title, "user_id": p.user_id, "mode": p.mode,
+            "genre": p.genre, "topic": p.topic, "setup_state": p.setup_state,
+            "target_chapters": p.target_chapters,
+            "target_words_per_chapter": p.target_words_per_chapter,
+            "brief_confirmed": bool(p.brief_confirmed),
+            "concept_confirmed": bool(p.concept_confirmed),
+            "outline_stale": bool(p.outline_stale),
+            "skeleton_stale": bool(p.skeleton_stale),
+            "finished": bool(p.finished),
+            "deleted": p.deleted_at is not None,
+            "deleted_at": p.deleted_at,
+            "created_at": p.created_at, "updated_at": p.updated_at,
+        },
+        "intent_card": p.intent_card,
+        "brief": p.brief,
+        "counts": {
+            "chapters": len(chapters),
+            "outlines": int(
+                db.query(func.count(Outline.id))
+                .filter(Outline.project_id == project_id)
+                .scalar() or 0
+            ),
+            "jobs": len(jobs),
+            "job_errors": sum(1 for j in jobs if j.status == "error"),
+            "gen_inputs": len(inputs),
+        },
+        "timeline": timeline,
+    }

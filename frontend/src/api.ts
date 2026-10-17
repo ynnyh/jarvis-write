@@ -237,6 +237,11 @@ export interface Project {
   mounted_packs?: string[];
   // 整书方案卡墙(docs/22 屏 C):当前工作集(含定向修订版);null=还没出方案
   book_plans?: BookPlan[] | null;
+  // 理解卡(docs/32 屏 2):AI 回读「我听到的」,作者确认① 后落库;null=还没回读过。
+  // 它是全链生成的最高约束:下游概念/架构/骨架/蓝图都从这张卡派生。
+  intent_card?: IntentCard | null;
+  // 架构层重出后骨架挂在旧架构上(True=建议重出骨架);与 outline_stale 同族
+  skeleton_stale?: boolean;
 }
 
 // 三问定纲的候选(docs/22 屏 B):★首推带一句理由
@@ -270,6 +275,25 @@ export interface BookPlan {
   mechanism?: string;
   opening_sample?: string;
 }
+// 理解卡(docs/32):AI 把作者的灵感/流派/参考方向回读成「我听到的」。
+// 每个字段可逐条改;uncertain 列出模型自己拿不准的字段与候选(前端在对应字段下出
+// 候选 chip,点选即填)——把「不确定」显式摆出来,而不是让它悄悄按默认值走。
+export interface IntentUncertain {
+  field: string;              // world / viewpoint / cast / flavor / must / avoid / genre
+  reason: string;
+  candidates: string[];
+}
+export interface IntentCard {
+  world: string;              // 世界坐标(时代/地域/架空还是真实历史):任何下游不得改写
+  viewpoint: string;          // 叙述视角与主角
+  cast: string;               // 主要人物与关系
+  flavor: string[];           // 味道(想要的感觉)
+  must: string[];             // 必须保留
+  avoid: string[];            // 不要出现
+  genre: string;              // 题材(确认① 后以这里的显式值为准落库,不再让推断覆盖)
+  uncertain: IntentUncertain[];
+}
+
 export interface Architecture {
   core_seed: string; character_dynamics: string;
   world_building: string; plot_architecture: string; version: number;
@@ -1371,9 +1395,10 @@ export const api = {
   deleteChapterOrder: (pid: number, n: number) =>
     req<{ deleted: number }>("DELETE", `/api/projects/${pid}/chapters/${n}/order`),
 
-  suggestTitleAsync: (topic: string, genre: string, concept?: Concept | null, avoid?: string[]) =>
+  // projectId 可选:带上后起名 job 归属该书(title-suggestion-{pid}),便于复盘
+  suggestTitleAsync: (topic: string, genre: string, concept?: Concept | null, avoid?: string[], projectId?: number) =>
     req<{ job_id: string }>("POST", "/api/projects/title-suggestion-async",
-      { topic, genre, concept: concept ?? null, avoid: avoid ?? [] }),
+      { topic, genre, concept: concept ?? null, avoid: avoid ?? [], project_id: projectId ?? null }),
 
   listProjects: () => req<Project[]>("GET", "/api/projects"),
   createProject: (p: Partial<Project>) => req<Project>("POST", "/api/projects", p),
@@ -1401,6 +1426,25 @@ export const api = {
     index: number; mode: string;
     scale_override?: { chapters: number; words: number } | null;
   }) => req<Project>("POST", `/api/projects/${pid}/plan-confirm`, body),
+  // ---- 开书前置重构(docs/32):理解卡一次确认 + 试读一次确认 ----
+  // 回读「我听到的」→ 理解卡草稿(不落库;走强档模型,慢是正常的,故给 signal 供
+  // 「终止等待」,与三问/方案流同一套取消语义)
+  intentReadback: (pid: number, body: {
+    mode: string; topic?: string; genre?: string; feedback?: string; avoid?: string[];
+  }, signal?: AbortSignal) => req<{ card: IntentCard; project: Project }>(
+    "POST", `/api/projects/${pid}/intent-readback`, body, LLM_TIMEOUT, signal),
+  // 确认①:落卡 + 渲染开书订单 + 启动样稿链(后端自动 spawn,返回样稿 job_id)
+  intentConfirm: (pid: number, body: {
+    card: IntentCard; mode: string; index?: number | null;
+    scale_override?: { chapters: number; words: number } | null;
+  }) => req<{ project: Project; sample_job_id: string }>(
+    "POST", `/api/projects/${pid}/intent-confirm`, body),
+  // 样稿链(概念→梗卡→核心种子→前三章蓝图→前三章正文);restart="blueprint" 带话重出
+  sampleChain: (pid: number, body: { directive?: string; restart?: "" | "blueprint" | "all" } = {}) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/sample-chain`, body),
+  // 全链(其余三层架构→骨架→全书蓝图):试读确认② 之后后台跑
+  fullChain: (pid: number) =>
+    req<{ job_id: string }>("POST", `/api/projects/${pid}/full-chain`, {}),
   // 整本旧书导入(TXT/DOCX):后端解析分卷/章节,建为可继续写作的新项目
   // 开续集:AI 出 8 个方向卡可选可重摇;建书继承文风/架构/梗卡/人物,
   // 前作分析(前情提要+文风技法画像)异步进行,字数按前作实际章节中位数对齐

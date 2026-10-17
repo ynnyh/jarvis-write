@@ -11,6 +11,8 @@
 """
 from __future__ import annotations
 
+import time
+
 import hashlib
 import json
 import logging
@@ -93,6 +95,21 @@ def _outline_content_hash(data: dict[str, Any]) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
+def _record_stream_usage(adapter, prompt: str, output: str, started: float) -> None:
+    """流式成功路径补记账(docs/32 §2.4):估算口径见适配器 record_stream_estimate。
+
+    记账是旁路:适配器没这能力(测试替身/自定义实现)或记账本身出错,都不许
+    影响生成结果。
+    """
+    rec = getattr(adapter, "record_stream_estimate", None)
+    if not callable(rec):
+        return
+    try:
+        rec(prompt, output, int((time.monotonic() - started) * 1000))
+    except Exception:  # noqa: BLE001 — 记账绝不影响生成
+        logger.warning("蓝图流式记账失败(不影响本次生成)", exc_info=True)
+
+
 async def _generate_chunk(
     adapter,
     prompt: str,
@@ -108,13 +125,14 @@ async def _generate_chunk(
     而不是干等一个不透明的批量调用。流式不可用(适配器无 stream / 出错 / 返回空)时,
     回落到一次性 ask()(带瞬时错误重试 + 空正文翻倍重试 + token 记账)。
 
-    注:流式主路径不记 token 用量(与 _complete_via_stream 一致的取舍——流式拿不到
-    准确 usage,记账允许为 0);回落的 ask() 分支照常记账。
+    注:流式主路径补**估算**记账(2026-10-17:铺 150 章实测 7.4 分钟零账,成本表
+    在这条路上永久留白);回落的 ask() 分支照常记上游真实 usage。
     base_done=本次规划中之前已完成的章数;total=本次规划总章数(进度分母)。
     """
     try:
         parts: list[str] = []
         last_reported = -1
+        started = time.monotonic()
         async for delta in adapter.stream(adapter.to_messages(prompt)):
             if not delta:
                 continue
@@ -129,6 +147,7 @@ async def _generate_chunk(
                 report(f"已生成 {done}/{total} 章")
         raw = "".join(parts).strip()
         if raw:
+            _record_stream_usage(adapter, prompt, raw, started)
             return raw
         logger.warning("蓝图流式返回空,回落一次性调用")
     except Exception as exc:  # noqa: BLE001 — 流式任何异常都回落,不影响生成
@@ -151,6 +170,7 @@ async def generate_blueprint(
     core_premise: str = "",
     directive: str = "",
     skill_block: str = "",
+    intent_block: str = "",
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """分块生成章节蓝图。返回 (章节 dict 列表, 警告列表)。纯生成,不落库。
 
@@ -163,6 +183,7 @@ async def generate_blueprint(
     与正文软约束打架导致每章超发;这里把字数盘子注入草稿,让节拍数量与字数匹配。
     directive: 用户对这版蓝图的修改要求(重铺时带话);空则 prompt 零变化。
     skill_block: 书级 skill 包注入块(docs/23);空串零变化,由调用方渲染传入。
+    intent_block: 理解卡硬约束块(docs/32);空串零变化,由调用方渲染传入。
     """
     title_directive = (title_directive or "").strip() or DEFAULT_TITLE_DIRECTIVE
 
@@ -208,6 +229,9 @@ async def generate_blueprint(
 
     assembled = assemble_tendency("outline", tendency, global_tendency)
     style_block = render_style_block(assembled)
+    if intent_block:
+        # 理解卡硬约束:蓝图逐章规划时必须守住世界坐标与主角(空串零变化)
+        style_block += intent_block
     adapter = get_adapter_for(Task.BLUEPRINT)
 
     last = end_chapter or number_of_chapters

@@ -20,8 +20,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.audit import record_gen_inputs
 from app.db.models import Outline, Project
 from app.db.session import SessionLocal, get_db
+from app.engines.intent import render_intent_block
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.pipeline.blueprint import generate_blueprint, save_blueprint
 from app.engines.skills.packs import render_project_skill_block
@@ -99,6 +101,91 @@ def get_skeleton(project_id: int, db: Session = Depends(get_db)):
     }
 
 
+async def build_skeleton_segments(
+    session: Session,
+    project: Project,
+    *,
+    tendency: dict | None = None,
+    report=None,
+    extra_block: str = "",
+) -> list[dict]:
+    """生成骨架分段(重出保留 locked 段)。返回新分段列表,不落库。
+
+    从端点 runner 抽出来给「骨架墙」与「全链后台」(chain.py)共用:骨架是全书走向
+    的唯一事实源,两条路各写一份必然分叉(docs/32 §2.2)。
+    extra_block:追加在 style_directives 之后的硬约束(理解卡 / 已写前三章为既成事实)。
+    """
+    def _report(stage: str) -> None:
+        if report:
+            try:
+                report(stage)
+            except Exception:  # noqa: BLE001 — 进度上报绝不影响生成
+                pass
+
+    p = project
+    style_block = render_style_block(
+        assemble_tendency("outline", tendency, p.global_tendency)
+    ) + dna_block_of(p.dna) + (extra_block or "")
+    old = _upgrade_segments(p.macro_plan, p.id, session)
+    kept_locked = [s for s in old if s["locked"]]
+    confirmed_goals = [
+        f"第{s['start']}-{s['end']}章《{s['title'] or '未命名'}》:{s['goal']}"
+        for s in old if s["confirmed"] and not s["locked"]
+    ]
+    # 未锁定段之外的全部区间重出:locked 段原样保留,其余按当前体量切
+    size = _segment_size(p.target_chapters)
+    count = math.ceil(p.target_chapters / size)
+    hard_note = f"\n注意:全书共 {p.target_chapters} 章是作者拍板的体量承诺,分段与节奏必须按这个总章数规划,不得擅自压缩或膨胀总章数。"
+    if confirmed_goals:
+        hard_note += (
+            "\n注意:以下段落作者已拍板,新骨架的其余段落必须与它们相容"
+            "(衔接处状态连续,不得矛盾):\n" + "\n".join(confirmed_goals)
+        )
+    _report("生成故事骨架")
+    raw = await get_adapter_for(Task.BLUEPRINT).ask(
+        SKELETON_PROMPT.format(
+            number_of_chapters=p.target_chapters,
+            novel_architecture=_arch_text(p),
+            style_directives=style_block,
+            segment_count=count,
+            segment_size=size,
+            hard_note=hard_note,
+        )
+    )
+    data = parse_llm_json(raw)
+    gen = [
+        s for s in (data.get("segments") or [])
+        if isinstance(s, dict) and str(s.get("goal") or "").strip()
+    ]
+    # 模型少铺了段:兜底补一段到结尾(与卷纲同款纪律)
+    if len(gen) < count:
+        gen.append({
+            "title": "终局", "goal": "收束全部主线与伏笔,完成架构中的终局。",
+            "conflict": "最终决战", "start_state": "全线压顶", "end_state": "尘埃落定",
+        })
+    segments: list[dict] = list(kept_locked)
+    cursor = 1
+    for s in gen:
+        while any(k["start"] <= cursor <= k["end"] for k in kept_locked):
+            cursor = kept_locked and max(k["end"] for k in kept_locked) + 1 or cursor
+        end = min(cursor + size - 1, p.target_chapters)
+        if end < cursor:
+            break
+        segments.append({
+            "start": cursor, "end": end,
+            "title": str(s.get("title") or ""),
+            "goal": str(s["goal"]).strip(),
+            "conflict": str(s.get("conflict") or ""),
+            "start_state": str(s.get("start_state") or ""),
+            "end_state": str(s.get("end_state") or ""),
+            "confirmed": False, "locked": False,
+        })
+        cursor = end + 1
+    if not segments:
+        raise RuntimeError("骨架生成失败(模型输出无法解析),请重试。")
+    return segments
+
+
 @router.post("/{project_id}/skeleton-async")
 async def generate_skeleton_async(
     project_id: int, req: GenerateBlueprintRequest, db: Session = Depends(get_db)
@@ -120,67 +207,25 @@ async def generate_skeleton_async(
         session = SessionLocal()
         try:
             p = session.get(Project, project_id)
-            style_block = render_style_block(
-                assemble_tendency("outline", req.tendency, p.global_tendency)
-            ) + dna_block_of(p.dna)
-            old = _upgrade_segments(p.macro_plan, p.id, session)
-            kept_locked = [s for s in old if s["locked"]]
-            confirmed_goals = [
-                f"第{s['start']}-{s['end']}章《{s['title'] or '未命名'}》:{s['goal']}"
-                for s in old if s["confirmed"] and not s["locked"]
-            ]
-            # 未锁定段之外的全部区间重出:locked 段原样保留,其余按当前体量切
-            size = _segment_size(p.target_chapters)
-            count = math.ceil(p.target_chapters / size)
-            hard_note = f"\n注意:全书共 {p.target_chapters} 章是作者拍板的体量承诺,分段与节奏必须按这个总章数规划,不得擅自压缩或膨胀总章数。"
-            if confirmed_goals:
-                hard_note += (
-                    "\n注意:以下段落作者已拍板,新骨架的其余段落必须与它们相容"
-                    "(衔接处状态连续,不得矛盾):\n" + "\n".join(confirmed_goals)
-                )
-            update_stage(job_id, "生成故事骨架")
-            raw = await get_adapter_for(Task.BLUEPRINT).ask(
-                SKELETON_PROMPT.format(
-                    number_of_chapters=p.target_chapters,
-                    novel_architecture=_arch_text(p),
-                    style_directives=style_block,
-                    segment_count=count,
-                    segment_size=size,
-                    hard_note=hard_note,
-                )
+            record_gen_inputs(
+                kind="skeleton", project_id=project_id,
+                payload={"tendency": req.tendency, "had_skeleton": bool(p.macro_plan)},
+                db=session,
             )
-            data = parse_llm_json(raw)
-            gen = [
-                s for s in (data.get("segments") or [])
-                if isinstance(s, dict) and str(s.get("goal") or "").strip()
-            ]
-            # 模型少铺了段:兜底补一段到结尾(与卷纲同款纪律)
-            if len(gen) < count:
-                gen.append({
-                    "title": "终局", "goal": "收束全部主线与伏笔,完成架构中的终局。",
-                    "conflict": "最终决战", "start_state": "全线压顶", "end_state": "尘埃落定",
-                })
-            segments: list[dict] = list(kept_locked)
-            cursor = 1
-            for s in gen:
-                while any(k["start"] <= cursor <= k["end"] for k in kept_locked):
-                    cursor = kept_locked and max(k["end"] for k in kept_locked) + 1 or cursor
-                end = min(cursor + size - 1, p.target_chapters)
-                if end < cursor:
-                    break
-                segments.append({
-                    "start": cursor, "end": end,
-                    "title": str(s.get("title") or ""),
-                    "goal": str(s["goal"]).strip(),
-                    "conflict": str(s.get("conflict") or ""),
-                    "start_state": str(s.get("start_state") or ""),
-                    "end_state": str(s.get("end_state") or ""),
-                    "confirmed": False, "locked": False,
-                })
-                cursor = end + 1
-            if not segments:
-                raise RuntimeError("骨架生成失败(模型输出无法解析),请重试。")
+            segments = await build_skeleton_segments(
+                session, p, tendency=req.tendency,
+                report=lambda s: update_stage(job_id, s),
+                extra_block=render_intent_block(p),
+            )
+            has_outlines = (
+                session.query(Outline.id).filter(Outline.project_id == p.id).first()
+                is not None
+            )
             p.macro_plan = segments
+            p.skeleton_stale = False  # 骨架重出 → 失配标记复位
+            if has_outlines:
+                # 骨架变了,已铺大纲挂在旧骨架上(与「架构→大纲」共用同一个提示位)
+                p.outline_stale = True
             session.commit()
             finish_job(job_id, {"segments": segments})
         except Exception as exc:  # noqa: BLE001 — 任务失败进 job 状态

@@ -8,10 +8,11 @@ interface Props {
   topic: string;                  // 主题/灵感(可空)
   genre?: string;                 // 类型(可空)
   concept?: Concept | null;       // 已捏出的结构化概念(可空,给起名更多上下文)
+  projectId?: number;             // 归属项目(重命名场景有):让起名 job 可复盘
   onPick: (title: string) => void;
 }
 
-export default function TitleSuggest({ topic, genre, concept, onPick }: Props) {
+export default function TitleSuggest({ topic, genre, concept, projectId, onPick }: Props) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [titles, setTitles] = useState<string[]>([]);
@@ -33,7 +34,7 @@ export default function TitleSuggest({ topic, genre, concept, onPick }: Props) {
     setBusy(true); setErr("");
     try {
       // 后台任务 + 轮询:POST 毫秒级返回,长活在服务端跑,轮询单次抖动会自动重试
-      const { job_id } = await api.suggestTitleAsync(topic.trim(), (genre ?? "").trim(), concept);
+      const { job_id } = await api.suggestTitleAsync(topic.trim(), (genre ?? "").trim(), concept, undefined, projectId);
       const r = await pollJob<{ titles: string[] }>(job_id, { intervalMs: 1500 });
       setTitles(r.titles);
       setOpen(true);

@@ -29,6 +29,7 @@ from app.db.models.mark import ChapterMark
 from app.db.models.premise import Premise
 from app.db.models.premise_ledger import PremiseLedger
 from app.db.models.writing_card import WritingCard
+from app.db.models.gen_input import GenInput
 from app.db.models.usage import FeatureUsage, LlmUsage
 from app.db.models.user import User
 from app.db.models.app_setting import AppSetting
@@ -55,6 +56,7 @@ from app.db.models.skill_pack import SkillPack
 from app.db.models.render import RenderConfig, RenderTask, TtsTrack
 
 __all__ = [
+    "GenInput",
     "User",
     "AppSetting",
     "InviteCode",

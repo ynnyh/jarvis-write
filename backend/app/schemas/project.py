@@ -73,6 +73,10 @@ class ProjectOut(BaseModel):
     chat_log: list[Any] | None = None
     # 卷纲(滚动规划指南针,长书才有):[{start, end, goal}]
     macro_plan: list[Any] | None = None
+    # 理解卡(docs/32):确认过的创作意图卡(世界坐标/视角主角/味道/必须/不要/题材)
+    intent_card: dict[str, Any] | None = None
+    # 骨架失配:架构改动后骨架挂在旧架构上(前端据此提示「重出骨架」)
+    skeleton_stale: bool = False
     # 文风备忘(随书累积的文风基线;可在翻新面板手动查看/编辑)
     style_memo: str | None = None
     # 世界观硬规则(钉板):不可违背的设定/常识,逐行一条;注入生成各环节,

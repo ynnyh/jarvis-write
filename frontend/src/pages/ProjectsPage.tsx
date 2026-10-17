@@ -325,7 +325,7 @@ export default function ProjectsPage() {
                 <div className="actions mt-2">
                   <button className="btn-sm primary" disabled={busy} onClick={() => saveRename(p.id)}>保存</button>
                   <button className="btn-sm" disabled={busy} onClick={() => setEditingId(null)}>取消</button>
-                  <TitleSuggest topic={p.topic} genre={p.genre} onPick={setEditTitle} />
+                  <TitleSuggest topic={p.topic} genre={p.genre} projectId={p.id} onPick={setEditTitle} />
                 </div>
               </div>
             ) : p.setup_state ? (

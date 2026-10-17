@@ -2,9 +2,10 @@
 """小说项目 + 顶层架构(雪花写作法产出)。"""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
@@ -133,6 +134,16 @@ class Project(Base, TimestampMixin):
     # 修订过的版本;拍板时把选中方案渲染成开书订单写入 brief(brief_confirmed 复用)。
     # NULL=还没出方案(老项目)。见 app/api/projects/plans.py。
     book_plans: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
+    # 理解卡(docs/32 前置重构):开书确认过的创作意图卡——世界坐标 / 视角与主角 /
+    # 味道 / 必须保留 / 不要出现 / 题材(派生)。确认①落库,之后全链生成从它派生;
+    # 世界坐标级字段(真实历史 vs 架空)任何下游层不得改写。NULL = 老项目(行为不变)。
+    intent_card: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # 骨架失配:架构层改动后,骨架(macro_plan)仍挂在旧架构上——补上「架构→骨架」
+    # 这一跳(与 outline_stale 同模式)。骨架重出时复位。
+    skeleton_stale: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 软删(docs/29 留痕):置位即前台不可见(列表/详情过滤),后台超期物理清理。
+    # 不全删的原因:用户「删掉重来」的那一刻恰是复盘价值最高的时刻(玉玺案例)。
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     architecture: Mapped["Architecture | None"] = relationship(
         back_populates="project", uselist=False, cascade="all, delete-orphan"

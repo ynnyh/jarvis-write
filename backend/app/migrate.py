@@ -988,6 +988,32 @@ def _add_project_outline_stale_column() -> None:
             logger.info("迁移:project 补 outline_stale 列")
 
 
+def _add_project_intent_card_columns() -> None:
+    """projects 补前置重构三列:intent_card / skeleton_stale / deleted_at(幂等)。
+
+    - intent_card(JSON):开书确认过的理解卡(docs/32)。NULL = 老项目,下游回落旧行为。
+    - skeleton_stale(BOOL):架构层改动后骨架仍挂在旧架构上——补上「架构→骨架」这一跳
+      (与既有 outline_stale 同模式),存量行默认 0。
+    - deleted_at(DATETIME):软删留痕(docs/29)。置位即前台不可见,超期才物理清理;
+      存量行默认 NULL(正常在库),行为零变化。
+    """
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "projects" not in insp.get_table_names():
+            return  # create_all 会按新模型建表,无需补列
+        for column, ddl in (
+            ("intent_card", "ALTER TABLE projects ADD COLUMN intent_card JSON"),
+            (
+                "skeleton_stale",
+                "ALTER TABLE projects ADD COLUMN skeleton_stale BOOLEAN DEFAULT 0 NOT NULL",
+            ),
+            ("deleted_at", "ALTER TABLE projects ADD COLUMN deleted_at DATETIME"),
+        ):
+            if not _column_exists("projects", column):
+                conn.execute(text(ddl))
+                logger.info("迁移:projects 补 %s 列", column)
+
+
 def _add_project_render_mode_column() -> None:
     """projects 补 render_mode 列(出片模式,幂等)。
 
@@ -1242,6 +1268,7 @@ def run_migrations() -> None:
     _add_llm_usage_job_id_column()
     _add_architecture_concept_stale_column()
     _add_project_outline_stale_column()
+    _add_project_intent_card_columns()
     _add_project_render_mode_column()
     _add_drama_dialogue_chain_columns()
     _add_render_episode_id_column()

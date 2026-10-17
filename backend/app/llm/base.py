@@ -792,6 +792,28 @@ class LLMAdapter(abc.ABC):
             # 会让人以为成本没问题。要能查,就得留痕。
             logger.warning("用量记账失败(不影响本次生成):%s", exc, exc_info=True)
 
+    def record_stream_estimate(
+        self, prompt_text: str, output_text: str, duration_ms: int = 0
+    ) -> None:
+        """流式路径的估算记账:流式拿不到上游 usage,但「零记账」会让最贵的调用隐形。
+
+        取舍(2026-10-17:铺 150 章蓝图实测 7.4 分钟零账):宁可给一个**诚实标注**的
+        估算值,也不让成本表在这条路上永久留白。按字符数估算(中文约 1.5 字/token,
+        保守取 2 字/token),finish_reason 记 "stream-est" —— 汇总时一眼能看出
+        哪些行是估算而非上游真实报数。
+        """
+        self._record_usage(
+            LLMResponse(
+                content=output_text[:200],
+                model=self.model_name or "(stream-est)",
+                prompt_tokens=max(1, len(prompt_text) // 2),
+                completion_tokens=max(1, len(output_text) // 2),
+                finish_reason="stream-est",
+                truncated=False,
+            ),
+            duration_ms=duration_ms,
+        )
+
     # ---- 便捷入口:直接传字符串 ----
     async def ask(self, prompt: str, system: str | None = None) -> str:
         """带重试的问答:空正文自动放大 max_tokens 重试,并给出原因。

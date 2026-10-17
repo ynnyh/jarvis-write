@@ -1,10 +1,21 @@
 # app/api/deps.py
 # -*- coding: utf-8 -*-
-"""接口层公共工具:取项目并校验归属;项目级联删除(用户删除时复用)。"""
+"""接口层公共工具:取项目并校验归属;项目级联删除;回收站清理。"""
 from __future__ import annotations
+
+import logging
+import os
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger("jarvis-write.deps")
+
+# 回收站保留期(天):软删的书留这么久供复盘,超期才物理清理。
+# 与 jobs.JOB_RETENTION_DAYS 同风格(可环境变量覆盖;设 0 表示永不物理清理)。
+PROJECT_TRASH_RETENTION_DAYS = max(
+    0, int(os.environ.get("PROJECT_TRASH_RETENTION_DAYS", "30"))
+)
 
 from app import storage
 from app.auth import assert_project_owner
@@ -36,9 +47,13 @@ from app.db.models import (
 
 
 def get_project_or_404(db: Session, project_id: int) -> Project:
-    """取项目:不存在 → 404;不属于当前用户 → 404(不泄露存在性)。"""
+    """取项目:不存在 / 已软删 → 404;不属于当前用户 → 404(不泄露存在性)。
+
+    软删(docs/29 留痕):用户点「删除」只是置 deleted_at,前台一律当它不存在;
+    复盘与清理走 admin 通道(直读库,不经这里)。
+    """
     p = db.get(Project, project_id)
-    if p is None:
+    if p is None or p.deleted_at is not None:
         raise HTTPException(status_code=404, detail=f"项目 {project_id} 不存在")
     assert_project_owner(p)
     return p
@@ -166,3 +181,54 @@ def reset_project_content(db: Session, project: Project) -> int:
     project.outline_stale = False
     db.commit()
     return len(chapter_ids)
+
+
+def release_project_files(db: Session, project: Project) -> None:
+    """软删时立刻释放磁盘占用:配额不能被回收站里的书长期占着。
+
+    留痕要留的是**文本证据**(作者输入/任务/用量/正文),定妆照与渲染草片是配额
+    大头、没有复盘价值,所以在软删当时就删;数据库行留到保留期满再物理清。
+    """
+    from app.api.render import release_render_files
+
+    project_id = project.id
+    # 渲染草片 + 末帧(约定落位只在 render.release_render_files 里写一次)
+    release_render_files(db, project_id=project_id)
+    storage.delete_project_dir(project_id)
+
+
+def purge_deleted_projects(db: Session | None = None) -> int:
+    """物理清理软删超期的项目(服务启动时调用),返回清理条数。
+
+    软删只解决「前台不可见」,库里的数据仍占空间;保留期一到就走老的级联删除。
+    清理失败不阻塞启动(与 jobs.purge_old_jobs 同纪律)。
+    """
+    if PROJECT_TRASH_RETENTION_DAYS <= 0:
+        return 0
+    from datetime import datetime, timedelta, timezone
+
+    from app.db.session import SessionLocal
+
+    own = db is None
+    session = SessionLocal() if own else db
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=PROJECT_TRASH_RETENTION_DAYS)
+        stale = (
+            session.query(Project)
+            .filter(Project.deleted_at.isnot(None))
+            .filter(Project.deleted_at < cutoff)
+            .all()
+        )
+        n = 0
+        for p in stale:
+            delete_project_cascade(session, p)  # 内部自行 commit
+            n += 1
+        if n:
+            logger.info("回收站清理:物理删除 %d 个超期软删项目", n)
+        return n
+    except Exception:  # noqa: BLE001 — 清理失败不阻塞启动
+        logger.warning("回收站清理失败", exc_info=True)
+        return 0
+    finally:
+        if own:
+            session.close()

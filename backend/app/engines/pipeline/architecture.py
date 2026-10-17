@@ -43,20 +43,33 @@ def _render_topic_block(topic: str, concept: Concept | dict | None) -> str:
     return (topic or "").strip() or "(自由发挥)"
 
 
-def _render_directive_block(directive: str | None) -> str:
+def _render_directive_block(directive: str | None, current_text: str = "") -> str:
     """把「架构研讨」对话共识渲染成注入四步 prompt 的额外指令块。
 
     为空时返回空串(四步 prompt 里 {directive_block} 就地消失,行为与旧版一致)。
     非空时高优先级注入:反复重生成仍不满意,说明用户脑子里有具体想法没传进来,
     这块就是那些想法的落点。
+
+    current_text:该层**当前版本**。带话重出时一并注入,并明确「未要求修改的部分
+    逐字保留」——重出不等于重新翻译(传国玉玺案例:主角从「玉玺」被换成人类太子,
+    正是因为重出时没把上一版当既成事实,模型从零重摇了一遍)。
     """
     directive = (directive or "").strip()
     if not directive:
         return ""
-    return (
+    block = (
         "【作者的额外要求(最高优先级,务必在本步落实;与上面通用要求冲突时以此为准)】\n"
         f"{directive}\n\n"
     )
+    if (current_text or "").strip():
+        block += (
+            "【本层当前版本(请在这一版基础上改,而不是重新创作)】\n"
+            f"{current_text.strip()}\n\n"
+            "【增量纪律】只改上面「作者的额外要求」点到的部分;其余内容必须逐字保留——"
+            "人物姓名与身份、世界坐标(时代/空间/真实还是架空)、叙述视角、已确立的设定"
+            "与数字,一律不许改写、替换或「顺手优化」。\n\n"
+        )
+    return block
 
 
 # =============== 架构闸门(docs/确认链 L2):逐层生成/拍板/作废 ===============
@@ -115,12 +128,16 @@ async def generate_architecture_layer(
     core_seed: str = "",
     character_dynamics: str = "",
     world_building: str = "",
+    intent_block: str = "",
+    current_text: str = "",
 ) -> str:
     """生成架构的指定一层,返回该层文本(架构闸门逐层生成/带话重出用)。
 
     与全书串行的 generate_architecture 共用同一组 prompt——单一代码路径,
     整本串行只是逐层调本函数的便捷封装。上游产物经参数显式传入:闸门模式
     只传**已拍板**的上游;依赖的上游为空时抛 ValueError(调用顺序错误)。
+    intent_block:理解卡硬约束块(app.engines.intent.render_intent_block);空串时
+    prompt 一字不变(老项目零影响)。current_text:本层当前版本,供带话重出增量修订。
     """
     validate_layer(layer)
     assembled = assemble_tendency("outline", tendency, global_tendency)
@@ -130,9 +147,12 @@ async def generate_architecture_layer(
         from app.engines.tendency.assembler import dna_block_of
 
         style_block += dna_block_of(dna)
+    # 理解卡(docs/32):作者确认过的世界坐标/视角/主角 → 硬约束块;空串零变化
+    if intent_block:
+        style_block += intent_block
     adapter = get_adapter_for(Task.ARCHITECTURE)
     topic_block = _render_topic_block(topic, concept)
-    directive_block = _render_directive_block(directive)
+    directive_block = _render_directive_block(directive, current_text)
     # 字数盘子:只有核心种子填了每章字数,情节架构/章节蓝图此前完全不知道字数,
     # 导致大纲按戏剧冲突自然铺、总规模放飞。这里算总盘子注入情节架构(Step4)。
     word_scope = (
@@ -229,6 +249,7 @@ async def generate_architecture(
     dna: object | None = None,
     open_ended: bool = False,
     progress=None,
+    intent_block: str = "",
 ) -> ArchitectureResult:
     """执行雪花四步,返回完整架构。纯生成,不落库。
 
@@ -257,6 +278,7 @@ async def generate_architecture(
         directive=directive,
         dna=dna,
         open_ended=open_ended,
+        intent_block=intent_block,
     )
 
     # 四步逐层生成(单一代码路径:与架构闸门的逐层端点共用 generate_architecture_layer)
@@ -332,9 +354,13 @@ def save_architecture(
             )
         )
         old_text = prev_text
-        if new_text.strip() != (old_text or "").strip() and _has_outlines(db, project.id):
-            project.outline_stale = True
-            _mark_written_chapters_stale(db, project.id)
+        if new_text.strip() != (old_text or "").strip():
+            if project.macro_plan:
+                # 架构真变了,骨架还挂在旧架构上(docs/32 §2.3 补上这一跳)
+                project.skeleton_stale = True
+            if _has_outlines(db, project.id):
+                project.outline_stale = True
+                _mark_written_chapters_stale(db, project.id)
 
     project.status = "outlining"
     db.flush()
@@ -370,6 +396,9 @@ def save_architecture_layer(
     for k in LAYER_KEYS[idx:]:
         state[k] = False
     _set_layer_state(arch, state)
+    if changed and project.macro_plan:
+        # 该层真变了 → 骨架挂在旧架构上(逐层重出同样要惊动骨架,docs/32 §2.3)
+        project.skeleton_stale = True
     if (
         not created
         and prev_state.get(layer)

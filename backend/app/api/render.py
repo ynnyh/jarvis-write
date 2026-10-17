@@ -457,8 +457,15 @@ async def read_render_task_file(
 
 
 # 供级联清理复用(删项目/删短片时把任务行与草片文件一起带走)
-def purge_render_tasks(db: Session, *, project_id: int | None = None, clip_id: int | None = None) -> int:
-    """删掉归属的渲染任务行与草片文件,返回删除行数(调用方负责在事务里调)。"""
+def release_render_files(
+    db: Session, *, project_id: int | None = None, clip_id: int | None = None
+) -> int:
+    """只删渲染**产物文件**(草片 + 末帧),保留任务行,返回处理条数。
+
+    末帧的落位约定(render/lf/r<id>.png)只在这里写一次——软删项目时文件必须
+    当场走(配额不能被回收站占着),而任务行要留到保留期满供复盘,所以「删文件」
+    与「删行」必须是两件事。
+    """
     q = db.query(RenderTask)
     if project_id is not None:
         q = q.filter(RenderTask.project_id == project_id)
@@ -470,9 +477,23 @@ def purge_render_tasks(db: Session, *, project_id: int | None = None, clip_id: i
     for t in rows:
         if t.result_path:
             storage.delete_render_file(t.result_path)
-        # 末帧文件按任务号约定落位(render/lf/r<id>.png),任务删则末帧删
+        # 末帧文件按任务号约定落位(render/lf/r<id>.png),任务文件清则末帧清
         lf = storage.upload_root() / "render" / "lf" / f"r{t.id}.png"
         lf.unlink(missing_ok=True)
+    return len(rows)
+
+
+def purge_render_tasks(db: Session, *, project_id: int | None = None, clip_id: int | None = None) -> int:
+    """删掉归属的渲染任务行与草片文件,返回删除行数(调用方负责在事务里调)。"""
+    q = db.query(RenderTask)
+    if project_id is not None:
+        q = q.filter(RenderTask.project_id == project_id)
+    elif clip_id is not None:
+        q = q.filter(RenderTask.clip_id == clip_id)
+    else:
+        return 0
+    rows = q.all()
+    release_render_files(db, project_id=project_id, clip_id=clip_id)
     for t in rows:
         db.delete(t)
     return len(rows)

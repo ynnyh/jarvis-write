@@ -217,6 +217,10 @@ async def lifespan(app: FastAPI):
     cleanup_stuck_jobs()
     # 历史任务清洗放标失败之后:卡住不动的先标 error,再一起按保留期删。
     purge_old_jobs()
+    # 回收站清理:软删超期的项目才真正物理删除(docs/29 留痕;失败同样不拦启动)
+    from app.api.deps import purge_deleted_projects
+
+    purge_deleted_projects()
     # AI 味检测热更配置(管理端在线调过的权重/门槛)载进内存;失败不拦启动
     from app.api.admin import load_ai_flavor_config
     load_ai_flavor_config()
