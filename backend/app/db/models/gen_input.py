@@ -22,6 +22,9 @@ class GenInput(Base, TimestampMixin):
     __tablename__ = "gen_inputs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # 归属用户(docs/37):灵感工坊等无项目上下文的输入也要能按人归档;
+    # NULL = 历史记录或取不到上下文
+    user_id: Mapped[int | None] = mapped_column(Integer, index=True, default=None)
     # 归属项目;老入口(无项目上下文)可为 NULL
     project_id: Mapped[int | None] = mapped_column(Integer, index=True, default=None)
     # 归属 job(与 llm_usage.job_id 同口径,便于按任务把整条链串起来)

@@ -50,6 +50,7 @@ def record_gen_inputs(
     不传则自己开短会话——请求路径上有 db 就传,worker 里不传。
     """
     try:
+        from app.auth import current_user_id
         from app.db.models import GenInput
 
         if job_id is None:
@@ -57,6 +58,9 @@ def record_gen_inputs(
 
             job_id = current_job_id.get()
         row = GenInput(
+            # 归属用户(docs/37):灵感工坊这类无项目上下文的输入也按人归档;
+            # 取不到(脚本/历史路径)就 NULL,不因归属缺失丢内容
+            user_id=current_user_id.get(),
             project_id=project_id,
             job_id=job_id,
             kind=kind,

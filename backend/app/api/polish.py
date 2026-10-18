@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_project_or_404
 from app.api.sse import STREAM_HEADERS, sse_event
+from app.audit import record_gen_inputs
 from app.auth import get_current_user
 from app.chapter_versions import snapshot_chapter
 from app.db.models import Chapter, Outline, WritingCard
@@ -103,6 +104,12 @@ async def polish_chapter(
     """润色整章(返回润色稿,不落库;满意后再调 /apply)。"""
     project = get_project_or_404(db, project_id)
     ch = _chapter(db, project_id, n)
+    record_gen_inputs(
+        kind="polish-chapter", project_id=project_id,
+        payload={"chapter_number": n, "tendency": req.tendency, "directive": req.directive},
+        db=db,
+    )
+    db.commit()
     try:
         result = await polish_text(
             ch.final_content,
@@ -127,6 +134,12 @@ async def polish_chapter_async(
     for jid, job in list_running(f"polish-{project_id}-"):
         if job["kind"] == f"polish-{project_id}-{n}":
             return {"job_id": jid}
+    record_gen_inputs(
+        kind="polish-chapter", project_id=project_id,
+        payload={"chapter_number": n, "tendency": req.tendency, "directive": req.directive},
+        db=db,
+    )
+    db.commit()
     text, global_tendency = ch.final_content, project.global_tendency
     cards = _cards(db, project_id)
 
@@ -177,6 +190,12 @@ async def polish_segment_in_project(
 ):
     """润色选段(带项目全局倾向)。"""
     project = get_project_or_404(db, project_id)
+    record_gen_inputs(
+        kind="polish-segment", project_id=project_id,
+        payload={"text": req.text, "tendency": req.tendency},
+        db=db,
+    )
+    db.commit()
     try:
         result = await polish_text(
             req.text, req.tendency, project.global_tendency, cards=_cards(db, project_id)
@@ -194,6 +213,12 @@ async def polish_segment_async(
     project = get_project_or_404(db, project_id)
     global_tendency = project.global_tendency
     cards = _cards(db, project_id)
+    record_gen_inputs(
+        kind="polish-segment", project_id=project_id,
+        payload={"text": req.text, "tendency": req.tendency},
+        db=db,
+    )
+    db.commit()
 
     async def work(progress):
         progress("AI 正在润色选段")
@@ -205,6 +230,10 @@ async def polish_segment_async(
 @router.post("/api/polish/segment", response_model=PolishResult)
 async def polish_segment(req: SegmentPolishRequest):
     """润色任意选段(无项目上下文)。"""
+    record_gen_inputs(
+        kind="polish-segment",
+        payload={"text": req.text, "tendency": req.tendency},
+    )
     try:
         result = await polish_text(req.text, req.tendency)
     except ValueError as exc:
@@ -253,6 +282,12 @@ async def polish_chapter_fragment(
             status_code=400,
             detail=f"片段最长 {_MAX_FRAGMENT_CHARS} 字,当前 {len(fragment)} 字",
         )
+    record_gen_inputs(
+        kind="polish-fragment", project_id=project_id,
+        payload={"chapter_number": n, "fragment": fragment, "direction": req.direction},
+        db=db,
+    )
+    db.commit()
 
     outline = (
         db.query(Outline)
@@ -387,6 +422,15 @@ async def discuss_chapter_fragment(
         raise HTTPException(
             status_code=400, detail="对话过长,请开新的讨论"
         )
+    record_gen_inputs(
+        kind="polish-discuss", project_id=project_id,
+        payload={
+            "chapter_number": n, "target": target,
+            "messages": [m.model_dump() for m in req.messages],
+        },
+        db=db,
+    )
+    db.commit()
 
     # 定位选段在定稿正文中的上下文(前后各一段窗口,仅供模型理解);无选段则跳过
     before = after = ""
@@ -461,6 +505,12 @@ async def discuss_chapter_fragment_stream(
     )
     summary = outline.summary if outline else ""
     messages = [m.model_dump() for m in req.messages]
+    record_gen_inputs(
+        kind="polish-discuss", project_id=project_id,
+        payload={"chapter_number": n, "target": target, "messages": messages},
+        db=db,
+    )
+    db.commit()
 
     async def gen():
         try:
@@ -483,4 +533,5 @@ async def discuss_chapter_fragment_stream(
 @router.post("/api/polish/ai-flavor")
 async def check_ai_flavor(req: FlavorRequest):
     """只做 AI 味检测(纯规则,不调 LLM,即时返回)。含分类得分与命中明细。"""
+    record_gen_inputs(kind="polish-flavor", payload={"text": req.text})
     return ai_flavor_report(req.text).to_dict()

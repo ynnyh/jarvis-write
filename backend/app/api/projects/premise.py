@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.audit import record_gen_inputs
 from app.auth import get_current_user
 from app.db.models import Outline, User
 from app.db.models.premise import Premise
@@ -154,6 +155,11 @@ async def suggest_premise(
     if not (logline or setting):
         raise HTTPException(status_code=400, detail="先确认故事概念,再提炼核心梗")
 
+    # 只读端点不传 db(请求会话不会 commit),让 helper 自己开短会话落库
+    record_gen_inputs(
+        kind="premise-suggest", project_id=project.id,
+        payload={"logline": logline, "setting": setting, "genre": project.genre},
+    )
     prompt = _SUGGEST_PROMPT.format(
         logline=logline or "(未填写)",
         setting=setting or "(未填写)",
@@ -221,6 +227,14 @@ async def backfill_premise_beats(
         raise HTTPException(status_code=409, detail="补标任务正在进行中,请稍候")
 
     user_id = user.id
+    # 触发即记:输入是主梗卡本身,worker 里逐批调用不再重复留痕;只读端点不传 db
+    record_gen_inputs(
+        kind="premise-backfill", project_id=project.id,
+        payload={
+            "high_concept": premise.high_concept,
+            "payoff": premise.payoff, "beats": premise.beats,
+        },
+    )
 
     async def work(progress) -> dict:
         # worker 自己开 Session(跨 LLM 调用持有请求级 session 是 database is locked 老根因)

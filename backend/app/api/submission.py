@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_project_or_404
+from app.audit import record_gen_inputs
 from app.auth import get_current_user
 from app.db.models import Outline, Project
 from app.db.session import get_db
@@ -137,6 +138,16 @@ async def generate_submission(project_id: int, db: Session = Depends(get_db)):
     for jid, job in list_running(f"submission-{project_id}"):
         if job["kind"] == f"submission-{project_id}":
             return {"job_id": jid}
+    # 触发即记(去重命中早退不记);输入全部来自项目素材
+    record_gen_inputs(
+        kind="submission-generate", project_id=project_id,
+        payload={
+            "title": project.title, "genre": project.genre, "topic": project.topic,
+            "concept": project.concept,
+            "core_seed": project.architecture.core_seed if project.architecture else "",
+            "synopsis": project.synopsis,
+        },
+    )
 
     prompt = _build_prompt(db, project)
     adapter = get_adapter_for(Task.SUBMISSION, max_tokens=2500, timeout=180)

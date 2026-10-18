@@ -281,12 +281,36 @@ def _retry_reason(exc: Exception) -> str:
 _RETRY_STEPS: dict[str, str] = {}
 
 
-def _notice_retry(exc: Exception, no: int, total: int) -> None:
+def _persist_retry(exc: Exception, no: int, total: int, label: str) -> None:
+    """重试台账落库(docs/37):一行 = 一次重试现场,给「渠道稳定率/哪个环节最爱抽」
+    留持久账——此前只有 live 内存里的 SSE 提示,重启即失。失败静默,绝不拖垮生成。"""
+    try:
+        from app.auth import current_user_id
+        from app.db.models import LlmRetry
+        from app.db.session import session_scope
+        from app.live import current_job_id
+
+        with session_scope() as db:
+            db.add(LlmRetry(
+                user_id=current_user_id.get(),
+                job_id=current_job_id.get(),
+                label=label[:80],
+                attempt=no,
+                total=total,
+                error=_describe_exc(exc)[:300],
+            ))
+    except Exception:  # noqa: BLE001 — 台账决不能影响生成
+        logger.debug("重试台账落库失败(不影响生成)", exc_info=True)
+
+
+def _notice_retry(exc: Exception, no: int, total: int, label: str = "") -> None:
     """把重试现场推到前端:「一致性检查 · 重试中 2/3(上游限流)」。
 
     为什么非得显式出来:AI 编程工具会明说「重试中 1/10」,我们此前是静默重试,
     用户只看到最后的结果——失败时显得毫无征兆,重试中又以为卡死。
     """
+    # 先落持久台账再玩 SSE:台账对「无 job 的请求路径重试」也要记(label 供分环节归因)
+    _persist_retry(exc, no, total, label)
     try:
         jid = live.current_job_id.get()
         if not jid:
@@ -317,12 +341,13 @@ def _clear_retry_notice() -> None:
         logger.debug("重试提示还原失败", exc_info=True)
 
 
-async def with_retries(call, *, attempts: int = 3, base_delay: float = 2.0, on_retry=None):
+async def with_retries(call, *, attempts: int = 3, base_delay: float = 2.0, on_retry=None, label: str = ""):
     """瞬时错误退避重试:retryable 的 UpstreamError / 网络超时连接错误。
 
     - call(attempt): 第几次尝试(0 起),返回 awaitable;
     - on_retry(exc): 每次重试前回调,调用方可借此调整下一次尝试的方式
       (如被 CDN 掐断后改走流式聚合);
+    - label: 环节/模型标识,进重试台账(llm_retries)供分环节归因,可为空;
     - 非 retryable 的错误(鉴权/参数/Base URL 错)立即抛出,不浪费重试;
     - 等待时长按错误类型分流(见 `_backoff_delay`),不再一律 2s→4s。
     """
@@ -342,7 +367,7 @@ async def with_retries(call, *, attempts: int = 3, base_delay: float = 2.0, on_r
         if attempt < attempts - 1:
             if on_retry is not None:
                 on_retry(last)
-            _notice_retry(last, attempt + 1, attempts)
+            _notice_retry(last, attempt + 1, attempts, label=label)
             await asyncio.sleep(_backoff_delay(last, attempt, base_delay))
     raise UpstreamError(
         f"上游连续 {attempts} 次调用失败,最后错误: {_describe_exc(last)}",
@@ -567,6 +592,7 @@ class LLMAdapter(abc.ABC):
             attempts=self.retry_attempts,
             base_delay=self.retry_base_delay,
             on_retry=on_retry,
+            label=getattr(self, "task_label", "") or (self.model_name or ""),
         )
 
     @abc.abstractmethod
@@ -765,8 +791,7 @@ class LLMAdapter(abc.ABC):
             diagnosis=diag,
         )
 
-    @staticmethod
-    def _record_usage(resp: "LLMResponse", duration_ms: int = 0) -> None:
+    def _record_usage(self, resp: "LLMResponse", duration_ms: int = 0) -> None:
         """用量记账(静默失败,绝不影响生成)。"""
         try:
             from app.auth import current_user_id
@@ -779,6 +804,9 @@ class LLMAdapter(abc.ABC):
                     LlmUsage(
                         user_id=current_user_id.get(),
                         job_id=current_job_id.get(),
+                        # 生成环节(docs/37):get_adapter_for 按 Task 打标,分环节
+                        # 成本/稳定率归因全靠它;鸭子类型的假适配器没有就空串
+                        task=str(getattr(self, "task_label", "") or ""),
                         model=resp.model,
                         prompt_tokens=resp.prompt_tokens,
                         completion_tokens=resp.completion_tokens,
@@ -878,7 +906,11 @@ async def complete_text_with_budget(adapter, messages: list[LLMMessage]) -> str:
                     raise
                 adapter.max_tokens = min(adapter.max_tokens * 2, 32768)
                 continue
-            LLMAdapter._record_usage(resp, duration_ms=_duration_ms)
+            # _record_usage 已改实例方法(要读 self.task_label);鸭子类型的假适配器
+            # (测试/自定义)可能没有,本函数的契约是只依赖 complete() 与 max_tokens
+            _record = getattr(adapter, "_record_usage", None)
+            if callable(_record):
+                _record(resp, duration_ms=_duration_ms)
             content = (resp.content or "").strip()
             # getattr:鸭子类型的假适配器(测试/自定义)可能没有这两个字段,
             # 而本函数的契约是只依赖 complete() 与 max_tokens,不许因此炸掉

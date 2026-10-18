@@ -69,7 +69,7 @@ class _ChatAdapter:
         self._distilled = distilled
         self.max_tokens = 8192
 
-    def _record_usage(self, resp):  # noqa: ANN001
+    def _record_usage(self, resp, duration_ms=0):  # noqa: ANN001
         pass
 
     async def complete(self, messages):

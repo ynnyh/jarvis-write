@@ -17,6 +17,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from app.audit import record_gen_inputs
 from app.auth import current_user_id, get_current_user
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.common import ask_llm_json
@@ -210,6 +211,12 @@ async def _gate_and_refill(
 
 
 async def _inspire_impl(req: InspireRequest) -> InspireResponse:
+    # 留痕:同步/异步两路共用此处,一次用户动作记一条
+    record_gen_inputs(kind="inspire-spark", payload={
+        "spark": req.spark, "count": req.count, "tendency": req.tendency,
+        "dna": req.dna.model_dump() if req.dna else None,
+        "avoid": req.avoid.model_dump() if req.avoid else None,
+    })
     story = _dna_of(req.dna)
     dna_block = dna_block_of(story)
     try:
@@ -288,6 +295,12 @@ class EnginesResponse(BaseModel):
 
 
 async def _engines_impl(req: EnginesRequest) -> EnginesResponse:
+    record_gen_inputs(kind="inspire-engines", payload={
+        "spark": req.spark, "count": req.count, "tendency": req.tendency,
+        "dna": req.dna.model_dump() if req.dna else None,
+        "avoid_engines": req.avoid_engines, "anchor_engine": req.anchor_engine,
+        "feedback": req.feedback,
+    })
     story = _dna_of(req.dna)
     style_block = render_style_block(assemble_tendency("outline", req.tendency))
     style_block += dna_block_of(story)
@@ -392,6 +405,11 @@ class PitchesResponse(BaseModel):
 
 
 async def _pitches_impl(req: PitchesRequest) -> PitchesResponse:
+    record_gen_inputs(kind="inspire-pitches", payload={
+        "spark": req.spark, "count": req.count, "tendency": req.tendency,
+        "dna": req.dna.model_dump() if req.dna else None,
+        "avoid_pitches": req.avoid_pitches, "feedback": req.feedback,
+    })
     style_block = render_style_block(assemble_tendency("outline", req.tendency))
     style_block += dna_block_of(_dna_of(req.dna))
     clean_avoid = [a.strip() for a in req.avoid_pitches if a.strip()][:10]
@@ -484,6 +502,10 @@ async def _develop_impl(req: DevelopRequest) -> DevelopResponse:
         ) + ("\n(用户想混搭:融合两张卡的要素)" if len(picked) > 1 else "")
     else:
         raise HTTPException(status_code=400, detail="请先选引擎卡,或提供已拍板的简介")
+    record_gen_inputs(kind="inspire-develop", payload={
+        "engines": req.engines, "brief": req.brief, "spark": req.spark,
+        "tendency": req.tendency, "dna": req.dna.model_dump() if req.dna else None,
+    })
     style_block = render_style_block(assemble_tendency("outline", req.tendency))
     style_block += dna_block_of(_dna_of(req.dna))
     prompt = DEVELOP_PROMPT.format(
@@ -564,6 +586,11 @@ async def _refine_impl(req: RefineRequest) -> RefineResponse:
         raise HTTPException(status_code=400, detail="修改意见过长(限 500 字)")
     if req.concept.is_empty():
         raise HTTPException(status_code=400, detail="当前还没有概念可改,请先生成或填写")
+    record_gen_inputs(kind="inspire-refine", payload={
+        "directive": req.directive, "concept": req.concept.model_dump(),
+        "locked_fields": req.locked_fields, "tendency": req.tendency,
+        "dna": req.dna.model_dump() if req.dna else None,
+    })
 
     # 味道锚(本书基因)折进 genre_boundary 自由文本槽注入(REFINE_PROMPT 无 style 占位符)
     dna_block = dna_block_of(_dna_of(req.dna))
@@ -654,6 +681,11 @@ async def chat(req: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=400, detail="请先说点什么")
     if turns[-1].role != "user":
         raise HTTPException(status_code=400, detail="最后一条应为用户发言")
+    record_gen_inputs(kind="inspire-chat", payload={
+        "messages": [m.model_dump() for m in req.messages],
+        "concept": req.concept.model_dump() if req.concept else None,
+        "tendency": req.tendency, "dna": req.dna.model_dump() if req.dna else None,
+    })
 
     assembled = assemble_tendency("outline", req.tendency)
     style_block = render_style_block(assembled)
@@ -764,6 +796,7 @@ async def pattern_derive(req: PatternDeriveRequest) -> PatternDeriveResponse:
     from app.engines.common import ask_llm_json
     from app.prompts.story_patterns import PATTERN_DERIVE_PROMPT, pattern_from_derived
 
+    record_gen_inputs(kind="inspire-dna", payload={"text": req.text})
     try:
         data, err = await ask_llm_json(
             get_adapter_for(Task.PATTERN_DERIVE),
@@ -850,6 +883,9 @@ async def dna_mirror(req: MirrorRequest) -> MirrorResponse:
     reflection 走 FAST 档蒸馏,失败回落到结构化基因(basis);contradictions/forbidden
     纯规则算出,零成本、恒定可用。
     """
+    record_gen_inputs(kind="inspire-mirror", payload={
+        "dna": req.dna.model_dump(), "spark": req.spark,
+    })
     story = coerce_dna(req.dna.model_dump())
     basis = story.render()
     contradictions = _dna_contradictions(story)

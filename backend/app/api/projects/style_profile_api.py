@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.audit import record_gen_inputs
 from app.auth import get_current_user
 from app.db.models import Chapter, Project, User
 from app.db.session import get_db
@@ -117,6 +118,11 @@ async def reanalyze_style_profile_async(
     """
     project = _get_project_or_404(db, project_id)
     source_pid = project.sequel_of_id or project_id
+    # 留痕放 handler(worker 无请求上下文);请求体无用户输入,记触发来源
+    record_gen_inputs(
+        kind="style-reanalyze", project_id=project_id,
+        payload={"source_project_id": source_pid},
+    )
 
     async def work(progress):
         progress("采样正文(全书均匀分层)")

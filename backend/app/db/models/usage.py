@@ -31,6 +31,31 @@ class LlmUsage(Base, TimestampMixin):
     # 归属任务(Phase 4.2):任务上下文里发起的调用带上 job_id,聚合出
     # 「这一章/这批卡花了多少 token」。请求上下文外/旧记录为 NULL。
     job_id: Mapped[str | None] = mapped_column(String(12), nullable=True, index=True)
+    # 生成环节(docs/37):architecture / polish / evolution …(Task 枚举值)。
+    # 成本与稳定率按环节分账全靠它;空串 = 旧记录或未走路由的调用。
+    task: Mapped[str] = mapped_column(String(40), default="", server_default="")
+
+
+class LlmRetry(Base, TimestampMixin):
+    """渠道重试台账(docs/37):每一次瞬时错误重试落一行,只追加不改。
+
+    此前重试只进 live 内存(SSE 提示),进程重启即失——「渠道稳不稳」「哪个环节
+    最爱抽」这种 P1 复盘信号没有任何持久账本。一行 = 一次重试前的现场;
+    成功的调用不记(重试率用本表对 llm_usage 对账即得)。
+    """
+
+    __tablename__ = "llm_retries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, index=True, default=None)
+    job_id: Mapped[str | None] = mapped_column(String(12), index=True, default=None)
+    # 环节或模型(task_label 优先,回落 model_name):定位「哪个环节的渠道不稳」
+    label: Mapped[str] = mapped_column(String(80), default="")
+    # 第几次重试(1 起)/共几轮
+    attempt: Mapped[int] = mapped_column(Integer, default=0)
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    # 归一化的错误摘要(_retry_reason/_describe_exc 口径)
+    error: Mapped[str] = mapped_column(String(300), default="")
 
 
 class FeatureUsage(Base):

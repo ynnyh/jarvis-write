@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.audit import record_gen_inputs
 from app.auth import get_current_user
 from app.db.models import User
 from app.db.session import get_db
@@ -106,6 +107,11 @@ async def suggest_shape(
     concept = project.concept or {}
     logline = str(concept.get("logline") or project.topic or "")[:300]
     setting = str(concept.get("setting") or "")[:200]
+    # 只读端点不传 db(请求会话不会 commit),让 helper 自己开短会话落库
+    record_gen_inputs(
+        kind="shape-suggest", project_id=project.id,
+        payload={"logline": logline, "setting": setting, "genre": project.genre},
+    )
 
     prompt = _PROMPT.format(
         logline=logline or "(未填写)",

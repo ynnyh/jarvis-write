@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_project_or_404
+from app.audit import record_gen_inputs
 from app.auth import get_current_user
 from app.db.models import Outline
 from app.db.session import get_db
@@ -108,6 +109,13 @@ async def parse_directive(
     if not outlines:
         raise HTTPException(status_code=400, detail="还没有章节蓝图,请先生成蓝图")
 
+    record_gen_inputs(
+        kind="edit-directive", project_id=project_id,
+        payload={"directive": directive},
+        db=db,
+    )
+    db.commit()
+
     prompt = EDIT_DIRECTIVE_PROMPT.format(
         directive=directive,
         architecture_brief=chapter_architecture_brief(project),
@@ -147,6 +155,12 @@ async def parse_directive_async(
     for jid, job in list_running(f"directive-{project_id}"):
         if job["kind"] == f"directive-{project_id}":
             return {"job_id": jid}
+    record_gen_inputs(
+        kind="edit-directive", project_id=project_id,
+        payload={"directive": directive},
+        db=db,
+    )
+    db.commit()
     prompt = EDIT_DIRECTIVE_PROMPT.format(
         directive=directive,
         architecture_brief=chapter_architecture_brief(project),

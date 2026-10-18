@@ -54,6 +54,13 @@ async def run_chapter_job(
                 db=session,
             )
             session.commit()
+        else:
+            record_gen_inputs(
+                kind="chapter-generate", project_id=project_id,
+                payload={"chapter_number": chapter_number, "tendency": tendency or {}},
+                db=session,
+            )
+            session.commit()
         chapter, issues, stats, guard_result, review_result, preflight = (
             await generate_chapter(
                 session, project, chapter_number, tendency,

@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.audit import record_gen_inputs
 from app.auth import get_current_user
 from app.db.models import (
     Architecture,
@@ -124,6 +125,14 @@ async def sequel_directions_async(
                 for c in (data.get("directions") or [])
                 if isinstance(c, dict) and str(c.get("title") or "").strip()
             ]
+            # cards 一并留痕:方向卡重摇整组覆盖,这里留得下每一批的历史
+            record_gen_inputs(
+                kind="sequel-directions", project_id=src.id,
+                payload={
+                    "avoid": req.avoid,
+                    "cards": [c.title for c in cards[:_DIRECTION_COUNT]],
+                },
+            )
             return {"directions": [c.model_dump() for c in cards[:_DIRECTION_COUNT]]}
         finally:
             session.close()
@@ -241,6 +250,14 @@ async def create_sequel(
             need_digest=not digest_text, need_style=need_style, need_arch=need_arch,
         )
 
+    record_gen_inputs(
+        kind="sequel-create", project_id=project.id,
+        payload={
+            "source_project_id": src.id,
+            "title": req.title, "direction": req.direction,
+        },
+        db=db,
+    )
     db.commit()
     return SequelOut(project_id=project.id, analyze_job_id=analyze_job_id)
 

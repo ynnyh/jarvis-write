@@ -124,6 +124,8 @@ def test_usage_row_carries_truncation_trace(monkeypatch):
     monkeypatch.setattr("app.db.session.session_scope", lambda: _FakeScope())
     monkeypatch.setattr("app.db.models.LlmUsage", _FakeLlmUsage)
 
+    from types import SimpleNamespace
+
     from app.llm.base import LLMAdapter, LLMResponse
 
     resp = LLMResponse(
@@ -134,7 +136,7 @@ def test_usage_row_carries_truncation_trace(monkeypatch):
         finish_reason="length",
         truncated=True,
     )
-    LLMAdapter._record_usage(resp)
+    LLMAdapter._record_usage(SimpleNamespace(task_label=""), resp)
     current_user_id.reset(token)
 
     assert captured["finish_reason"] == "length"

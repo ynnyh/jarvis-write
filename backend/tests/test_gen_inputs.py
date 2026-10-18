@@ -95,3 +95,146 @@ def test_gen_input_sites_present():
         if f'kind="{kind}"' not in source:
             missing.append(f"{module.__name__}:{kind}")
     assert not missing, f"留痕埋点缺失:{missing}"
+
+
+# —— docs/37 留痕加固:归属用户 / 重试台账 / 环节名 / 方向卡历史 ——
+def test_record_gen_inputs_captures_user_id(client):
+    """无项目上下文的输入也要按人归档(灵感工坊那批留痕的归属前提)。"""
+    from app import audit, live
+    from app.auth import current_user_id
+    from app.db.models import GenInput
+    from app.db.session import SessionLocal
+
+    t_user = current_user_id.set(42)
+    t_job = live.current_job_id.set(None)
+    try:
+        audit.record_gen_inputs(kind="unit-user", payload={"a": 1})
+    finally:
+        live.current_job_id.reset(t_job)
+        current_user_id.reset(t_user)
+
+    with SessionLocal() as db:
+        row = (
+            db.query(GenInput).filter_by(kind="unit-user")
+            .order_by(GenInput.id.desc()).first()
+        )
+        assert row is not None and row.user_id == 42 and row.project_id is None
+
+
+def test_retry_ledger_persists(client):
+    """渠道重试必须落持久台账(llm_retries):有 job 记 job,纯请求路径也要留。"""
+    from app.auth import current_user_id
+    from app.db.models import LlmRetry
+    from app.db.session import SessionLocal
+    from app.llm.base import UpstreamError, _notice_retry
+    from app.live import current_job_id
+
+    t_user = current_user_id.set(7)
+    t_job = current_job_id.set("job-retry01")
+    try:
+        _notice_retry(UpstreamError("上游限流", retryable=True), 1, 3, label="polish")
+    finally:
+        current_job_id.reset(t_job)
+        current_user_id.reset(t_user)
+
+    with SessionLocal() as db:
+        row = (
+            db.query(LlmRetry).filter_by(label="polish")
+            .order_by(LlmRetry.id.desc()).first()
+        )
+        assert row is not None
+        assert row.user_id == 7 and row.job_id == "job-retry01"
+        assert row.attempt == 1 and row.total == 3
+        assert "限流" in row.error
+
+    # 无 job 的请求路径重试:台账照记(job_id 空),这是此前完全丢失的盲区
+    t_user = current_user_id.set(7)
+    t_job = current_job_id.set(None)
+    try:
+        _notice_retry(UpstreamError("连接被掐断", retryable=True), 2, 3, label="naming")
+    finally:
+        current_job_id.reset(t_job)
+        current_user_id.reset(t_user)
+    with SessionLocal() as db:
+        row = (
+            db.query(LlmRetry).filter_by(label="naming")
+            .order_by(LlmRetry.id.desc()).first()
+        )
+        assert row is not None and row.job_id is None and row.attempt == 2
+
+
+def test_llm_usage_records_task_label(client):
+    """llm_usage.task:环节名进成本账,分环节归因的源头。"""
+    from types import SimpleNamespace
+
+    from app.db.models import LlmUsage
+    from app.db.session import SessionLocal
+    from app.llm.base import LLMAdapter, LLMResponse
+
+    dummy = SimpleNamespace(task_label="evolution")  # 鸭子类型:只有打标属性也要能记账
+    LLMAdapter._record_usage(
+        dummy,
+        LLMResponse(content="ok", model="test-model", prompt_tokens=10,
+                    completion_tokens=5, finish_reason="stop", truncated=False),
+        duration_ms=123,
+    )
+    with SessionLocal() as db:
+        row = (
+            db.query(LlmUsage).filter_by(task="evolution")
+            .order_by(LlmUsage.id.desc()).first()
+        )
+        assert row is not None
+        assert row.model == "test-model" and row.duration_ms == 123
+
+
+def test_book_plans_payload_keeps_cards(client, monkeypatch):
+    """方向卡批次全文入留痕:book_plans 列「换一批」即覆盖,产物不记就永久丢。"""
+    import json as _json
+    from unittest.mock import patch
+
+    from app.db.models import GenInput
+    from app.db.session import SessionLocal
+
+    r = client.post(
+        "/api/auth/register",
+        json={"username": "gi_cards_user", "password": "pass123", "invite_code": "test-invite"},
+    )
+    assert r.status_code == 200
+    headers = {"Authorization": f"Bearer {r.json()['token']}"}
+    r = client.post("/api/projects", headers=headers, json={"title": "卡史书"})
+    pid = r.json()["id"]
+
+    plans_json = _json.dumps({"plans": [
+        {"title": "甲方案", "kernel": "k1", "protagonist": "p1", "world": "w1",
+         "arc": "a1", "engine": "e1", "flavor": ["冷"], "scale": "长篇",
+         "scale_reason": "r", "label": "l1"},
+        {"title": "乙方案", "kernel": "k2", "protagonist": "p2", "world": "w2",
+         "arc": "a2", "engine": "e2", "flavor": ["燃"], "scale": "连载",
+         "scale_reason": "r2", "label": "l2"},
+    ]}, ensure_ascii=False)
+
+    class _Fake:
+        def __init__(self, payload):
+            self.payload = payload
+            self.last_prompt = ""
+
+        async def ask(self, prompt, system=None):
+            self.last_prompt = prompt
+            return self.payload
+
+    with patch("app.api.projects.plans.get_adapter_for", return_value=_Fake(plans_json)):
+        r = client.post(f"/api/projects/{pid}/book-plans", headers=headers,
+                        json={"mode": "serial", "topic": "一个点子", "genre": ""})
+    assert r.status_code == 200, r.text
+
+    with SessionLocal() as db:
+        row = (
+            db.query(GenInput).filter_by(kind="book-plans", project_id=pid)
+            .order_by(GenInput.id.desc()).first()
+        )
+        assert row is not None
+        cards = row.payload.get("cards")
+        assert isinstance(cards, list) and len(cards) == 2
+        assert cards[0]["title"] == "甲方案" and cards[1]["title"] == "乙方案"
+        # 归属用户(docs/37)
+        assert row.user_id is not None

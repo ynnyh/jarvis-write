@@ -11,6 +11,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from app.audit import record_gen_inputs
 from app.auth import get_current_user
 from app.engines.consistency.extractor import parse_llm_json
 from app.engines.tendency import get_catalog, get_node_catalog
@@ -79,6 +80,7 @@ _INFER_PROMPT = """\
 @router.post("/genre-infer", response_model=GenreInferResponse)
 async def genre_infer(req: GenreInferRequest) -> GenreInferResponse:
     """推断题材:概念文本 → 大类 + 最贴流派 + 同类推荐(规则本地算,零成本换一批)。"""
+    record_gen_inputs(kind="genre-infer", payload={"text": req.text})
     dim = _genre_dimension()
     categories = dim.get("categories") or []
     chips = dim.get("chips") or []

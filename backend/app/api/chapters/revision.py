@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_project_or_404
 from app.api.sse import STREAM_HEADERS, sse_event
+from app.audit import record_gen_inputs
 from app.chapter_versions import snapshot_chapter
 from app.db.models import Chapter, Outline
 from app.db.session import get_db
@@ -76,6 +77,12 @@ async def revise_discuss(
         .filter(Outline.project_id == project_id, Outline.chapter_number == chapter_number)
         .first()
     )
+    record_gen_inputs(
+        kind="revise-discuss", project_id=project_id,
+        payload={"chapter_number": chapter_number, "messages": req.messages},
+        db=db,
+    )
+    db.commit()
     try:
         result = await discuss_revision(
             req.messages,
@@ -117,6 +124,12 @@ async def revise_discuss_stream(
     blueprint = _blueprint_block(outline, chapter_number)
     chapter_block = ch.final_content
     messages = req.messages
+    record_gen_inputs(
+        kind="revise-discuss", project_id=project_id,
+        payload={"chapter_number": chapter_number, "messages": messages},
+        db=db,
+    )
+    db.commit()
 
     async def gen():
         try:
@@ -187,6 +200,12 @@ async def revise_annotated_async(
         {"para_idx": a.para_idx, "original": a.original.strip(), "note": a.note}
         for a in req.annotations
     ]
+    record_gen_inputs(
+        kind="revise-annotated", project_id=project_id,
+        payload={"chapter_number": chapter_number, "annotations": items},
+        db=db,
+    )
+    db.commit()
 
     async def work(progress):
         pairs = []
@@ -279,6 +298,12 @@ async def continue_chapter(
     text = (ch.final_content or ch.draft_content or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="本章还没有正文,先写或生成一段再续写")
+    record_gen_inputs(
+        kind="chapter-continue", project_id=project_id,
+        payload={"chapter_number": chapter_number, "note": req.note},
+        db=db,
+    )
+    db.commit()
 
     outline = (
         db.query(Outline)

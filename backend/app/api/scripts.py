@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.audit import record_gen_inputs
 from app.auth import get_current_user
 from app.db.models import Chapter, Project, Script, ScriptEpisode, User
 from app.db.session import get_db
@@ -320,6 +321,12 @@ async def generate_outline(
 ):
     """AI 生成分集大纲:清掉旧集,按 target_episodes 重建全部集大纲。"""
     s = _get_script(db, script_id, user)
+    record_gen_inputs(
+        kind="script-outline",
+        payload={"script_id": script_id, "target_episodes": s.target_episodes},
+        db=db,
+    )
+    db.commit()
     adapter = get_adapter_for(Task.SUMMARY, max_tokens=3000, timeout=180)
     try:
         episodes = await engine_generate_outline(adapter, s)
@@ -364,6 +371,15 @@ async def generate_episode(
     """
     s = _get_script(db, script_id, user)
     ep = _get_episode(db, script_id, n)
+    record_gen_inputs(
+        kind="script-episode",
+        payload={
+            "script_id": script_id, "episode_number": n,
+            "extra_direction": req.extra_direction,
+        },
+        db=db,
+    )
+    db.commit()
     draft_adapter = get_adapter_for(Task.DRAFT, max_tokens=4000, timeout=300)
     state_adapter = get_adapter_for(Task.SUMMARY, max_tokens=2000, timeout=180)
     try:
@@ -402,6 +418,12 @@ async def adapt_to_script(
     chapters = query.all()
     if not chapters:
         raise HTTPException(status_code=400, detail="没有可改编的定稿章节,先在小说里生成正文")
+    record_gen_inputs(
+        kind="script-adapt", project_id=project_id,
+        payload={"chapter_numbers": req.chapter_numbers, "target_episodes": req.target_episodes},
+        db=db,
+    )
+    db.commit()
 
     # 改编素材(2026-09-10 修):此前每章只取前 600 字纯头截断、总截 12000,
     # 一本书 80% 的内容在改编时凭空消失,且完全看不到本书基因 / 作者雷区 /

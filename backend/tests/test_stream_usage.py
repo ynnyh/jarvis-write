@@ -29,7 +29,7 @@ class _StreamAdapter:
     model_name = "test-stream-model"
 
     # 记账要落到真适配器的那套实现上(生产路径里 _record_usage 来自 LLMAdapter)
-    _record_usage = staticmethod(LLMAdapter._record_usage)
+    _record_usage = LLMAdapter._record_usage
 
     def __init__(self, parts: list[str]):
         self._parts = parts
@@ -92,7 +92,7 @@ def test_stream_estimate_is_character_based_and_marked():
 
     class _Stub:
         model_name = "test-est-model"
-        _record_usage = staticmethod(LLMAdapter._record_usage)
+        _record_usage = LLMAdapter._record_usage
 
     LLMAdapter.record_stream_estimate(_Stub(), "p" * 100, "o" * 400)
     with SessionLocal() as db:

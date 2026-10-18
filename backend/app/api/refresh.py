@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_project_or_404
+from app.audit import record_gen_inputs
 from app.auth import get_current_user
 from app.db.models import Chapter, Outline, Project
 from app.db.session import SessionLocal, get_db
@@ -158,6 +159,12 @@ async def light_refresh_async(
     busy = _chapter_job_busy(project_id)
     if busy:
         raise HTTPException(status_code=409, detail=f"已有章节任务在进行中({busy}),稍后再试。")
+    record_gen_inputs(
+        kind="refresh-light", project_id=project_id,
+        payload={"chapter_numbers": nums, "directive": directive},
+        db=db,
+    )
+    db.commit()
     job_id = create_job(f"refresh-{project_id}-light")
 
     async def work(progress) -> dict:
@@ -212,6 +219,12 @@ async def heavy_refresh_async(
     busy = _chapter_job_busy(project_id)
     if busy:
         raise HTTPException(status_code=409, detail=f"已有章节任务在进行中({busy}),稍后再试。")
+    record_gen_inputs(
+        kind="refresh-heavy", project_id=project_id,
+        payload={"chapter_numbers": nums, "directive": directive},
+        db=db,
+    )
+    db.commit()
     job_id = create_job(f"refresh-{project_id}-heavy")
 
     async def work(progress) -> dict:

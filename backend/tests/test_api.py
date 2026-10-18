@@ -1156,7 +1156,7 @@ class _DiscussAdapter:
         self.max_tokens = 8192
         self.captured: list = []
 
-    def _record_usage(self, resp):  # noqa: ANN001 — 记账在测试里是 no-op
+    def _record_usage(self, resp, duration_ms=0):  # noqa: ANN001 — 记账在测试里是 no-op
         pass
 
     async def complete(self, messages):

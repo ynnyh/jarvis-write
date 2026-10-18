@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_project_or_404
 from app.api.submission import _build_context_blocks
+from app.audit import record_gen_inputs
 from app.auth import get_current_user
 from app.db.models import Project
 from app.db.session import get_db
@@ -64,6 +65,16 @@ async def generate_cover(project_id: int, db: Session = Depends(get_db)):
     for jid, job in list_running(f"cover-{project_id}"):
         if job["kind"] == f"cover-{project_id}":
             return {"job_id": jid}
+    # 触发即记(去重命中早退不记);输入全部来自项目素材
+    record_gen_inputs(
+        kind="cover-prompt", project_id=project_id,
+        payload={
+            "title": project.title, "genre": project.genre, "topic": project.topic,
+            "concept": project.concept,
+            "core_seed": project.architecture.core_seed if project.architecture else "",
+            "synopsis": project.synopsis,
+        },
+    )
 
     prompt = COVER_PROMPT.format(**_build_context_blocks(db, project))
     # 提示词要求写细(中文六层 150-250 字 × 3 套 + 英文版),给足输出额度
@@ -99,6 +110,16 @@ async def generate_anthem(project_id: int, db: Session = Depends(get_db)):
     for jid, job in list_running(f"anthem-{project_id}"):
         if job["kind"] == f"anthem-{project_id}":
             return {"job_id": jid}
+    # 触发即记(去重命中早退不记);输入全部来自项目素材
+    record_gen_inputs(
+        kind="anthem-prompt", project_id=project_id,
+        payload={
+            "title": project.title, "genre": project.genre, "topic": project.topic,
+            "concept": project.concept,
+            "core_seed": project.architecture.core_seed if project.architecture else "",
+            "synopsis": project.synopsis,
+        },
+    )
 
     prompt = ANTHEM_PROMPT.format(**_build_context_blocks(db, project))
     # 中文音乐描述 + 歌词 + 逐条中文对照,输出额度比默认略宽

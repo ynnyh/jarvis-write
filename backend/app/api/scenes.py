@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_project_or_404
+from app.audit import record_gen_inputs
 from app.auth import get_current_user
 from app.db.models import Outline, Project, Scene
 from app.db.session import get_db
@@ -271,6 +272,14 @@ async def regenerate_scene(
         if s.seq < scene.seq:
             previous = s.content or previous
 
+    record_gen_inputs(
+        kind="scene-regen", project_id=project_id,
+        payload={
+            "directive": (req.directive if req else ""),
+            "chapter_number": scene.chapter_number, "seq": scene.seq,
+        },
+        db=db,
+    )
     try:
         scene.content = await write_scene(
             db, project, scene,

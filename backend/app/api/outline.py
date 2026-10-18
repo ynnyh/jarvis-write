@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_project_or_404
+from app.audit import record_gen_inputs
 from app.auth import get_current_user
 from app.db.models import Chapter, Outline, OutlineVersion, Project
 from app.db.session import SessionLocal, get_db
@@ -217,6 +218,12 @@ async def discuss(
     """
     project = get_project_or_404(db, project_id)
     outline = _outline(db, project_id, chapter_number)
+    record_gen_inputs(
+        kind="outline-discuss", project_id=project_id,
+        payload={"chapter_number": chapter_number, "messages": req.messages},
+        db=db,
+    )
+    db.commit()
 
     neighbors = (
         db.query(Outline)
@@ -281,6 +288,12 @@ async def retitle(
     """基于本章大纲生成若干候选标题(不落库)。作者选定后走 PUT 只改 title。"""
     project = get_project_or_404(db, project_id)
     outline = _outline(db, project_id, chapter_number)
+    record_gen_inputs(
+        kind="outline-retitle", project_id=project_id,
+        payload={"chapter_number": chapter_number, "directive": req.directive},
+        db=db,
+    )
+    db.commit()
     try:
         titles = await suggest_chapter_titles(
             chapter_number=chapter_number,
@@ -342,6 +355,15 @@ async def retitle_all(
     outlines = q.order_by(Outline.chapter_number).all()
     if not outlines:
         raise HTTPException(status_code=404, detail="还没有章节大纲")
+    record_gen_inputs(
+        kind="outline-retitle", project_id=project_id,
+        payload={
+            "chapter_numbers": req.chapter_numbers, "title_style": req.title_style,
+            "directive": req.directive,
+        },
+        db=db,
+    )
+    db.commit()
     chapters = [
         {"chapter_number": o.chapter_number, "title": o.title, "summary": o.summary}
         for o in outlines
@@ -393,6 +415,12 @@ async def impact(
     """分析最新一次改动对下游的影响。只分析,不改任何数据。"""
     project = get_project_or_404(db, project_id)
     outline = _outline(db, project_id, chapter_number)
+    record_gen_inputs(
+        kind="outline-impact", project_id=project_id,
+        payload={"chapter_number": chapter_number},
+        db=db,
+    )
+    db.commit()
     result = await analyze_impact(db, project, outline)
     locked_set = {
         o.chapter_number
@@ -420,6 +448,12 @@ async def impact_async(
     for jid, job in list_running(f"impact-{project_id}-"):
         if job["kind"] == f"impact-{project_id}-{chapter_number}":
             return {"job_id": jid}
+    record_gen_inputs(
+        kind="outline-impact", project_id=project_id,
+        payload={"chapter_number": chapter_number},
+        db=db,
+    )
+    db.commit()
 
     async def work(progress):
         progress(f"分析第 {chapter_number} 章改动的下游影响")
@@ -461,6 +495,15 @@ async def cascade(
 ):
     """级联重生成用户勾选的章节大纲(用户拍板后才调用)。"""
     project = get_project_or_404(db, project_id)
+    record_gen_inputs(
+        kind="outline-cascade", project_id=project_id,
+        payload={
+            "source_chapter": req.source_chapter, "chapter_numbers": req.chapter_numbers,
+            "reasons": req.reasons, "tendency": req.tendency,
+        },
+        db=db,
+    )
+    db.commit()
     try:
         result = await cascade_regenerate(
             db,
@@ -497,6 +540,15 @@ async def cascade_async(
     for jid, job in list_running(f"cascade-{project_id}"):
         if job["kind"] == f"cascade-{project_id}":
             return {"job_id": jid}
+    record_gen_inputs(
+        kind="outline-cascade", project_id=project_id,
+        payload={
+            "source_chapter": req.source_chapter, "chapter_numbers": req.chapter_numbers,
+            "reasons": req.reasons, "tendency": req.tendency,
+        },
+        db=db,
+    )
+    db.commit()
 
     async def work(progress):
         progress(f"级联重生成 {len(req.chapter_numbers)} 章大纲")

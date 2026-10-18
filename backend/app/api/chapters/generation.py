@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_project_or_404
+from app.audit import record_gen_inputs
 from app.db.models import Chapter, ChapterOrder, Outline, Project
 from app.db.session import SessionLocal, get_db
 from app.engines.pipeline.chapter import generate_chapter
@@ -70,6 +71,19 @@ async def generate(
 ):
     """生成一章(草稿/定稿/检查/抽取/摘要,多次 LLM 调用,耗时较长)。"""
     project = get_project_or_404(db, project_id)
+    if req.revision.strip():
+        record_gen_inputs(
+            kind="chapter-revision", project_id=project_id,
+            payload={"chapter_number": chapter_number, "revision": req.revision.strip()},
+            db=db,
+        )
+    else:
+        record_gen_inputs(
+            kind="chapter-generate", project_id=project_id,
+            payload={"chapter_number": chapter_number, "tendency": req.tendency},
+            db=db,
+        )
+    db.commit()
     try:
         chapter, issues, stats, guard_result, review_result, preflight = (
             await generate_chapter(
@@ -165,6 +179,12 @@ async def generate_queue(
             status_code=409,
             detail=f"已有章节任务在进行中({busy[0][1]['stage']}),等它完成再排队。",
         )
+    record_gen_inputs(
+        kind="chapter-queue", project_id=project_id,
+        payload={"chapter_numbers": req.chapter_numbers, "tendency": req.tendency},
+        db=db,
+    )
+    db.commit()
     job_id = create_job(f"chapter-{project_id}-queue")
 
     async def runner() -> None:

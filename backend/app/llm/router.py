@@ -288,10 +288,19 @@ def get_adapter_for(task: Task, **overrides) -> LLMAdapter:
         overrides["temperature"] = _TASK_TEMPERATURE[task]
     if "max_tokens" not in overrides and task in _TASK_MAX_TOKENS:
         overrides["max_tokens"] = _TASK_MAX_TOKENS[task]
-    if cfg.get("id") is not None:
-        return create_llm_adapter(config_id=cfg["id"], **overrides)
-    # .env 兜底的配置没有 id,按协议名走旧路径
-    return create_llm_adapter(cfg["interface_format"], **overrides)
+    # 环节打标(docs/37):llm_usage.task / llm_retries.label 的归因源头。
+    # 设在实例上而非工厂参数,零侵入;鸭子类型的假适配器(测试)setattr 也不炸。
+    adapter = (
+        create_llm_adapter(config_id=cfg["id"], **overrides)
+        if cfg.get("id") is not None
+        # .env 兜底的配置没有 id,按协议名走旧路径
+        else create_llm_adapter(cfg["interface_format"], **overrides)
+    )
+    try:
+        adapter.task_label = task.value
+    except Exception:  # noqa: BLE001 — 打标失败不影响生成
+        pass
+    return adapter
 
 
 def tier_of(task: Task) -> Tier:

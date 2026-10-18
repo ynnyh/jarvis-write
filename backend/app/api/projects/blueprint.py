@@ -414,6 +414,14 @@ async def extend_blueprint_async(project_id: int, db: Session = Depends(get_db))
     for jid, _job in list_running(f"blueprint-{project_id}"):
         if _job["kind"] == f"blueprint-{project_id}":
             return {"job_id": jid}
+    # 触发即记:请求体没有用户输入,记触发时的规划状态(含连载自动续订)
+    record_gen_inputs(
+        kind="blueprint-extend", project_id=project_id,
+        payload={
+            "planned_upto": planned_upto, "renewed_to": renewed_to,
+            "target_chapters": project.target_chapters, "open_ended": project.open_ended,
+        },
+    )
     job_id = create_job(f"blueprint-{project_id}")
 
     async def runner() -> None:

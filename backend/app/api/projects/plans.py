@@ -333,6 +333,9 @@ async def book_plans(
         payload={
             "topic": req.topic, "genre": req.genre, "mode": mode,
             "answers": req.answers, "feedback": req.feedback, "avoid": req.avoid,
+            # 本批卡全文入留痕(docs/37):book_plans 列「换一批」即整组覆盖,
+            # 不记产物的话,被摇掉的上一批就永久丢了——每一批都有人不喜欢过
+            "cards": [p.model_dump() for p in plans],
         },
         db=db,
     )

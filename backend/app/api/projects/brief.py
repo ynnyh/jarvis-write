@@ -105,6 +105,12 @@ async def brief_chat(
     clean = req.message.strip()[:_CHAT_USER_MAX]
     history = [m for m in (project.chat_log or []) if isinstance(m, dict)]
     thread = history + [{"role": "user", "content": clean}]
+    record_gen_inputs(
+        kind="brief-chat", project_id=project_id,
+        payload={"message": clean},
+        db=db,
+    )
+    db.commit()
 
     style_block = render_style_block(assemble_tendency("outline", project.global_tendency or {}))
     style_block += dna_block_of(project.dna)

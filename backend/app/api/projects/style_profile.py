@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.audit import record_gen_inputs
 from app.db.models import Chapter, Project
 from app.db.session import get_db
 from app.llm.router import Task, get_adapter_for
@@ -154,6 +155,11 @@ async def absorb_style_profile(
     project = _get_project_or_404(db, project_id)
     current = _read_profile(project)
     directive = req.directive.strip()
+    # 作者的创作主张是这里最重要的输入,吸收成败都要能复盘
+    record_gen_inputs(
+        kind="style-absorb", project_id=project.id,
+        payload={"directive": req.directive}, db=db,
+    )
     try:
         adapter = get_adapter_for(Task.SUMMARY)
         prompt = PROFILE_ABSORB_PROMPT.format(
@@ -233,6 +239,11 @@ async def extract_style_profile(project_id: int, db: Session = Depends(get_db)):
     context = _build_extract_context(db, project)
     if len(context.strip()) < 20:
         raise HTTPException(status_code=400, detail="这本书还没有内容,先写点再来提炼")
+    # 输入是本书已有内容,记元数据即可(正文不进留痕库)
+    record_gen_inputs(
+        kind="style-extract", project_id=project.id,
+        payload={"topic": project.topic, "context_chars": len(context)}, db=db,
+    )
     try:
         adapter = get_adapter_for(Task.SUMMARY)
         extracted = _parse_profile_json(

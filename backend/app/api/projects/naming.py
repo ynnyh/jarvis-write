@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.audit import record_gen_inputs
 from app.db.session import get_db
 from app.engines.tendency import assemble_tendency
 from app.engines.tendency.assembler import render_style_block
@@ -106,6 +107,14 @@ async def suggest_titles(req: TitleSuggestRequest):
     这里不再自己预检一遍:那份预检走的是「按协议名取最早一套配置」的旧路径,
     和真正发请求用的配置会分叉。
     """
+    record_gen_inputs(
+        kind="naming", project_id=req.project_id,
+        payload={
+            "topic": req.topic, "genre": req.genre,
+            "concept": req.concept.model_dump() if req.concept else None,
+            "avoid": req.avoid,
+        },
+    )
     prompt = _title_prompt(req)
     adapter = _title_adapter()
     try:
@@ -135,6 +144,15 @@ async def suggest_titles_async(req: TitleSuggestRequest):
     prompt = _title_prompt(req)
     # 未配置 key 时工厂层抛 400——放在 spawn_job 之前,让它同步冒出去
     adapter = _title_adapter()
+    # 留痕放 handler(不在 worker 里):同步/异步同一次动作口径一致
+    record_gen_inputs(
+        kind="naming", project_id=req.project_id,
+        payload={
+            "topic": req.topic, "genre": req.genre,
+            "concept": req.concept.model_dump() if req.concept else None,
+            "avoid": req.avoid,
+        },
+    )
 
     async def work(progress):
         progress("AI 正在起书名")
@@ -182,6 +200,14 @@ async def generate_synopsis(
         if project.architecture and project.architecture.core_seed.strip()
         else ""
     )
+    # 只读端点不传 db(请求会话不会 commit),让 helper 自己开短会话落库
+    record_gen_inputs(
+        kind="synopsis", project_id=project_id,
+        payload={
+            "title": project.title, "genre": project.genre,
+            "topic": project.topic, "core_seed": core_seed,
+        },
+    )
     prompt = _SYNOPSIS_PROMPT.format(
         title=project.title,
         genre=project.genre.strip() or "不限",
@@ -228,6 +254,14 @@ async def generate_synopsis_async(project_id: int, db: Session = Depends(get_db)
         style_block=render_style_block(
             assemble_tendency("outline", project.global_tendency)
         ),
+    )
+    # 留痕放 handler:去重命中早退时不记(没有发起新生成);只读端点不传 db
+    record_gen_inputs(
+        kind="synopsis", project_id=project_id,
+        payload={
+            "title": project.title, "genre": project.genre,
+            "topic": project.topic, "core_seed": core_seed,
+        },
     )
     adapter = get_adapter_for(Task.SYNOPSIS, max_tokens=600, timeout=120)
 
