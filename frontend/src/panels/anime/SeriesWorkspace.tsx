@@ -318,6 +318,8 @@ function EpisodePanel({ series, episode, meta, onEpisode }: {
   const [shots, setShots] = useState<AnimeShot[]>(episode.shots);
   const [shotsDirty, setShotsDirty] = useState(false);
   const [segS, setSegS] = useState<15 | 30>(15);
+  // 出片目标(视频站方言):只对镜头卡工艺生效——生成时按目标站重排每镜块
+  const [targetM, setTargetM] = useState("");
   const [busy, setBusy] = useState("");
   // 镜头卡渲染工艺包(docs/21)启用时,整集提示词是逐镜镜头卡(一镜一卡+首帧图生视频);
   // 停用则回退旧分段长文。包状态只在设置页能改,拉一次足够。
@@ -544,6 +546,16 @@ function EpisodePanel({ series, episode, meta, onEpisode }: {
                       onChange={(e) => editShot(i, { action_desc: e.target.value })} />
                   </div>
                   <div className="field">
+                    <label className="fl">起点画面<span className="hint">第一帧</span></label>
+                    <input maxLength={60} value={s.start_state ?? ""} placeholder="谁在哪、什么姿态"
+                      onChange={(e) => editShot(i, { start_state: e.target.value })} />
+                  </div>
+                  <div className="field">
+                    <label className="fl">终点画面<span className="hint">动作落定</span></label>
+                    <input maxLength={60} value={s.end_state ?? ""} placeholder="停在什么上"
+                      onChange={(e) => editShot(i, { end_state: e.target.value })} />
+                  </div>
+                  <div className="field">
                     <label className="fl">台词</label>
                     <input maxLength={200} value={s.dialogue} placeholder="没有就留空"
                       onChange={(e) => editShot(i, { dialogue: e.target.value })} />
@@ -574,7 +586,7 @@ function EpisodePanel({ series, episode, meta, onEpisode }: {
       <FilmPromptCard
         load={() => animeApi.getFilmPrompt(episode.id, series.workspace).then((r) => r.film_prompt)}
         save={(t) => animeApi.saveFilmPrompt(episode.id, t, series.workspace).then((r) => r.film_prompt)}
-        generate={() => animeApi.buildFilmPrompt(episode.id, segS, series.workspace)}
+        generate={() => animeApi.buildFilmPrompt(episode.id, segS, series.workspace, targetM)}
         jobKind={`anime-fp-${episode.id}`}
         ready={hasShots && !episode.creative_stale && !episode.script?.stale}
         readyHint="先确认简介并展开分镜,才有原料组装整集提示词"
@@ -583,11 +595,24 @@ function EpisodePanel({ series, episode, meta, onEpisode }: {
           : "文档已按段切好:逐段复制贴进视频模型,生成完按段号拼接"}
         usageHint={shotcardOn
           ? "镜头卡制:一镜一卡,画面卡 60-120 字只讲一个镜头怎么拍;运动卡零外貌词,长相由首帧钉死;负面词逐镜独立。文档头附每位角色的定妆照提示词——先文生图定妆,再逐镜图生视频,按镜号拼接成片。"
-          : <>提示词由分镜+卡司定妆+画风锚组装,细节全部写死:{meta?.max_shots ?? 40} 镜以内,
+          : <>提示词由分镜+卡司定妆+画风锚组装,细节全部写死:
+            {/* 镜数上限随时长放大,与后端 shot_cap_for 同式:max(40, 时长/3.5+8) */}
+            {Math.max(meta?.max_shots ?? 40, Math.round((series.episode_s || 60) / 3.5) + 8)} 镜以内,
             每段开头复述画风锚,出镜角色的定妆逐字注入——跨段形象不漂移。逐段复制贴进视频模型,
             生成完按段号拼接;也可以把自己写好的版本整段粘贴进来保存。</>}
         headerExtra={shotcardOn ? (
-          <span className="skill-entry-meta">镜头卡模式(设置页可切回旧分段式)</span>
+          <>
+            <span className="skill-entry-meta">镜头卡模式(设置页可切回旧分段式)</span>
+            <select value={targetM} title="出片目标:按你用的视频站重排每镜提示词结构与粘贴方式"
+              onChange={(e) => setTargetM(e.target.value)}
+              style={{ padding: "2px 6px" }}>
+              {(meta?.targets ?? [{ key: "", label: "出片目标:通用", tip: "" }]).map((t) => (
+                <option key={t.key} value={t.key}>
+                  出片目标:{t.label}{t.tip ? `(${t.tip})` : ""}
+                </option>
+              ))}
+            </select>
+          </>
         ) : (
           <select value={segS} title="单段时长上限:外部模型单次生成的上限"
             onChange={(e) => setSegS(Number(e.target.value) as 15 | 30)}

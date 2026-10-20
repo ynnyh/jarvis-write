@@ -188,7 +188,9 @@ def test_anime_meta(client):
     keys = [g["key"] for g in m["genres"]]
     assert "comedy" in keys and len(keys) >= 5
     assert all(d["key"] != "auto" for d in m["directions"])
-    assert m["episode_s"] == [60, 90]
+    assert m["episode_s"] == {"min": 20}
+    # 出片目标(视频站方言)目录:通用 + 即梦/可灵/MiniMax H3
+    assert [t["key"] for t in m["targets"]] == ["", "jimeng", "kling", "minimax-h3"]
 
 
 def test_anime_create_validations(client):
@@ -197,8 +199,14 @@ def test_anime_create_validations(client):
     assert r.status_code == 400
     r = client.post("/api/anime", headers=headers, json={"direction": "auto"})
     assert r.status_code == 400
-    r = client.post("/api/anime", headers=headers, json={"episode_s": 45})
-    assert r.status_code == 400
+    # 每集时长:只卡下限 20 秒(管线物理极限),上不封顶
+    for bad in (5, 19):
+        r = client.post("/api/anime", headers=headers, json={"episode_s": bad})
+        assert r.status_code == 400, bad
+    for ok in (20, 45, 60, 90, 180, 600):
+        sid = _mk_series(client, headers, episode_s=ok)
+        got = client.get(f"/api/anime/{sid}", headers=headers)
+        assert got.json()["series"]["episode_s"] == ok
 
 
 def test_anime_series_crud_and_ownership(client):
@@ -213,6 +221,10 @@ def test_anime_series_crud_and_ownership(client):
     r = client.patch(f"/api/anime/{sid}", headers=headers,
                      json={"title": "饭团小厨房·第二季", "episode_s": 90})
     assert r.status_code == 200 and r.json()["series"]["episode_s"] == 90
+    r = client.patch(f"/api/anime/{sid}", headers=headers, json={"episode_s": 300})
+    assert r.status_code == 200 and r.json()["series"]["episode_s"] == 300
+    assert client.patch(f"/api/anime/{sid}", headers=headers,
+                        json={"episode_s": 19}).status_code == 400
 
     other = _auth(client, "anime_crud_other")
     assert client.get(f"/api/anime/{sid}", headers=other).status_code == 404
@@ -470,6 +482,66 @@ def test_anime_film_prompt_shotcards(client):
 
     other = _auth(client, "anime_fp_other")
     assert client.get(f"/api/anime/episodes/{eid}/film-prompt", headers=other).status_code == 404
+
+
+def test_anime_film_prompt_shotcard_dialect_targets(client):
+    """出片目标(视频站方言):按目标站重排每镜块+文档头挂图说明+方言要点进生成 prompt。"""
+    headers = _auth(client, "anime_fp_dialect")
+    sid, eid, _adapter = _prepared_episode(client, headers)
+
+    # 不在支持列表:400
+    r = client.post(f"/api/anime/episodes/{eid}/film-prompt", headers=headers,
+                    json={"segment_s": 15, "target": "foo"})
+    assert r.status_code == 400
+
+    adapter = _FakeAdapter(_FILM_REPLY)
+    with patch("app.engines.anime.episodes.get_adapter_for", return_value=adapter):
+        r = client.post(f"/api/anime/episodes/{eid}/film-prompt", headers=headers,
+                        json={"segment_s": 15, "target": "minimax-h3"})
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    doc = client.get(f"/api/anime/episodes/{eid}/film-prompt", headers=headers).json()["film_prompt"]
+    assert "目标:MiniMax H3" in doc
+    assert "subject_definitions:" in doc and "retention_analysis:" in doc
+    assert "<d>[Chinese]「包在我身上!」(阿丸" in doc  # 对白进 <d>[Chinese],逐字保留
+    assert "【节奏体检】" in doc  # P2 轻量:近景占比/平均镜长/固定运镜体检行
+    assert "出片目标是 MiniMax H3" in adapter.prompts[-1]  # 方言要点进生成 prompt
+
+    adapter2 = _FakeAdapter(_FILM_REPLY)
+    with patch("app.engines.anime.episodes.get_adapter_for", return_value=adapter2):
+        r = client.post(f"/api/anime/episodes/{eid}/film-prompt", headers=headers,
+                        json={"segment_s": 15, "target": "jimeng"})
+        job = _wait_job(client, headers, r.json()["job_id"])
+    assert job["status"] == "done", job
+    doc2 = client.get(f"/api/anime/episodes/{eid}/film-prompt", headers=headers).json()["film_prompt"]
+    assert "目标:即梦" in doc2 and "提示词:" in doc2
+    assert "画面卡:" not in doc2  # 方言重排:不再是通用格式的分轨
+
+
+def test_anime_shots_start_end_roundtrip(client):
+    """分镜起止双状态:手改保存归一保留(运动卡/方言层从这对状态长出来)。"""
+    headers = _auth(client, "anime_fp_se")
+    sid, eid, _adapter = _prepared_episode(client, headers)
+    body = {"shots": [
+        {"seq": i, "shot_type": "中景", "camera": "固定", "duration_s": 3,
+         "action_desc": f"第{i}镜:阿丸在灶台前颠勺", 
+         "start_state": "阿丸站灶台前,双手握锅铲",
+         "end_state": "蛋翻起又落回锅里,蒸汽散开",
+         "dialogue": "", "speaker": "", "characters": ["阿丸"], "sfx": ""}
+        for i in range(1, 6)
+    ]}
+    r = client.put(f"/api/anime/episodes/{eid}/shots", headers=headers, json=body)
+    assert r.status_code == 200, r.text
+    got = r.json()["episode"]["shots"]
+    assert got[0]["start_state"] == "阿丸站灶台前,双手握锅铲"
+    assert got[0]["end_state"] == "蛋翻起又落回锅里,蒸汽散开"
+    # 老数据缺字段:归一成空串不炸
+    body2 = {"shots": [{**body["shots"][0], "start_state": None}, *body["shots"][1:]]}
+    body2["shots"][0].pop("end_state")
+    r2 = client.put(f"/api/anime/episodes/{eid}/shots", headers=headers, json=body2)
+    assert r2.status_code == 200
+    s0 = r2.json()["episode"]["shots"][0]
+    assert s0["start_state"] == "" and s0["end_state"] == ""
 
 
 def test_anime_film_prompt_legacy_when_pack_disabled(client):

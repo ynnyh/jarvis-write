@@ -5,7 +5,7 @@ import json
 import re
 import math
 
-from app.engines.anime.common import AnimeError, cast_block, episode_dict
+from app.engines.anime.common import AnimeError, cast_block, episode_dict, episode_token_budget
 from app.engines.creative import render_goal
 from app.engines.consistency.extractor import parse_llm_json
 from app.llm.router import Task, get_adapter_for
@@ -51,13 +51,19 @@ def normalize_script(data: dict, series, episode) -> dict:
                 pause = float(line.get("pause_s", 0))
             except (ValueError, TypeError, OverflowError):
                 raise AnimeError("节拍时长格式不对") from None
-            if not math.isfinite(pause) or not 1 <= duration <= 20 or not 0 <= pause <= duration or len(text) > (duration - pause) * 5:
+            # 语速预算 4 可发声字/秒(含换气):按音频原生模型实测口径收紧
+            # (MiniMax H3 中文小样本约 4.1 字/秒,对标 drama-skills 的产线经验)
+            if not math.isfinite(pause) or not 1 <= duration <= 20 or not 0 <= pause <= duration or len(text) > (duration - pause) * 4:
                 raise AnimeError("对白与停顿装不进节拍时长，请减少台词或留足时间")
             total += duration
             count += 1
             lines.append({"speaker": speaker, "text": text, "action": action, "duration_s": duration, "pause_s": pause})
         clean.append({"slug": str(scene.get("slug") or "")[:100], "purpose": str(scene.get("purpose") or "")[:150], "lines": lines})
-    if not 4 <= count <= 60 or abs(total - int(series.episode_s or 60)) > 8:
+    target_s = int(series.episode_s or 60)
+    # 长集口径:节拍上限与总时长容差随时长放大,180 秒按 3 秒/拍也要装得下
+    beat_cap = max(60, target_s // 2)
+    tol = max(8, target_s // 15)
+    if not 4 <= count <= beat_cap or abs(total - target_s) > tol:
         raise AnimeError(f"剧本{count}个节拍、{total}秒，与目标时长不匹配")
     return {"title": str(data.get("title") or episode.title or "")[:60], "scenes": clean,
             "goal_version": (series.creative_goal or {}).get("version", 0), "total_s": total,
@@ -83,21 +89,25 @@ async def gen_script(db, series, episode, progress=lambda s: None, feedback: str
         raise AnimeError("先定好本集简介，再试写完整短剧本")
     if episode.creative_stale:
         raise AnimeError("方向已经变更，请先按新方向重新打磨并确认简介")
-    prompt = """你是短剧编剧。按已选方向把简介写成完整可演剧本，不能只列梗概。
+    target_s = int(series.episode_s or 60)
+    tol = max(8, target_s // 15)
+    prompt = f"""你是短剧编剧。按已选方向把简介写成完整可演剧本，不能只列梗概。
 每个场次明确人物想得到什么、如何说话/行动以及对方怎样接招；笑点或情绪落点必须在实际台词动作里发生。
 独立喜剧以人物一本正经的目的、信息差和误导为主，不用身份揭晓打脸替代包袱，不用旁白解释哪里好笑。
 连续剧情保留追剧线索；生活剧允许克制；多段子合集分场独立起落，演员可以饰演不同职业但用已登记名字标说话人。
 不要套万能四拍，也不要所有台词带肢体反应；给反应和停顿留时间，落点后及时结束。
 只借鉴参考的机制，不复刻情节、角色和标志台词。禁止新增未定妆的角色。
-输出 JSON：{"title":"","scenes":[{"slug":"内·地点·日","purpose":"本场作用","lines":[{"speaker":"已定妆名字；无台词为空","text":"实际对白","action":"可演动作","duration_s":5,"pause_s":0}]}]}。
-每节拍1—20秒，pause_s计入duration_s，台词按正常说话速度；总时长接近目标±8秒。
+输出 JSON：{{"title":"","scenes":[{{"slug":"内·地点·日","purpose":"本场作用","lines":[{{"speaker":"已定妆名字；无台词为空","text":"实际对白","action":"可演动作","duration_s":5,"pause_s":0}}]}}]}}。
+每节拍1—20秒，pause_s计入duration_s，台词按每秒约4个可发声字（含换气）的语速排进节拍时长，一句装不进就给足时长；总时长接近目标±{tol}秒。
 """ + render_goal(series.creative_goal, "完整剧本") + f"\n目标：{series.episode_s}秒\n设定：{series.premise}\n简介：{episode.synopsis}\n卡司：{cast_block(episode_cast(series, episode))}\n作者反馈：{feedback[:1000]}"
     if episode.script and not episode.script.get("stale") and feedback.strip():
         prompt += "\n旧剧本（未要求的有效铺垫与事实保留）：" + json.dumps(episode.script, ensure_ascii=False)
     progress("正在试写可演的完整短剧本…")
     for attempt in range(2):
         try:
-            data = parse_llm_json(await get_adapter_for(Task.ANIME_TAKES, max_tokens=8000, timeout=300).ask(prompt))
+            data = parse_llm_json(await get_adapter_for(
+                Task.ANIME_TAKES, max_tokens=episode_token_budget(target_s), timeout=300,
+            ).ask(prompt))
             result = save_script(episode, series, {**data, "feedback": feedback})
             db.commit()
             return result

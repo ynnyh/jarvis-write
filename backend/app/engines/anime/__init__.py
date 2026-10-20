@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 """动画短剧引擎:固定卡司的原创系列动画,按集出点子/聊简介/分镜/整集分段提示词。"""
 from app.engines.anime.common import (
+    EPISODE_S_MIN,
     MAX_SHOTS,
     PREMISE_MAX,
     TITLE_MAX,
-    VALID_EPISODE_S,
     AnimeError,
     episode_dict,
     genre_of,
@@ -29,10 +29,10 @@ from app.engines.anime.episodes import (
 
 __all__ = [
     "AnimeError",
+    "EPISODE_S_MIN",
     "MAX_SHOTS",
     "PREMISE_MAX",
     "TITLE_MAX",
-    "VALID_EPISODE_S",
     "anime_chat",
     "build_film_prompt",
     "confirm_synopsis",

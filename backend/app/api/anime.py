@@ -37,11 +37,11 @@ from app.auth import assert_project_owner, get_current_user
 from app.db.models import AnimeEpisode, AnimeSeries
 from app.db.session import get_db
 from app.engines.anime import (
+    EPISODE_S_MIN,
     MAX_SHOTS,
     AnimeError,
     PREMISE_MAX,
     TITLE_MAX,
-    VALID_EPISODE_S,
     anime_chat,
     build_film_prompt,
     confirm_synopsis,
@@ -60,6 +60,7 @@ from app.engines.anime import (
     valid_genres,
 )
 from app.engines.media.directions import DIRECTIONS, VALID_DIRECTIONS, direction_directive
+from app.engines.media.dialects import target_meta, valid_target
 from app.engines.anime.screenplay import episode_cast, gen_script, invalidate_script, save_script, validate_script_shots
 from app.jobs import list_running, spawn_job
 
@@ -143,8 +144,9 @@ class ShotsIn(BaseModel):
 
 
 class FilmPromptGenIn(BaseModel):
-    """整集提示词生成参数:单段时长上限(外部模型单次生成的现实上限)。"""
+    """整集提示词生成参数:单段时长上限(外部模型单次生成的现实上限)+ 出片目标(视频站方言)。"""
     segment_s: int = Field(default=15)
+    target: str = ""
 
 
 class FilmPromptIn(BaseModel):
@@ -176,10 +178,11 @@ def _check_direction(direction: str) -> str:
 
 
 def _check_episode_s(episode_s: int) -> int:
-    if episode_s not in VALID_EPISODE_S:
+    # 上不封顶(用户拍板):只卡管线物理下限,更短的点子属于系列短片线
+    if episode_s < EPISODE_S_MIN:
         raise HTTPException(
             status_code=400,
-            detail=f"每集时长只支持 {' / '.join(str(s) for s in VALID_EPISODE_S)} 秒。",
+            detail=f"每集时长至少 {EPISODE_S_MIN} 秒;更短的点子建议走系列短片线。",
         )
     return episode_s
 
@@ -229,7 +232,7 @@ def _current(ep):
 
 @router.get("/meta")
 def meta():
-    """目录一次下发:类型节奏库、画风方向(去 auto)、每集时长档、切段上限。"""
+    """目录一次下发:类型节奏库、画风方向(去 auto)、每集时长下限(上不封顶)、切段上限。"""
     return {
         "genres": [
             {"key": g["key"], "label": g["label"], "framing": g["framing"]}
@@ -239,8 +242,9 @@ def meta():
             {"key": d["key"], "label": d["label"], "tip": d.get("tip", "")}
             for d in DIRECTIONS if d["key"] != "auto"
         ],
-        "episode_s": list(VALID_EPISODE_S),
+        "episode_s": {"min": EPISODE_S_MIN},
         "segment_s": [15, 30],
+        "targets": target_meta(),
         "max_shots": MAX_SHOTS,
     }
 
@@ -621,7 +625,7 @@ def put_shots(eid: int, body: ShotsIn, db: Session = Depends(get_db)):
     _idle(eid)
     _current(row)
     try:
-        row.shots = save_shots(row, body.shots)
+        row.shots = save_shots(row, body.shots, total_s=int(_series.episode_s or 60))
         if row.script and not row.script.get("stale"):
             validate_script_shots(row.shots, row.script, episode_cast(_series, row))
     except AnimeError as e:
@@ -642,6 +646,9 @@ async def build_film_prompt_route(eid: int, body: FilmPromptGenIn | None = None,
     segment_s = (body.segment_s if body else 15) or 15
     if segment_s not in (15, 30):
         raise HTTPException(status_code=400, detail="单段时长只支持 15 / 30 秒。")
+    target = (body.target if body else "") or ""
+    if not valid_target(target):
+        raise HTTPException(status_code=400, detail="出片目标不在支持列表里。")
     kind = f"anime-fp-{eid}"
     for jid, job in list_running("anime-"):
         if job["kind"] == kind:
@@ -656,7 +663,7 @@ async def build_film_prompt_route(eid: int, body: FilmPromptGenIn | None = None,
             if ep is None:
                 raise ValueError("这一集已被删除,任务取消。")
             sr = session.get(AnimeSeries, ep.series_id)
-            return await build_film_prompt(session, sr, ep, progress, segment_s=segment_s)
+            return await build_film_prompt(session, sr, ep, progress, segment_s=segment_s, target=target)
 
     return {"job_id": spawn_job(kind, work)}
 

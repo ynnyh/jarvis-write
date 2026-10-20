@@ -27,6 +27,8 @@ function SeriesList({ workspace }: { workspace: AnimeWorkspace }) {
   const [direction, setDirection] = useState("chibi");
   const [episodeS, setEpisodeS] = useState(60);
   const [creating, setCreating] = useState(false);
+  // 每集时长下限(meta 下发;上不封顶,后端只卡管线物理下限,提交前就地夹住)
+  const durMin = meta?.episode_s.min ?? 20;
   // 没灵感:AI 出的系列设定点子(点一条回填设定框)
   const [ideas, setIdeas] = useState<string[]>([]);
   const [ideaBusy, setIdeaBusy] = useState(false);
@@ -57,7 +59,8 @@ function SeriesList({ workspace }: { workspace: AnimeWorkspace }) {
     try {
       const r = await animeApi.create({
         title: title.trim() || "未命名系列",
-        premise: premise.trim(), genre, direction, episode_s: episodeS,
+        premise: premise.trim(), genre, direction,
+        episode_s: Math.max(durMin, episodeS || durMin),
         workspace,
       });
       toast.ok("系列已建", "下一步:让 AI 设计固定卡司(1 主角 + 2-3 配角)");
@@ -103,12 +106,9 @@ function SeriesList({ workspace }: { workspace: AnimeWorkspace }) {
               onChange={(e) => setTitle(e.target.value)} placeholder={original ? "如「体面合租屋」" : "如「饭团小厨房」"} />
           </div>
           <div className="field">
-            <label className="fl" htmlFor="an-dur">每集时长</label>
-            <select id="an-dur" value={episodeS} onChange={(e) => setEpisodeS(Number(e.target.value))}>
-              {(meta?.episode_s ?? [60, 90]).map((s) => (
-                <option key={s} value={s}>{s} 秒</option>
-              ))}
-            </select>
+            <label className="fl" htmlFor="an-dur">每集时长<span className="hint">最短 20 秒,上不封顶</span></label>
+            <input id="an-dur" type="number" min={durMin} value={episodeS}
+              onChange={(e) => setEpisodeS(Number(e.target.value))} />
           </div>
           <div className="field field-full">
             <label className="fl" htmlFor="an-premise">

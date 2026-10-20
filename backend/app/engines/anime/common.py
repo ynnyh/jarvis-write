@@ -4,7 +4,8 @@
 
 产品决策(用户拍板):
 - 类型用户自选(目录下发),爆笑虫子只是格式参考不是硬编码品类;
-- 每集 60/90 秒两档;台词动作全开(音频原生模型直接生成语音与动作);
+- 每集时长上不封顶、最短 20 秒(2026-10-20 定;原先 60/90 两档→60-180→彻底放开);
+  台词动作全开(音频原生模型直接生成语音与动作);
 - 卡司是系列级资产:恰好 1 主角,配角 0-3;locked 角色批量重出不覆盖。
 """
 from __future__ import annotations
@@ -17,10 +18,12 @@ TITLE_MAX = 120      # 系列名
 PREMISE_MAX = 500    # 一句话设定 / 单集命题
 EP_TITLE_MAX = 60    # 集标题
 CATCH_MAX = 60       # 口头禅
-VALID_EPISODE_S = (60, 90)
+EPISODE_S_MIN = 20           # 每集时长下限(秒):管线物理极限(剧本≥4节拍、分镜≥5镜×2s)。
+                             # 上不封顶(用户拍板 2026-10-20:「想设多久就多久,不做卡控」);
+                             # 更短的点子走系列短片线(5-15 秒单主角)。
 VALID_SEGMENT_S = (15, 30)   # 整集提示词的单段上限(外部模型现实上限)
 MAX_CAST = 4                 # 1 主角 + 至多 3 配角
-MAX_SHOTS = 40               # 单集分镜上限(90s ÷ 2s 也不该到 40,防跑飞)
+MAX_SHOTS = 40               # 单集分镜防跑飞下限;生成/手改按 shot_cap_for(时长) 放大
 
 STATUS_CN = {
     "cast_empty": "待定卡司", "cast_ready": "卡司就绪", "active": "连载中",
@@ -38,10 +41,30 @@ def valid_genres() -> list[str]:
     return [g["key"] for g in ANIME_GENRES]
 
 
+def shot_cap_for(total_s: int) -> int:
+    """单集分镜数上限:按时长放大(每镜约 3.5 秒 + 8 镜余量),MAX_SHOTS 兜底。
+
+    180 秒的集约需 51 镜,固定 40 的旧上限会把长集的合法分镜截断,
+    再被总时长校验拦下,表现为永远生成失败。
+    """
+    return max(MAX_SHOTS, round(total_s / 3.5) + 8)
+
+
+def episode_token_budget(total_s: int) -> int:
+    """长集输出预算:按时长线性放大,8192(全局默认)兜底——60/90 秒维持原量级。
+
+    剧本/分镜/镜头卡都是一次性整集产出,长集内容按倍数涨,
+    不放大预算会在 max_tokens 处截断,契约闸拦截后重试也一样截。
+    65536 封顶:再大就超出主流模型单次输出上限,直接报错比静默截断诚实。
+    """
+    return min(65536, max(8192, int(total_s) * 100))
+
+
 __all__ = [
-    "ANIME_GENRES", "AnimeError", "CATCH_MAX", "EP_TITLE_MAX", "MAX_CAST",
-    "MAX_SHOTS", "PREMISE_MAX", "STATUS_CN", "TITLE_MAX", "VALID_EPISODE_S",
-    "VALID_SEGMENT_S", "genre_of", "valid_genres",
+    "ANIME_GENRES", "AnimeError", "CATCH_MAX", "EPISODE_S_MIN",
+    "EP_TITLE_MAX", "MAX_CAST", "MAX_SHOTS", "PREMISE_MAX", "STATUS_CN",
+    "TITLE_MAX", "VALID_SEGMENT_S", "episode_token_budget", "genre_of",
+    "shot_cap_for", "valid_genres",
 ]
 
 

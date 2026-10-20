@@ -59,7 +59,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="birthday/:id?" element={<BirthdayPage />} />
             {/* 系列短片:固定主角的 5-15 秒系列,主角档案持久化(资产制) */}
             <Route path="series/:id?" element={<SeriesPage />} />
-            {/* 动画短剧:固定卡司的 60-90 秒原创系列,类型自选、按集出梗(资产制) */}
+            {/* 动画短剧:固定卡司的原创系列(每集时长上不封顶),类型自选、按集出梗(资产制) */}
             <Route path="anime/:id?" element={<AnimePage />} />
             <Route path="original-drama/:id?" element={<OriginalDramaPage />} />
             {/* 剧本工坊:独立写剧 + 小说改编共用集管线 */}

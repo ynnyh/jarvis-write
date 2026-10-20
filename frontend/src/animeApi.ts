@@ -13,8 +13,9 @@ export interface AnimeDirection { key: string; label: string; tip: string }
 export interface AnimeMeta {
   genres: AnimeGenre[];
   directions: AnimeDirection[];
-  episode_s: number[];
+  episode_s: { min: number };  // 每集时长下限(秒);上不封顶
   segment_s: number[];
+  targets: { key: string; label: string; tip: string }[];  // 出片目标(视频站方言)
   max_shots: number;
 }
 
@@ -52,6 +53,8 @@ export interface AnimeShot {
   camera: string;
   duration_s: number;
   action_desc: string;
+  start_state: string;   // 起点画面:本镜第一帧(老数据可能为空串)
+  end_state: string;     // 终点画面:动作落定的最后一帧
   dialogue: string;
   speaker: string;
   characters: string[];
@@ -158,9 +161,10 @@ export const animeApi = {
     req<{ episode: AnimeEpisode }>("PUT", `/api/anime/episodes/${eid}/shots${workspaceQuery(workspace)}`, { shots }),
 
   // ---- 整集分段提示词 ----
-  buildFilmPrompt: (eid: number, segmentS: 15 | 30 = 15, workspace: AnimeWorkspace = "anime") =>
+  buildFilmPrompt: (eid: number, segmentS: 15 | 30 = 15, workspace: AnimeWorkspace = "anime", target = "") =>
     req<{ job_id: string }>(
-      "POST", `/api/anime/episodes/${eid}/film-prompt${workspaceQuery(workspace)}`, { segment_s: segmentS }, LLM_TIMEOUT),
+      "POST", `/api/anime/episodes/${eid}/film-prompt${workspaceQuery(workspace)}`,
+      { segment_s: segmentS, target }, LLM_TIMEOUT),
   getFilmPrompt: (eid: number, workspace: AnimeWorkspace = "anime") =>
     req<{ film_prompt: string }>("GET", `/api/anime/episodes/${eid}/film-prompt${workspaceQuery(workspace)}`),
   saveFilmPrompt: (eid: number, film_prompt: string, workspace: AnimeWorkspace = "anime") =>
