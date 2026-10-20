@@ -204,6 +204,52 @@ def reply_for(prompt: str) -> str:
         return json.dumps({"facts": [], "relationships": []}, ensure_ascii=False)
     if "章末交接" in prompt or "交接契约" in prompt:
         return json.dumps({"summary": "柳三娘亮出钥匙逼开棺验货", "next_setup": "马蹄声逼近码头"}, ensure_ascii=False)
+    # ---- 漫剧资产链(风格卡/角色卡/场景卡):官网截图与 UI 走查用 ----
+    if "美术指导" in prompt and "style_cn" in prompt:
+        return json.dumps({
+            "style_name": "运河暮色·国漫厚涂",
+            "style_cn": "国漫厚涂插画风,笔触沉稳、块面光影。色彩以黛青与暖褐为主调,朱红灯笼作点睛辅色;侧逆光为主,暗部占七成,水面反光提亮前景。绢本颗粒质感,雨雾氤氲,超精细,剧场感构图。",
+            "style_en": "guoman thick-painting illustration, steady brushwork, block shading, indigo and warm umber palette, vermilion lantern accents, strong rim light, deep shadow mass, silk-scroll grain, misty rain, ultra-detailed, cinematic composition",
+            "negative": "文字, 水印, 五官错位, 多余肢体, 低分辨率, 模糊, 现代服饰, 霓虹灯",
+        }, ensure_ascii=False)
+    if "漫剧角色设计师" in prompt:
+        return json.dumps({"cards": [
+            {"name": "柳三娘", "gender": "female",
+             "appearance_cn": "二十七八岁的青年女性,鹅蛋脸,眉梢微挑,一双含笑的凤眼;乌发挽髻,斜插一支黄铜簪;身量高挑利落,常穿靛蓝布衫,袖口挽起,外罩一条半旧的酱色围裙;指尖有薄茧。",
+             "appearance_en": "young woman in her late twenties, oval face, slightly raised brows, smiling phoenix eyes, black hair in a bun with a brass hairpin, tall and agile, indigo cotton shirt with rolled sleeves, worn maroon apron",
+             "outfit_cn": "靛蓝布衫配酱色围裙,黄铜簪子从不离髻",
+             "voice_desc": "青年女声,爽利带笑,语速偏快"},
+            {"name": "账房", "gender": "male",
+             "appearance_cn": "四十岁上下的中年男性,瘦长脸,山羊胡,三角眼总在算计;稀疏头发束成小髻;身形单薄微驼,常穿灰褐长衫,袖口磨得发亮,腰间挂着一把铜锁钥匙串。",
+             "appearance_en": "middle-aged man around forty, thin gaunt face, goatee, calculating triangular eyes, sparse hair in a small topknot, slight hunch, grey-brown long gown with shiny cuffs, brass key ring at the belt",
+             "outfit_cn": "灰褐长衫,腰间铜钥匙串哗啦作响",
+             "voice_desc": "中年男声,尖细急促,语速快"},
+            {"name": "嫁衣新娘", "gender": "female",
+             "appearance_cn": "年纪难辨的年轻女子,面色红润得反常,唇上一点朱红;乌黑长发被大红嫁衣的风帽半掩;凤冠霞帔,金线绣并蒂莲,交叠在膝的双手攥着一把黄铜钥匙;睁眼时瞳色极深。",
+             "appearance_en": "young woman of indeterminate age, unnaturally rosy complexion, vermilion lips, long black hair half covered by a red wedding hood, phoenix coronet and embroidered cape with gold-thread lotus, hands clasping a brass key, very dark eyes",
+             "outfit_cn": "大红嫁衣凤冠霞帔,金线并蒂莲,怀中黄铜钥匙",
+             "voice_desc": "青年女声,气声轻缓,一字一顿"},
+        ]}, ensure_ascii=False)
+    if "漫剧场景设计师" in prompt:
+        return json.dumps({"scenes": [
+            {"name": "柳记棺材铺",
+             "appearance_cn": "运河小镇的临街棺材铺,门脸两开间,厚木板门半开;店内杉木棺料靠墙立着,刨花与桐油味仿佛可见;一盏昏黄纸灯悬在柜台上方,柜台上摆着铜钱串与旧算盘;门外雨棚滴水,青石板反光。",
+             "appearance_en": "street-side coffin shop in a canal town, half-open heavy plank door, raw coffin timber leaning on walls, dim paper lantern over the counter, copper coins and an old abacus, rain canopy dripping, reflective stone slabs"},
+            {"name": "雨夜码头",
+             "appearance_cn": "夜色里的运河码头,石阶没入黑水,泊船的桅杆如林;两盏气死风灯挂在栈桥木柱上,火光在雨里晕成一团;货箱与湿透的苫布堆在跳板旁,远处货栈只余一窗黄光。",
+             "appearance_en": "canal wharf at night, stone steps sinking into black water, dense boat masts, two storm lanterns on pier posts glowing through rain, cargo boxes and soaked tarpaulins by the gangplank, a single lit window in the far warehouse"},
+        ]}, ensure_ascii=False)
+    if "漫剧统筹" in prompt and "in_story_time" in prompt:
+        return json.dumps({
+            "in_story_time": "当夜 子时刚过",
+            "location": "柳记棺材铺,门板半开",
+            "on_stage": ["柳三娘"],
+            "character_states": [
+                {"name": "柳三娘", "state": "握紧撬棍,毫无波澜的脸下压着惊", "doing": "回头望向码头灯火"}
+            ],
+            "resolved": ["开箱见嫁衣活人", "黄铜钥匙认主"],
+            "open_threads": ["箱底第二声敲响", "码头方向的马蹄声", "新娘说的「别回头」"],
+        }, ensure_ascii=False)
     # ---- 漫剧工坊链(集规划/剧本/分镜/三轨):这些 prompt 都含【书名】字段,
     # 必须全部排在书名分支之前,否则被书名分支截胡(踩过:切集回书名列表→规划为空)。
     if "切分成漫剧的「集」" in prompt or ("集数规划" in prompt and "hook" in prompt):

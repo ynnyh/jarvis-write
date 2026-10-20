@@ -50,48 +50,63 @@ const navLinks = [
 const capabilities = [
   {
     seal: '壹',
+    title: '开书两处确认',
+    desc: 'AI 把「我听到的」回读成理解卡,逐条可改;确认后分钟级先出前三章样稿,读着对味才铺全链——你的题材与主角,不再被静默改写。',
+  },
+  {
+    seal: '贰',
     title: '场景级生成',
     desc: '一章不再是一次生成:切成带目标与张力档的场景,每个场景只带它需要的事实、只收一个明确的情绪指令、只被验收一次。该精彩处放开写、该压抑处压住,由架构保证。',
   },
   {
-    seal: '贰',
+    seal: '叁',
     title: '时序故事圣经',
     desc: '每条事实绑定生效章节区间,可查「第 N 章时他是什么状态」;章后自动抽取实体与事实写回圣经,几十万字不自相矛盾。',
   },
   {
-    seal: '叁',
+    seal: '肆',
     title: '伏笔四态调度',
     desc: '埋设、强化、回收、弃用,四态全生命周期管理,到期自动提醒——埋了的线,不会写丢。',
   },
   {
-    seal: '肆',
+    seal: '伍',
     title: '大纲级联更新',
     desc: '改任意一章大纲:改动分级、下游影响分析、勾选后级联重生成;已有正文自动标记失配,大纲全程版本化可回退。',
   },
   {
-    seal: '伍',
-    title: '去 AI 味门禁',
-    desc: '九类套话规则 + 句长节奏统计 + 叙事架构指纹(模板转折/点题说教/结局三脚架),定稿前量化把关;超标定向重写、复测收敛,校准纪律防矫枉过正。',
-  },
-  {
     seal: '陆',
-    title: '标签化倾向系统',
-    desc: '风格、节奏、基调不写死在 Prompt 里:chips + 自定义 + 预设模板,贯穿大纲、正文、润色三个节点,全程你说了算。',
+    title: '梗卡与章节订单',
+    desc: '核心梗卡定兑现循环与边界禁忌,本章作战图写前一屏看全,交稿逐条对账;章节订单确认后按单生成——从抽卡到点菜,连续 3 章不兑现还出文扑预警。',
   },
   {
     seal: '柒',
-    title: '漫剧与短片工坊',
-    desc: '定稿章节一键改编竖屏漫剧;宣传片、情绪短片、生日祝福各有工坊——分镜、三轨绘图提示词、配音稿、成片包,拿去即梦/可灵/剪映直接出片。',
+    title: '去 AI 味门禁',
+    desc: '九类套话规则 + 句长节奏统计 + 叙事架构指纹(模板转折/点题说教/结局三脚架),身体反应复读按频次抓换词复用;定稿前量化把关,超标定向重写、复测收敛,校准纪律防矫枉过正。',
   },
   {
     seal: '捌',
+    title: '进化系统',
+    desc: '写完一本复盘一本:从你确认过的定稿与删改痕迹提炼带出处的文风与教训,开下一本自动回注;三档自治旋钮,主动权全在你,默认关闭。',
+  },
+  {
+    seal: '玖',
+    title: '漫剧与短片工坊',
+    desc: '开书即爽文体裁的漫剧源书线,或定稿章节一键改编竖屏漫剧:场次制剧本、爽点地图、剪映草稿导出;宣传片、情绪短片、动画短剧、系列短片各有工坊——拿去即梦/可灵/剪映直接出片。',
+  },
+  {
+    seal: '拾',
     title: '剧本工坊',
     desc: '一句话直接开写,或把写完的小说改编成剧:AI 出分集大纲,一集一集生成 Fountain 风格剧本,场景块高亮,正文随手改。',
   },
   {
-    seal: '玖',
+    seal: '拾壹',
     title: '开放式连载',
     desc: '长篇不必开局交结局:架构只定长线引擎与本批次收束点,铺满一键续订下一卷,卷纲带着前情与伏笔重出——写到哪,续到哪。',
+  },
+  {
+    seal: '拾贰',
+    title: '标签化倾向系统',
+    desc: '风格、节奏、基调不写死在 Prompt 里:chips + 自定义 + 预设模板,贯穿大纲、正文、润色三个节点,全程你说了算。',
   },
 ]
 
@@ -122,8 +137,8 @@ const ideas = [
         <a class="brand" :href="withBase('/')">
           <BrandMark :size="34" class="brand-mark" />
           <span class="brand-text">
-            <b>jarvis-write</b>
-            <i>AI 长篇小说工作台</i>
+            <b>藏山</b>
+            <i>jarvis-write · AI 长篇小说工作台</i>
           </span>
         </a>
         <nav class="nav-links" aria-label="站内导航">
@@ -146,7 +161,7 @@ const ideas = [
             <em>伏脉千里</em>。
           </h1>
           <p class="hero-sub">
-            jarvis-write 是包在大模型外面的控制层:时序故事圣经管事实,伏笔调度管回收,
+            藏山(jarvis-write)是包在大模型外面的控制层:时序故事圣经管事实,伏笔调度管回收,
             大纲级联管改动,去 AI 味门禁管文风——模型只管写字,<b>章法归你</b>。
           </p>
           <div class="cta-row">
@@ -154,7 +169,7 @@ const ideas = [
             <a v-if="demoReady" class="btn line lg" :href="DEMO.url" target="_blank" rel="noopener">在线试读样章 →</a>
             <a class="btn quiet lg" :href="REPO_URL" target="_blank" rel="noopener">GitHub</a>
           </div>
-          <p class="hero-meta">Apache-2.0 开源 · 900+ 项自动化测试 · 桌面版单机免登录 / Docker 多用户自部署</p>
+          <p class="hero-meta">Apache-2.0 开源 · 2000+ 项自动化测试 · 桌面版单机免登录 / Docker 多用户自部署</p>
         </div>
         <div class="hero-visual" data-reveal>
           <figure class="shot-frame">
@@ -215,7 +230,7 @@ const ideas = [
     <section id="engines" class="band">
       <div class="lw-shell">
         <p class="kicker accent" data-reveal>核心能力</p>
-        <h2 class="band-title" data-reveal>让长篇全程可控的八个引擎。</h2>
+        <h2 class="band-title" data-reveal>让长篇全程可控的十二个引擎。</h2>
         <div class="engines-grid">
           <article v-for="(it, i) in capabilities" :key="it.seal" class="engine" data-reveal :style="{ transitionDelay: `${(i % 3) * 70}ms` }">
             <span class="engine-seal" aria-hidden="true">{{ it.seal }}</span>
@@ -281,7 +296,7 @@ const ideas = [
           <span>想先摸线上版?QQ 群 <b>1006352530</b> 进群领邀请码,免部署直接试用。</span>
         </p>
         <footer class="lw-footer" data-reveal>
-          <span class="foot-brand"><BrandMark :size="22" class="foot-mark" />jarvis-write · AI 长篇小说工作台</span>
+          <span class="foot-brand"><BrandMark :size="22" class="foot-mark" />藏山 · jarvis-write</span>
           <nav class="foot-links" aria-label="页脚导航">
             <a :href="withBase('/features')">功能导览</a>
             <a :href="withBase('/00-overview')">设计文档</a>
