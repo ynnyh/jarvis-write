@@ -43,7 +43,7 @@
 >
 > 🌐 **官网与在线文档** → [ynnyh.github.io/jarvis-write](https://ynnyh.github.io/jarvis-write/)
 >
-> 💬 **想直接试用、不想自己部署?** 扫码进 QQ 群领**邀请码**，开箱即用 → [见文末交流群](#community)
+> 💬 **想直接在线试用、不想自己部署?** 进 QQ 群领**在线版邀请码**（桌面版无需邀请码，开箱即用）→ [见文末交流群](#community)
 
 ## ✨ 四个别人没有的杀手锏
 
@@ -316,13 +316,13 @@ cd frontend && npm run lint && npm run build
 
 ## 🫂 交流群
 
-遇到问题、想要**邀请码试用**、提需求或一起折腾，欢迎进 QQ 群：
+遇到问题、想要**在线版邀请码**、提需求或一起折腾，欢迎进 QQ 群：
 
 <p align="center">
   <img src="docs/assets/qq-group-qr.jpg" alt="jarvis-write QQ 交流群 1006352530" width="240">
 </p>
 
-<p align="center"><b>QQ 群：1006352530</b> · 扫码进群，<b>领邀请码免费试用</b></p>
+<p align="center"><b>QQ 群：1006352530</b> · 扫码进群，<b>领在线版邀请码免费试用</b>（桌面版无需邀请码）</p>
 
 ## 🙏 鸣谢
 

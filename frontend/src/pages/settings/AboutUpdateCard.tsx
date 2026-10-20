@@ -13,6 +13,7 @@ import {
 } from "../../desktop";
 import { toast } from "../../ui/Toaster";
 import { confirmDialog } from "../../ui/ConfirmDialog";
+import { errMsg as errText } from "../../pollJob";
 
 type UpdateStage = "idle" | "checking" | "available" | "downloading" | "ready" | "latest" | "error";
 
@@ -50,7 +51,7 @@ export function AboutUpdateCard() {
       await setUpdateProxy(proxy.trim());
       toast.ok(proxy.trim() ? "更新代理已保存" : "已恢复直连", "下次检查/下载更新生效");
     } catch (e) {
-      toast.err("保存失败", e instanceof Error ? e.message : String(e));
+      toast.err("保存失败", errText(e));
     } finally {
       setProxyBusy(false);
     }
@@ -71,7 +72,7 @@ export function AboutUpdateCard() {
       if (r.available) { setInfo(r); setStage("available"); }
       else { setStage("latest"); }
     } catch (e) {
-      setErrMsg(e instanceof Error ? e.message : String(e));
+      setErrMsg(errText(e));
       setStage("error");
     }
   }
@@ -92,7 +93,7 @@ export function AboutUpdateCard() {
       toast.ok("新版本已就绪", "重启应用即可生效");
     } catch (e) {
       unlistenRef.current?.();
-      setErrMsg(e instanceof Error ? e.message : String(e));
+      setErrMsg(errText(e));
       setStage("error");
     }
   }
@@ -103,7 +104,7 @@ export function AboutUpdateCard() {
       body: "应用会关闭并重新打开。未保存的操作请先处理。",
       confirmText: "立即重启",
     });
-    if (ok) restartApp().catch((e) => toast.err("重启失败", e instanceof Error ? e.message : String(e)));
+    if (ok) restartApp().catch((e) => toast.err("重启失败", errText(e)));
   }
 
   const pct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : null;

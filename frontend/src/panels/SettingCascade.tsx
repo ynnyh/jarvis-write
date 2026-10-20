@@ -186,7 +186,7 @@ function SettingPatchChapterCard({ pid, chapterNumber, pairs, onChapterClosed }:
     let cancelled = false;
     api.getChapter(pid, chapterNumber)
       .then((c) => { if (!cancelled) setChapter(c); })
-      .catch((e) => { if (!cancelled) setErr(String(e)); });
+      .catch((e) => { if (!cancelled) setErr(errMsg(e)); });
     return () => { cancelled = true; };
   }, [pid, chapterNumber]);
 

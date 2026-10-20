@@ -1,9 +1,22 @@
 // 轮询后端 job 直到完成:统一间隔/超时上限/外部中止(组件卸载时取消)
 import { api, ApiError } from "./api";
 
-/** 渲染错误给用户:Error 取 message(去掉 "Error: " 英文前缀),其余兜底 String。 */
+/** 渲染错误给用户:Error 取 message;对象提取 detail/message/msg(裸对象直接 String
+ *  会变 "[object Object]",真实报错被吞——2026-10-20 方向卡页实踩);再兜底 JSON。 */
 export function errMsg(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  if (e && typeof e === "object") {
+    const o = e as { detail?: unknown; message?: unknown; msg?: unknown };
+    for (const v of [o.detail, o.message, o.msg]) {
+      if (typeof v === "string" && v) return v;
+    }
+    try {
+      const s = JSON.stringify(e);
+      if (s && s !== "{}") return s;
+    } catch { /* 循环引用等:走兜底 */ }
+  }
+  return String(e ?? "未知错误");
 }
 
 export interface PollJobOptions {

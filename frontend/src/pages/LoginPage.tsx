@@ -1,4 +1,4 @@
-// 登录 / 注册页(阶段 8:多用户)。注册需邀请码。
+// 登录 / 注册页(阶段 8:多用户)。注册需邀请码——**仅在线版**;桌面单机版免登录免邀请码。
 // 安卓壳(Capacitor)默认连官方服务器(api.ts 里静默处理),用户只管登录/注册;
 // 注册的邀请码在官方 QQ 群领取。浏览器/桌面同源模式行为一致。
 import { useState } from "react";
@@ -38,6 +38,10 @@ export default function LoginPage({ onAuthed }: Props) {
         <div className="auth-logo"><BrandMark size={44} /></div>
         <h1 className="auth-brand">藏<span>山</span></h1>
         <div className="auth-sub">AI 长篇小说工作台 · 从一句灵感到一部成书</div>
+        {/* 防误解:很多用户以为必须邀请码才能用——其实只有在线版注册要,桌面单机版免登录 */}
+        <div className="fld-hint" style={{ textAlign: "center" }}>
+          在线版需注册登录;<b>桌面版(单机模式)免登录免邀请码</b>,装好直接用
+        </div>
 
         <div className="tabs auth-tabs">
           <button type="button" className={"tab" + (mode === "login" ? " on" : "")} onClick={() => { setMode("login"); setErr(""); }}>登录</button>
@@ -56,10 +60,10 @@ export default function LoginPage({ onAuthed }: Props) {
 
           {mode === "register" && (
             <>
-              <label className="fl">邀请码</label>
+              <label className="fl">邀请码<span className="hint">仅在线版需要</span></label>
               <input type="text" value={invite}
                 onChange={(e) => setInvite(e.target.value)} placeholder="进 QQ 群免费领取" />
-              <div className="fld-hint">邀请码进官方 QQ 群 <b>1006352530</b> 领取,群内还有使用交流与版本通知。</div>
+              <div className="fld-hint">邀请码只有在线版注册才要,进官方 QQ 群 <b>1006352530</b> 免费领取;桌面版单机模式不需要。群内还有使用交流与版本通知。</div>
             </>
           )}
 

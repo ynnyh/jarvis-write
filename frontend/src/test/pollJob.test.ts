@@ -1,6 +1,6 @@
-// pollJob 单元测试:轮询逻辑、重试、超时、中止、404 快失败
+// pollJob 单元测试:轮询逻辑、重试、超时、中止、404 快失败 + errMsg 对象感知
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { pollJob } from "../pollJob";
+import { pollJob, errMsg } from "../pollJob";
 import { api, ApiError } from "../api";
 
 vi.mock("../api", () => ({
@@ -116,5 +116,30 @@ describe("pollJob", () => {
       .rejects.toThrow("任务已丢失");
     // 只查了一次:确定性失败,重试无意义
     expect(getJob).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("errMsg 对象感知(防 [object Object] 上屏)", () => {
+  it("Error 取 message;字符串原样返回", () => {
+    expect(errMsg(new Error("网络错误"))).toBe("网络错误");
+    expect(errMsg("直接字符串")).toBe("直接字符串");
+  });
+
+  it("裸对象提取 detail/message/msg 字段", () => {
+    expect(errMsg({ detail: "字段不合法" })).toBe("字段不合法");
+    expect(errMsg({ message: "消息字段" })).toBe("消息字段");
+    expect(errMsg({ msg: "msg 字段" })).toBe("msg 字段");
+  });
+
+  it("FastAPI 422 形状(detail 是数组)落到 JSON,不再是 [object Object]", () => {
+    const out = errMsg({ detail: [{ loc: ["body", "mode"], msg: "Field required" }] });
+    expect(out).toContain("Field required");
+    expect(out).not.toBe("[object Object]");
+  });
+
+  it("无可读字段的对象给 JSON,undefined 给兜底文案", () => {
+    expect(errMsg({ a: 1 })).toBe('{"a":1}');
+    expect(errMsg(undefined)).not.toBe("undefined");
+    expect(errMsg(undefined).length).toBeGreaterThan(0);
   });
 });

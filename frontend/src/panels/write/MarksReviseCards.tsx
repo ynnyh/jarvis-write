@@ -5,6 +5,7 @@
 // 懒加载各章 ChapterDetail(批修结果只有章号,正文详情按需拉一次)。
 import { useEffect, useState } from "react";
 import { api, ChapterDetail, MarksReviseResult } from "../../api";
+import { errMsg } from "../../pollJob";
 import AnnotatedReviseCard from "./AnnotatedReviseCard";
 
 interface Props {
@@ -68,7 +69,7 @@ function MarksReviseChapterCard({ pid, chapterNumber, pairs, onSaved, onPairAcce
     let cancelled = false;
     api.getChapter(pid, chapterNumber)
       .then((c) => { if (!cancelled) setChapter(c); })
-      .catch((e) => { if (!cancelled) setErr(String(e)); });
+      .catch((e) => { if (!cancelled) setErr(errMsg(e)); });
     return () => { cancelled = true; };
   }, [pid, chapterNumber]);
 

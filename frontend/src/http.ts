@@ -89,6 +89,20 @@ function isCancelled(external?: AbortSignal): boolean {
   return external?.aborted ?? false;
 }
 
+/** 错误响应体 → 人话。detail 常见是字符串,但 FastAPI 422 校验错误是对象数组——
+ *  原样塞进 Error(message) 会被 String 化成 "[object Object]" 上屏(2026-10-20
+ *  「挑一整套书方向」页实踩:真实报错被吞,用户与排查都看不到内容)。 */
+function detailText(j: unknown): string {
+  if (typeof j === "string") return j;
+  const d = (j as { detail?: unknown } | null)?.detail;
+  if (typeof d === "string") return d;
+  try {
+    return JSON.stringify(d ?? j);
+  } catch {
+    return "服务返回了无法解析的错误信息";
+  }
+}
+
 /** 非 2xx 响应 → ApiError;401 顺带清 token 并跳登录。
  *  抽出来的原因:这段此前在 api.ts 内被 req / reqForm / postImage / sseStream 等
  *  抄了 5 遍,改一处文案必漏其余。 */
@@ -96,8 +110,7 @@ async function failResponse(res: Response): Promise<never> {
   if (res.status === 401) notifyUnauthorized();
   let detail = `HTTP ${res.status}`;
   try {
-    const j = await res.json();
-    detail = j.detail ?? JSON.stringify(j);
+    detail = detailText(await res.json());
   } catch { /* ignore */ }
   throw new ApiError(res.status, detail);
 }
@@ -200,8 +213,7 @@ export async function downloadFile(path: string, fallbackName: string): Promise<
     if (res.status === 401) notifyUnauthorized();
     let detail = `HTTP ${res.status}`;
     try {
-      const j = await res.json();
-      detail = j.detail ?? JSON.stringify(j);
+      detail = detailText(await res.json());
     } catch { /* ignore */ }
     throw new Error(detail);
   }

@@ -44,6 +44,14 @@ describe("LoginPage", () => {
     expect(screen.getByPlaceholderText("进 QQ 群免费领取")).toBeTruthy();
   });
 
+  it("防误解提示:登录页说明桌面单机版免登录免邀请码,注册模式再强调一次", () => {
+    renderPage();
+    expect(screen.getByText("桌面版(单机模式)免登录免邀请码")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "注册" }));
+    expect(screen.getByText(/只有在线版注册才要/)).toBeTruthy();
+  });
+
   it("登录成功:用户名按 trim 提交,写 token 并回调 onAuthed(me)", async () => {
     vi.mocked(api.login).mockResolvedValue({ token: "tk-1", username: "alice", is_admin: false });
     vi.mocked(api.me).mockResolvedValue({ id: 1, username: "alice", is_admin: false });
