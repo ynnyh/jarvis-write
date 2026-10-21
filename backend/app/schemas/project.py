@@ -16,7 +16,9 @@ from app.schemas.tendency import Tendency
 
 class ProjectCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
-    topic: str = ""
+    # 想法上限 2000:与 intent/plans 线同口径(_TOPIC_MAX)。此前不设限,超长想法
+    # 落库后会在下游 500 闸门处变 422(2026-10-20 实测踩中)。
+    topic: str = Field(default="", max_length=2000)
     genre: str = ""
     target_chapters: int = Field(default=30, ge=1, le=5000)
     target_words_per_chapter: int = Field(default=3000, ge=200, le=20000)

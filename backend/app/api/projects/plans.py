@@ -53,6 +53,10 @@ router = APIRouter()
 
 _ANSWER_MAX = 200      # 三问每答上限(点选候选文本或自写)
 _DIRECTIVE_MAX = 300   # 定向修订一句话上限
+# 想法(topic)上限:与 intent 线对齐(intent._TOPIC_MAX=2000)。历史遗留曾是 500,
+# 而建项目/PATCH 不设限、理解卡收 2000——想法一旦超过 500 字,三问/出方向必被
+# 422 拦下(2026-10-20 用户实测「挑一整套书方向」报错,旧前端还只显示 [object Object])。
+_TOPIC_MAX = 2000
 _TITLE_SENTINEL = "未命名新书"
 
 # 档位 → (章数, 每章字数);与前端 SCALE_PRESETS 同源,后端为拍板落库的权威映射
@@ -91,7 +95,7 @@ def _q3_title(mode: str) -> str:
 
 class ThreeQuestionsRequest(BaseModel):
     mode: str = Field(default="serial", max_length=10)
-    topic: str = Field(default="", max_length=500)
+    topic: str = Field(default="", max_length=_TOPIC_MAX)
     genre: str = Field(default="", max_length=100)
     # 作者的正向引导(大白话):avoid 只能排除「不要什么」,这句告诉 AI「想要
     # 什么」——重选时带上,换一批才有方向感(2026-10-05 月哥实测「重选还是
@@ -209,7 +213,7 @@ async def three_questions(
 
 class BookPlansRequest(BaseModel):
     mode: str = Field(default="serial", max_length=10)
-    topic: str = Field(default="", max_length=500)
+    topic: str = Field(default="", max_length=_TOPIC_MAX)
     genre: str = Field(default="", max_length=100)
     answers: dict[str, str] = Field(default_factory=dict)
     # 再来三套时的反馈(可空);avoid 为上一批的 label/title/kernel 摘要(防趋同,

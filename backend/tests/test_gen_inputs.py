@@ -238,3 +238,50 @@ def test_book_plans_payload_keeps_cards(client, monkeypatch):
         assert cards[0]["title"] == "甲方案" and cards[1]["title"] == "乙方案"
         # 归属用户(docs/37)
         assert row.user_id is not None
+
+
+def test_book_plans_accepts_long_topic(client):
+    """想法(topic)超 500 字不再被 422 拦——与 intent 线 2000 对齐;超 2000 仍拒。
+
+    2026-10-20 用户实测「挑一整套书方向」页报错只显示 [object Object]:根因是
+    建项目/PATCH 不限长的 topic 撞上 book-plans 的 500 历史闸门。
+    """
+    import json as _json
+    from unittest.mock import patch
+
+    r = client.post(
+        "/api/auth/register",
+        json={"username": "plans_long_topic", "password": "pass123", "invite_code": "test-invite"},
+    )
+    assert r.status_code == 200
+    headers = {"Authorization": f"Bearer {r.json()['token']}"}
+    r = client.post("/api/projects", headers=headers, json={"title": "长想法书"})
+    pid = r.json()["id"]
+
+    plans_json = _json.dumps({"plans": [
+        {"title": "甲方案", "kernel": "k1", "protagonist": "p1", "world": "w1",
+         "arc": "a1", "engine": "e1", "flavor": ["冷"], "scale": "长篇",
+         "scale_reason": "r", "label": "l1"},
+        {"title": "乙方案", "kernel": "k2", "protagonist": "p2", "world": "w2",
+         "arc": "a2", "engine": "e2", "flavor": ["燃"], "scale": "连载",
+         "scale_reason": "r2", "label": "l2"},
+    ]}, ensure_ascii=False)
+
+    class _Fake:
+        async def ask(self, prompt, system=None):
+            return plans_json
+
+    # 800 字:旧 500 闸门必拦(422),新口径放行
+    long_topic = "修" * 800
+    with patch("app.api.projects.plans.get_adapter_for", return_value=_Fake()):
+        r = client.post(f"/api/projects/{pid}/book-plans", headers=headers,
+                        json={"mode": "serial", "topic": long_topic})
+    assert r.status_code == 200, r.text
+
+    # 上限仍在:2001 字被校验拦下(422;前端 v0.59.3 起会显示可读原因)
+    r = client.post(f"/api/projects/{pid}/book-plans", headers=headers,
+                    json={"mode": "serial", "topic": "修" * 2001})
+    assert r.status_code == 422
+    # 建项目同口径:超长想法在源头就被拦,不再绕道落库
+    assert client.post("/api/projects", headers=headers,
+                       json={"title": "又一本", "topic": "修" * 2001}).status_code == 422

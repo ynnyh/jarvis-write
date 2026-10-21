@@ -168,7 +168,8 @@ async def get_project(project_id: int, db: Session = Depends(get_db)) -> Project
 
 class ProjectPatch(BaseModel):
     title: str | None = None
-    topic: str | None = None
+    # 2000 与建项目/三问/出方向同口径(_TOPIC_MAX),防超长想法绕道 PATCH 落库
+    topic: str | None = Field(default=None, max_length=2000)
     genre: str | None = None
     target_chapters: int | None = None
     target_words_per_chapter: int | None = None
