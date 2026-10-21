@@ -19,6 +19,7 @@ import { RequestCancelled } from "../../http";
 import { errMsg } from "../../pollJob";
 import { ThinkingText } from "../../ui/ThinkingText";
 import { toast } from "../../ui/Toaster";
+import PlanEditDialog from "./PlanEditDialog";
 import { THINK_INTENT } from "./presets";
 
 // 理解卡字段的渲染顺序与中文标签(与后端 app.engines.intent.INTENT_FIELDS 对齐)
@@ -94,6 +95,8 @@ export default function IntentScreen({ pid, mode, avoid = [], onConfirmed, onBac
   const [reviseOpen, setReviseOpen] = useState<number | null>(null);
   const [reviseText, setReviseText] = useState("");
   const [lockedFields, setLockedFields] = useState<string[]>([]);
+  // 手动改卡弹层:改的是第几套(null=关着)。AI 改意思走「改改再选」,这里改字面
+  const [editIndex, setEditIndex] = useState<number | null>(null);
   // 三问降级为可选工具(不再是关卡):拿不准时让 AI 出候选,点选即填进 answers
   const [questions, setQuestions] = useState<ThreeQuestions[] | null>(null);
   const [qAnswers, setQAnswers] = useState<Record<string, string>>({});
@@ -533,6 +536,8 @@ export default function IntentScreen({ pid, mode, avoid = [], onConfirmed, onBac
                         setReviseOpen(reviseOpen === i ? null : i);
                         setReviseText(""); setLockedFields([]);
                       }}>✎ 改改再选</button>
+                    <button className="btn-sm" disabled={busy}
+                      onClick={() => setEditIndex(i)}>✎ 手动改</button>
                   </div>
                   {reviseOpen === i && (
                     <>
@@ -603,6 +608,13 @@ export default function IntentScreen({ pid, mode, avoid = [], onConfirmed, onBac
         </div>
         {err && <div className="msg-err mt-2">{err}</div>}
       </div>
+
+      {/* 手动改方向卡弹层(改完原地更新卡面) */}
+      {editIndex !== null && plans?.[editIndex] && (
+        <PlanEditDialog pid={pid} mode={mode} index={editIndex} plan={plans[editIndex]}
+          onSaved={(next, p) => { setPlans(next); setProject(p); }}
+          onClose={() => setEditIndex(null)} />
+      )}
     </>
   );
 }

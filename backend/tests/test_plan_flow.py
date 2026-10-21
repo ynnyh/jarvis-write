@@ -367,3 +367,89 @@ def test_book_plans_avoid_includes_kernel_and_hard_rules(client, monkeypatch):
     assert "严禁换皮重出" in captured.last_prompt
     assert "口吃女警靠背诵旧案笔录串并七起悬案" in captured.last_prompt
     assert "味道组合不得原样复用" in captured.last_prompt
+
+
+def test_update_plan_manual_edit_without_llm(client, monkeypatch):
+    """PATCH /plans/{index} 手动改卡:不烧 LLM,上限与必填格和 AI 出卡同一套。"""
+    headers = _auth(client, "plans_manual_user")
+    p = _create_project(client, headers, "手改书")
+    pid = p["id"]
+
+    # 没方案 → 400
+    r = client.patch(f"/api/projects/{pid}/plans/0", headers=headers,
+                     json={"card": {"title": "x"}})
+    assert r.status_code == 400
+
+    from app.api.projects import plans as plans_mod
+    monkeypatch.setattr(plans_mod, "get_adapter_for", lambda task, **kw: _FakeAdapter(_PLANS_JSON))
+    r = client.post(f"/api/projects/{pid}/book-plans", headers=headers, json={"mode": "serial"})
+    assert r.status_code == 200
+
+    # 手改第 0 套:kernel 敲 700 字 → 裁到 600;其余格子原样保留;其余套不动
+    card = dict(r.json()["plans"][0])
+    card["kernel"] = "手" * 700
+    card["label"] = "手改标签"
+    r = client.patch(f"/api/projects/{pid}/plans/0", headers=headers, json={"card": card})
+    assert r.status_code == 200, r.text
+    plans = r.json()["plans"]
+    assert plans[0]["kernel"] == "手" * 600
+    assert plans[0]["label"] == "手改标签"
+    assert plans[0]["protagonist"] == card["protagonist"]
+    assert plans[0]["flavor"] == card["flavor"]
+    assert plans[1]["kernel"] == "跑单王骑手查兄弟坠桥真相"
+
+    # 必填格删空 → 422 说人话(报中文名,不甩字段名)
+    card2 = dict(plans[0])
+    card2["engine"] = "  "
+    r = client.patch(f"/api/projects/{pid}/plans/0", headers=headers, json={"card": card2})
+    assert r.status_code == 422
+    assert "连载引擎" in r.json()["detail"]
+
+    # flavor 超额/超长:裁到 4 条、每条 20 字
+    card3 = dict(plans[0])
+    card3["flavor"] = ["味" * 30, "冷硬写实", "慢热燃", "孤勇", "多出来的一条"]
+    r = client.patch(f"/api/projects/{pid}/plans/0", headers=headers, json={"card": card3})
+    assert r.status_code == 200
+    assert r.json()["plans"][0]["flavor"] == ["味" * 20, "冷硬写实", "慢热燃", "孤勇"]
+
+    # 越界 → 400
+    r = client.patch(f"/api/projects/{pid}/plans/9", headers=headers, json={"card": card})
+    assert r.status_code == 400
+
+
+def test_update_plan_short_mode_requires_ending(client, monkeypatch):
+    """短故事模式:必填格是 ending 不是 engine。"""
+    headers = _auth(client, "plans_manual_short_user")
+    p = _create_project(client, headers, "手改短篇书", mode="short")
+    pid = p["id"]
+    from app.api.projects import plans as plans_mod
+
+    short_json = json.dumps({
+        "plans": [{
+            "title": "最后一课", "kernel": "代课老师用最后一节课送走想辍学的学生",
+            "protagonist": "陈默,58岁,想体面地退场",
+            "world": "县城中学,冬天", "arc": "开端发现辍学信;转折家访见真相;结尾空座位",
+            "ending": "怅然·微光", "flavor": ["温情"], "scale": "8千字",
+            "scale_reason": "单一事件", "label": "老师·挽留·温情",
+        }, {
+            "title": "夜班公交", "kernel": "末班车司机每晚会多等一个不存在的乘客",
+            "protagonist": "老周,50岁", "world": "城市深夜公交", "arc": "起末班怪客;转揭亡妻;结空站台",
+            "ending": "酸楚·释然", "flavor": ["都市传说"], "scale": "3千字",
+            "scale_reason": "一个反转", "label": "司机·执念·传说",
+        }],
+    }, ensure_ascii=False)
+    monkeypatch.setattr(plans_mod, "get_adapter_for", lambda task, **kw: _FakeAdapter(short_json))
+    r = client.post(f"/api/projects/{pid}/book-plans", headers=headers,
+                    json={"mode": "short", "answers": {}})
+    assert r.status_code == 200, r.text
+
+    # 删空 engine(短篇非必填)能过;删空 ending → 422
+    card = dict(r.json()["plans"][0])
+    card["engine"] = ""
+    r = client.patch(f"/api/projects/{pid}/plans/0", headers=headers, json={"card": card})
+    assert r.status_code == 200, r.text
+    card2 = dict(r.json()["plans"][0])
+    card2["ending"] = ""
+    r = client.patch(f"/api/projects/{pid}/plans/0", headers=headers, json={"card": card2})
+    assert r.status_code == 422
+    assert "结尾落在" in r.json()["detail"]

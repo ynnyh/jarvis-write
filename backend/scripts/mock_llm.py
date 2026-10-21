@@ -383,6 +383,23 @@ def reply_for(prompt: str) -> str:
                          "嗡鸣、罐子滚过木架的闷响、短促鼻息。",
             "negative": "畸变,多手多脚,文字,水印",
         }, ensure_ascii=False)
+    if "把你听到的东西复述回来" in prompt:
+        # 理解卡回读(docs/32 屏 2):把作者的点子复述成一张卡,不扩写剧情。
+        # 注意:字段在顶层(intent 端点直接 clean_intent_card(data)),不套 card 壳。
+        # 卡内容贴都市异闻类种子(与方向卡分支同一世界),供理解屏走查直接续卡。
+        return json.dumps({
+            "world": "当代某南方城市,便利店与深夜街巷;现实表层下藏着二十年前的失踪案",
+            "viewpoint": "便利店夜班店员第一视角,全程只凭夜班所见追查",
+            "cast": "夜班店员(主角,22岁,攒学费的兼职生);总在三点出现的常客;当年失踪案的退休警察",
+            "flavor": ["都市异闻", "冷峻悬疑"],
+            "must": ["收银机凌晨三点多出纸币的异象", "二十年前的失踪案真相"],
+            "avoid": ["丧尸围城式大场面", "超自然力量正面互搏"],
+            "genre": "都市异闻",
+            "uncertain": [
+                {"field": "viewpoint", "reason": "第一视角还是第三人称限制了追查的写法",
+                 "candidates": ["便利店夜班店员第一视角", "第三人称贴着店员写"]},
+            ],
+        }, ensure_ascii=False)
     if "先用三个问题把方向定住" in prompt:
         # 开书方案流(docs/22 P0):三问定纲,每问 3 候选 + ★首推带理由
         def _q(key: str, title: str, cands: list) -> dict:

@@ -15,6 +15,7 @@
   POST /api/projects/{pid}/three-questions  三问定纲:每问 3-4 候选 + ★首推(FAST)
   POST /api/projects/{pid}/book-plans       整书方案×3(ARCHITECTURE;再来三套带 avoid)
   POST /api/projects/{pid}/revise-plan      定向修订:一句话只改第 index 套(FAST)
+  PATCH /api/projects/{pid}/plans/{index}   手动改卡:逐字编辑格子,不烧 LLM
   POST /api/projects/{pid}/plan-confirm     拍板:方案 → 开书订单,唯一前置硬门
 """
 from __future__ import annotations
@@ -417,6 +418,92 @@ async def revise_plan(
     db.commit()
     db.refresh(project)
     return RevisePlanResponse(
+        plans=[PlanCard(**p) for p in plans],
+        project=ProjectOut.model_validate(project, from_attributes=True),
+    )
+
+
+class PlanEditRequest(BaseModel):
+    """手动改方向卡:整卡回传,不烧 LLM(2026-10-21 用户反馈「这些内容无法修改」)。"""
+    card: dict = Field(default_factory=dict)
+
+
+class PlanEditResponse(BaseModel):
+    plans: list[PlanCard]
+    project: ProjectOut
+
+
+# 必填格的中文名(手动改卡删空必填格时的报错要说人话,不甩字段名)
+_PLAN_FIELD_LABELS = {
+    "title": "书名", "kernel": "内核", "protagonist": "主角", "world": "世界观",
+    "arc": "走向", "engine": "连载引擎", "ending": "结尾落在",
+    "opening": "开场冲突", "payoff": "第一回报", "escalation": "后续困境/代价",
+    "mechanism": "故事机制", "opening_sample": "开场试读",
+}
+
+
+def _sanitize_manual_plan(card: dict, mode: str) -> PlanCard:
+    """手动改卡落库前的裁剪:字段集、必填格与上限和 LLM 出卡(_sanitize_plans)同一套。
+
+    为什么不放宽:这张卡确认后会渲染成开书订单、被下游全链当硬约束引用,
+    字段口径只有一套才不会「手动改的卡」和「AI 出的卡」走两种下游行为。
+    """
+    fields = _PLAN_FIELDS_SHORT if mode == "short" else _PLAN_FIELDS_SERIAL
+    text_fields = set(fields) | {
+        "opening", "payoff", "escalation", "mechanism", "opening_sample",
+    }
+    missing = [f for f in fields if not str(card.get(f) or "").strip()]
+    if missing:
+        names = "、".join(_PLAN_FIELD_LABELS.get(f, f) for f in missing)
+        raise ValueError(f"这些格子不能空着:{names}")
+    flavor = card.get("flavor") or []
+    if isinstance(flavor, str):
+        flavor = [flavor]
+    if not isinstance(flavor, list):
+        flavor = []
+    return PlanCard(
+        **{f: str(card.get(f) or "").strip()[:600] for f in text_fields},
+        flavor=[str(x).strip()[:20] for x in flavor if str(x).strip()][:4],
+        scale=str(card.get("scale") or "").strip()[:10],
+        scale_reason=str(card.get("scale_reason") or "").strip()[:150],
+        label=str(card.get("label") or "").strip()[:60],
+    )
+
+
+@router.patch("/{project_id}/plans/{index}", response_model=PlanEditResponse)
+async def update_plan(
+    project_id: int, index: int, req: PlanEditRequest, db: Session = Depends(get_db)
+) -> PlanEditResponse:
+    """手动改第 index 套方向卡:作者对某个格子的措辞不满意时,逐字直改。
+
+    与 revise-plan 的分工:AI 修订改「意思」(一句话重写相关格子),这里改
+    「字面」(作者自己敲什么就是什么)——不调模型,改完即落库。
+    """
+    project = _get_project_or_404(db, project_id)
+    plans_raw = project.book_plans or []
+    if index < 0 or index >= len(plans_raw):
+        raise HTTPException(status_code=400, detail="方案序号越界,先出一批方案")
+    mode = "short" if project.mode == "short" else "serial"
+    try:
+        plan = _sanitize_manual_plan(req.card, mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    plans = plans_raw.copy()
+    plans[index] = plan.model_dump()
+    project.book_plans = plans  # type: ignore[assignment]
+    record_gen_inputs(
+        kind="plan-edit", project_id=project_id,
+        payload={
+            "index": index,
+            # 手改不经过模型,改前改后两张卡都留痕(docs/37),改丢了有据可查
+            "before": plans_raw[index],
+            "after": plan.model_dump(),
+        },
+        db=db,
+    )
+    db.commit()
+    db.refresh(project)
+    return PlanEditResponse(
         plans=[PlanCard(**p) for p in plans],
         project=ProjectOut.model_validate(project, from_attributes=True),
     )

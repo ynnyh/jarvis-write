@@ -1444,6 +1444,10 @@ export const api = {
   revisePlan: (pid: number, body: { index: number; directive: string; locked_fields?: string[] }, signal?: AbortSignal) =>
     req<{ plans: BookPlan[]; project: Project }>(
       "POST", `/api/projects/${pid}/revise-plan`, body, LLM_TIMEOUT, signal),
+  // 手动改方向卡:逐字编辑格子,不烧 LLM(AI 改意思走 revisePlan,改字面走这里)
+  updatePlan: (pid: number, index: number, card: BookPlan) =>
+    req<{ plans: BookPlan[]; project: Project }>(
+      "PATCH", `/api/projects/${pid}/plans/${index}`, { card }),
   confirmPlan: (pid: number, body: {
     index: number; mode: string;
     scale_override?: { chapters: number; words: number } | null;

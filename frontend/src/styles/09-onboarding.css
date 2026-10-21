@@ -228,6 +228,16 @@
 .plan-k { flex: 0 0 60px; color: var(--text-2); }
 .plan-v { flex: 1; }
 
+/* 手动改方向卡弹层:整卡铺开逐格改。格多且长(开场试读动辄几百字)→ 宽体 +
+   内部滚动;textarea 高度跟内容走(PlanEditDialog 里 JS 自增高),不出「缝里看内容」 */
+.plan-edit-dlg { width: 680px; max-height: calc(100vh - 48px); overflow-y: auto; }
+.plan-edit-grid { display: grid; gap: 12px; }
+.plan-edit-ta { width: 100%; overflow: hidden; resize: none; }
+.plan-edit-meta { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 640px) {
+  .plan-edit-meta { grid-template-columns: 1fr 1fr 2fr; }
+}
+
 /* ==========================================================================
    开书前置重构(docs/30 / docs/32):理解屏 + 样稿屏
    移动四纪律沿用:行必 wrap 或收缩保护、窄屏触摸目标≥44px、无固定宽、grid 可塌缩
