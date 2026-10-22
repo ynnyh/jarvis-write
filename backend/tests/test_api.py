@@ -249,7 +249,7 @@ def test_title_suggestion_ok(client):
 
 
 def test_title_suggestion_requires_key(client):
-    """未配置任何 key 时返回 400,并提示去设置页。
+    """未配置任何 key 时返回 400,带结构化错误码 NO_PROVIDER(前端据此弹配置引导)。
 
     文案由工厂层统一给(端点自己那份预检已删——它走的是「按协议名取最早一套」的
     旧路径,和真正发请求用的配置会分叉)。
@@ -261,8 +261,9 @@ def test_title_suggestion_requires_key(client):
         json={"topic": "随便", "genre": ""},
     )
     assert r.status_code == 400
-    assert "API key" in r.json()["detail"]
-    assert "模型设置" in r.json()["detail"]
+    detail = r.json()["detail"]
+    assert detail["code"] == "NO_PROVIDER"
+    assert "API Key" in detail["message"]
 
 
 def test_title_suggestion_llm_failure(client):
@@ -327,7 +328,7 @@ def test_title_suggestion_async_ok(client):
         json={"topic": "随便", "genre": ""},
     )
     assert r.status_code == 400
-    assert "API key" in r.json()["detail"]
+    assert r.json()["detail"]["code"] == "NO_PROVIDER"
 
 
 # ---------- provider 配置状态(前端引导横幅用) ----------
@@ -417,7 +418,7 @@ def test_default_provider_prefers_db_default(client):
 
 
 def test_generate_without_any_key_returns_400(client):
-    """完全没配 key 调生成类接口 → 400 清晰文案,不再是 500 LocalProtocolError。"""
+    """完全没配 key 调生成类接口 → 400 结构化 NO_PROVIDER,不再是 500。"""
     headers = _auth(_register(client, "nokey_gen")["token"])
     p = _create_project(client, headers)
 
@@ -425,15 +426,14 @@ def test_generate_without_any_key_returns_400(client):
         f"/api/projects/{p['id']}/architecture", headers=headers, json={"tendency": {}}
     )
     assert r.status_code == 400, r.text
-    assert "API key" in r.json()["detail"]
-    assert "模型设置" in r.json()["detail"]
+    detail = r.json()["detail"]
+    assert detail["code"] == "NO_PROVIDER"
+    assert "API Key" in detail["message"]
 
 
 def test_create_adapter_empty_key_raises_400(client):
-    """工厂层兜底:空 key(含纯空白)直接抛 HTTPException(400)。"""
-    from fastapi import HTTPException as FastAPIHTTPException
-
-    from app.llm.factory import create_llm_adapter
+    """工厂层兜底:空 key(含纯空白)抛 ProviderNotConfigured(HTTP 层由此转 400)。"""
+    from app.llm.factory import ProviderNotConfigured, create_llm_adapter
 
     headers = _auth(_register(client, "nokey_factory")["token"])
 
@@ -442,11 +442,10 @@ def test_create_adapter_empty_key_raises_400(client):
 
     try:
         _with_uid(client, headers, _build)
-    except FastAPIHTTPException as exc:
-        assert exc.status_code == 400
-        assert "deepseek" in exc.detail
+    except ProviderNotConfigured as exc:
+        assert exc.code == "NO_PROVIDER"
     else:
-        raise AssertionError("空 key 应抛 HTTPException(400)")
+        raise AssertionError("空 key 应抛 ProviderNotConfigured")
 
 
 # ---------- 模型接入大类扩展(cc-switch:三大类 + 两别名) ----------
@@ -1327,13 +1326,13 @@ def test_synopsis_generate_empty_topic_400(client):
 
 
 def test_synopsis_generate_requires_key(client):
-    """未配置任何 key → 工厂层 400。"""
+    """未配置任何 key → 工厂层 400(结构化 NO_PROVIDER)。"""
     headers = _auth(_register(client, "syn_nokey")["token"])
     p = _create_project_with_topic(client, headers)
 
     r = client.post(f"/api/projects/{p['id']}/synopsis", headers=headers)
     assert r.status_code == 400
-    assert "API key" in r.json()["detail"]
+    assert r.json()["detail"]["code"] == "NO_PROVIDER"
 
 
 def test_synopsis_generate_not_owner_404(client):

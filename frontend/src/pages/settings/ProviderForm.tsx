@@ -6,8 +6,10 @@ import { toast } from "../../ui/Toaster";
 import { CATEGORY_BY_KEY, normalizeCategory, PROTOCOL_CATEGORIES, QUICK_PRESETS } from "./providerCatalog";
 import { errMsg } from "../../pollJob";
 
-export function ProviderForm({ editing, onSaved, onCancel }: {
+export function ProviderForm({ editing, onSaved, onCancel, hideHeader }: {
   editing?: ProviderConfigOut; onSaved: () => void; onCancel: () => void;
+  /** 内联弹层(ProviderSetupHost)复用时隐藏自带标题,避免与弹窗标题重复 */
+  hideHeader?: boolean;
 }) {
   const [category, setCategory] = useState(normalizeCategory(editing?.interface_format || "openai-compatible"));
   const [name, setName] = useState(editing?.name || "");
@@ -57,9 +59,11 @@ export function ProviderForm({ editing, onSaved, onCancel }: {
 
   return (
     <div className="provider-row">
-      <div className="card-head">
-        <h3>{editing ? `编辑「${editing.name}」` : "添加配置"}</h3>
-      </div>
+      {!hideHeader && (
+        <div className="card-head">
+          <h3>{editing ? `编辑「${editing.name}」` : "添加配置"}</h3>
+        </div>
+      )}
 
       <label className="fl">快捷预设</label>
       <div className="chips">

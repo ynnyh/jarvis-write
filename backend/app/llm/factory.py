@@ -33,6 +33,18 @@ from .opencode_go import OpenCodeGoAdapter
 
 logger = logging.getLogger("jarvis-write.llm")
 
+
+class ProviderNotConfigured(RuntimeError):
+    """一个可用渠道都没有(没有任何带 key 的配置)。
+
+    不直接用 HTTPException:这个错既发生在 HTTP 请求路径(转成 400 + 结构化
+    code,前端弹「配置渠道」内联引导,见 main.py 的 exception_handler),
+    也发生在后台任务路径(job runner 只拿到异常对象,文案进 job.error)。
+    继承 RuntimeError,老代码的 except 不受影响;code 供前端程序化分流。
+    """
+
+    code = "NO_PROVIDER"
+
 # interface_format -> 适配器类。wire 协议 + 渠道卡两级:
 # - openai-compatible:主力通用卡(OpenAI/DeepSeek/Kimi/通义/中转站/本地 Ollama…);
 # - anthropic / gemini:各自的原生协议;
@@ -273,12 +285,9 @@ def create_llm_adapter(
 
     resolved_key = api_key if api_key is not None else cfg["api_key"]
     if not (resolved_key or "").strip():
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"未配置 {cfg['interface_format']} 的 API key,"
-                "请到「模型设置」页配置后再试。"
-            ),
+        raise ProviderNotConfigured(
+            "还没有可用的写作渠道:配好一个模型的 API Key 就能开始"
+            "(报错弹窗里的「配置渠道」可以直达,配完刚才的操作会自动继续)。"
         )
 
     # 思考模式:显式参数 > 配置列("" 视为未指定)> 全局默认(默认 disabled,
@@ -291,33 +300,105 @@ def create_llm_adapter(
         else (cfg.get("thinking_mode") or settings.default_thinking_mode)
     )
 
-    return adapter_cls(
-        api_key=resolved_key,
-        base_url=base_url if base_url is not None else cfg["base_url"],
-        model_name=model_name if model_name is not None else cfg["model"],
-        temperature=(
-            temperature if temperature is not None else settings.default_temperature
+    return _finish_adapter(
+        adapter_cls(
+            api_key=resolved_key,
+            base_url=base_url if base_url is not None else cfg["base_url"],
+            model_name=model_name if model_name is not None else cfg["model"],
+            temperature=(
+                temperature if temperature is not None else settings.default_temperature
+            ),
+            max_tokens=(
+                max_tokens
+                if max_tokens is not None
+                else _sane_max_tokens(cfg.get("max_tokens"))
+            ),
+            timeout=(
+                timeout
+                if timeout is not None
+                else (cfg.get("timeout") or settings.default_timeout)
+            ),
+            thinking_mode=resolved_thinking,
+            thinking_forced=forced,
+            # 主动限速:显式参数 > 配置列 > 0(不限)。见 llm/throttle.py
+            max_concurrency=(
+                max_concurrency
+                if max_concurrency is not None
+                else (cfg.get("max_concurrency") or 0)
+            ),
+            rpm=rpm if rpm is not None else (cfg.get("rpm") or 0),
         ),
-        max_tokens=(
-            max_tokens
-            if max_tokens is not None
-            else _sane_max_tokens(cfg.get("max_tokens"))
-        ),
-        timeout=(
-            timeout
-            if timeout is not None
-            else (cfg.get("timeout") or settings.default_timeout)
-        ),
-        thinking_mode=resolved_thinking,
-        thinking_forced=forced,
-        # 主动限速:显式参数 > 配置列 > 0(不限)。见 llm/throttle.py
-        max_concurrency=(
-            max_concurrency
-            if max_concurrency is not None
-            else (cfg.get("max_concurrency") or 0)
-        ),
-        rpm=rpm if rpm is not None else (cfg.get("rpm") or 0),
+        cfg,
+        attach_failover=(config_id is None and not provider),
     )
+
+
+def _finish_adapter(adapter: LLMAdapter, cfg: dict, *, attach_failover: bool) -> LLMAdapter:
+    """收尾:挂渠道名(failover 提示要用「魔芋」这种可读名,不是 model 名);
+    「走当前生效配置」的入口(不指定 config_id/provider,即起名/简介等直连
+    调用)顺带挂上跨渠道 failover 候选——这些调用不走 get_adapter_for,
+    不在这里挂就永远享受不到轮换。指定 config_id/provider 是用户点名某套
+    配置(设置页测试连通等),不该被轮换掩盖,不挂。"""
+    try:
+        adapter.config_name = str(cfg.get("name") or "")
+    except Exception:  # noqa: BLE001 — 鸭子类型假适配器可能拒写,不影响生成
+        pass
+    if attach_failover and cfg.get("id") is not None:
+        try:
+            adapter.failover_adapters = build_failover_adapters(cfg)
+        except Exception:  # noqa: BLE001 — 候选构建失败不影响主渠道
+            logger.debug("failover 候选构建失败(不影响生成)", exc_info=True)
+    return adapter
+
+
+# 跨渠道 failover 候选上限:每个候选失败前还要吃满一轮「3 次退避重试」,
+# 候选再多就把一次生成拖成小时级了——3 个是「救回来」与「别拖死」的平衡点。
+FAILOVER_LIMIT = 3
+
+
+def build_failover_adapters(
+    primary_cfg: dict,
+    overrides: dict | None = None,
+    task_label: str = "",
+) -> list[LLMAdapter]:
+    """当前用户其余可用配置 → 跨渠道 failover 候选(按创建序,上限 FAILOVER_LIMIT)。
+
+    只挑「带 key 且协议认识」的;与主渠道(或彼此)同 (base_url, model) 的
+    跳过——同渠道同模型再试没有意义,那轮重试 with_retries 已经做过。
+    主渠道来自 .env(id=None,开发兜底)时返回空:开发环境没有多配置可言。
+    任何一套候选建不出来(协议不认识/参数非法)都跳过,绝不影响主渠道。
+    """
+    if not primary_cfg.get("id"):
+        return []
+
+    def _key(c: dict) -> tuple[str, str]:
+        return (
+            (c.get("base_url") or "").strip().rstrip("/"),
+            (c.get("model") or "").strip(),
+        )
+
+    seen = {_key(primary_cfg)}
+    out: list[LLMAdapter] = []
+    for c in _db_configs():
+        if len(out) >= FAILOVER_LIMIT:
+            break
+        if not c["api_key"] or c["interface_format"] not in _REGISTRY or not c["model"]:
+            continue
+        if _key(c) in seen:
+            continue
+        seen.add(_key(c))
+        try:
+            fb = create_llm_adapter(config_id=c["id"], **(overrides or {}))
+        except Exception:  # noqa: BLE001 — 候选建不出来就换下一个
+            continue
+        try:
+            fb.config_name = str(c.get("name") or "")
+            if task_label:
+                fb.task_label = task_label
+        except Exception:  # noqa: BLE001 — 打标失败不影响生成
+            pass
+        out.append(fb)
+    return out
 
 
 def available_providers() -> dict[str, bool]:

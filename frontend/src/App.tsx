@@ -1,6 +1,8 @@
 import { Suspense, useEffect, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { api, token, setUnauthorizedHandler, Me } from "./api";
+import { openProviderSetup, ProviderSetupHost } from "./ui/ProviderSetupHost";
+import { setProviderSetupHandler } from "./http";
 import { isDesktop } from "./desktop";
 import { useBreakpoint } from "./hooks/useBreakpoint";
 import LoginPage from "./pages/LoginPage";
@@ -58,6 +60,12 @@ export default function App() {
   // 401 统一处理:清 token、回登录页
   useEffect(() => {
     setUnauthorizedHandler(() => { setMe(null); });
+  }, []);
+
+  // 「未配置写作渠道」统一处置:注册弹窗处理器(http 层/pollJob 撞上
+  // NO_PROVIDER 时调用),配完渠道后横幅状态随之刷新
+  useEffect(() => {
+    setProviderSetupHandler(() => openProviderSetup());
   }, []);
 
   // 启动:先探运行模式。local → 免登录直接拉用户;server → 有 token 才校验。
@@ -256,7 +264,14 @@ export default function App() {
           {llmConfigured === false && (
             <div className="llm-banner">
               还没有配置模型——大部分功能需要模型才能工作。
-              <Link to="/settings" className="llm-banner-link">去「设置」配置你的 key →</Link>
+              <button
+                type="button"
+                className="llm-banner-link llm-banner-btn"
+                onClick={() => { openProviderSetup().catch(() => { /* 用户关掉弹窗 */ }); }}
+              >
+                就地配置(约 2 分钟)
+              </button>
+              <Link to="/settings" className="llm-banner-link">高级选项 →</Link>
             </div>
           )}
           <div className="wrap">
@@ -271,6 +286,9 @@ export default function App() {
       </div>
       <Toaster />
       <ConfirmHost />
+      {/* 「未配置写作渠道」内联配置弹层:http 层/pollJob 撞上 NO_PROVIDER 时就地弹出,
+          配完自动重放原请求;配好后全局横幅随之消失 */}
+      <ProviderSetupHost onConfigured={() => setLlmConfigured(true)} />
       {/* 复制兜底层:浏览器不给写剪贴板时(如用 http:// 打开)弹出已全选的文本 */}
       <CopyHost />
       {/* 实时正文:后台任务里模型正在写的字逐字滚动(全局悬浮,跟着在跑的任务) */}

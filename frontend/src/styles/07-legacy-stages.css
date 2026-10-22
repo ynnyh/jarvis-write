@@ -130,6 +130,12 @@
 }
 .dlg-title { font-size: var(--fs-lg); font-weight: 600; margin: 0; }
 .dlg-body { color: var(--text-2); font-size: var(--fs-sm); margin: 10px 0 0; }
+/* 「配置写作渠道」弹层:表单双列要比默认确认框宽,内容过高时内部滚动 */
+.dlg-provider-setup {
+  width: 640px;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+}
 .dlg-actions {
   display: flex; justify-content: flex-end; gap: 10px;
   margin-top: 20px;

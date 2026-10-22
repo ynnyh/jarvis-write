@@ -1,4 +1,6 @@
 // 轮询后端 job 直到完成:统一间隔/超时上限/外部中止(组件卸载时取消)
+import { NO_PROVIDER_MARKER, requestProviderSetup } from "./http";
+import { toast } from "./ui/Toaster";
 import { api, ApiError } from "./api";
 
 /** 渲染错误给用户:Error 取 message;对象提取 detail/message/msg(裸对象直接 String
@@ -68,7 +70,20 @@ export async function pollJob<T = unknown>(jobId: string, opts: PollJobOptions =
       continue;
     }
     if (job.status === "running") { onStage?.(job.stage); continue; }
-    if (job.status === "error") throw new Error(job.error ?? "任务失败");
+    if (job.status === "error") {
+      const raw = job.error ?? "任务失败";
+      // 任务路径的「未配置写作渠道」:后端打了 [NO_PROVIDER] 标记。当场弹配置
+      // 弹窗(与请求路径同一个),配好后提示重跑——job 本身已结束没法续跑,
+      // 但页面上的输入都还在,再点一次「生成」即可。
+      if (raw.startsWith(NO_PROVIDER_MARKER)) {
+        const text = raw.slice(NO_PROVIDER_MARKER.length);
+        requestProviderSetup()
+          .then(() => toast.ok("渠道已配置", "再点一次「生成」就能继续了。"))
+          .catch(() => { /* 用户关掉弹窗:下面的人话错误照常上屏 */ });
+        throw new Error(text);
+      }
+      throw new Error(raw);
+    }
     return job.result as unknown as T;
   }
 }

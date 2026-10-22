@@ -268,6 +268,12 @@ def _retry_reason(exc: Exception) -> str:
         return "上游限流"
     if status == 529:
         return "上游过载"
+    if status == 401:
+        return "Key 无效"
+    if status == 402:
+        return "余额不足"
+    if status == 403:
+        return "无权访问"
     if isinstance(status, int) and 520 <= status <= 527:
         return "网关掐断了连接"
     if isinstance(exc, TRANSIENT_NET_ERRORS):
@@ -339,6 +345,95 @@ def _clear_retry_notice() -> None:
             live.label_step(jid, original)
     except Exception:  # noqa: BLE001
         logger.debug("重试提示还原失败", exc_info=True)
+
+
+# ---- 跨渠道 failover:主渠道重试耗尽后,自动切到其余已配置的渠道 ----
+#
+# 为什么非做不可(2026-10-22 服务器数据复盘):用户「白子」10-05 注册当天高强度
+# 生成 192 次后,卡在蓝图环节——默认渠道连吃 429,自己明明配了 3 个渠道,系统
+# 却只会死磕默认那个,横跨 4 天重试 10 次全撞同一堵墙,用户就此流失。
+# 渠道轮换是「多套配置」体系欠用户的最后一块拼图。
+
+# 渠道自身的故障(而非瞬时抖动)也值得换渠道:key 无效/欠费/无权访问——
+# 这些错在 A 渠道是绝路,在 B 渠道是坦途。参数错(400)与模型不存在(404)
+# 不在列:换渠道大概率一样,如实报错更诚实。
+_FAILOVER_AUTH_STATUSES = frozenset({401, 402, 403})
+
+
+def _failover_eligible(exc: BaseException) -> bool:
+    """该错误是否值得换渠道:瞬时错误重试已耗尽(429/5xx/网络),或渠道自身故障。"""
+    if not isinstance(exc, UpstreamError) or isinstance(exc, EmptyContentError):
+        return False
+    return bool(exc.retryable) or exc.status in _FAILOVER_AUTH_STATUSES
+
+
+def _channel_label(adapter) -> str:
+    """渠道的可读名:设置页起的名字(「魔芋」)优先,退而求其次用模型名。"""
+    name = str(getattr(adapter, "config_name", "") or "")
+    return name or (str(getattr(adapter, "model_name", "") or "") or "当前渠道")
+
+
+def _notice_failover(to_label: str, reason_exc: Exception, attempt: int, total: int) -> None:
+    """把「已切换渠道」现场留痕 + 下发:「蓝图 · 切换到「魔芋」重试(上游限流)」。
+
+    与重试提示同一套机制(台账 llm_retries + SSE 步骤文案 + 渠道不稳累计),
+    用户在任务进度与任务中心看到的都是熟悉的位置,不新增一层需要理解的 UI。
+    """
+    _persist_retry(reason_exc, attempt, total, label=f"failover→{to_label}")
+    try:
+        jid = live.current_job_id.get()
+        if not jid:
+            return  # 前台请求/脚本:没人看,别占内存
+        base_step = _RETRY_STEPS.get(jid) or live.peek_step(jid)
+        if base_step and "重试中" not in base_step and "切换" not in base_step:
+            _RETRY_STEPS[jid] = base_step
+        tip = f"切换到「{to_label}」重试({_retry_reason(reason_exc)})"
+        live.label_step(jid, f"{_RETRY_STEPS.get(jid, base_step)} · {tip}" if base_step else tip)
+        live.note_retry(jid, _describe_exc(reason_exc))
+    except Exception:  # noqa: BLE001 — 提示决不能拖垮主流程
+        logger.debug("切换渠道提示下发失败", exc_info=True)
+
+
+async def ask_with_failover(adapter, messages: list[LLMMessage]) -> str:
+    """ask 的统一入口:主渠道跑完整轮次(退避重试+预算放大)仍失败,且还有
+    候选渠道时,逐个切换再试;全灭才把每个渠道的死因合并成一份诚实清单。
+
+    - 只接可换渠道的错(见 _failover_eligible):429/5xx/网络抖动的重试耗尽,
+      以及 key 无效/欠费/无权;安全过滤、复读退化这类换渠道也治不了的照旧直抛;
+    - 切换本身对用户不静默:每次切换都在任务进度上留一行「切换到「X」重试」,
+      全成功后还原步骤名——救回生成的同时,让用户知道默认渠道不稳该换心了;
+    - 台账:每次切换进 llm_retries(label=failover→渠道名),渠道稳定率可归因。
+    """
+    try:
+        return await complete_text_with_budget(adapter, messages)
+    except UpstreamError as exc:
+        if not _failover_eligible(exc):
+            raise
+        fallbacks = getattr(adapter, "failover_adapters", None) or []
+        if not fallbacks:
+            raise
+        total = len(fallbacks) + 1
+        failures: list[tuple[str, str]] = [(_channel_label(adapter), _describe_exc(exc))]
+        last: Exception = exc
+        for i, fb in enumerate(fallbacks):
+            label = _channel_label(fb)
+            _notice_failover(label, exc, attempt=i + 1, total=total)
+            try:
+                result = await complete_text_with_budget(fb, messages)
+                _clear_retry_notice()  # 切换成功了,把「切换到…」的临时文案还原
+                logger.info(
+                    "渠道轮换成功:%s → %s(原渠道:%s)",
+                    failures[0][0], label, _describe_exc(exc),
+                )
+                return result
+            except UpstreamError as fb_exc:
+                last = fb_exc
+                failures.append((label, _describe_exc(fb_exc)))
+        detail = "\n".join(f"· {name}:{err}" for name, err in failures)
+        raise UpstreamError(
+            f"{len(failures)} 个渠道都失败了(已自动轮换),最后错误:\n{detail}",
+            retryable=True,
+        ) from last
 
 
 async def with_retries(call, *, attempts: int = 3, base_delay: float = 2.0, on_retry=None, label: str = ""):
@@ -852,8 +947,12 @@ class LLMAdapter(abc.ABC):
         return await self.ask_messages(self.to_messages(prompt, system))
 
     async def ask_messages(self, messages: list[LLMMessage]) -> str:
-        """多轮对话版的 ask(见模块级 `complete_text_with_budget`)。"""
-        return await complete_text_with_budget(self, messages)
+        """多轮对话版的 ask(见模块级 `complete_text_with_budget`)。
+
+        走 ask_with_failover:主渠道重试耗尽/渠道自身故障时,自动切换到
+        其余已配置渠道再试(见 ask_with_failover 的注释)。鸭子类型的假
+        适配器(测试里只实现 ask/complete)不经过这里,行为不变。"""
+        return await ask_with_failover(self, messages)
 
 
 def _looks_degenerate(text: str) -> bool:

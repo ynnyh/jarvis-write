@@ -305,6 +305,21 @@ def create_app() -> FastAPI:
     from app.disconnect_guard import ClientDisconnectedGuardMiddleware
     app.add_middleware(ClientDisconnectedGuardMiddleware)
 
+    # 「未配置写作渠道」→ 400 + 结构化 {code, message}:前端 http 层认 code,
+    # 当场弹「配置渠道」内联引导,配完自动重放原请求(见 http.ts NO_PROVIDER)。
+    # 工厂层抛的是 ProviderNotConfigured(后台任务路径没有 HTTP 语义,不该绑死
+    # HTTPException);HTTP 形态在这里这一处统一翻译。
+    from app.llm.factory import ProviderNotConfigured
+
+    @app.exception_handler(ProviderNotConfigured)
+    async def _provider_not_configured_handler(
+        request: Request, exc: ProviderNotConfigured
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=400,
+            content={"detail": {"code": exc.code, "message": str(exc)}},
+        )
+
     app.include_router(system_router)
     app.include_router(auth_router)
     app.include_router(admin_router)

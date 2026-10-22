@@ -225,6 +225,17 @@ def normalize_job_error(exc: Exception) -> str:
     429 限流),其余原样返回(后端业务错误本身已是中文)。
     """
     msg = str(exc)
+    # 未配置写作渠道:打机器可读标记给前端——pollJob 检测到就弹「配置渠道」
+    # 内联引导(配完重跑一次即可),不再让新用户对着一句死文案没地方点。
+    from app.llm.factory import ProviderNotConfigured
+
+    if isinstance(exc, ProviderNotConfigured):
+        return "[NO_PROVIDER]" + msg
+    # 跨渠道轮换的合并清单(「3 个渠道都失败了(已自动轮换)…」):每渠道死因
+    # 都在里面,比任何单状态码归一都有信息量——放行,别被下面的 HTTP 429/401
+    # 分支改写成人尽皆知的一句话。
+    if "已自动轮换" in msg:
+        return msg
     # 出片链路的错误文案是面向用户的最终版(含「出片平台…(HTTP 401/402)」形态),
     # 若掉进下面的 HTTP 状态分支会被翻译成「模型 API Key 无效」,指错地方——原样放行。
     from app.engines.render.client import RenderError

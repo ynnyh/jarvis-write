@@ -6,7 +6,7 @@
 //
 // 兼容说明:下面 re-export 的符号,既有 `from "./api"` 的导入方无需改路径
 // (约 100 个文件);新代码请直接 `from "./http"`。
-import { apiBase, ApiError, authHeaders, notifyUnauthorized, req, reqForm, token } from "./http";
+import { apiBase, ApiError, authHeaders, notifyUnauthorized, req, reqForm, requestProviderSetup, NO_PROVIDER, token } from "./http";
 
 export { apiBase, token, setUnauthorizedHandler, ApiError, postImage, imageBlobUrl, downloadFile } from "./http";
 
@@ -46,26 +46,45 @@ export function createSseDecoder(): (chunk: string) => SseFrame[] {
 }
 
 /** 发起一条 SSE 流,逐帧回调 onFrame。鉴权/401 与 req 对齐;非 2xx(流还没开始)抛 ApiError。
- *  GET/POST 都走这里:POST 用于对话流,GET 用于订阅任务的实时正文。 */
+ *  GET/POST 都走这里:POST 用于对话流,GET 用于订阅任务的实时正文。
+ *  NO_PROVIDER 与 req 同一处置:未配置写作渠道时弹配置弹窗,保存成功自动重连一次。 */
 async function sseStream(
   path: string,
   init: RequestInit,
   onFrame: (frame: SseFrame) => void,
   signal?: AbortSignal,
+  _setupRetried = false,
 ): Promise<void> {
   const headers: Record<string, string> = { ...(init.headers as Record<string, string> | undefined) };
   const tk = token.get();
   if (tk) headers["Authorization"] = `Bearer ${tk}`;
   const res = await fetch(apiBase() + path, { ...init, headers, signal });
-  if (!res.ok || !res.body) {
+  if (!res.ok) {
     if (res.status === 401) notifyUnauthorized();
-    let detail = `HTTP ${res.status}`;
+    let message = `HTTP ${res.status}`;
+    let code: string | undefined;
     try {
-      const j = await res.json();
-      detail = j.detail ?? JSON.stringify(j);
+      const j: unknown = await res.json();
+      const d = (j as { detail?: unknown } | null)?.detail;
+      if (d && typeof d === "object" && !Array.isArray(d) && "code" in (d as Record<string, unknown>)) {
+        const o = d as { code?: unknown; message?: unknown };
+        if (typeof o.code === "string") code = o.code;
+        message = typeof o.message === "string" && o.message ? o.message : JSON.stringify(d);
+      } else {
+        message = typeof d === "string" ? d : JSON.stringify(j);
+      }
     } catch { /* ignore */ }
-    throw new ApiError(res.status, detail);
+    if (code === NO_PROVIDER && !_setupRetried) {
+      try {
+        await requestProviderSetup();
+      } catch {
+        throw new ApiError(res.status, message);
+      }
+      return sseStream(path, init, onFrame, signal, true);
+    }
+    throw new ApiError(res.status, message, code);
   }
+  if (!res.body) throw new ApiError(res.status, `HTTP ${res.status}`);
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   const feed = createSseDecoder();

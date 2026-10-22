@@ -300,6 +300,18 @@ def get_adapter_for(task: Task, **overrides) -> LLMAdapter:
         adapter.task_label = task.value
     except Exception:  # noqa: BLE001 — 打标失败不影响生成
         pass
+    # 跨渠道 failover 候选:主渠道重试耗尽/欠费/key 失效时自动轮换到其余
+    # 已配置的渠道(fallback 执行见 base.ask_with_failover)。候选与主渠道
+    # 同 overrides(温度/预算按任务对齐),task_label 同打,用量归因不串档。
+    if cfg.get("id") is not None:
+        try:
+            from .factory import build_failover_adapters
+
+            adapter.failover_adapters = build_failover_adapters(
+                cfg, overrides=overrides, task_label=task.value
+            )
+        except Exception:  # noqa: BLE001 — 候选构建失败不影响主渠道
+            pass
     return adapter
 
 

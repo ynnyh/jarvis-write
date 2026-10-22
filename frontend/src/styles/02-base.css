@@ -325,6 +325,13 @@ select {
   text-align: center;
 }
 .llm-banner a { color: var(--warn); font-weight: 600; margin-left: var(--sp-1); }
+/* 横幅里的「就地配置」按钮:长得像链接(与右侧「高级选项 →」同一行,主次分明) */
+.llm-banner .llm-banner-btn {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--warn); font-weight: 600; font-size: inherit;
+  margin-left: var(--sp-1);
+}
+.llm-banner .llm-banner-btn:hover { text-decoration: underline; }
 
 /* 更新提醒横幅(发现新版本时,顶栏下方常驻,品牌色区别于未配置模型的警告横幅) */
 .update-banner {
