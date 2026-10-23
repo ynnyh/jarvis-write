@@ -265,7 +265,7 @@ async def generate_queue(
                     "stopped_at": n, "remaining": nums[i - 1:],
                     "quarantined": False,
                     "error": (
-                        f"第 {n} 章生成失败:{normalize_job_error(exc)[:300]}"
+                        f"第 {n} 章生成失败:{normalize_job_error(exc)[:500]}"
                         f"(已完成:{done};后续章节依赖本章摘要,已停止)"
                     ),
                 })

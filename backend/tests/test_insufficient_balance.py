@@ -21,10 +21,27 @@ def test_check_upstream_402_gives_actionable_message():
     resp = httpx.Response(402, json={"error": {"message": "Insufficient Balance"}})
     with pytest.raises(UpstreamError) as ei:
         check_upstream(resp)
-    assert "余额不足" in str(ei.value)
-    assert "充值" in str(ei.value)
+    text = str(ei.value)
+    assert "402" in text
+    # 上游原文必须保留:402 ≠ 账户欠费(令牌额度用尽也回 402),证据不能被话术盖掉
+    assert "Insufficient Balance" in text
+    assert "令牌" in text  # 指引覆盖「令牌额度」这个常见假欠费口
     assert ei.value.status == 402
     assert ei.value.retryable is False  # 重试无意义,别烧用户时间
+
+
+def test_check_upstream_402_keeps_relay_token_quota_text():
+    """中转站「令牌额度已用尽」也回 402:账户有钱,咬定欠费就是误导(2026-10-23 用户反馈)。"""
+    from app.llm.base import UpstreamError, check_upstream
+
+    resp = httpx.Response(
+        402, json={"error": {"message": "令牌额度已用尽", "type": "insufficient_quota"}}
+    )
+    with pytest.raises(UpstreamError) as ei:
+        check_upstream(resp)
+    text = str(ei.value)
+    assert "令牌额度已用尽" in text  # 服务商原文照实上屏
+    assert "欠费" not in text  # HTTP 层绝不咬定欠费
 
 
 def test_check_upstream_402_not_misleading_base_url_hint():

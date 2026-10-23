@@ -152,6 +152,20 @@ def _parse_retry_after(resp: httpx.Response) -> float | None:
         return None
 
 
+def _upstream_detail(resp: httpx.Response) -> str:
+    """抠上游错误响应里能读的细节:JSON 的 error.message/message;非 JSON 给前 80 字符。"""
+    try:
+        err = resp.json()
+        detail = (err.get("error") or {}).get("message") or err.get("message")
+        if detail:
+            return f": {detail}"
+    except Exception:  # noqa: BLE001 — HTML 错误页/Base URL 填错等非 JSON 响应
+        snippet = resp.text[:80].strip()
+        if snippet:
+            return f"(响应非 JSON,开头: {snippet})"
+    return ""
+
+
 def check_upstream(resp: httpx.Response, *, hint: str = "") -> dict:
     """校验上游响应并返回 JSON;异常时抛出用户可读的错误。
 
@@ -163,25 +177,20 @@ def check_upstream(resp: httpx.Response, *, hint: str = "") -> dict:
     - 非 JSON(Base URL 填错/协议不匹配,上游回了 HTML 错误页):说明原因并附 hint。
     """
     if resp.status_code >= 400:
-        # 402 单列:欠费是长篇生成必撞的场景,给出可行动的话术,并让调用方
-        # 能用 is_insufficient_balance() 程序化识别(挂任务/续跑都靠它)。
+        # 402 单列(is_insufficient_balance() 靠状态码程序化识别,挂任务/续跑都靠
+        # 它)。但「402=账户欠费」不成立:中转站令牌(Token)额度用尽、中转自身
+        # 上游故障也回 402,账户余额可能好好的——2026-10-23 用户反馈:提示咬定
+        # 欠费,控制台里却有钱。这里只留状态码+上游原文,话术交给任务层,别让
+        # 猜出来的话术把证据盖掉。
         if resp.status_code == 402:
             raise UpstreamError(
-                "上游返回 HTTP 402: API 余额不足(Insufficient Balance)。"
-                "请到服务商控制台充值后重试;已生成的章节与进度都已落库,不会丢失。",
+                "上游返回 HTTP 402(余额/额度类拒绝)"
+                + _upstream_detail(resp)
+                + "。请核对该渠道的账户余额与令牌(Token)额度。",
                 status=402,
                 retryable=False,
             )
-        msg = f"上游返回 HTTP {resp.status_code}"
-        try:
-            err = resp.json()
-            detail = (err.get("error") or {}).get("message") or err.get("message")
-            if detail:
-                msg += f": {detail}"
-        except Exception:  # noqa: BLE001
-            snippet = resp.text[:80].strip()
-            if snippet:
-                msg += f"(响应非 JSON,开头: {snippet})"
+        msg = f"上游返回 HTTP {resp.status_code}" + _upstream_detail(resp)
         if 520 <= resp.status_code <= 529:
             msg += (
                 "。这是中转站网关/CDN 错误,通常是生成耗时过长被 CDN 掐断"
@@ -271,7 +280,7 @@ def _retry_reason(exc: Exception) -> str:
     if status == 401:
         return "Key 无效"
     if status == 402:
-        return "余额不足"
+        return "余额/额度不足"
     if status == 403:
         return "无权访问"
     if isinstance(status, int) and 520 <= status <= 527:
