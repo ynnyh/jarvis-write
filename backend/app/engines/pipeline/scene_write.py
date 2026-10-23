@@ -167,6 +167,7 @@ async def write_scene(
     chapter_summary: str,
     chapter_title: str,
     previous_text: str = "",
+    beats_view: str = "",
     revision_directive: str = "",
     outline: Any = None,
 ) -> str:
@@ -174,6 +175,10 @@ async def write_scene(
 
     检索在这里发生:本场需要的事实由 retrieve_for_scene 现场捞出,而不是把
     全库灌进来。上一场的尾部也一并注入(缝接的一手材料)。
+
+    beats_view:全章节拍清单(一行一拍)。逐场生成的固有盲区是「本场写手看不见
+    其他场次」——前场不知道后场要揭什么,结构上没法铺垫;把整章节拍摆给每一场,
+    才有机会为后文埋引子(也才知道本场该接住前文哪根线)。空串=蓝图无节拍,不注入。
     """
     ctx = retrieve_for_scene(db, project.id, scene, chapter_number)
     facts_block = render_facts_block(ctx)
@@ -197,6 +202,13 @@ async def write_scene(
             tension_directive=tension_directive(scene.tension_level),
             revision_directive=revision_directive,
             previous_text=_tail_of(scene.content, 2000),
+            # 重写最容易把「与上一场的衔接」改丢:把上一场尾部单独摆出来当衔接参照
+            prev_scene_tail=(
+                f"【上一场结尾(衔接参照:重写后的开头与它的衔接必须仍然成立)】\n"
+                f"{_tail_of(previous_text)}\n"
+                if (previous_text or "").strip()
+                else ""
+            ),
             scene_words=int(scene.target_words or 0) or 1500,
         )
         scene.status = "drafting"
@@ -204,11 +216,22 @@ async def write_scene(
         raw = await get_adapter_for(Task.SCENE_DRAFT).ask(prompt)
         return _strip_scene_meta(raw)
 
+    # 全章节拍全景:给本场写手看见「全章要走的路」,才有机会为后文埋引子。
+    # 未来节拍只许埋引子不许写出来——指令写在模板里,这里只负责把节拍带上。
+    beats_view_block = (
+        "【本章节拍全景(全章路线图,供铺垫参考)】\n"
+        + beats_view.strip()
+        + "\n(排在本场之前的节拍当作已发生的事实,不要重演;"
+        "排在后面的节拍,只许在对白、细节里轻轻埋一点引子,不许把未来场次的剧情写出来)\n"
+        if (beats_view or "").strip()
+        else ""
+    )
     prompt = SCENE_DRAFT_PROMPT.format(
         chapter_number=chapter_number,
         chapter_title=chapter_title,
         chapter_summary=chapter_summary or "",
         scene_anchor=scene_anchor or "(未指定)",
+        beats_view_block=beats_view_block,
         scene_seq=scene.seq,
         scene_total=scene_total,
         scene_title=scene.title or f"第{scene.seq}场",

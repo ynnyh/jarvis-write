@@ -41,6 +41,17 @@ from app.engines.pipeline.scene_write import (
 logger = logging.getLogger("jarvis-write.scene_chapter")
 
 
+def _beats_view(outline) -> str:
+    """蓝图节拍 → 逐行清单,注入每一场的 prompt(全章路线图,铺垫用)。
+
+    逐场生成的固有盲区:每场的写手只看自己的场景卡,不知道本章后文要揭什么,
+    结构上写不出铺垫。把蓝图的节拍清单带给每一场,前场才有机会为后场埋引子。
+    蓝图无节拍时返回空串,不注入(write_scene 里按空串零副作用处理)。
+    """
+    beats = [str(b).strip() for b in (getattr(outline, "beats", None) or []) if str(b).strip()]
+    return "\n".join(f"{i}. {b}" for i, b in enumerate(beats, 1))
+
+
 async def compose_by_scenes(
     db: Session,
     project: Project,
@@ -95,6 +106,7 @@ async def compose_by_scenes(
     db.commit()
 
     total = len(scenes)
+    beats_view = _beats_view(outline)
 
     # ---- 逐场生成 → 验收 → 定点重写 ----
     verdicts: list[dict] = []
@@ -117,6 +129,7 @@ async def compose_by_scenes(
                 chapter_summary=outline_summary,
                 chapter_title=outline_title,
                 previous_text=previous_text,
+                beats_view=beats_view,
                 outline=outline,
                 # 章级重写意见只在第一场带一次,后续场靠「上一场尾部」自然接住
                 revision_directive=revision_directive if i == 1 else "",
@@ -184,6 +197,9 @@ async def compose_by_scenes(
                     scene_anchor=scene_anchor,
                     chapter_summary=outline_summary,
                     chapter_title=outline_title,
+                    # 重写也要带上一场尾部:验收打回重写最容易把「与上一场的衔接」改丢
+                    previous_text=(scenes[i - 2].content or "") if i > 1 else "",
+                    beats_view=beats_view,
                     outline=outline,
                     revision_directive=_build_scene_directive(verdict),
                 )

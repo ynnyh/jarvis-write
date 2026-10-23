@@ -213,6 +213,34 @@ def test_write_scene_omits_tail_block_when_no_previous(monkeypatch):
     assert "上一场结尾" not in adapter.calls[0]
 
 
+def test_write_scene_injects_beats_view(monkeypatch):
+    """beats_view 非空 → prompt 带全章节拍全景块(逐场写手看见全章路线)。"""
+    db = _db()
+    project, scene = _mk(db)
+    adapter = _Adapter(["正文。"])
+    _patch(monkeypatch, adapter, sw)
+    asyncio.run(
+        sw.write_scene(
+            db, project, scene,
+            chapter_number=6, scene_total=3,
+            style_block="", deai_rules="",
+            rolling_summary="", recent_tail="", handoff_block="",
+            scene_anchor="", chapter_summary="", chapter_title="夜行",
+            beats_view="1. 雨夜潜入\n2. 撞见仇人",
+        )
+    )
+    p = adapter.calls[0]
+    assert "本章节拍全景" in p
+    assert "雨夜潜入" in p
+    assert "不许把未来场次的剧情写出来" in p
+
+
+def test_write_scene_omits_beats_view_when_empty(monkeypatch):
+    """蓝图无节拍 → 不出现空的全景块(零副作用)。"""
+    db, project, scene, adapter, _ = _write(monkeypatch, ["正文。"])
+    assert "本章节拍全景" not in adapter.calls[0]
+
+
 def test_write_scene_retrieval_stats_recorded(monkeypatch):
     """检索诊断随场景卡落库(前端可回显「这一场参考了什么」)。"""
     db, project, scene, _, _ = _write(monkeypatch, ["正文。"])

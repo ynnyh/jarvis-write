@@ -372,6 +372,37 @@ def test_previous_scene_tail_injected_for_stitching(monkeypatch):
     assert "上一场结尾" not in adapter.calls[1]
 
 
+def test_beats_view_injected_into_every_scene(monkeypatch):
+    """每场 prompt 都带全章节拍全景:逐场写手看得见后文,才有机会铺垫。"""
+    db, project, adapter = _setup(
+        monkeypatch,
+        [_SCENE_JSON, "一。", _verdict(), "二。", _verdict(), "三。", _verdict()],
+    )
+    _compose(db, project)
+    # calls[1]/[3]/[5] = 三场的生成 prompt
+    for idx in (1, 3, 5):
+        assert "本章节拍全景" in adapter.calls[idx]
+        assert "雨夜潜入" in adapter.calls[idx]
+        assert "不许把未来场次的剧情写出来" in adapter.calls[idx]
+
+
+def test_rewrite_prompt_carries_previous_scene_tail(monkeypatch):
+    """验收打回重写时,prompt 要带上一场尾部当衔接参照(重写最易把衔接改丢)。"""
+    db, project, adapter = _setup(
+        monkeypatch,
+        [_SCENE_JSON,
+         "第一场结尾原句在这里。", _verdict(),
+         "初版。", _fail_verdict(),
+         "重写版。", _verdict(),
+         "三。", _verdict()],
+    )
+    _compose(db, project)
+    # calls[3] = 第二场的重写 prompt
+    rewrite_prompt = adapter.calls[3]
+    assert "衔接" in rewrite_prompt
+    assert "第一场结尾原句" in rewrite_prompt
+
+
 # ---------- 复用既有场景卡 ----------
 
 def test_reuses_existing_scene_cards(monkeypatch):

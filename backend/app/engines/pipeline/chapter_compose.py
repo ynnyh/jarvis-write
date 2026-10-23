@@ -248,7 +248,8 @@ def _beats_block(outline) -> str:
     lines = "\n".join(f"  {i}. {b}" for i, b in enumerate(beats, 1))
     return (
         "按以下场景节拍逐个推进(每个节拍写成一个有画面、有张力的场景,"
-        "顺序可微调,但都要落实):\n" + lines
+        "顺序可微调,但都要落实;节拍之间要有因果与时间缝接——上一拍的结果"
+        "把故事推到下一拍,不许写成互不相干的清单):\n" + lines
     )
 
 
