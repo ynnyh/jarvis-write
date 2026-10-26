@@ -51,8 +51,8 @@ class ProjectOut(BaseModel):
     target_words_per_chapter: int
     # 开放式连载(结局未定):前端据此显示「续订」入口与连载式文案
     open_ended: bool = False
-    # 字数守卫开关(写作页):超标自动压缩/拆章,默认关闭
-    word_guard_enabled: bool = False
+    # 字数守卫开关(写作页):超标自动压缩/拆章,新项目默认开启(2026-10 起)
+    word_guard_enabled: bool = True
     auto_split_enabled: bool = False
     # 编辑部审校把关(生成时自动校对+主审+有上限回炉)
     review_pass_threshold: int = 7

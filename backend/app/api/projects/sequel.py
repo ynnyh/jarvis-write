@@ -172,6 +172,8 @@ async def create_sequel(
         genre=src.genre,
         target_chapters=src.target_chapters,
         target_words_per_chapter=target_words,
+        # 字数守卫随作者偏好继承(新项目默认开,但原书明确关了就别硬掰)
+        word_guard_enabled=src.word_guard_enabled,
         global_tendency=src.global_tendency,
         style_memo=src.style_memo,
         dna=src.dna,

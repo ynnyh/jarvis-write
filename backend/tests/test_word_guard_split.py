@@ -107,8 +107,13 @@ async def _split_case() -> None:
     sa = SessionLocal()
     proj2 = sa.get(Project, pid)
     outline2 = sa.get(Outline, outline_id)
+    # 摘要重建走 chapter_maintenance.summarize_rolling 单一入口(封顶兜底),
+    # adapter 得两个模块都打上,否则会真发起 LLM 调用。
+    from app.engines.pipeline import chapter_maintenance as cm
+
     with patch.object(wg, "get_adapter_for", return_value=_SplitAdapter()), \
-         patch.object(extractor_mod, "get_adapter_for", return_value=_SplitAdapter()):
+         patch.object(extractor_mod, "get_adapter_for", return_value=_SplitAdapter()), \
+         patch.object(cm, "get_adapter_for", return_value=_SplitAdapter()):
         result = await wg.word_count_guard(
             sa, proj2, 1, outline2, full_text, style_block="", report=None
         )

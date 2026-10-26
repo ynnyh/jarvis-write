@@ -36,9 +36,11 @@ class Project(Base, TimestampMixin):
     # 蓝图铺满当前批次后「展开下一卷」自动续订(体量顺延 +30,卷纲带着前情重出),
     # 写到哪续到哪。False(默认)= 契约式:开局定结局,写完目标章数完本,行为与旧版一致。
     open_ended: Mapped[bool] = mapped_column(default=False)
-    # 字数守卫:finalize 后检查字数,超标则压缩/拆章。默认关闭(用户反馈约束太严),
-    # 由写作页开关控制;存量项目由迁移统一关掉。
-    word_guard_enabled: Mapped[bool] = mapped_column(default=False)
+    # 字数守卫:finalize 后检查字数,超标则压缩/拆章。新项目默认开(2026-10
+    # 篇幅漂移排查:无守卫时章均可漂到 2×+ 目标,模型并不自律);当年「约束太严」
+    # 的主因是草稿措辞强硬(2026-07 ffc6795 已一并软化),守卫本身只在超 50% 时介入。
+    # 存量项目维持显式设置(ffc6795 迁移统一关过,不覆盖之后的手动开启)。
+    word_guard_enabled: Mapped[bool] = mapped_column(default=True)
     word_guard_ratio: Mapped[float] = mapped_column(default=1.5)
     auto_split_enabled: Mapped[bool] = mapped_column(default=False)
     # 编辑部审校把关(生成时):定稿后自动跑校对(硬伤自修)+ 主审打分,不达标则

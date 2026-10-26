@@ -39,9 +39,12 @@ MIN_SCENES = 3
 MAX_SCENES = 5
 
 # 单场景目标字数(D3)。1500 字是实测的甜点:够铺一个完整的情绪起伏,
-# 又不至于退化成「一小章」。
+# 又不至于退化成「一小章」。900 是甜点下限——只在章目标摊薄 ≥900 时生效;
+# 摊薄不足时让位到绝对下限 500:篇幅对齐用户目标优先于「单场写透」,
+# 硬抬 900 会让 2000-3000 字的章系统性超发到 1.35-1.5×(2026-10 排查实测)。
 DEFAULT_SCENE_WORDS = 1500
 MIN_SCENE_WORDS = 900
+ABS_MIN_SCENE_WORDS = 500
 MAX_SCENE_WORDS = 2400
 
 _TENSION_MIN, _TENSION_MAX = 1, 5
@@ -119,20 +122,25 @@ def _has_curve(levels: list[int]) -> bool:
 
 
 def _clamp_words(value: Any, chapter_target: int, count: int) -> int:
-    """把模型给的单场字数收敛到合法区间,并尽量对齐章目标字数。
+    """把模型给的单场字数收敛到合法区间,基准=章目标均摊值。
 
-    章目标字数 / 场景数 = 均分基准。模型给的值偏离太远(或没给)时回落到基准,
-    否则一章可能写出 8000 字(总和超标)或 2000 字(严重欠账)。
+    章目标字数 / 场景数 = 均摊基准;模型给的值落在均摊的 ±25% 内就尊重,
+    否则回落基准。旧逻辑 `max(900, 均摊)` 是系统性超发根因之一:章目标
+    2000-3000 的书切 3-5 场,每场被硬抬到 ≥900,全章至少 2700-4500 字
+    (1.35-1.5× 目标)——用户明确要 2000,结构上就给不到。900 甜点下限
+    只在均摊 ≥900 时生效;均摊更低时以绝对下限 500 保底(再短铺不开画面)。
     """
-    baseline = max(MIN_SCENE_WORDS, chapter_target // max(1, count)) if chapter_target else DEFAULT_SCENE_WORDS
-    baseline = max(MIN_SCENE_WORDS, min(MAX_SCENE_WORDS, baseline))
+    share = (
+        max(1, chapter_target // max(1, count)) if chapter_target else DEFAULT_SCENE_WORDS
+    )
+    lo = max(ABS_MIN_SCENE_WORDS, share * 3 // 4)
+    hi = max(lo + 1, min(MAX_SCENE_WORDS, share * 5 // 4))
+    base = min(max(share, lo), hi)
     try:
         w = int(value)
     except (TypeError, ValueError):
-        return baseline
-    if w < MIN_SCENE_WORDS or w > MAX_SCENE_WORDS:
-        return baseline
-    return w
+        return base
+    return w if lo <= w <= hi else base
 
 
 def _clamp_tension(value: Any, fallback: int) -> int:

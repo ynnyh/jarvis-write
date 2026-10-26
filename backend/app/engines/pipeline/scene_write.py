@@ -106,9 +106,14 @@ def _tail_of(text: str, limit: int = _PREV_TAIL_CHARS) -> str:
 
 
 def _word_target_line(project_target: int, scene: Scene) -> str:
-    """本场字数区间行。以场景卡自己的 target_words 为准(章目标在切分时已摊过)。"""
+    """本场字数区间行。以场景卡自己的 target_words 为准(章目标在切分时已摊过)。
+
+    下限随目标等比(2/3),绝对下限 400 只保住「写得动一个画面」——旧的
+    max(600,·) 硬底会在短目标章把下限抬过目标本身,与切分端的超发同根
+    (2026-10 篇幅漂移排查)。
+    """
     target = int(scene.target_words or 0) or (project_target // 4 or 1500)
-    floor = max(600, target * 2 // 3)
+    floor = max(400, target * 2 // 3)
     ceil = target * 5 // 4
     return f"本场目标 {target} 字(下限 {floor},上限 {ceil})"
 
@@ -246,7 +251,7 @@ async def write_scene(
         ),
         scene_word_target=_word_target_line(int(project.target_words_per_chapter or 0), scene),
         scene_words=int(scene.target_words or 0) or 1500,
-        scene_word_floor=max(600, (int(scene.target_words or 0) or 1500) * 2 // 3),
+        scene_word_floor=max(400, (int(scene.target_words or 0) or 1500) * 2 // 3),
         scene_word_ceil=(int(scene.target_words or 0) or 1500) * 5 // 4,
         hard_constraints=facts_block,
         resource_ledger="",

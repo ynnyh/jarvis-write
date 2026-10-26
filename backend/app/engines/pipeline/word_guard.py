@@ -440,8 +440,12 @@ async def _rebuild_split_summaries(
     text_a: str,
     text_b: str,
 ) -> None:
-    """为拆出的两章生成滚动摘要。"""
-    from app.prompts.chapter import ROLLING_SUMMARY_PROMPT
+    """为拆出的两章生成滚动摘要。
+
+    走 summarize_rolling 单一入口:封顶兜底(2026-10 篇幅漂移修复)不能一边修
+    一边漏——拆章重建的摘要同样进下一章的 prompt,棘轮从哪条路进来都得拦。
+    """
+    from app.engines.pipeline.chapter_maintenance import summarize_rolling
 
     try:
         # 取前一章的摘要作为基础
@@ -468,13 +472,11 @@ async def _rebuild_split_summaries(
         )
 
         # 第 A 章摘要
-        summary_a = await get_adapter_for(Task.SUMMARY).ask(
-            ROLLING_SUMMARY_PROMPT.format(
-                previous_summary=prev_summary,
-                chapter_number=chapter_a,
-                chapter_title=outline_a.title if outline_a else "",
-                chapter_text=text_a,
-            )
+        summary_a = await summarize_rolling(
+            prev_summary,
+            chapter_a,
+            outline_a.title if outline_a else "",
+            text_a,
         )
         row_a = (
             db.query(ChapterSummary)
@@ -487,17 +489,15 @@ async def _rebuild_split_summaries(
         if row_a is None:
             row_a = ChapterSummary(project_id=project.id, chapter_number=chapter_a)
             db.add(row_a)
-        row_a.rolling_summary = summary_a.strip()
+        row_a.rolling_summary = summary_a
         db.flush()
 
         # 第 B 章摘要(基于 A 的摘要)
-        summary_b = await get_adapter_for(Task.SUMMARY).ask(
-            ROLLING_SUMMARY_PROMPT.format(
-                previous_summary=summary_a.strip(),
-                chapter_number=chapter_b,
-                chapter_title=outline_b.title if outline_b else "",
-                chapter_text=text_b,
-            )
+        summary_b = await summarize_rolling(
+            summary_a,
+            chapter_b,
+            outline_b.title if outline_b else "",
+            text_b,
         )
         row_b = (
             db.query(ChapterSummary)

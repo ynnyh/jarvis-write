@@ -89,7 +89,7 @@ export default function ProjectSettingsPanel({ pid, project }: Props) {
     } catch (e) { toast.err("每章目标字数保存失败", errMsg(e)); } finally { setWordsSaving(false); }
   }
 
-  // 字数守卫开关(压缩):超标自动压回目标字数。默认关闭。
+  // 字数守卫开关(压缩):超标自动压回目标字数。新项目默认开启(2026-10 起,治篇幅越写越长);存量书维持各自设置。
   async function toggleGuard(on: boolean) {
     try {
       await api.patchProject(pid, { word_guard_enabled: on });
@@ -304,7 +304,7 @@ export default function ProjectSettingsPanel({ pid, project }: Props) {
             onChange={(e) => toggleGuard(e.target.checked)} />
           <span>
             字数守卫
-            <b className="hint">超标自动压缩回目标字数,默认关闭</b>
+            <b className="hint">超标自动压缩回目标字数,新书默认开启</b>
           </span>
         </label>
       </div>

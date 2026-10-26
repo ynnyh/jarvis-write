@@ -157,14 +157,30 @@ def test_plan_from_beats_handles_no_summary_no_beats():
 
 def test_clamp_words_rejects_out_of_range():
     """模型给的离谱字数(过短/过长)回落到均分基准。"""
-    # 章 3000 字 / 3 场 → 基准 1000(受 MIN_SCENE_WORDS=900 下限保护)
+    # 章 3000 字 / 3 场 → 均摊基准 1000
     assert sp._clamp_words(None, 3000, 3) == 1000
     assert sp._clamp_words(100, 3000, 3) == 1000     # 太短 → 回落
     assert sp._clamp_words(99999, 3000, 3) == 1000   # 太长 → 回落
     assert sp._clamp_words("abc", 3000, 3) == 1000   # 脏值 → 回落
-    assert sp._clamp_words(1500, 3000, 3) == 1500    # 合法值保留
+    assert sp._clamp_words(1150, 3000, 3) == 1150    # 均摊 ±25% 内保留
+    # 偏离均摊超过 +25%(旧口径会放行,把全章顶到 1.5×目标)→ 回落基准
+    assert sp._clamp_words(1500, 3000, 3) == 1000
     # 章很长时基准上调但不超上限
     assert sp._clamp_words(None, 12000, 4) == sp.MAX_SCENE_WORDS
+
+
+def test_clamp_words_no_floor_inflation_for_short_targets():
+    """短目标章不再被 900 硬底抬升(2026-10 篇幅漂移修复)。
+
+    旧逻辑 max(900, 均摊):章目标 2000/3 场 → 均摊 666 被抬到 900,
+    全章结构性 ≥2700 字(1.35×)。现在均摊即基准,下限只保绝对底 500。
+    """
+    assert sp._clamp_words(None, 2000, 3) == 666
+    assert sp._clamp_words(900, 2000, 3) == 666    # 高于均摊+25% → 不再放行
+    assert sp._clamp_words(700, 2000, 3) == 700    # 均摊 ±25% 内 → 尊重
+    # 均摊 ≥900 的章,900 甜点下限语义不变(基准就是均摊,不再抬升也不许过低)
+    assert sp._clamp_words(None, 3600, 4) == 900
+    assert sp._clamp_words(500, 3600, 4) == 900    # 低于均摊-25% → 回落
 
 
 # ---------- JSON 抠取容错 ----------
@@ -256,7 +272,11 @@ def test_plan_scenes_persists_cards():
     assert [r.tension_level for r in rows] == [2, 5, 4]
     assert rows[0].emotion_target == "紧绷"
     assert rows[0].goal == "摸清祭坛位置"
-    assert rows[1].target_words == 1800
+    # 章目标 3000 / 3 场 → 均摊窗口 [750,1250]:带内的 1200 尊重模型;
+    # 带外的 1800 拉回均摊 1000(旧口径放行 1800,全章顶到 1.8× 目标——
+    # 篇幅越写越长的结构性来源之一,2026-10 修复)
+    assert rows[0].target_words == 1200
+    assert rows[1].target_words == 1000
     assert all(r.status == "planned" for r in rows)
     # 每张卡都有 v1 快照(重写的回退基线)
     for r in rows:

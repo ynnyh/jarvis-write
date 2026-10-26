@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -26,9 +27,92 @@ from app.engines.pipeline.chapter_context import _rolling_summary
 from app.engines.pipeline.handoff import extract_handoff_contract
 from app.engines.timeline import persist_clock_issues
 from app.llm.router import Task, get_adapter_for
-from app.prompts.chapter import ROLLING_SUMMARY_PROMPT, STYLE_MEMO_UPDATE_PROMPT
+from app.prompts.chapter import (
+    MEMO_COMPRESS_PROMPT,
+    ROLLING_SUMMARY_PROMPT,
+    STYLE_MEMO_UPDATE_PROMPT,
+    SUMMARY_COMPRESS_PROMPT,
+)
 
 logger = logging.getLogger("jarvis-write.chapter")
+
+# ---- 自我反馈型字段的封顶口径(模板 {cap} 与这里同源,别各写一份数字) ----
+# 滚动摘要/文风备忘每章由「上一版 + 新章」重算,模型天然只增不减:prompt 里写死
+# "不超过 N 字"管不住(实测项目4:摘要 19 章从 539 字棘轮到 2814 字,3.5×),
+# 指令性封顶必须配代码兜底。容忍带取指令值的 1.5 倍:带内信任指令(稳态零额外
+# 调用),超带重压一次,重压仍超按句边界截断——棘轮从此有上界。
+ROLLING_SUMMARY_CAP = 800
+STYLE_MEMO_CAP = 600
+_CAP_TOLERANCE = 1.5
+
+
+def _truncate_at_sentence(text: str, limit: int) -> str:
+    """按句边界截断(找最后一个句末标点;实在没有就硬切)。最后手段,几乎不该走到。"""
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    for sep in ("。", "!", "?", "…", "；", ";", "，", ",", "\n"):
+        idx = cut.rfind(sep)
+        if idx >= limit // 2:
+            return cut[: idx + 1]
+    return cut
+
+
+async def _capped_field(
+    adapter: Any, text: str, *, cap: int, compress_prompt: str
+) -> str:
+    """自我反馈型 LLM 字段的代码级封顶。
+
+    len <= cap×1.5 → 直接用;超过 → 压缩模板重压一次;重压结果更短就采纳;
+    仍超 → 句边界截断。重压调用失败不抛:封顶是预算保护,不是生成的前置条件,
+    兜不回来就截断,绝不让摘要更新把章后链路搞挂。
+    """
+    text = (text or "").strip()
+    hard = int(cap * _CAP_TOLERANCE)
+    if len(text) <= hard:
+        return text
+    logger.warning("自我反馈字段超限(%d 字 > %d×1.5),触发重压", len(text), cap)
+    try:
+        raw = await adapter.ask(
+            compress_prompt.format(actual_len=len(text), cap=cap, text=text)
+        )
+        trimmed = (raw or "").strip()
+    except Exception:  # noqa: BLE001 — 重压失败走截断兜底
+        logger.warning("超限字段重压失败,按句边界截断兜底", exc_info=True)
+        trimmed = ""
+    if trimmed and len(trimmed) < len(text):
+        text = trimmed
+    if len(text) <= hard:
+        return text
+    return _truncate_at_sentence(text, hard)
+
+
+async def summarize_rolling(
+    previous_summary: str,
+    chapter_number: int,
+    chapter_title: str,
+    chapter_text: str,
+) -> str:
+    """滚动摘要的单一生成入口:模板 format + 封顶兜底,三处调用方共用。
+
+    word_guard 拆章后重建摘要也走这里——封顶口径不能一边修一边漏。
+    """
+    adapter = get_adapter_for(Task.SUMMARY)
+    raw = await adapter.ask(
+        ROLLING_SUMMARY_PROMPT.format(
+            previous_summary=previous_summary,
+            chapter_number=chapter_number,
+            chapter_title=chapter_title,
+            chapter_text=chapter_text,
+            cap=ROLLING_SUMMARY_CAP,
+        )
+    )
+    return await _capped_field(
+        adapter,
+        (raw or "").strip(),
+        cap=ROLLING_SUMMARY_CAP,
+        compress_prompt=SUMMARY_COMPRESS_PROMPT,
+    )
 
 
 async def update_style_memo(
@@ -46,19 +130,27 @@ async def update_style_memo(
     沉淀进备忘「要避开的」小节;干净章节传空串,整块省略。
     """
     prev = (project.style_memo or "").strip() or "(尚无,这是第一次积累)"
+    adapter = get_adapter_for(Task.SUMMARY)
     try:
-        memo = await get_adapter_for(Task.SUMMARY).ask(
+        memo = await adapter.ask(
             STYLE_MEMO_UPDATE_PROMPT.format(
                 previous_memo=prev,
                 chapter_number=chapter_number,
                 chapter_text=chapter_text[:8000],
                 flavor_notes=flavor_notes,
+                cap=STYLE_MEMO_CAP,
             )
         )
     except Exception:  # noqa: BLE001 — 备忘更新失败不影响正文与主流程
         logger.warning("文风备忘更新失败(第 %d 章),跳过", chapter_number, exc_info=True)
         return None
     memo = (memo or "").strip()
+    if not memo:
+        return None
+    # 随书累积的自我反馈字段:代码级封顶,防"每章只增不减"的棘轮(与滚动摘要同口径)
+    memo = await _capped_field(
+        adapter, memo, cap=STYLE_MEMO_CAP, compress_prompt=MEMO_COMPRESS_PROMPT
+    )
     if not memo:
         return None
     project.style_memo = memo
@@ -104,14 +196,7 @@ async def rebuild_summaries_after(
         # 读完即提交,释放读快照:LLM 调用期间用量记账会在别的连接提交,让旧快照过期,
         # 之后 UPDATE 升级写锁会撞 SQLITE_BUSY(WAL 下该错误不走 busy_timeout,直接失败)。
         db.commit()
-        new_summary = await get_adapter_for(Task.SUMMARY).ask(
-            ROLLING_SUMMARY_PROMPT.format(
-                previous_summary=prev,
-                chapter_number=ch.chapter_number,
-                chapter_title=title,
-                chapter_text=text,
-            )
-        )
+        new_summary = await summarize_rolling(prev, ch.chapter_number, title, text)
         row = (
             db.query(ChapterSummary)
             .filter(
@@ -187,14 +272,7 @@ async def apply_chapter_tail(
     _report("6/6 更新前情摘要")
     logger.info("第 %d 章:更新前情摘要...", chapter_number)
     rolling = _rolling_summary(db, project.id, chapter_number)
-    new_summary = await get_adapter_for(Task.SUMMARY).ask(
-        ROLLING_SUMMARY_PROMPT.format(
-            previous_summary=rolling,
-            chapter_number=chapter_number,
-            chapter_title=outline_title,
-            chapter_text=final,
-        )
-    )
+    new_summary = await summarize_rolling(rolling, chapter_number, outline_title, final)
     srow = (
         db.query(ChapterSummary)
         .filter(
