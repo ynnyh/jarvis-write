@@ -15,6 +15,7 @@ from typing import AsyncIterator
 
 import httpx
 
+from app import live
 from app.llm.base import (
     _http_timeout,
     LLMAdapter,
@@ -153,6 +154,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
         trapped = self._note_thinking_trap(resp)
         if resp.content.strip():
             # 正文拿到了也要记账:渠道白烧思考是浪费钱,记忆撤参让后续调用受益
+            self._warn_thinking(resp)
             return resp
         if not trapped:
             # 陷阱命中时不兜底:我们要的就是「不思考」,思考内容是过程不是答案,
@@ -206,6 +208,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
                             completion_tokens=parsed.completion_tokens,
                         )
                         reasoning.append(parsed.reasoning)
+                        live.publish_reasoning(parsed.reasoning)
                         if parsed.content:
                             yield parsed.content
                         return
@@ -247,6 +250,9 @@ class OpenAICompatibleAdapter(LLMAdapter):
                         think = _reasoning_of(delta)
                         if think:
                             reasoning.append(think)
+                            # 思考直播:与正文分流进总线(live 自己丢弃无 job 的),
+                            # 让"正在思考"看得见,强制思考渠道不再表现为黑盒卡住
+                            live.publish_reasoning(think)
                         text = as_text(delta.get("content"))
                         if text:
                             yield text

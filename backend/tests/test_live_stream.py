@@ -553,6 +553,85 @@ def test_follow_carries_retry_count_in_label_frames():
     assert "无可用渠道" in label_frames[-1]["lastErr"]
 
 
+# ---------- 思考直播 + 强制思考预警 ----------
+
+def test_publish_reasoning_is_a_separate_stream():
+    """思考与正文分流:各走各的缓冲与游标,互不污染。"""
+    live.publish_reasoning("想一想开头…", job_id="j-think")
+    live.publish_reasoning("再想想衔接。", job_id="j-think")
+    live.publish("正文第一句。", job_id="j-think")
+    snap = live.snapshot("j-think")
+    assert snap["think"] == "想一想开头…再想想衔接。"
+    assert snap["text"] == "正文第一句。"
+    assert snap["thinkSeq"] == 12 and snap["seq"] == 6  # 游标各自独立
+    live.publish_reasoning("无 job 上下文的孤儿思考")     # 静默丢弃,不串流
+    assert live.snapshot("j-think")["think"] == "想一想开头…再想想衔接。"
+
+
+def test_think_tail_is_trimmed_and_cleared_on_step_change():
+    """思考流裁尾 + 一步一屏:换步骤清思考,但 thinkSeq 不回退(游标单调)。"""
+    live.publish_reasoning("甲" * 2500, job_id="j-ttrim")
+    live.publish_reasoning("乙" * 500, job_id="j-ttrim")
+    snap = live.snapshot("j-ttrim")
+    assert len(snap["think"]) <= live._THINK_TAIL_CHARS
+    assert snap["think"].endswith("乙")
+    assert snap["thinkSeq"] == 3000
+    live.set_step("j-ttrim", "下一步")
+    snap = live.snapshot("j-ttrim")
+    assert snap["think"] == ""                     # 换屏清思考
+    assert snap["thinkSeq"] == 3000                # 游标不回退
+
+
+def test_note_thinking_unstoppable_sets_banner_and_accumulates():
+    """强制思考预警:横幅一次置位、消耗跨调用累加;随 snapshot 下发。"""
+    live.note_thinking_unstoppable("j-burn", 163)
+    live.note_thinking_unstoppable("j-burn", 500)
+    snap = live.snapshot("j-burn")
+    assert snap["thinkWarn"] is True
+    assert snap["thinkBurned"] == 663              # 累计,不是覆盖
+    live.note_thinking_unstoppable("j-burn", 0)    # 渠道没报数的调用:只保证横幅在
+    assert live.snapshot("j-burn")["thinkBurned"] == 663
+
+
+def test_follow_emits_think_frames_and_warn_labels():
+    """思考增量走独立的 think 帧;预警变了实时推 label(不用等换屏)。"""
+
+    async def scenario():
+        job_id = jobs.create_job("live-think")
+        jobs.update_stage(job_id, "正在写草稿")
+        frames: list[tuple[str, dict]] = []
+
+        async def reader():
+            async for frame in live.follow(job_id):
+                frames.append(frame)
+                if frame[0] == "done":
+                    return
+
+        task = asyncio.create_task(reader())
+        await asyncio.sleep(0.05)
+        live.publish_reasoning("先想开头", job_id=job_id)
+        await asyncio.sleep(0.2)
+        live.publish("雪落了", job_id=job_id)
+        await asyncio.sleep(0.2)
+        live.note_thinking_unstoppable(job_id, 163)
+        await asyncio.sleep(0.3)
+        jobs.finish_job(job_id, None)
+        await asyncio.wait_for(task, 5)
+        return frames
+
+    frames = asyncio.run(scenario())
+    thinks = [d for k, d in frames if k == "think"]
+    assert "".join(d["text"] for d in thinks) == "先想开头"
+    tokens = [d for k, d in frames if k == "token"]
+    assert tokens and tokens[0]["text"] == "雪落了"      # 正文与思考各自成流
+    label_frames = [d for k, d in frames if k == "label"]
+    assert label_frames and label_frames[-1]["thinkWarn"] is True
+    assert label_frames[-1]["thinkBurned"] == 163
+    # step 首帧带思考快照字段(断线重连/首屏都靠它)
+    step_frames = [d for k, d in frames if k == "step"]
+    assert "think" in step_frames[0] and "thinkWarn" in step_frames[0]
+
+
 def test_http_timeout_has_connect_floor():
     """渠道不可达时快速失败:连接超时独立于总超时(10s 下限),黑等不再长达 10 分钟。"""
     from app.llm.base import _http_timeout

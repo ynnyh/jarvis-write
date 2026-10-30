@@ -16,6 +16,7 @@ from typing import AsyncIterator
 
 import httpx
 
+from app import live
 from app.llm.base import (
     _http_timeout,
     LLMAdapter,
@@ -157,6 +158,7 @@ class AnthropicAdapter(LLMAdapter):
                             completion_tokens=parsed.completion_tokens,
                         )
                         reasoning.append(parsed.reasoning)
+                        live.publish_reasoning(parsed.reasoning)
                         if parsed.content:
                             yield parsed.content
                         return
@@ -194,6 +196,7 @@ class AnthropicAdapter(LLMAdapter):
                             think = delta.get("thinking")
                             if think:
                                 reasoning.append(as_text(think))
+                                live.publish_reasoning(as_text(think))
                                 continue
                             text = delta.get("text")
                             if text:

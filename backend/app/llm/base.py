@@ -511,6 +511,28 @@ def remember_thinking_rejected(base_url: str, model: str) -> None:
     _THINKING_REJECTED.add((base_url or "", model))
 
 
+# 渠道「思考关不掉」的现场记录:(base_url, model) → 输出预算自动加思考余量。
+# 与 _THINKING_REJECTED 的分工:那里只记「参数不被接受/不再下发」,渠道本身可能
+# 根本不思考(纯参数错);这里专门记「发了 disabled 仍观察到思考」的渠道——
+# 裸探针实测(2026-10-30,用户渠道 deepseek-v4-1-flash-1017):thinking:disabled /
+# enable_thinking / chat_template_kwargs / reasoning_effort 四种关思考形态全被无视,
+# 思考 42~1334 token 随任务复杂度上涨,与正文一起挤 max_tokens → finish_reason=length
+# → 预算翻倍整章重发,首调整轮作废(实测单次白烧 8192 token / 74 秒)。
+# max_tokens 只是封顶不提前计费,提前加余量零成本,把「必截断→重跑」变成「一次跑完」。
+# 进程内记忆:每渠道每进程首调仍要先挨一次才进登记(与 _THINKING_REJECTED 同口径)。
+_REASONING_UNSTOPPABLE: set[tuple[str, str]] = set()
+
+# 思考余量:覆盖实测思考量级(玩具任务数百、章节级数千)+ 安全边际;
+# 封顶与 complete_text_with_budget 的翻倍上限同口径,防一发超出模型硬上限。
+_REASONING_HEADROOM_TOKENS = 8192
+_MAX_TOKENS_CEILING = 32768
+
+
+def reasoning_unstoppable(base_url: str, model: str) -> bool:
+    """该 (渠道, 模型) 是否已判定「思考关不掉」(complete() 据此加预算余量)。"""
+    return (base_url or "", model) in _REASONING_UNSTOPPABLE
+
+
 def _is_param_rejection(exc: "UpstreamError", sent_thinking: bool) -> bool:
     if not sent_thinking or exc.status != 400:
         return False
@@ -654,6 +676,14 @@ class LLMAdapter(abc.ABC):
         - 429/5xx/网络超时 → 指数退避重试,并把后续尝试切到流式;
         - 空正文(EmptyContentError)不在这层重试,交给 `ask()` 放大预算。
         """
+        # 思考关不掉的渠道:提前给输出预算加余量。思考与正文挤同一个 max_tokens,
+        # 等截断后再翻倍重跑,赔上的是一整轮生成(时间+token 双输);余量只在
+        # 真用到时才计费,提前给不花钱。complete_text_with_budget 的 finally 会把
+        # max_tokens 还原到调用前的值,这里每次入口重算,多轮放大照常叠加。
+        if reasoning_unstoppable(self.base_url or "", self.model_name):
+            self.max_tokens = min(
+                self.max_tokens + _REASONING_HEADROOM_TOKENS, _MAX_TOKENS_CEILING
+            )
         use_stream = self.prefer_stream
         stream_rejected = False
 
@@ -756,6 +786,10 @@ class LLMAdapter(abc.ABC):
         """非流式兜底路径:整段回来后补播一次(总比一个字都看不到强)。"""
         async with throttle.slot(self.throttle_key(), self.max_concurrency, self.rpm):
             resp = await self._complete_once(messages)
+        if resp.reasoning:
+            # 思考也补播(截尾交给总线):非流式虽拿不到逐字思考,但"想多久"
+            # 用户该看得见,不然强制思考渠道在非流式兜底路上又成了黑盒
+            live.publish_reasoning(resp.reasoning)
         if resp.content:
             live.publish(resp.content)
         return resp
@@ -780,6 +814,7 @@ class LLMAdapter(abc.ABC):
         if text.strip():
             # 正文拿到了也要记账:渠道白烧思考是浪费钱,记忆撤参让后续调用受益
             self._note_thinking_trap(resp)
+            self._warn_thinking(resp)
             return resp
         trapped = self._note_thinking_trap(resp)
         if not trapped:
@@ -839,6 +874,9 @@ class LLMAdapter(abc.ABC):
             return False
         first = not thinking_param_rejected(self.base_url or "", self.model_name)
         remember_thinking_rejected(self.base_url or "", self.model_name)
+        # 同时登记「思考关不掉」:后续调用给输出预算加余量,别让思考把预算
+        # 挤爆后走「翻倍重跑」那趟冤枉路(见 _REASONING_UNSTOPPABLE 注释)
+        _REASONING_UNSTOPPABLE.add((self.base_url or "", self.model_name))
         self.thinking_mode = ""
         if first:
             logger.warning(
@@ -848,6 +886,24 @@ class LLMAdapter(abc.ABC):
                 self.model_name, len(resp.reasoning or ""), resp.reasoning_tokens,
             )
         return True
+
+    def _warn_thinking(self, resp: "LLMResponse") -> None:
+        """强制思考预警:登记在案的渠道每次烧思考都记进任务横幅。
+
+        思考 token 是用户没要求的额外开销(配置里说的是「关闭」,渠道置之不理),
+        必须摆到台面上让用户看见,而不是默默烧钱——「不能平白消耗用户的 token」。
+        横幅在 live 总线上一任务一条、跨调用持续可见,消耗跨调用累加;无 job
+        上下文(前台请求/脚本)没人看,直接跳过。
+        """
+        if not reasoning_unstoppable(self.base_url or "", self.model_name):
+            return
+        try:
+            jid = live.current_job_id.get()
+            if not jid:
+                return
+            live.note_thinking_unstoppable(jid, int(resp.reasoning_tokens or 0))
+        except Exception:  # noqa: BLE001 — 预警决不能拖垮生成
+            logger.debug("强制思考预警下发失败", exc_info=True)
 
     def _trap_retry_error(
         self, resp: "LLMResponse", *, status: int | None = None
@@ -880,6 +936,13 @@ class LLMAdapter(abc.ABC):
                 diagnosis=diag,
             )
         if fr in FINISH_TRUNCATED or (resp.reasoning or "").strip():
+            # 预算烧光却一个字没落:思考(可见或隐形)吃满预算的实锤。有些中转
+            # 不回传 reasoning 字段(实测 2026-10-30,用户渠道两次烧光预算的调用
+            # 都没带 reasoning_tokens,_note_thinking_trap 抓不到),这里补第二道
+            # 登记——空正文 + 截断收尾本身就是「思考关不掉」的充分证据,让预算
+            # 余量从下一次调用就生效,不必等哪次恰好带出思考字段。
+            _REASONING_UNSTOPPABLE.add((self.base_url or "", self.model_name))
+            self._warn_thinking(resp)
             return EmptyContentError(
                 f"{prefix}模型把输出预算全花在思考上了,正文为空({diag})。"
                 "推理模型的思考也占 max_tokens,系统会放大预算重试",

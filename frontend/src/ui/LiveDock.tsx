@@ -36,7 +36,8 @@ export function LiveDock() {
     return picked ?? running[running.length - 1] ?? null;
   }, [liveJobId, running]);
 
-  const { text, step, streaming, ended, retries, lastErr } = useJobLive(target?.job_id ?? null, open);
+  const { text, step, streaming, ended, retries, lastErr, think, thinkWarn, thinkBurned } =
+    useJobLive(target?.job_id ?? null, open);
 
   useEffect(() => {
     localStorage.setItem(OPEN_KEY, open ? "1" : "0");
@@ -50,7 +51,7 @@ export function LiveDock() {
   useEffect(() => {
     const el = bodyRef.current;
     if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
-  }, [text]);
+  }, [text, think]);
 
   // 手动终止正在盯的任务:掐断进行中的模型调用,省下后续 token
   const [stopping, setStopping] = useState(false);
@@ -136,11 +137,28 @@ export function LiveDock() {
             pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
           }}
         >
+          {thinkWarn && (
+            /* 强制思考预警:渠道想关思考却关不掉,白烧的 token 必须摆到台面上 */
+            <span className="live-stall live-think-warn">
+              💭 该渠道的模型强制思考且无法关闭
+              {thinkBurned > 0 ? `:本任务已额外消耗思考约 ${thinkBurned} token` : ",思考在静默消耗 token"}
+              (不写入正文)。建议换非思考模型,或在「模型设置」调大 max_tokens 防截断重跑。
+            </span>
+          )}
           {text ? (
             <>
+              {think && <div className="live-think-badge">💭 已深度思考</div>}
               {text}
               {streaming && !ended && <span className="live-caret" />}
             </>
+          ) : think ? (
+            /* 思考直播:模型 reasoning 逐字滚出来,强制思考渠道不再表现为黑盒卡住 */
+            <span className="live-think">
+              💭 思考中
+              {streaming && !ended && <span className="live-caret" />}
+              {"\n"}
+              {think}
+            </span>
           ) : retries > 0 ? (
             /* 渠道在背后反复抽风:把重试账亮出来,别让用户把卡住当正常等待 */
             <span className="live-stall">

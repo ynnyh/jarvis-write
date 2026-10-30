@@ -18,6 +18,7 @@ from typing import AsyncIterator
 
 import httpx
 
+from app import live
 from app.llm.base import (
     _http_timeout,
     LLMAdapter,
@@ -201,6 +202,7 @@ class OpenAIResponsesAdapter(LLMAdapter):
                             completion_tokens=parsed.completion_tokens,
                         )
                         reasoning.append(parsed.reasoning)
+                        live.publish_reasoning(parsed.reasoning)
                         if parsed.content:
                             yield parsed.content
                         return
@@ -221,6 +223,7 @@ class OpenAIResponsesAdapter(LLMAdapter):
                             think = as_text(chunk.get("delta"))
                             if think:
                                 reasoning.append(think)
+                                live.publish_reasoning(think)
                         elif kind in ("response.completed", "response.incomplete"):
                             done = chunk.get("response") or {}
                             usage = done.get("usage") or {}

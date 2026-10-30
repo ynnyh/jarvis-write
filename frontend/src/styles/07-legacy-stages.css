@@ -287,6 +287,29 @@
   line-height: 1.6;
 }
 
+/* 强制思考预警(渠道想关思考却关不掉):与渠道异常警示同一套黄底,
+   上面留间距与正文隔开 */
+.live-think-warn {
+  margin-bottom: 8px;
+}
+
+/* 思考直播:模型 reasoning 逐字滚出来——灰、斜、略小,一眼和正文区分。
+   思考是过程不是书稿,绝不能混进正文的视觉里 */
+.live-think {
+  display: block;
+  color: var(--text-3);
+  font-style: italic;
+  font-size: calc(var(--fs-sm) * 0.92);
+  line-height: 1.6;
+}
+
+/* 思考收场徽标:正文开始后,思考流收成一行小字,不跟正文抢地方 */
+.live-think-badge {
+  color: var(--text-3);
+  font-size: calc(var(--fs-sm) * 0.9);
+  margin-bottom: 4px;
+}
+
 /* 移动端 LiveDock 定位 + 高度。
    - 默认(非写区场景)贴底 8px:不再硬上抬 64px 浮在屏幕中间遮挡正文。
    - 写区场景(:has(.write-zone)):让出 .m-ai-bar(fixed,min-height 48px + 8px 边距

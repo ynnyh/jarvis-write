@@ -32,6 +32,7 @@ logger = logging.getLogger("jarvis-write.live")
 current_job_id: ContextVar[str | None] = ContextVar("live_job_id", default=None)
 
 _TAIL_CHARS = 4000      # 每个任务只保留尾部这么多字
+_THINK_TAIL_CHARS = 2000  # 思考流尾部(思考只是"看见在干活",留太多了没意义)
 _MAX_STREAMS = 128      # 内存上限:超出先清已结束的流
 _POLL_S = 0.12          # 订阅端查新间隔
 _HEARTBEAT_S = 15.0     # 心跳间隔(穿透 nginx/CDN 的空闲超时)
@@ -46,6 +47,7 @@ class _Stream:
     __slots__ = (
         "chunks", "chars", "seq", "step", "epoch", "closed", "touched", "calls",
         "retries", "last_err",
+        "think_chunks", "think_chars", "think_seq", "think_warn", "think_burned",
     )
 
     def __init__(self) -> None:
@@ -62,6 +64,15 @@ class _Stream:
         # 「渠道在背后反复抽风」要持续可见,用户才不会把卡住当成正常等待。
         self.retries = 0
         self.last_err = ""
+        # 思考流(模型 reasoning):直播"正在思考"的观感 + 强制思考预警账。
+        # 思考不写入正文,单独一条缓冲,与正文各自持游标。
+        self.think_chunks: deque[str] = deque()
+        self.think_chars = 0
+        self.think_seq = 0
+        # 强制思考预警:渠道被判定「思考关不掉」后置位(一次任务只提示一条),
+        # think_burned 累计本任务白烧的思考 token(上游 usage 报数,跨调用累加)。
+        self.think_warn = False
+        self.think_burned = 0
         self.touched = time.monotonic()
 
     def tail(self) -> str:
@@ -75,6 +86,18 @@ class _Stream:
             kept = self.chunks[0][-_TAIL_CHARS:]
             self.chunks[0] = kept
             self.chars = len(kept)
+
+    def think_tail(self) -> str:
+        return "".join(self.think_chunks)
+
+    def trim_think(self) -> None:
+        """思考流裁到 _THINK_TAIL_CHARS(算法同 trim)。"""
+        while self.think_chars > _THINK_TAIL_CHARS and len(self.think_chunks) > 1:
+            self.think_chars -= len(self.think_chunks.popleft())
+        if self.think_chars > _THINK_TAIL_CHARS:
+            kept = self.think_chunks[0][-_THINK_TAIL_CHARS:]
+            self.think_chunks[0] = kept
+            self.think_chars = len(kept)
 
 
 _STREAMS: dict[str, _Stream] = {}
@@ -121,6 +144,44 @@ def publish(delta: str, *, job_id: str | None = None) -> None:
         stream.trim()
 
 
+def publish_reasoning(delta: str, *, job_id: str | None = None) -> None:
+    """把一段思考增量挂到当前任务的思考流上(与正文分流,前端单独渲染)。
+
+    为什么单独一条流:思考不写入正文,混进正文会把书稿内容搅乱;但"模型正在
+    思考"必须可见——强制思考的渠道上一动不动几十秒,用户只会以为卡死了。
+    无 job 上下文时直接丢弃,与 publish 同口径。
+    """
+    if not delta:
+        return
+    jid = job_id or current_job_id.get()
+    if not jid:
+        return
+    with _LOCK:
+        stream = _ensure_locked(jid)
+        if stream.closed:
+            return
+        stream.think_chunks.append(delta)
+        stream.think_chars += len(delta)
+        stream.think_seq += len(delta)
+        stream.touched = time.monotonic()
+        stream.trim_think()
+
+
+def note_thinking_unstoppable(job_id: str, burned_tokens: int = 0) -> None:
+    """记一次强制思考:任务横幅置位(一次任务只提示一条)+ 累计白烧的思考 token。
+
+    与 note_retry 同设计:横幅跨调用持续可见(渠道特性不变,提示不能闪一下就没了),
+    消耗跨调用累加(用户得知道这条渠道一顿饭烧了多少)。重复置位不重复提示。
+    """
+    with _LOCK:
+        stream = _ensure_locked(job_id)
+        if not stream.think_warn:
+            stream.think_warn = True
+        if burned_tokens > 0:
+            stream.think_burned += burned_tokens
+        stream.touched = time.monotonic()
+
+
 def set_step(job_id: str, step: str) -> None:
     """步骤变了 → 换屏(清缓冲 + epoch+1),让前端一步一屏。
 
@@ -141,6 +202,9 @@ def set_step(job_id: str, step: str) -> None:
         stream.epoch += 1
         stream.chunks.clear()
         stream.chars = 0     # 注意 seq 不回退:订阅游标必须保持单调
+        # 思考流同屏清:一步一屏对思考一样成立,上一步的思考不该糊到这一步
+        stream.think_chunks.clear()
+        stream.think_chars = 0
 
 
 def begin_call(*, job_id: str | None = None) -> None:
@@ -191,6 +255,10 @@ def snapshot(job_id: str) -> dict[str, Any] | None:
             "closed": stream.closed,
             "retries": stream.retries,
             "lastErr": stream.last_err,
+            "think": stream.think_tail(),
+            "thinkSeq": stream.think_seq,
+            "thinkWarn": stream.think_warn,
+            "thinkBurned": stream.think_burned,
         }
 
 
@@ -263,18 +331,23 @@ async def follow(
       step  换屏(带这一屏已有的文字)——首帧必发,充当初始快照
       label 只换步骤文案(同一次调用中的进度计数,如蓝图「已生成 N/M 章」),正文不动
       token 正文增量
+      think 思考增量(与正文分流,前端单独渲染;带 reset 语义同 reset)
       reset 订阅端落后太多、缓冲区已滚过 → 整屏重置(带丢弃字数,不伪造连续)
       ping  心跳(穿透反代空闲超时)
       done  任务结束(带 status/stage/error),之后本流不再有内容
 
     每个内容帧都带 seq(服务端已发到第几个字),订阅端存下来,断线重连传回
-    cursor 即可续看,不重复也不糊账。
+    cursor 即可续看,不重复也不糊账;思考流有独立游标(前端单独维护)。
+    强制思考预警(thinkWarn/thinkBurned)随 step/label 帧下发,变化即推。
     """
     from app.jobs import get_job  # 延迟导入:jobs 依赖本模块,避免循环
 
     epoch = -1
     step_shown = None
     retries_shown = 0
+    think_shown = False
+    burned_shown = 0
+    think_cursor = 0
     started = last_sent = time.monotonic()
     while True:
         snap = snapshot(job_id)
@@ -285,11 +358,16 @@ async def follow(
                 epoch = snap["epoch"]
                 step_shown = snap["step"]
                 retries_shown = snap["retries"]
+                think_shown = snap["thinkWarn"]
+                burned_shown = snap["thinkBurned"]
                 cursor = snap["seq"]
+                think_cursor = snap["thinkSeq"]
                 yield ("step", {
                     "step": snap["step"], "epoch": epoch,
                     "text": snap["text"], "seq": cursor,
                     "retries": snap["retries"], "lastErr": snap["lastErr"],
+                    "think": snap["think"], "thinkSeq": snap["thinkSeq"],
+                    "thinkWarn": snap["thinkWarn"], "thinkBurned": snap["thinkBurned"],
                 })
                 last_sent = time.monotonic()
             else:
@@ -298,14 +376,22 @@ async def follow(
                     yield ("label", {
                         "step": snap["step"], "seq": cursor,
                         "retries": snap["retries"], "lastErr": snap["lastErr"],
+                        "thinkWarn": snap["thinkWarn"], "thinkBurned": snap["thinkBurned"],
                     })
                     last_sent = time.monotonic()
-                elif snap["retries"] != retries_shown:
-                    # 重试计数变了但步骤没变:单独推一帧 label,警示别等到下次换屏才可见
+                elif (
+                    snap["retries"] != retries_shown
+                    or snap["thinkWarn"] != think_shown
+                    or snap["thinkBurned"] != burned_shown
+                ):
+                    # 重试/强制思考预警变了但步骤没变:单独推一帧 label,警示别等到下次换屏才可见
                     retries_shown = snap["retries"]
+                    think_shown = snap["thinkWarn"]
+                    burned_shown = snap["thinkBurned"]
                     yield ("label", {
                         "step": snap["step"], "seq": cursor,
                         "retries": snap["retries"], "lastErr": snap["lastErr"],
+                        "thinkWarn": snap["thinkWarn"], "thinkBurned": snap["thinkBurned"],
                     })
                     last_sent = time.monotonic()
                 if snap["seq"] > cursor:
@@ -320,6 +406,20 @@ async def follow(
                             "seq": snap["seq"],
                         })
                     cursor = snap["seq"]
+                    last_sent = time.monotonic()
+                if snap["thinkSeq"] > think_cursor:
+                    ttext, tstart = snap["think"], snap["thinkSeq"] - len(snap["think"])
+                    if think_cursor < tstart:
+                        yield ("think", {
+                            "reset": True, "text": ttext,
+                            "dropped": tstart - think_cursor, "seq": snap["thinkSeq"],
+                        })
+                    else:
+                        yield ("think", {
+                            "text": ttext[len(ttext) - (snap["thinkSeq"] - think_cursor):],
+                            "seq": snap["thinkSeq"],
+                        })
+                    think_cursor = snap["thinkSeq"]
                     last_sent = time.monotonic()
         # 收尾:流已 close、或任务已不在运行(压根没产生过流的失败任务也走这)
         if job is None or job.get("status") != "running" or (snap and snap["closed"]):

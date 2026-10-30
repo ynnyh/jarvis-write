@@ -168,4 +168,67 @@ describe("useJobLive", () => {
     await waitFor(() => expect(calls.length).toBe(2));
     expect(calls[1].cursor).toBe(0);             // 新任务从头看
   });
+
+  // ---- 思考直播 + 强制思考预警(think 帧分流,不混进正文) ----
+
+  it("think 帧进思考流,不混进正文;正文开始后两不误", async () => {
+    const calls = stubFollow();
+    const { result } = renderHook(() => useJobLive("job1"));
+    await waitFor(() => expect(calls.length).toBe(1));
+    act(() => {
+      calls[0].emit({ event: "step", data: { step: "正在写草稿", text: "", epoch: 1, seq: 0 } });
+      calls[0].emit({ event: "think", data: { text: "先想一下开头…", thinkSeq: 8 } });
+      calls[0].emit({ event: "think", data: { text: "再想一下衔接。", thinkSeq: 16 } });
+    });
+    expect(result.current.think).toBe("先想一下开头…再想一下衔接。");
+    expect(result.current.text).toBe("");        // 思考绝不混进正文
+
+    act(() => {
+      calls[0].emit({ event: "token", data: { text: "雪落了一夜。", seq: 6 } });
+    });
+    expect(result.current.text).toBe("雪落了一夜。");
+    expect(result.current.think).toBe("先想一下开头…再想一下衔接。"); // 徽标依据保留
+  });
+
+  it("think reset 帧(订阅端落后)整段重置思考流,不影响正文游标", async () => {
+    const calls = stubFollow();
+    const { result } = renderHook(() => useJobLive("job1"));
+    await waitFor(() => expect(calls.length).toBe(1));
+    act(() => {
+      calls[0].emit({ event: "think", data: { text: "很早以前的思考", thinkSeq: 7 } });
+      calls[0].emit({
+        event: "think",
+        data: { reset: true, text: "最新一屏思考", dropped: 300, thinkSeq: 999 },
+      });
+      calls[0].emit({ event: "token", data: { text: "正文照旧", seq: 4 } });
+    });
+    expect(result.current.think).toBe("最新一屏思考");
+    expect(result.current.text).toBe("正文照旧");
+  });
+
+  it("step 帧清思考流(一步一屏);thinkWarn/thinkBurned 经 label 帧实时更新", async () => {
+    const calls = stubFollow();
+    const { result } = renderHook(() => useJobLive("job1"));
+    await waitFor(() => expect(calls.length).toBe(1));
+    act(() => {
+      calls[0].emit({ event: "step", data: { step: "正在写草稿", text: "", epoch: 1, seq: 0 } });
+      calls[0].emit({ event: "think", data: { text: "这一步的思考", thinkSeq: 6 } });
+      calls[0].emit({
+        event: "label",
+        data: { step: "正在写草稿", seq: 0, thinkWarn: true, thinkBurned: 163 },
+      });
+    });
+    expect(result.current.thinkWarn).toBe(true);
+    expect(result.current.thinkBurned).toBe(163);
+
+    // 换步骤:思考流跟着清(预警横幅跨步骤保留——渠道特性不变)
+    act(() => {
+      calls[0].emit({
+        event: "step",
+        data: { step: "正在定稿", text: "", epoch: 2, seq: 0, thinkWarn: true, thinkBurned: 163 },
+      });
+    });
+    expect(result.current.think).toBe("");
+    expect(result.current.thinkWarn).toBe(true);
+  });
 });

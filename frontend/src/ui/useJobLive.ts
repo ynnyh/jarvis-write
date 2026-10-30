@@ -21,19 +21,32 @@ export interface JobLiveState {
   retries: number;
   /** 最近一次上游错误的可读摘要 */
   lastErr: string;
+  /** 当前这一屏的思考流(模型 reasoning,与正文分流;步骤切换清屏) */
+  think: string;
+  /** 渠道被判定「强制思考关不掉」:横幅常驻 */
+  thinkWarn: boolean;
+  /** 本任务累计白烧的思考 token(上游 usage 报数;0 = 渠道没报数) */
+  thinkBurned: number;
 }
 
-const EMPTY: JobLiveState = { text: "", step: "", streaming: false, ended: false, retries: 0, lastErr: "" };
+const EMPTY: JobLiveState = {
+  text: "", step: "", streaming: false, ended: false, retries: 0, lastErr: "",
+  think: "", thinkWarn: false, thinkBurned: 0,
+};
+
+const MAX_THINK_CHARS = 2500; // 思考流尾部上限(服务端也在裁,双保险)
 
 /** 订阅任务实时正文。jobId 为空或 enabled=false 时不连接。 */
 export function useJobLive(jobId: string | null, enabled = true): JobLiveState {
   const [state, setState] = useState<JobLiveState>(EMPTY);
-  // 存最新 cursor,重连时续看(不放 state,避免每帧触发重连)
+  // 存最新 cursor,重连时续看(不放 state,避免每帧触发重连);思考流独立游标
   const cursorRef = useRef(0);
+  const thinkCursorRef = useRef(0);
 
   useEffect(() => {
     setState(EMPTY);
     cursorRef.current = 0;
+    thinkCursorRef.current = 0;
     if (!jobId || !enabled) return;
 
     const ctrl = new AbortController();
@@ -44,19 +57,27 @@ export function useJobLive(jobId: string | null, enabled = true): JobLiveState {
       const d = (frame.data ?? {}) as {
         text?: string; step?: string; seq?: number; status?: string;
         retries?: number; lastErr?: string;
+        think?: string; thinkSeq?: number; thinkWarn?: boolean; thinkBurned?: number;
+        reset?: boolean; dropped?: number;
       };
-      if (typeof d.seq === "number") cursorRef.current = d.seq;
+      if (typeof d.seq === "number" && frame.event !== "think") cursorRef.current = d.seq;
       switch (frame.event) {
         case "step":  // 换屏(首帧也走这):整屏替换
+          if (typeof d.thinkSeq === "number") thinkCursorRef.current = d.thinkSeq;
           setState((s) => ({
             ...s, step: d.step ?? "", text: d.text ?? "", streaming: true,
             retries: d.retries ?? s.retries, lastErr: d.lastErr ?? s.lastErr,
+            think: d.think ?? "",
+            thinkWarn: d.thinkWarn ?? s.thinkWarn,
+            thinkBurned: d.thinkBurned ?? s.thinkBurned,
           }));
           break;
         case "label": // 同一步里的进度计数(如「已生成 3/40 章」):只换标签,正文照旧
           setState((s) => ({
             ...s, step: d.step ?? "",
             retries: d.retries ?? s.retries, lastErr: d.lastErr ?? s.lastErr,
+            thinkWarn: d.thinkWarn ?? s.thinkWarn,
+            thinkBurned: d.thinkBurned ?? s.thinkBurned,
           }));
           break;
         case "reset": // 落后太多、服务端缓冲已滚过:整屏重置,不假装连续
@@ -66,6 +87,14 @@ export function useJobLive(jobId: string | null, enabled = true): JobLiveState {
           setState((s) => ({
             ...s, streaming: true, text: (s.text + (d.text ?? "")).slice(-MAX_CHARS),
           }));
+          break;
+        case "think": // 思考增量:单独拼,不混进正文(正文开始后由 UI 收成徽标)
+          if (typeof d.thinkSeq === "number") thinkCursorRef.current = d.thinkSeq;
+          setState((s) => {
+            const base = d.reset ? "" : s.think;
+            const next = (base + (d.text ?? "")).slice(-MAX_THINK_CHARS);
+            return { ...s, streaming: true, think: next };
+          });
           break;
         case "done":
           stopped = true;
