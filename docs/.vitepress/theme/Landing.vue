@@ -111,7 +111,7 @@ const capabilities = [
   {
     seal: '拾叁',
     title: '渠道轮换与开箱即通',
-    desc: '默认渠道限流/欠费/Key 失效时自动切换到其余已配置渠道重试,任务进度看得见切换过程,全灭才报错并列出各渠道死因;没配模型就点生成,当场弹内联配置引导(快捷预设一键填好),保存后请求自动续跑。',
+    desc: '默认渠道限流/欠费/Key 失效时自动切换到其余已配置渠道重试,任务进度看得见切换过程,全灭才报错并列出各渠道死因;没配模型就点生成,当场弹内联配置引导(快捷预设一键填好),保存后请求自动续跑;模型思考逐字直播(「💭 思考中」),强制思考的渠道不再黑盒卡住,白烧 token 横幅预警。',
   },
 ]
 
@@ -295,6 +295,11 @@ const ideas = [
             <p>公开体验站筹备中:将开放仙侠样章试读,无需安装、无需注册。可先下载桌面版或浏览功能导览。</p>
             <a class="dl-go" :href="withBase('/features')">先看功能导览 →</a>
           </div>
+          <a class="dl-card" href="https://yuehun.aileaderme.top/products" target="_blank" rel="noopener" data-reveal>
+            <h3>作者小店 · AI 订阅</h3>
+            <p>ChatGPT / Claude / Gemini 会员与官渠中转 API——藏山「模型设置」要用的渠道,这里一站配齐;游客下单,付款自动发货。</p>
+            <span class="dl-go">逛逛小店 →</span>
+          </a>
         </div>
         <p class="qq-note" data-reveal>
           <img :src="qqQr" alt="jarvis-write QQ 交流群二维码" width="64" height="64" loading="lazy" />
